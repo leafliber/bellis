@@ -1,0 +1,18 @@
+Screen {
+    background: $background;
+}
+
+Header {
+    background: $surface;
+}
+
+Footer {
+    background: $surface;
+}
+
+BellisWidget {
+    background: $surface;
+    border: round $primary;
+    padding: 1;
+    margin: 1;
+}
