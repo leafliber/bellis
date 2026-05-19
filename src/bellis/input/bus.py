@@ -14,9 +14,7 @@ class EventBus:
         maxsize: int = 1000,
         sampling: SamplingStrategy | None = None,
     ) -> None:
-        self._queue: asyncio.PriorityQueue[tuple[int, float, LiveEvent]] = asyncio.PriorityQueue(
-            maxsize=maxsize
-        )
+        self._queue: asyncio.PriorityQueue[tuple[int, float, LiveEvent]] = asyncio.PriorityQueue(maxsize=maxsize)
         self._maxsize = maxsize
         self._sampling = sampling or TokenBucketStrategy()
         self._counter = 0.0

@@ -41,3 +41,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "llm: tests that require real LLM API calls (deselected by default)",
+]
+addopts = "-m 'not llm'"

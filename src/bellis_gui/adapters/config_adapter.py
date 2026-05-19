@@ -80,5 +80,6 @@ class ConfigAdapter(BaseAdapter[GUIConfig]):
     async def _run(self) -> None:
         self._push(self.snapshot())
         import asyncio
+
         while self._running:
             await asyncio.sleep(5.0)

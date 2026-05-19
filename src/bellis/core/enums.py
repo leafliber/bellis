@@ -34,9 +34,14 @@ class EventPriority(int, Enum):
 class EventSource(StrEnum):
     DANMAKU = "danmaku"
     GIFT = "gift"
+    SUPER_CHAT = "super_chat"
+    VOICE = "voice"
+    ENTER = "enter"
+    FOLLOW = "follow"
     COMMAND = "command"
     RAG = "rag"
     SYSTEM = "system"
+    IDLE = "idle"
 
 
 class CommandType(StrEnum):
@@ -45,3 +50,13 @@ class CommandType(StrEnum):
     SWITCH_PERSONA = "switch_persona"
     INTERRUPT = "interrupt"
     RESUME = "resume"
+
+
+class ActionType(StrEnum):
+    speak = "speak"
+    set_expression = "set_expression"
+    set_motion = "set_motion"
+    reply_danmaku = "reply_danmaku"
+    change_bg = "change_bg"
+    tool_call = "tool_call"
+    custom = "custom"

@@ -1,4 +1,3 @@
-
 import pytest
 
 from bellis.core.enums import EventPriority

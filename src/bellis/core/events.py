@@ -35,6 +35,35 @@ class GiftEvent(LiveEvent):
     coin_value: int = 0
 
 
+class SuperChatEvent(LiveEvent):
+    source: EventSource = EventSource.SUPER_CHAT
+    priority: EventPriority = EventPriority.CRITICAL
+    user_id: str = ""
+    user_name: str = ""
+    price: int = 0
+    duration: int = 0
+
+
+class VoiceEvent(LiveEvent):
+    source: EventSource = EventSource.VOICE
+    audio_data: bytes = b""
+    language: str = "zh"
+
+
+class EnterEvent(LiveEvent):
+    source: EventSource = EventSource.ENTER
+    priority: EventPriority = EventPriority.LOW
+    user_id: str = ""
+    user_name: str = ""
+
+
+class FollowEvent(LiveEvent):
+    source: EventSource = EventSource.FOLLOW
+    priority: EventPriority = EventPriority.HIGH
+    user_id: str = ""
+    user_name: str = ""
+
+
 class CommandEvent(LiveEvent):
     source: EventSource = EventSource.COMMAND
     priority: EventPriority = EventPriority.CRITICAL
@@ -46,3 +75,8 @@ class RAGEvent(LiveEvent):
     source: EventSource = EventSource.RAG
     query: str = ""
     retrieved_docs: list[str] = []
+
+
+class IdleEvent(LiveEvent):
+    source: EventSource = EventSource.IDLE
+    priority: EventPriority = EventPriority.LOW

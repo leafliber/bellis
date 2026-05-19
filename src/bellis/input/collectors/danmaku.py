@@ -2,21 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 
 import websockets
 
-from bellis.core.events import DanmakuEvent
+from bellis.core.events import DanmakuEvent, LiveEvent
 from bellis.input.bus import EventBus
 from bellis.input.collectors.base import BaseCollector
+from bellis.plugins.base import InputPlugin
 
 
-class DanmakuCollector(BaseCollector):
+class DanmakuCollector(BaseCollector, InputPlugin):
+    """B站弹幕收集器，同时实现 BaseCollector 和 InputPlugin 接口。"""
+
     def __init__(self, bus: EventBus, uri: str = "ws://localhost:8080/danmaku") -> None:
-        super().__init__(bus)
+        BaseCollector.__init__(self, bus)
         self._uri = uri
         self._ws = None
         self._task: asyncio.Task[None] | None = None
         self._running = False
+        self._event_queue: asyncio.Queue[LiveEvent] = asyncio.Queue()
 
     async def start(self) -> None:
         self._running = True
@@ -35,6 +40,12 @@ class DanmakuCollector(BaseCollector):
                 pass
             self._task = None
 
+    async def listen(self) -> AsyncIterator[LiveEvent]:
+        """InputPlugin 接口：产生事件流。"""
+        while self._running:
+            event = await self._event_queue.get()
+            yield event
+
     async def _consume_loop(self) -> None:
         while self._running:
             try:
@@ -46,6 +57,7 @@ class DanmakuCollector(BaseCollector):
                         event = self._parse_message(message)
                         if event is not None:
                             await self._bus.publish(event)
+                            await self._event_queue.put(event)
             except asyncio.CancelledError:
                 break
             except Exception:

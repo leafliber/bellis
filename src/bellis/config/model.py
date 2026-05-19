@@ -10,3 +10,5 @@ class ModelConfig(BaseModel):
     base_delay: float = 1.0
     max_delay: float = 30.0
     temperature: float = 0.7
+    base_url: str | None = None
+    api_key: str | None = None

@@ -22,10 +22,12 @@ class AuditMiddleware(OutputMiddleware):
                 text = text.replace(word, self._replacement)
                 replaced = True
         if replaced:
-            self._audit_log.append({
-                "original_text": response.text,
-                "filtered_text": text,
-                "emotion": response.emotion.value,
-            })
+            self._audit_log.append(
+                {
+                    "original_text": response.text,
+                    "filtered_text": text,
+                    "emotion": response.emotion.value,
+                }
+            )
             return response.model_copy(update={"text": text})
         return response

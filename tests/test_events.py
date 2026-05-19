@@ -1,7 +1,18 @@
 import pytest
 
-from bellis.core.enums import EmotionEnum, EventPriority, EventSource, MotionEnum
-from bellis.core.events import CommandEvent, DanmakuEvent, GiftEvent, LiveEvent, RAGEvent
+from bellis.core.enums import ActionType, EmotionEnum, EventPriority, EventSource, MotionEnum
+from bellis.core.events import (
+    CommandEvent,
+    DanmakuEvent,
+    EnterEvent,
+    FollowEvent,
+    GiftEvent,
+    IdleEvent,
+    LiveEvent,
+    RAGEvent,
+    SuperChatEvent,
+    VoiceEvent,
+)
 from bellis.core.models import EmotionState, PersonaConfig
 from bellis.core.response import LiveResponse
 
@@ -26,6 +37,32 @@ class TestLiveEvent:
         assert event.source == EventSource.GIFT
         assert event.priority == EventPriority.HIGH
         assert event.coin_value == 500
+
+    def test_super_chat_event(self):
+        event = SuperChatEvent(content="醒目留言", user_name="土豪", price=50)
+        assert event.source == EventSource.SUPER_CHAT
+        assert event.priority == EventPriority.CRITICAL
+        assert event.price == 50
+
+    def test_enter_event(self):
+        event = EnterEvent(content="进入直播间", user_name="新人")
+        assert event.source == EventSource.ENTER
+        assert event.priority == EventPriority.LOW
+
+    def test_follow_event(self):
+        event = FollowEvent(content="关注了主播", user_name="粉丝")
+        assert event.source == EventSource.FOLLOW
+        assert event.priority == EventPriority.HIGH
+
+    def test_voice_event(self):
+        event = VoiceEvent(content="语音消息", audio_data=b"fake_audio")
+        assert event.source == EventSource.VOICE
+        assert event.language == "zh"
+
+    def test_idle_event(self):
+        event = IdleEvent(content="idle_tick")
+        assert event.source == EventSource.IDLE
+        assert event.priority == EventPriority.LOW
 
     def test_command_event_critical_priority(self):
         event = CommandEvent(content="切换话题", command_type="switch_topic")
@@ -75,11 +112,64 @@ class TestLiveResponse:
             LiveResponse(text="test", tts_speed=2.0)
 
 
+class TestAction:
+    def test_speak_action(self):
+        from bellis.core.actions import Action
+
+        action = Action(type=ActionType.speak, text="你好", emotion=EmotionEnum.happy)
+        assert action.type == ActionType.speak
+        assert action.text == "你好"
+
+    def test_set_expression_action(self):
+        from bellis.core.actions import Action
+
+        action = Action(type=ActionType.set_expression, expression="happy")
+        assert action.type == ActionType.set_expression
+
+    def test_set_motion_action(self):
+        from bellis.core.actions import Action
+
+        action = Action(type=ActionType.set_motion, motion=MotionEnum.wave, motion_duration=2.0)
+        assert action.type == ActionType.set_motion
+        assert action.motion_duration == 2.0
+
+    def test_reply_danmaku_action(self):
+        from bellis.core.actions import Action
+
+        action = Action(type=ActionType.reply_danmaku, reply_text="谢谢", target_user="粉丝")
+        assert action.type == ActionType.reply_danmaku
+        assert action.target_user == "粉丝"
+
+    def test_change_bg_action(self):
+        from bellis.core.actions import Action
+
+        action = Action(type=ActionType.change_bg, metadata={"bg": "night"})
+        assert action.type == ActionType.change_bg
+
+    def test_tool_call_action(self):
+        from bellis.core.actions import Action
+
+        action = Action(type=ActionType.tool_call, metadata={"tool": "search", "args": {"q": "天气"}})
+        assert action.type == ActionType.tool_call
+
+    def test_custom_action(self):
+        from bellis.core.actions import Action
+
+        action = Action(type=ActionType.custom, metadata={"key": "value"})
+        assert action.type == ActionType.custom
+
+
 class TestEmotionState:
     def test_defaults(self):
         state = EmotionState()
         assert state.current == EmotionEnum.neutral
         assert state.intensity == 0.5
+
+    def test_intensity_bounds(self):
+        state = EmotionState(current=EmotionEnum.happy, intensity=1.0)
+        assert state.intensity == 1.0
+        state = EmotionState(current=EmotionEnum.sad, intensity=0.0)
+        assert state.intensity == 0.0
 
 
 class TestPersonaConfig:
@@ -87,3 +177,13 @@ class TestPersonaConfig:
         config = PersonaConfig()
         assert config.name == "default"
         assert config.tts_speed_range == (0.8, 1.5)
+
+    def test_custom_persona(self):
+        config = PersonaConfig(
+            name="cat_girl",
+            system_prompt="你是一个猫娘",
+            emotion_map={"开心": EmotionEnum.happy},
+            motion_map={"打招呼": MotionEnum.wave},
+        )
+        assert config.name == "cat_girl"
+        assert EmotionEnum.happy in config.emotion_map.values()

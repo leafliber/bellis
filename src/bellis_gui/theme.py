@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from textual.design import ColorSystem
+
 
 @dataclass
 class BellisTheme:
@@ -21,18 +23,20 @@ class BellisTheme:
     command_color: str = "#f38ba8"
     system_color: str = "#6c7086"
 
+    def to_color_system(self) -> ColorSystem:
+        return ColorSystem(
+            primary=self.primary,
+            secondary=self.secondary,
+            accent=self.accent,
+            warning=self.warning,
+            error=self.error,
+            success=self.success,
+            surface=self.surface,
+            background=self.background,
+        )
+
     def to_css_vars(self) -> dict[str, str]:
         return {
-            "background": self.background,
-            "surface": self.surface,
-            "primary": self.primary,
-            "secondary": self.secondary,
-            "accent": self.accent,
-            "error": self.error,
-            "warning": self.warning,
-            "success": self.success,
-            "text": self.text,
-            "text-muted": self.text_muted,
             "danmaku-color": self.danmaku_color,
             "gift-color": self.gift_color,
             "command-color": self.command_color,
@@ -57,7 +61,6 @@ _LIGHT_THEME = BellisTheme(
     command_color="#d20f39",
     system_color="#9ca0b0",
 )
-
 
 _THEMES: dict[str, BellisTheme] = {
     "dark": BellisTheme(),

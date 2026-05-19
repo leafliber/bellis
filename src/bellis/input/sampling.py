@@ -52,9 +52,7 @@ class AggregateStrategy(SamplingStrategy):
             return True
         key = self._normalize(event.content)
         now = datetime.now()
-        self._buckets[key] = [
-            t for t in self._buckets[key] if (now - t).total_seconds() < self._window_seconds
-        ]
+        self._buckets[key] = [t for t in self._buckets[key] if (now - t).total_seconds() < self._window_seconds]
         self._buckets[key].append(now)
         if len(self._buckets[key]) >= self._threshold:
             last_emitted = self._emitted.get(key)

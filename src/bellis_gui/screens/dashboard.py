@@ -31,7 +31,7 @@ class DashboardScreen(Screen):
     DashboardScreen #control-area {
         height: auto;
     }
-    DashboardScreen #section-title {
+    DashboardScreen .section-title {
         text-style: bold;
         padding: 0 1;
         height: 1;
@@ -52,12 +52,12 @@ class DashboardScreen(Screen):
     def compose(self) -> ComposeResult:
         with Horizontal(id="main-area"):
             with Vertical(id="left-panel"):
-                yield Static("📡 事件流", id="section-title")
+                yield Static("📡 事件流", classes="section-title")
                 yield EventLog(self._event_adapter, id="dashboard-event-log")
             with Vertical(id="right-panel"):
-                yield Static("🤖 智能体状态", id="section-title")
+                yield Static("🤖 智能体状态", classes="section-title")
                 yield StatePanel(self._state_adapter, id="dashboard-state-panel")
-                yield Static("💬 最新回复", id="section-title")
+                yield Static("💬 最新回复", classes="section-title")
                 yield ResponseCard(id="dashboard-response-card")
         with Vertical(id="control-area"):
             yield ControlBar(self._config_adapter, id="dashboard-control-bar")
