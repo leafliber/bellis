@@ -20,12 +20,22 @@ class ConsoleInputPlugin(InputPlugin):
     )
 
     async def _on_start(self) -> None:
+        """插件启动（终端输入无需额外初始化）。"""
         pass  # 无需额外初始化
 
     async def _on_stop(self) -> None:
+        """插件停止（终端输入无需额外清理）。"""
         pass
 
     async def listen(self) -> AsyncIterator[LiveEvent]:
+        """从 stdin 逐行读取输入，包装为 DanmakuEvent 产出。
+
+        使用 ``run_in_executor`` 将阻塞的 ``input()`` 调用移至线程池，
+        避免阻塞事件循环。输入为空行时跳过，遇到 EOF 或 Ctrl+C 时退出。
+
+        Yields:
+            LiveEvent: 以终端输入内容构造的 DanmakuEvent，user_name 固定为 "console"。
+        """
         import asyncio
 
         loop = asyncio.get_running_loop()

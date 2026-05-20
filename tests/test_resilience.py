@@ -1,3 +1,9 @@
+"""弹性调用（CircuitBreaker + ResilientCaller）的单元测试。
+
+验证熔断器的三种状态转换（closed → open → half_open → closed）
+以及 ResilientCaller 的重试和降级回退逻辑。
+"""
+
 import asyncio
 
 import pytest
@@ -7,18 +13,22 @@ from bellis.core.enums import EmotionEnum, MotionEnum
 
 
 async def _ok():
+    """模拟成功调用。"""
     return "ok"
 
 
 async def _fail():
+    """模拟失败调用。"""
     raise RuntimeError("fail")
 
 
 async def _recovered():
+    """模拟恢复后的成功调用。"""
     return "recovered"
 
 
 class TestCircuitBreaker:
+    """CircuitBreaker 熔断器状态转换测试。"""
     @pytest.mark.asyncio
     async def test_closed_state_passes(self):
         breaker = CircuitBreaker(failure_threshold=3)
@@ -56,6 +66,7 @@ class TestCircuitBreaker:
 
 
 class TestResilientCaller:
+    """ResilientCaller 重试和降级回退测试。"""
     @pytest.mark.asyncio
     async def test_fallback_response(self):
         caller = ResilientCaller(max_retries=1, fallback_model=None)

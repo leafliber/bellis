@@ -24,9 +24,22 @@ class DanmakuCollector(BilibiliWSInputPlugin):
     )
 
     def __init__(self, uri: str = "ws://localhost:8080/danmaku") -> None:
+        """初始化弹幕收集器。
+
+        Args:
+            uri: 弹幕 WebSocket 服务地址，默认 ``ws://localhost:8080/danmaku``。
+        """
         super().__init__(uri=uri)
 
     def _parse_message(self, raw: str) -> DanmakuEvent | None:
+        """将原始 JSON 字符串解析为 DanmakuEvent。
+
+        Args:
+            raw: WebSocket 收到的原始 JSON 字符串。
+
+        Returns:
+            解析成功返回 DanmakuEvent，JSON 解析失败返回 None。
+        """
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, TypeError):

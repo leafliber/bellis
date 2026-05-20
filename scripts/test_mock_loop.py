@@ -34,6 +34,7 @@ from bellis.plugin.registry import PluginRegistry
 # ─── Mock LLM 回复映射 ──────────────────────────────────────────────────
 
 MOCK_RESPONSES: list[tuple[str, LiveResponse]] = [
+    # 关键词 → 预设回复映射，用于模拟 LLM 行为
     ("你好", LiveResponse(text="你好呀！欢迎来到直播间~", emotion=EmotionEnum.happy, motion=MotionEnum.wave)),
     ("送", LiveResponse(text="哇！谢谢你的礼物，太感谢啦！", emotion=EmotionEnum.excited, motion=MotionEnum.cheer)),
     ("醒目", LiveResponse(text="感谢醒目留言！你太给力了！", emotion=EmotionEnum.excited, motion=MotionEnum.bow)),
@@ -46,10 +47,18 @@ MOCK_RESPONSES: list[tuple[str, LiveResponse]] = [
     ("还在", LiveResponse(text="在的在的！我一直在呢~", emotion=EmotionEnum.happy, motion=MotionEnum.wave)),
 ]
 
-DEFAULT_RESPONSE = LiveResponse(text="收到！让我想想怎么回复~", emotion=EmotionEnum.neutral, motion=MotionEnum.nod)
+DEFAULT_RESPONSE = LiveResponse(text="收到！让我想想怎么回复~", emotion=EmotionEnum.neutral, motion=MotionEnum.nod)  # 未匹配关键词时的默认回复
 
 
 def _mock_response_for_prompt(prompt: str) -> LiveResponse:
+    """根据 prompt 中的关键词返回预设的 Mock 回复。
+
+    Args:
+        prompt: LLM 输入提示文本。
+
+    Returns:
+        匹配关键词的 LiveResponse，未匹配则返回默认回复。
+    """
     for keyword, response in MOCK_RESPONSES:
         if keyword in prompt:
             return response
@@ -59,9 +68,16 @@ def _mock_response_for_prompt(prompt: str) -> LiveResponse:
 # ─── Mock 输入插件 ──────────────────────────────────────────────────────
 
 class MockInputPlugin(InputPlugin):
+    """Mock 输入插件，按顺序产出一组预设事件。"""
+
     plugin_meta = PluginMeta(name="mock_input", category=PluginCategory.INPUT)
 
     def __init__(self, events: list[LiveEvent]) -> None:
+        """初始化 Mock 输入插件。
+
+        Args:
+            events: 待产出的预设事件列表。
+        """
         self._events = events
         self._running = False
 
@@ -72,6 +88,11 @@ class MockInputPlugin(InputPlugin):
         self._running = False
 
     async def listen(self) -> AsyncIterator[LiveEvent]:
+        """按顺序产出预设事件。
+
+        Yields:
+            LiveEvent: 预设列表中的事件。
+        """
         for event in self._events:
             if not self._running:
                 break
@@ -81,28 +102,55 @@ class MockInputPlugin(InputPlugin):
 # ─── Mock 输出插件 ──────────────────────────────────────────────────────
 
 class MockOutputPlugin(OutputPlugin):
+    """Mock 输出插件，记录所有收到的 Action。"""
+
     plugin_meta = PluginMeta(name="mock_output", category=PluginCategory.OUTPUT)
 
     def __init__(self, name: str = "mock") -> None:
+        """初始化 Mock 输出插件。
+
+        Args:
+            name: 插件名称标识。
+        """
         self.name = name
         self.actions: list[Action] = []
 
     async def emit(self, action: Action) -> None:
+        """记录收到的 Action。
+
+        Args:
+            action: 输出插件接收到的动作。
+        """
         self.actions.append(action)
 
     def get_actions_by_type(self, action_type: ActionType) -> list[Action]:
+        """按动作类型筛选已记录的 Action。
+
+        Args:
+            action_type: 动作类型枚举值。
+
+        Returns:
+            匹配类型的 Action 列表。
+        """
         return [a for a in self.actions if a.type == action_type]
 
 
 # ─── Mock Hook 插件 ─────────────────────────────────────────────────────
 
 class MockHookPlugin(HookPlugin):
+    """Mock Hook 插件，记录 post_think、pre_act、post_act 的调用。"""
+
     plugin_meta = PluginMeta(name="mock_hook", category=PluginCategory.HOOK)
 
     def __init__(self) -> None:
         self.calls: list[str] = []
 
     def register_hooks(self, hook_mgr: HookManager) -> None:
+        """注册 post_think、pre_act、post_act 三个 hook。
+
+        Args:
+            hook_mgr: Hook 管理器实例。
+        """
         async def on_post_think(state: AgentState) -> AgentState:
             self.calls.append("post_think")
             return state
@@ -123,6 +171,13 @@ class MockHookPlugin(HookPlugin):
 # ─── 构造 Mock 事件序列 ─────────────────────────────────────────────────
 
 def build_mock_events() -> list[LiveEvent]:
+    """构造模拟直播间的完整事件序列。
+
+    包含弹幕、礼物、醒目留言、关注、刷屏、命令、空闲 tick 等典型事件。
+
+    Returns:
+        按时间顺序排列的 LiveEvent 列表。
+    """
     return [
         DanmakuEvent(content="你好主播！", user_name="粉丝小明", user_level=10, fan_badge="铁粉"),
         GiftEvent(content="送出小电视", user_name="土豪大佬", gift_name="小电视", gift_count=1, coin_value=1245),
@@ -158,6 +213,7 @@ def install_mock_agent() -> None:
 # ─── 主测试逻辑 ─────────────────────────────────────────────────────────
 
 async def run_mock_test() -> None:
+    """主测试入口：安装 Mock、构建图、逐事件运行主循环并验证关键行为。"""
     print("=" * 60)
     print("Bellis 主循环 Mock 测试")
     print("=" * 60)

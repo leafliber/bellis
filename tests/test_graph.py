@@ -1,3 +1,9 @@
+"""Agent 图节点的单元测试。
+
+覆盖感知辅助函数（意图分类、情绪分析、优先级重评估）、
+感知节点、执行节点、中断处理、路由决策、响应转动作等核心逻辑。
+"""
+
 import pytest
 
 from bellis.agent.execution import _response_to_actions, act, handle_interrupt, route_after_act
@@ -16,10 +22,11 @@ from bellis.core.events import CommandEvent, DanmakuEvent, EnterEvent, FollowEve
 from bellis.core.response import LiveResponse
 from bellis.core.state import AgentState
 
-_IDLE_THRESHOLD = 5
+_IDLE_THRESHOLD = 5  # 空闲自言自语触发阈值，与 Agent 配置保持一致
 
 
 class TestPerceptionHelpers:
+    """感知辅助函数测试：意图分类、情绪分析、优先级重评估。"""
     def test_classify_greeting(self):
         event = DanmakuEvent(content="你好呀")
         assert _classify_intent(event) == "greeting"
@@ -106,6 +113,7 @@ class TestPerceptionHelpers:
 
 
 class TestPerceptionNodes:
+    """感知节点测试：事件出队、感知处理、路由决策。"""
     def test_dequeue_event(self):
         event = DanmakuEvent(content="test")
         state: AgentState = {"event_queue": [event], "current_event": None}
@@ -224,6 +232,7 @@ class TestPerceptionNodes:
 
 
 class TestActNode:
+    """执行节点测试：Action 生成、OutputPlugin 分发、Hook 触发。"""
     @pytest.mark.asyncio
     async def test_act_generates_actions(self):
         """act 节点应将 LiveResponse 转换为 Action 列表。"""
@@ -305,6 +314,7 @@ class TestActNode:
 
 
 class TestHandleInterrupt:
+    """中断处理测试：人设切换、话题切换、非命令事件。"""
     @pytest.mark.asyncio
     async def test_switch_persona(self):
         event = CommandEvent(content="切换人设", command_type="switch_persona", payload={"name": "cat_girl"})
@@ -335,6 +345,7 @@ class TestHandleInterrupt:
 
 
 class TestRouteAfterAct:
+    """执行后路由测试：根据事件队列是否为空决定下一节点。"""
     def test_with_more_events(self):
         state: AgentState = {"event_queue": [DanmakuEvent(content="next")]}
         assert route_after_act(state) == "perceive"
@@ -345,6 +356,7 @@ class TestRouteAfterAct:
 
 
 class TestResponseToActions:
+    """LiveResponse 转 Action 列表测试。"""
     def test_full_response(self):
         response = LiveResponse(text="谢谢！", emotion=EmotionEnum.happy, motion=MotionEnum.wave, target_user="粉丝A")
         event = DanmakuEvent(content="送礼物", user_name="粉丝A")

@@ -1,3 +1,9 @@
+"""端到端感知流程和配置中心的集成测试。
+
+验证弹幕、礼物、中断、刷屏等事件从出队到路由的完整流程，
+以及 ConfigCenter 的人设管理（切换、注册、序列化）。
+"""
+
 import pytest
 
 from bellis.agent.perception import dequeue_event, perceive, route_after_perception
@@ -9,6 +15,7 @@ from bellis.core.state import AgentState
 
 
 class TestEndToEndPerception:
+    """端到端感知流程测试：事件出队 → 感知 → 路由决策。"""
     @pytest.mark.asyncio
     async def test_danmaku_flow(self):
         event = DanmakuEvent(content="你好主播！", user_name="粉丝A", user_level=10, fan_badge="铁粉")
@@ -115,6 +122,7 @@ class TestEndToEndPerception:
 
 
 class TestConfigCenter:
+    """ConfigCenter 人设管理测试：默认人设、切换、注册、序列化。"""
     def test_default_personas(self):
         config = ConfigCenter()
         assert "default" in config.personas

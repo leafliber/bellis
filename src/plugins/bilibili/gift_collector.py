@@ -28,22 +28,34 @@ class GiftCollector(InputPlugin):
     )
 
     def __init__(self) -> None:
+        """初始化礼物收集器，创建内部事件队列。"""
         super().__init__()
         self._event_queue: asyncio.Queue[LiveEvent] = asyncio.Queue()
 
     async def _on_start(self) -> None:
+        """插件启动（礼物收集器无需额外初始化）。"""
         pass
 
     async def _on_stop(self) -> None:
+        """插件停止（礼物收集器无需额外清理）。"""
         pass
 
     async def listen(self) -> AsyncIterator[LiveEvent]:
+        """从事件队列中持续读取并产出 LiveEvent。
+
+        Yields:
+            LiveEvent: 从礼物回调注入的事件。
+        """
         while self.state.value == "running":
             event = await self._event_queue.get()
             yield event
 
     async def on_gift_callback(self, raw_data: dict) -> None:
-        """外部回调接口，由 bilibili-api SDK 调用。"""
+        """外部回调接口，由 bilibili-api SDK 调用。
+
+        Args:
+            raw_data: 礼物回调原始数据，需包含 user_name、gift_name 等字段。
+        """
         try:
             event = GiftEvent(
                 content=raw_data.get("content", ""),

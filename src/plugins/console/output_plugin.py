@@ -19,6 +19,18 @@ class ConsoleOutputPlugin(OutputPlugin):
     )
 
     async def emit(self, action: Action) -> None:
+        """将 Action 格式化打印到控制台。
+
+        根据动作类型输出不同格式：
+        - speak: 显示情绪标签、目标用户和文本
+        - set_expression: 显示表情名称
+        - set_motion: 显示动作名称和持续时间
+        - reply_danmaku: 显示目标用户和回复文本
+        - 其他类型: 显示动作类型和完整字段
+
+        Args:
+            action: 待输出的动作对象。
+        """
         if action.type == ActionType.speak:
             emotion = f"[{action.emotion.value}]" if action.emotion else ""
             target = f"@{action.target_user} " if action.target_user else ""

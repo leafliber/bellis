@@ -32,19 +32,42 @@ pytestmark = pytest.mark.llm
 
 
 class RecorderPlugin(OutputPlugin):
+    """记录所有 Action 的输出插件，用于测试中验证 Action 生成。"""
+
     plugin_meta = PluginMeta(name="recorder", category=PluginCategory.OUTPUT)
 
     def __init__(self) -> None:
         self.actions: list[Action] = []
 
     async def emit(self, action: Action) -> None:
+        """记录收到的 Action。
+
+        Args:
+            action: 输出插件接收到的动作。
+        """
         self.actions.append(action)
 
     def by_type(self, t: ActionType) -> list[Action]:
+        """按动作类型筛选已记录的 Action。
+
+        Args:
+            t: 动作类型枚举值。
+
+        Returns:
+            匹配类型的 Action 列表。
+        """
         return [a for a in self.actions if a.type == t]
 
 
 def _model(llm_env) -> str:
+    """从 llm_env 字典构造 OpenAI 模型标识字符串。
+
+    Args:
+        llm_env: 包含 model 键的环境配置字典。
+
+    Returns:
+        格式为 ``openai:<model_name>`` 的字符串。
+    """
     m = llm_env.get("model") or "gpt-4o-mini"
     return f"openai:{m}"
 
@@ -56,6 +79,18 @@ def _build_state(
     hook_manager: HookManager | None = None,
     **overrides,
 ) -> AgentState:
+    """构造用于 LLM 集成测试的 AgentState 字典。
+
+    Args:
+        event: 初始事件，会放入 event_queue。
+        llm_env: LLM 环境配置（base_url、api_key、model）。
+        output_plugins: 输出插件列表。
+        hook_manager: Hook 管理器。
+        **overrides: 额外覆盖 state 中的字段。
+
+    Returns:
+        完整的 AgentState 字典。
+    """
     ctx = AgentContext(
         hook_manager=hook_manager,
         output_plugins=output_plugins or [],
@@ -92,6 +127,7 @@ def _build_state(
 
 
 class TestThinkNode:
+    """Think 节点测试：直接调用 LLM 验证各类事件的回复。"""
     @pytest.mark.asyncio
     async def test_danmaku_reply(self, llm_env):
         """弹幕 → LLM 返回合法 LiveResponse。"""
@@ -195,6 +231,7 @@ class TestThinkNode:
 
 
 class TestFullLoop:
+    """完整主循环测试：PERCEIVE → THINK → ACT 全流程。"""
     @pytest.mark.asyncio
     async def test_danmaku_full_loop(self, llm_env):
         """弹幕事件走完整主循环，验证 Action 生成 + OutputPlugin 收到。"""
@@ -327,6 +364,7 @@ class TestFullLoop:
 
 
 class TestStreaming:
+    """流式输出测试：验证 streaming 模式下的 think 和图执行。"""
     @pytest.mark.asyncio
     async def test_stream_think(self, llm_env):
         """流式 think 输出。"""
@@ -371,6 +409,7 @@ class TestStreaming:
 
 
 class TestHookWithLLM:
+    """Hook 与 LLM 联动测试：验证 Hook 在 LLM 调用期间被触发且能修改状态。"""
     @pytest.mark.asyncio
     async def test_hooks_fired(self, llm_env):
         """验证 post_think / pre_act / post_act hook 在 LLM 调用期间被触发。"""
@@ -447,6 +486,7 @@ class TestHookWithLLM:
 
 
 class TestActionDispatch:
+    """Action 分发验证测试：确认各类 Action 被正确生成。"""
     @pytest.mark.asyncio
     async def test_speak_action_generated(self, llm_env):
         """弹幕事件产生 speak Action。"""
@@ -532,6 +572,7 @@ class TestActionDispatch:
 
 
 class TestPersonaSwitch:
+    """多人设切换测试：验证不同人设下 LLM 回复风格。"""
     @pytest.mark.asyncio
     async def test_cat_girl_persona(self, llm_env):
         """猫娘人设下 LLM 回复风格不同。"""
@@ -561,6 +602,7 @@ class TestPersonaSwitch:
 
 
 class TestResilienceWithLLM:
+    """弹性调用与 LLM 集成测试：验证成功调用后熔断器状态。"""
     @pytest.mark.asyncio
     async def test_successful_call_resets_breaker(self, llm_env):
         """成功调用后 CircuitBreaker 保持 closed。"""

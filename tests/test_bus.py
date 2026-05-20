@@ -1,3 +1,9 @@
+"""EventBus 及采样策略的单元测试。
+
+验证事件总线的发布/订阅、优先级排序、清空功能，
+以及 TokenBucketStrategy 和 AggregateStrategy 的采样逻辑。
+"""
+
 import pytest
 
 from bellis.core.enums import EventPriority
@@ -7,6 +13,7 @@ from bellis.runtime.sampling import AggregateStrategy, TokenBucketStrategy
 
 
 class TestEventBus:
+    """EventBus 核心功能测试。"""
     @pytest.mark.asyncio
     async def test_publish_and_subscribe(self):
         bus = EventBus(maxsize=10, sampling=TokenBucketStrategy(qps=100))
@@ -41,6 +48,7 @@ class TestEventBus:
 
 
 class TestTokenBucketStrategy:
+    """令牌桶采样策略测试。"""
     @pytest.mark.asyncio
     async def test_high_priority_always_pass(self):
         strategy = TokenBucketStrategy(qps=0)
@@ -56,6 +64,7 @@ class TestTokenBucketStrategy:
 
 
 class TestAggregateStrategy:
+    """聚合采样策略测试。"""
     @pytest.mark.asyncio
     async def test_high_priority_always_pass(self):
         strategy = AggregateStrategy()

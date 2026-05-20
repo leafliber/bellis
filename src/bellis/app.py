@@ -1,3 +1,9 @@
+"""Bellis 主应用模块 — 应用生命周期管理与主循环入口。
+
+本模块实现 BellisApp 类，负责组装配置、插件注册表、事件总线、
+追踪器等核心组件，并驱动 Agent 主循环的运行。同时提供 CLI 入口函数 main()。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,7 +28,21 @@ logger = logging.getLogger(__name__)
 
 
 class BellisApp:
-    """Bellis 主应用：加载插件 → 编译图 → 跑主循环。"""
+    """Bellis 主应用：加载插件 → 编译图 → 跑主循环。
+
+    负责管理应用的完整生命周期，包括插件启动/停止、事件收集、
+    空闲检测、主循环驱动及优雅关闭。
+
+    Attributes:
+        _config: 配置中心实例。
+        _registry: 插件注册表实例。
+        _streaming: 是否启用流式输出模式。
+        _running: 应用运行标志位。
+        _graph: 编译后的主循环图。
+        _event_bus: 事件总线实例。
+        _tracer: 链路追踪器实例。
+        _context: Agent 上下文，贯穿主循环的共享依赖容器。
+    """
 
     def __init__(
         self,
@@ -37,6 +57,7 @@ class BellisApp:
         self._graph = None
         self._event_bus: EventBus | None = None
         self._tracer = Tracer()
+        # 构建 Agent 上下文，将插件注册表和配置中心的依赖注入其中
         self._context = AgentContext(
             hook_manager=self._registry.hook_manager,
             output_plugins=self._registry.outputs,
@@ -51,18 +72,22 @@ class BellisApp:
 
     @property
     def config(self) -> ConfigCenter:
+        """返回配置中心实例。"""
         return self._config
 
     @property
     def registry(self) -> PluginRegistry:
+        """返回插件注册表实例。"""
         return self._registry
 
     @property
     def event_bus(self) -> EventBus | None:
+        """返回事件总线实例，应用未启动时为 None。"""
         return self._event_bus
 
     @property
     def context(self) -> AgentContext:
+        """返回 Agent 上下文实例。"""
         return self._context
 
     def setup_defaults(self) -> None:
@@ -75,7 +100,14 @@ class BellisApp:
         self._context.output_plugins = self._registry.outputs
 
     def _build_timeline_sync(self) -> TimelineSync | None:
-        """从已注册的 OutputPlugin 中提取 TTSExecutor 和 Live2DExecutor，构建 TimelineSync。"""
+        """从已注册的 OutputPlugin 中提取 TTSExecutor 和 Live2DExecutor，构建 TimelineSync。
+
+        仅当同时找到 TTS 和 Live2D 驱动时才创建 TimelineSync，
+        否则返回 None（表示不需要时间线同步）。
+
+        Returns:
+            TimelineSync 实例或 None。
+        """
         tts_driver: TTSExecutor | None = None
         live2d_driver: Live2DExecutor | None = None
         for plugin in self._registry.outputs:
@@ -89,6 +121,11 @@ class BellisApp:
         return None
 
     def _build_initial_state(self) -> AgentState:
+        """构建 Agent 主循环的初始状态字典。
+
+        Returns:
+            包含所有初始字段的 AgentState 字典。
+        """
         persona = self._config.get_active_persona()
         return {
             "event_queue": [],
@@ -108,7 +145,11 @@ class BellisApp:
         }
 
     async def start(self) -> None:
-        """启动应用：初始化 EventBus → 启动所有插件 → 编译图 → 进入主循环。"""
+        """启动应用：初始化 EventBus → 启动所有插件 → 编译图 → 进入主循环。
+
+        启动后会创建事件收集和空闲检测两个后台任务，
+        主循环退出后自动取消后台任务并停止所有插件。
+        """
         self._running = True
         self._event_bus = EventBus(maxsize=self._config.platform.max_queue_size)
 
@@ -139,7 +180,11 @@ class BellisApp:
             await self._registry.stop_all()
 
     async def _collect_events(self) -> None:
-        """从所有 InputPlugin 收集事件并推入 EventBus。"""
+        """从所有 InputPlugin 收集事件并推入 EventBus。
+
+        为每个 InputPlugin 创建独立的异步收集任务，
+        使用 gather 并发执行，单个插件异常不会影响其他插件。
+        """
         tasks = []
         for plugin in self._registry.inputs:
             tasks.append(asyncio.create_task(self._collect_from_plugin(plugin)))
@@ -147,7 +192,14 @@ class BellisApp:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _collect_from_plugin(self, plugin) -> None:
-        """从单个 InputPlugin 持续收集事件。"""
+        """从单个 InputPlugin 持续收集事件。
+
+        持续监听插件的 listen() 异步迭代器，将事件发布到 EventBus。
+        当应用停止或任务被取消时退出循环。
+
+        Args:
+            plugin: 输入插件实例。
+        """
         try:
             async for event in plugin.listen():
                 if not self._running:
@@ -160,7 +212,11 @@ class BellisApp:
             logger.exception("InputPlugin %s 收集事件异常，任务终止", plugin.name)
 
     async def _idle_monitor(self) -> None:
-        """监控空闲状态，当长时间无事件时注入 IdleEvent。"""
+        """监控空闲状态，当长时间无事件时注入 IdleEvent。
+
+        按配置的 idle_monitor_interval 周期性检查事件总线，
+        若队列为空则发布 IdleEvent 以触发空闲处理逻辑。
+        """
         while self._running:
             await asyncio.sleep(self._context.idle_monitor_interval)
             if self._event_bus and self._event_bus.queue_size == 0:
@@ -168,7 +224,12 @@ class BellisApp:
                 await self._event_bus.publish(idle_event)
 
     async def _main_loop(self) -> None:
-        """主循环：从 EventBus 取事件 → 调用图 → 处理结果。"""
+        """主循环：从 EventBus 取事件 → 调用图 → 处理结果。
+
+        每轮循环从 EventBus 订阅一个事件，将其加入状态的事件队列后
+        调用编译后的图进行推理，最后将图输出合并回状态。
+        单次图执行失败不会终止主循环，仅跳过本轮事件。
+        """
         if not self._event_bus:
             return
 
@@ -197,7 +258,7 @@ class BellisApp:
 
             # 合并结果到 state
             if result:
-                # 保留 _context 引用
+                # 保留 _context 引用，避免图输出覆盖上下文
                 ctx = state.get("_context")
                 state = dict(result)
                 if ctx is not None:
@@ -209,7 +270,11 @@ class BellisApp:
 
 
 def main() -> None:
-    """CLI 入口。"""
+    """CLI 入口。
+
+    初始化日志、创建默认应用实例、注册信号处理器，
+    然后在事件循环中启动应用。支持 Ctrl+C 优雅退出。
+    """
     setup_logging()
 
     app = BellisApp()
@@ -218,10 +283,12 @@ def main() -> None:
     loop = asyncio.new_event_loop()
 
     def _shutdown():
+        """信号处理回调：线程安全地调度应用停止。"""
         loop.call_soon_threadsafe(lambda: asyncio.ensure_future(app.stop()))
 
     signal.signal(signal.SIGINT, lambda *_: _shutdown())
     if sys.platform != "win32":
+        # Windows 不支持 SIGTERM 信号
         signal.signal(signal.SIGTERM, lambda *_: _shutdown())
 
     logger.info("Bellis - Live Streaming AI Agent Framework")

@@ -24,9 +24,22 @@ class CommandCollector(BilibiliWSInputPlugin):
     )
 
     def __init__(self, uri: str = "ws://localhost:8080/command") -> None:
+        """初始化命令收集器。
+
+        Args:
+            uri: 命令 WebSocket 服务地址，默认 ``ws://localhost:8080/command``。
+        """
         super().__init__(uri=uri)
 
     def _parse_message(self, raw: str) -> CommandEvent | None:
+        """将原始 JSON 字符串解析为 CommandEvent。
+
+        Args:
+            raw: WebSocket 收到的原始 JSON 字符串。
+
+        Returns:
+            解析成功返回 CommandEvent，JSON 解析失败返回 None。
+        """
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, TypeError):

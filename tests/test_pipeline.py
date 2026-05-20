@@ -1,3 +1,9 @@
+"""输出管道及中间件的单元测试。
+
+验证审计中间件（敏感词过滤）、节流中间件（队列超限丢弃低优先级）
+以及 OutputPipeline 的中间件链式执行逻辑。
+"""
+
 import pytest
 
 from bellis.core.enums import EmotionEnum
@@ -6,6 +12,7 @@ from bellis.runtime.middleware import AuditMiddleware, OutputPipeline, ThrottleM
 
 
 class TestAuditMiddleware:
+    """审计中间件测试：敏感词过滤和替换。"""
     @pytest.mark.asyncio
     async def test_pass_clean_text(self):
         middleware = AuditMiddleware(sensitive_words=["违禁词"])
@@ -26,6 +33,7 @@ class TestAuditMiddleware:
 
 
 class TestThrottleMiddleware:
+    """节流中间件测试：队列超限时丢弃低优先级响应。"""
     @pytest.mark.asyncio
     async def test_pass_when_under_limit(self):
         middleware = ThrottleMiddleware(queue_limit=20)
@@ -54,6 +62,7 @@ class TestThrottleMiddleware:
 
 
 class TestOutputPipeline:
+    """输出管道测试：中间件链式执行和短路逻辑。"""
     @pytest.mark.asyncio
     async def test_pipeline_with_middleware(self):
         pipeline = OutputPipeline()

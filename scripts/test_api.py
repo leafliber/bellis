@@ -1,4 +1,9 @@
-"""Test compat_mode direct agent.run."""
+"""Test compat_mode direct agent.run.
+
+使用 .env 中的 KEY/URL/MODEL 调用真实 LLM API，
+验证兼容模式（compat_mode=True）下 Agent 的直接调用和响应解析。
+"""
+
 import asyncio
 from pathlib import Path
 
@@ -7,6 +12,11 @@ from bellis.core.models import EmotionState, PersonaConfig, SceneContext
 
 
 def load_env():
+    """从项目根目录 .env 文件加载 LLM 配置。
+
+    Returns:
+        包含 api_key、base_url、model 三个键的字典。
+    """
     env = {"api_key": None, "base_url": None, "model": None}
     p = Path(__file__).resolve().parent.parent / ".env"
     for line in p.read_text().splitlines():
@@ -27,6 +37,7 @@ def load_env():
 
 
 async def test():
+    """兼容模式下直接调用 Agent 并解析响应的测试函数。"""
     env = load_env()
     model_str = "openai:" + (env["model"] or "gpt-4o-mini")
     print(f"Model: {model_str}")

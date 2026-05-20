@@ -1,3 +1,9 @@
+"""事件总线模块。
+
+提供基于优先级队列的异步事件发布/订阅机制，
+支持采样策略过滤和低优先级事件淘汰。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -12,21 +18,47 @@ logger = logging.getLogger(__name__)
 
 
 class EventBus:
+    """异步优先级事件总线，负责事件的发布、采样与分发。
+
+    内部使用 asyncio.PriorityQueue 存储事件，元组格式为
+    (priority_value, counter, event)，其中 counter 用于保证
+    同优先级事件的 FIFO 顺序。
+
+    Attributes:
+        queue_size: 当前队列中的事件数量。
+    """
+
     def __init__(
         self,
         maxsize: int = 1000,
         sampling: SamplingStrategy | None = None,
     ) -> None:
+        """初始化事件总线。
+
+        Args:
+            maxsize: 优先级队列最大容量。
+            sampling: 采样策略实例，为 None 时使用 TokenBucketStrategy。
+        """
         self._queue: asyncio.PriorityQueue[tuple[int, int, LiveEvent]] = asyncio.PriorityQueue(maxsize=maxsize)
         self._maxsize = maxsize
         self._sampling = sampling or TokenBucketStrategy()
-        self._counter = 0
+        self._counter = 0  # 单调递增计数器，保证同优先级事件 FIFO
 
     @property
     def queue_size(self) -> int:
+        """当前队列中的事件数量。"""
         return self._queue.qsize()
 
     async def publish(self, event: LiveEvent) -> None:
+        """发布事件到总线。
+
+        NORMAL 及以下优先级的事件会先经过采样策略过滤；
+        HIGH/CRITICAL 级别事件直接入队。队列满时尝试淘汰
+        低优先级事件以腾出空间。
+
+        Args:
+            event: 要发布的直播事件。
+        """
         if event.priority.value >= EventPriority.NORMAL.value:
             should_keep = await self._sampling.should_keep(event)
             if not should_keep:
@@ -95,12 +127,18 @@ class EventBus:
         return False
 
     async def subscribe(self) -> AsyncIterator[LiveEvent]:
+        """订阅事件流，持续产出队列中的事件。
+
+        Yields:
+            队列中按优先级排序的 LiveEvent 实例。
+        """
         while True:
             _, _, event = await self._queue.get()
             yield event
             self._queue.task_done()
 
     async def flush(self) -> None:
+        """清空队列中的所有事件。"""
         while not self._queue.empty():
             try:
                 self._queue.get_nowait()

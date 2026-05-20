@@ -67,6 +67,11 @@ from bellis.plugin.registry import PluginRegistry
 
 
 def _load_env() -> dict[str, str | None]:
+    """从项目根目录 .env 文件加载 LLM 配置。
+
+    Returns:
+        包含 api_key、base_url、model 三个键的字典，值可能为 None。
+    """
     env_path = Path(__file__).resolve().parent.parent / ".env"
     env: dict[str, str | None] = {"api_key": None, "base_url": None, "model": None}
     if env_path.exists():
@@ -129,7 +134,12 @@ def build_real_danmaku_events() -> list[LiveEvent]:
 
 
 class WSOutputPlugin(OutputPlugin):
-    """将 Action 通过 WebSocket 推送到前端。"""
+    """将 Action 通过 WebSocket 推送到前端。
+
+    Attributes:
+        actions: 记录所有已推送的 Action。
+        _ws_clients: 当前连接的 WebSocket 客户端集合。
+    """
 
     plugin_meta = PluginMeta(name="ws_output", category=PluginCategory.OUTPUT)
 
@@ -138,17 +148,37 @@ class WSOutputPlugin(OutputPlugin):
         self._ws_clients: set = set()
 
     def add_client(self, ws) -> None:
+        """添加 WebSocket 客户端连接。
+
+        Args:
+            ws: WebSocket 连接对象。
+        """
         self._ws_clients.add(ws)
 
     def remove_client(self, ws) -> None:
+        """移除 WebSocket 客户端连接。
+
+        Args:
+            ws: WebSocket 连接对象。
+        """
         self._ws_clients.discard(ws)
 
     async def emit(self, action: Action) -> None:
+        """将 Action 序列化后广播到所有连接的客户端。
+
+        Args:
+            action: 待推送的动作对象。
+        """
         self.actions.append(action)
         msg = _action_to_ws_message(action)
         await self._broadcast(msg)
 
     async def _broadcast(self, msg: dict) -> None:
+        """向所有客户端广播消息，自动清理已断开的连接。
+
+        Args:
+            msg: 待广播的 JSON 消息字典。
+        """
         data = json.dumps(msg, ensure_ascii=False)
         dead = set()
         for ws in self._ws_clients:
@@ -163,17 +193,27 @@ class WSOutputPlugin(OutputPlugin):
 
 
 EMOTION_ICONS = {
+    # 情绪名称 → 前端展示图标的映射
     "happy": "😊", "excited": "🤩", "calm": "😌", "shy": "😳",
     "angry": "😠", "sad": "😢", "surprised": "😲", "neutral": "😐",
 }
 
 EMOTION_COLORS = {
+    # 情绪名称 → 前端展示颜色的映射
     "happy": "#FFD700", "excited": "#FF6B6B", "calm": "#87CEEB", "shy": "#FFB6C1",
     "angry": "#FF4444", "sad": "#6495ED", "surprised": "#FFA500", "neutral": "#A0A0A0",
 }
 
 
 def _event_to_ws_message(event: LiveEvent) -> dict:
+    """将 LiveEvent 序列化为前端可消费的 WebSocket 消息。
+
+    Args:
+        event: 待序列化的事件对象。
+
+    Returns:
+        包含 type="event" 和 payload 的消息字典。
+    """
     source_map = {
         "danmaku": "danmaku", "gift": "gift", "super_chat": "danmaku",
         "follow": "system", "enter": "system", "idle": "system",
@@ -196,6 +236,14 @@ def _event_to_ws_message(event: LiveEvent) -> dict:
 
 
 def _action_to_ws_message(action: Action) -> dict:
+    """将 Action 序列化为前端可消费的 WebSocket 消息。
+
+    Args:
+        action: 待序列化的动作对象。
+
+    Returns:
+        包含 type="action" 和 payload 的消息字典。
+    """
     return {
         "type": "action",
         "payload": {
@@ -209,6 +257,16 @@ def _action_to_ws_message(action: Action) -> dict:
 
 
 def _state_to_ws_message(state: AgentState) -> dict:
+    """将 AgentState 序列化为前端可消费的 WebSocket 消息。
+
+    包含情绪状态、场景信息、最近动作历史等。
+
+    Args:
+        state: 当前 Agent 状态字典。
+
+    Returns:
+        包含 type="state" 和 payload 的消息字典。
+    """
     emotion_state = state.get("emotion_state", EmotionState())
     scene = state.get("scene_context", SceneContext())
     emotion_val = emotion_state.current.value
@@ -247,6 +305,14 @@ def _state_to_ws_message(state: AgentState) -> dict:
 
 
 def _response_to_ws_message(state: AgentState) -> dict | None:
+    """将 LiveResponse 序列化为前端可消费的 WebSocket 消息。
+
+    Args:
+        state: 当前 Agent 状态字典，需包含 "live_response" 键。
+
+    Returns:
+        包含 type="response" 和 payload 的消息字典，无回复时返回 None。
+    """
     response = state.get("live_response")
     if response is None:
         return None
@@ -267,7 +333,21 @@ def _response_to_ws_message(state: AgentState) -> dict | None:
 
 
 class BellisWSServer:
+    """Bellis WebSocket 服务主类，管理 LLM Agent、事件处理和前端推送。
+
+    Attributes:
+        env: 从 .env 加载的 LLM 配置。
+        model_name: 模型名称。
+        model_str: 完整模型标识字符串（如 ``openai:gpt-4o-mini``）。
+        ws_output: WebSocket 输出插件实例。
+        registry: 插件注册表。
+        graph: 主循环图。
+        state: 当前 Agent 状态。
+        caller: 弹性调用器（含熔断器和重试）。
+    """
+
     def __init__(self) -> None:
+        """初始化 WebSocket 服务，加载配置并构建 Agent 图。"""
         self.env = _load_env()
         self.model_name = self.env.get("model") or "gpt-4o-mini"
         self.model_str = f"openai:{self.model_name}"
@@ -290,6 +370,11 @@ class BellisWSServer:
         decision_module._caller = self.caller
 
     def _build_initial_state(self) -> AgentState:
+        """构建初始 Agent 状态字典。
+
+        Returns:
+            包含所有必要字段的 AgentState 字典。
+        """
         config = ConfigCenter()
         persona = config.get_active_persona()
         return {
@@ -437,6 +522,7 @@ class BellisWSServer:
 
 
 async def main() -> None:
+    """启动 Bellis WebSocket 服务：初始化 Agent、监听客户端连接、运行事件循环。"""
     server = BellisWSServer()
 
     # 初始化 Agent（兼容模式：不支持 tool calling 的 API）

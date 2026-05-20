@@ -1,3 +1,9 @@
+"""插件系统单元测试。
+
+覆盖 HookManager（注册、触发、清除）、PluginRegistry（各类插件注册）
+以及 ConsoleOutputPlugin 的输出格式化。
+"""
+
 import pytest
 
 from bellis.core.actions import Action
@@ -19,6 +25,7 @@ from plugins.console import ConsoleOutputPlugin
 
 
 class TestHookManager:
+    """HookManager 注册、触发和清除测试。"""
     @pytest.mark.asyncio
     async def test_register_and_fire(self):
         mgr = HookManager()
@@ -70,6 +77,7 @@ class TestHookManager:
 
 
 class TestPluginRegistry:
+    """PluginRegistry 各类插件注册和链式注册测试。"""
     def test_register_input(self):
         registry = PluginRegistry()
 
@@ -160,6 +168,7 @@ class TestPluginRegistry:
 
 
 class TestConsoleOutputPlugin:
+    """ConsoleOutputPlugin 输出格式化测试。"""
     @pytest.mark.asyncio
     async def test_emit_speak(self, capsys):
         plugin = ConsoleOutputPlugin()

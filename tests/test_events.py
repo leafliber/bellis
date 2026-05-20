@@ -1,3 +1,9 @@
+"""事件模型、响应模型、动作模型及配置模型的单元测试。
+
+覆盖 LiveEvent 各子类的默认值与优先级、LiveResponse 字段验证、
+Action 类型构造、EmotionState 边界值、PersonaConfig 默认配置等。
+"""
+
 import pytest
 from pydantic import ValidationError
 
@@ -19,6 +25,7 @@ from bellis.core.response import LiveResponse
 
 
 class TestLiveEvent:
+    """LiveEvent 及其子类的默认值和优先级测试。"""
     def test_base_event_defaults(self):
         event = LiveEvent(content="hello")
         assert event.content == "hello"
@@ -82,6 +89,7 @@ class TestLiveEvent:
 
 
 class TestLiveResponse:
+    """LiveResponse 字段默认值和验证测试。"""
     def test_defaults(self):
         resp = LiveResponse(text="你好")
         assert resp.emotion == EmotionEnum.neutral
@@ -114,6 +122,7 @@ class TestLiveResponse:
 
 
 class TestAction:
+    """Action 各类型的构造测试。"""
     def test_speak_action(self):
         from bellis.core.actions import Action
 
@@ -161,6 +170,7 @@ class TestAction:
 
 
 class TestEmotionState:
+    """EmotionState 默认值和边界值测试。"""
     def test_defaults(self):
         state = EmotionState()
         assert state.current == EmotionEnum.neutral
@@ -174,6 +184,7 @@ class TestEmotionState:
 
 
 class TestPersonaConfig:
+    """PersonaConfig 默认配置和自定义配置测试。"""
     def test_defaults(self):
         config = PersonaConfig()
         assert config.name == "default"
