@@ -46,11 +46,19 @@ async def test():
 
     try:
         result = await agent.run("事件内容：你好主播！", deps=deps)
-        output = result.get_output()
+        # output_type=str 时用 result.output
+        output = result.output
         print(f"Output type: {type(output).__name__}")
         print(f"Output: {output!r}")
+
+        from bellis.graph.decision import _parse_compat_response
+        response = _parse_compat_response(output)
+        print(f"Parsed: text={response.text}")
+        print(f"emotion={response.emotion.value}, motion={response.motion.value}")
     except Exception as e:
         print(f"Error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

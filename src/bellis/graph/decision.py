@@ -68,12 +68,12 @@ class ResilientCaller:
             motion=MotionEnum.think,
         )
 
-    async def call_with_retry(self, agent: Agent, prompt: str, deps: LiveDeps) -> LiveResponse:
+    async def call_with_retry(self, agent: Agent, prompt: str, deps: LiveDeps) -> LiveResponse | str:
         base_delay = 1.0
         for attempt in range(self.max_retries):
             try:
                 result = await self.breaker.call(agent.run, prompt, deps=deps)
-                return result.get_output()
+                return _extract_output(result)
             except CircuitOpenError:
                 break
             except Exception:
@@ -82,10 +82,17 @@ class ResilientCaller:
         if self.fallback_model is not None:
             try:
                 result = await agent.run(prompt, deps=deps, model=self.fallback_model)
-                return result.get_output()
+                return _extract_output(result)
             except Exception:
                 pass
         return self.fallback_response
+
+
+def _extract_output(result) -> LiveResponse | str:
+    """从 AgentRunResult 提取输出，兼容 output_type=LiveResponse 和 output_type=str。"""
+    if hasattr(result, "get_output"):
+        return result.get_output()
+    return result.output
 
 
 def create_decision_agent(
@@ -289,19 +296,34 @@ def _parse_compat_response(raw: str | LiveResponse) -> LiveResponse:
     try:
         import json
 
-        data = json.loads(raw)
-        return LiveResponse(
-            text=data.get("text", raw),
-            emotion=EmotionEnum(data.get("emotion", "neutral")),
-            motion=MotionEnum(data.get("motion", "idle")),
-            tts_speed=data.get("tts_speed", 1.0),
-            priority=data.get("priority", 0),
-            target_user=data.get("target_user"),
-            motion_duration=data.get("motion_duration", 1.0),
-            wait_for_next=data.get("wait_for_next", False),
-        )
+        # 尝试提取 JSON 部分（可能被 markdown 代码块包裹或截断）
+        text = raw.strip()
+        # 去除 markdown 代码块
+        if text.startswith("```"):
+            lines = text.split("\n")
+            text = "\n".join(lines[1:])
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+        # 尝试找到 JSON 对象
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            json_str = text[start:end]
+            data = json.loads(json_str)
+            return LiveResponse(
+                text=data.get("text", raw),
+                emotion=EmotionEnum(data.get("emotion", "neutral")),
+                motion=MotionEnum(data.get("motion", "idle")),
+                tts_speed=data.get("tts_speed", 1.0),
+                priority=data.get("priority", 0),
+                target_user=data.get("target_user"),
+                motion_duration=data.get("motion_duration", 1.0),
+                wait_for_next=data.get("wait_for_next", False),
+            )
     except (json.JSONDecodeError, ValueError):
-        return LiveResponse(text=raw, emotion=EmotionEnum.neutral, motion=MotionEnum.idle)
+        pass
+    return LiveResponse(text=raw, emotion=EmotionEnum.neutral, motion=MotionEnum.idle)
 
 
 _SENTENCE_PATTERN = re.compile(r"(.*?[。！？!?.])")

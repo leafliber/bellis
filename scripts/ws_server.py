@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
+
+# 确保 Windows 终端使用 UTF-8
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import websockets
 
