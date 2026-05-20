@@ -7,11 +7,14 @@ from collections.abc import AsyncIterator
 
 from bellis.core.events import GiftEvent, LiveEvent
 from bellis.plugin.base import InputPlugin, PluginCategory, PluginMeta
-from bellis.runtime.bus import EventBus
 
 
 class GiftCollector(InputPlugin):
-    """礼物事件收集器，接收 B站直播礼物回调。"""
+    """礼物事件收集器，接收 B站直播礼物回调。
+
+    与弹幕/命令收集器不同，礼物事件通过外部回调接口注入，
+    不走 WebSocket 通道，因此不继承 BilibiliWSInputPlugin。
+    """
 
     plugin_meta = PluginMeta(
         name="bilibili_gift",
@@ -21,9 +24,8 @@ class GiftCollector(InputPlugin):
         tags=("bilibili", "gift"),
     )
 
-    def __init__(self, bus: EventBus) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._bus = bus
         self._event_queue: asyncio.Queue[LiveEvent] = asyncio.Queue()
 
     async def _on_start(self) -> None:
@@ -48,5 +50,4 @@ class GiftCollector(InputPlugin):
             coin_value=raw_data.get("coin_value", 0),
             metadata=raw_data.get("metadata", {}),
         )
-        await self._bus.publish(event)
         await self._event_queue.put(event)

@@ -134,13 +134,13 @@ class TestPerceptionNodes:
         assert result["idle_ticks"] == 4
 
     @pytest.mark.asyncio
-    async def test_perceive_idle_event_increments_idle(self):
-        """IdleEvent 应累加 idle_ticks 并清除 current_event。"""
+    async def test_perceive_idle_event_resets_idle(self):
+        """IdleEvent 作为普通事件处理，重置 idle_ticks 为 0 并记录感知信息。"""
         event = IdleEvent(content="idle_tick")
         state: AgentState = {"current_event": event, "idle_ticks": 2, "metrics": {}, "_context": AgentContext()}
         result = await perceive(state)
-        assert result["idle_ticks"] == 3
-        assert result["current_event"] is None
+        assert result["idle_ticks"] == 0
+        assert "perception" in result.get("metrics", {})
 
     @pytest.mark.asyncio
     async def test_perceive_normal_event_resets_idle(self):
@@ -199,6 +199,28 @@ class TestPerceptionNodes:
             "metrics": {"perception": {"reassessed_priority": "LOW", "intent": "chat"}},
         }
         assert route_after_perception(state) == "end"
+
+    def test_route_idle_event_below_threshold_to_end(self):
+        """IdleEvent 且 idle_ticks 未达阈值时路由到 end。"""
+        event = IdleEvent(content="idle_tick")
+        state: AgentState = {
+            "current_event": event,
+            "idle_ticks": 1,
+            "metrics": {"perception": {"reassessed_priority": "LOW", "intent": "idle"}},
+            "_context": AgentContext(),
+        }
+        assert route_after_perception(state) == "end"
+
+    def test_route_idle_event_at_threshold_to_think(self):
+        """IdleEvent 且 idle_ticks 达到阈值时路由到 think。"""
+        event = IdleEvent(content="idle_tick")
+        state: AgentState = {
+            "current_event": event,
+            "idle_ticks": _IDLE_THRESHOLD,
+            "metrics": {"perception": {"reassessed_priority": "LOW", "intent": "idle"}},
+            "_context": AgentContext(),
+        }
+        assert route_after_perception(state) == "think"
 
 
 class TestActNode:

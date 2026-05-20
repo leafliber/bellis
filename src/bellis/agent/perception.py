@@ -13,7 +13,7 @@ from bellis.core.events import (
     RAGEvent,
     SuperChatEvent,
 )
-from bellis.core.state import AgentState
+from bellis.core.state import AgentState, get_context
 
 _GREETING_KEYWORDS = (
     "你好", "嗨", "哈喽", "hello", "hi",
@@ -94,13 +94,6 @@ def _reassess_priority(event: LiveEvent) -> EventPriority:
     return event.priority
 
 
-def _get_context(state: AgentState) -> AgentContext:
-    ctx = state.get("_context")
-    if ctx is None:
-        raise RuntimeError("AgentState 中缺少 _context，请确保 BellisApp 已正确初始化")
-    return ctx
-
-
 def dequeue_event(state: AgentState) -> dict:
     queue = state.get("event_queue", [])
     if not queue:
@@ -109,15 +102,13 @@ def dequeue_event(state: AgentState) -> dict:
 
 
 async def perceive(state: AgentState) -> dict:
-    ctx = _get_context(state)
+    ctx = get_context(state)
     if ctx.hook_manager:
         state = await ctx.hook_manager.fire("pre_perceive", state)
 
     event = state.get("current_event")
     if event is None:
         result = {"idle_ticks": state.get("idle_ticks", 0) + 1}
-    elif isinstance(event, IdleEvent):
-        result = {"idle_ticks": state.get("idle_ticks", 0) + 1, "current_event": None}
     else:
         metrics = dict(state.get("metrics") or {})
         reassessed = _reassess_priority(event)
@@ -163,7 +154,12 @@ def route_after_perception(state: AgentState) -> str:
 
     if priority in (EventPriority.CRITICAL, EventPriority.HIGH, EventPriority.NORMAL):
         return "think"
+    # LOW 优先级或 spam 意图跳过，idle 意图由 idle_ticks 阈值控制
+    if intent == "idle":
+        if idle_ticks >= idle_threshold:
+            return "think"
+        return "end"
     if priority == EventPriority.LOW or intent == "spam":
         return "end"
 
-    return "think"
+    return "end"

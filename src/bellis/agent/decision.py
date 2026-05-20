@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -13,7 +14,7 @@ from bellis.core.context import AgentContext
 from bellis.core.enums import EmotionEnum, MotionEnum
 from bellis.core.models import ActionRecord, EmotionState, PersonaConfig, SceneContext, TTSTask
 from bellis.core.response import LiveResponse
-from bellis.core.state import AgentState
+from bellis.core.state import AgentState, get_context
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,14 @@ class ResilientCaller:
         self,
         breaker: CircuitBreaker | None = None,
         max_retries: int = 3,
+        base_delay: float = 1.0,
+        max_delay: float = 30.0,
         fallback_model: str | None = None,
     ) -> None:
         self.breaker = breaker or CircuitBreaker()
         self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
         self.fallback_model = fallback_model
         self.fallback_response = LiveResponse(
             text="让我想想...",
@@ -73,7 +78,6 @@ class ResilientCaller:
         )
 
     async def call_with_retry(self, agent: Agent, prompt: str, deps: LiveDeps) -> LiveResponse | str:
-        base_delay = 1.0
         for attempt in range(self.max_retries):
             try:
                 result = await self.breaker.call(agent.run, prompt, deps=deps)
@@ -83,7 +87,7 @@ class ResilientCaller:
             except Exception as exc:
                 logger.debug("Agent call attempt %d failed: %s", attempt + 1, exc)
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(base_delay * (2**attempt))
+                    await asyncio.sleep(min(self.base_delay * (2**attempt), self.max_delay))
         if self.fallback_model is not None:
             try:
                 result = await agent.run(prompt, deps=deps, model=self.fallback_model)
@@ -170,7 +174,16 @@ def create_decision_agent(
 
 
 decision_agent: Agent | None = None
-_caller = ResilientCaller()
+
+
+def _get_caller(ctx: AgentContext) -> ResilientCaller:
+    """根据 AgentContext 中的配置创建或复用 ResilientCaller。"""
+    return ResilientCaller(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=30.0,
+        fallback_model=None,
+    )
 
 
 def _get_agent(ctx: AgentContext) -> Agent:
@@ -222,23 +235,16 @@ def _build_deps(state: AgentState) -> LiveDeps:
     )
 
 
-def _get_context(state: AgentState) -> AgentContext:
-    """从 AgentState 中提取 AgentContext。"""
-    ctx = state.get("_context")
-    if ctx is None:
-        raise RuntimeError("AgentState 中缺少 _context，请确保 BellisApp 已正确初始化")
-    return ctx
-
-
 async def think(state: AgentState) -> dict:
-    ctx = _get_context(state)
+    ctx = get_context(state)
     if ctx.hook_manager:
         state = await ctx.hook_manager.fire("pre_think", state)
 
     agent = _get_agent(ctx)
+    caller = _get_caller(ctx)
     deps = _build_deps(state)
     prompt = _build_prompt(state)
-    raw_response = await _caller.call_with_retry(agent, prompt, deps)
+    raw_response = await caller.call_with_retry(agent, prompt, deps)
 
     response = _parse_compat_response(raw_response) if ctx.compat_mode else raw_response
 
@@ -276,8 +282,6 @@ def _parse_compat_response(raw: str | LiveResponse) -> LiveResponse:
     if isinstance(raw, LiveResponse):
         return raw
     try:
-        import json
-
         text = raw.strip()
         if text.startswith("```"):
             lines = text.split("\n")
@@ -309,11 +313,12 @@ _SENTENCE_PATTERN = re.compile(r"(.*?[。！？!?.])")
 
 
 async def stream_think(state: AgentState) -> dict:
-    ctx = _get_context(state)
+    ctx = get_context(state)
     if ctx.hook_manager:
         state = await ctx.hook_manager.fire("pre_think", state)
 
     agent = _get_agent(ctx)
+    caller = _get_caller(ctx)
     deps = _build_deps(state)
     prompt = _build_prompt(state)
     tts_queue = list(state.get("tts_queue", []))
@@ -334,6 +339,16 @@ async def stream_think(state: AgentState) -> dict:
                                 emotion=state.get("emotion_state", EmotionState()).current,
                             )
                         )
+            # 流正常结束时，将 buffer 残留文本推入 TTS 队列
+            if buffer.strip():
+                tts_queue.append(
+                    TTSTask(
+                        text=buffer.strip(),
+                        speed=1.0,
+                        emotion=state.get("emotion_state", EmotionState()).current,
+                    )
+                )
+                buffer = ""
             final_response = await stream.get_output()
     except Exception as exc:
         logger.warning("Stream think failed, falling back to retry: %s", exc)
@@ -345,9 +360,13 @@ async def stream_think(state: AgentState) -> dict:
                     emotion=state.get("emotion_state", EmotionState()).current,
                 )
             )
-        final_response = await _caller.call_with_retry(agent, prompt, deps)
+        final_response = await caller.call_with_retry(agent, prompt, deps)
+
+    # compat_mode 下解析文本响应为 LiveResponse
+    if ctx.compat_mode:
+        final_response = _parse_compat_response(final_response)
     if final_response is None:
-        final_response = _caller.fallback_response
+        final_response = caller.fallback_response
     new_emotion = EmotionState(
         current=final_response.emotion,
         intensity=state.get("emotion_state", EmotionState()).intensity,
@@ -369,6 +388,7 @@ async def stream_think(state: AgentState) -> dict:
         "state_version": state.get("state_version", 0) + 1,
         "tts_queue": tts_queue,
         "idle_ticks": 0,
+        "_streaming_tts_pushed": True,
     }
 
     if ctx.hook_manager:

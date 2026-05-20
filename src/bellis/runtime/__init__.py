@@ -1,5 +1,5 @@
 from bellis.runtime.bus import EventBus
-from bellis.runtime.executors import Live2DCommand, Live2DExecutor, TTSExecutor
+from bellis.runtime.executors import Live2DExecutor, TTSExecutor
 from bellis.runtime.middleware import (
     ActionMiddleware,
     AuditMiddleware,
@@ -22,6 +22,5 @@ __all__ = [
     "ThrottleMiddleware",
     "TTSExecutor",
     "Live2DExecutor",
-    "Live2DCommand",
     "TimelineSync",
 ]

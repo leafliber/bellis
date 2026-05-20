@@ -113,8 +113,10 @@ class PluginRegistry:
     # --- 生命周期 ---
 
     async def start_all(self) -> None:
-        """按顺序启动所有插件：输入 → 平台 → 工具 → Hook。"""
+        """按顺序启动所有插件：输入 → 输出 → 平台 → 工具 → Hook。"""
         for plugin in self._inputs:
+            await plugin.start()
+        for plugin in self._outputs:
             await plugin.start()
         for plugin in self._platforms:
             await plugin.start()

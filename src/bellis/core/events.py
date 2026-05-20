@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from bellis.core.enums import EventPriority, EventSource
+from bellis.core.enums import CommandType, EventPriority, EventSource
 
 
 class LiveEvent(BaseModel):
@@ -12,7 +12,7 @@ class LiveEvent(BaseModel):
     priority: EventPriority = EventPriority.NORMAL
     source: EventSource = EventSource.SYSTEM
     timestamp: datetime = Field(default_factory=datetime.now)
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
     model_config = {"frozen": True}
 
@@ -67,14 +67,14 @@ class FollowEvent(LiveEvent):
 class CommandEvent(LiveEvent):
     source: EventSource = EventSource.COMMAND
     priority: EventPriority = EventPriority.CRITICAL
-    command_type: str = ""
-    payload: dict = {}
+    command_type: CommandType = CommandType.SWITCH_TOPIC
+    payload: dict = Field(default_factory=dict)
 
 
 class RAGEvent(LiveEvent):
     source: EventSource = EventSource.RAG
     query: str = ""
-    retrieved_docs: list[str] = []
+    retrieved_docs: list[str] = Field(default_factory=list)
 
 
 class IdleEvent(LiveEvent):

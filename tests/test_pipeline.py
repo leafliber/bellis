@@ -30,7 +30,7 @@ class TestThrottleMiddleware:
     async def test_pass_when_under_limit(self):
         middleware = ThrottleMiddleware(queue_limit=20)
         middleware.set_pending_count(5)
-        response = LiveResponse(text="test", priority=0)
+        response = LiveResponse(text="test")
         result = await middleware.process(response)
         assert result is not None
 
@@ -38,9 +38,19 @@ class TestThrottleMiddleware:
     async def test_drop_low_priority_when_over_limit(self):
         middleware = ThrottleMiddleware(queue_limit=20)
         middleware.set_pending_count(25)
-        response = LiveResponse(text="test", priority=2)
+        # priority=3 即 LOW，超限时会被丢弃
+        response = LiveResponse(text="test", priority=3)
         result = await middleware.process(response)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_keep_normal_priority_when_over_limit(self):
+        middleware = ThrottleMiddleware(queue_limit=20)
+        middleware.set_pending_count(25)
+        # priority=2 即 NORMAL，超限时仍保留
+        response = LiveResponse(text="test", priority=2)
+        result = await middleware.process(response)
+        assert result is not None
 
 
 class TestOutputPipeline:
@@ -64,7 +74,7 @@ class TestOutputPipeline:
         middleware.set_pending_count(10)
         executed = []
         pipeline.add_executor(lambda r: executed.append(r.text))
-        response = LiveResponse(text="test", priority=2)
+        response = LiveResponse(text="test", priority=3)
         result = await pipeline.execute(response)
         assert result is None
         assert len(executed) == 0

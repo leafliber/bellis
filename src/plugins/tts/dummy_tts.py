@@ -1,4 +1,4 @@
-"""占位 TTS 执行器 — 同时实现 TTSExecutor 和 OutputPlugin 接口。"""
+"""占位 TTS 执行器 — 实现 OutputPlugin 接口，内部组合 TTSExecutor。"""
 
 from __future__ import annotations
 
@@ -9,8 +9,15 @@ from bellis.plugin.base import OutputPlugin, PluginCategory, PluginMeta
 from bellis.runtime.executors import TTSExecutor
 
 
-class DummyTTSExecutor(TTSExecutor, OutputPlugin):
-    """占位 TTS 执行器，同时实现 OutputPlugin 接口。"""
+class _DummyTTSDriver(TTSExecutor):
+    """TTSExecutor 的占位实现，不产生实际语音。"""
+
+    async def synthesize(self, task: TTSTask) -> bytes | None:
+        return b""
+
+
+class DummyTTSExecutor(OutputPlugin):
+    """占位 TTS 输出插件，通过组合方式持有 TTSExecutor 驱动器。"""
 
     plugin_meta = PluginMeta(
         name="dummy_tts",
@@ -20,8 +27,14 @@ class DummyTTSExecutor(TTSExecutor, OutputPlugin):
         tags=("tts", "dummy"),
     )
 
-    async def synthesize(self, task: TTSTask) -> bytes | None:
-        return b""
+    def __init__(self) -> None:
+        super().__init__()
+        self._driver = _DummyTTSDriver()
+
+    @property
+    def driver(self) -> _DummyTTSDriver:
+        """暴露底层驱动器，供 TimelineSync 等组件直接使用。"""
+        return self._driver
 
     async def emit(self, action: Action) -> None:
         if action.type == ActionType.speak and action.text:
@@ -32,4 +45,4 @@ class DummyTTSExecutor(TTSExecutor, OutputPlugin):
                 target_user=action.target_user,
                 priority=action.priority,
             )
-            await self.synthesize(task)
+            await self._driver.synthesize(task)

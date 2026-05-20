@@ -56,6 +56,9 @@ class Tracer:
         self._current = span
         try:
             yield span
+        except Exception as exc:
+            span.metadata["error"] = f"{type(exc).__name__}: {exc}"
+            raise
         finally:
             span.end_time = time.monotonic()
             self._current = prev

@@ -3,19 +3,11 @@ from __future__ import annotations
 import logging
 
 from bellis.core.actions import Action
-from bellis.core.context import AgentContext
-from bellis.core.enums import ActionType, CommandType, EventSource
+from bellis.core.enums import ActionType, CommandType, EmotionEnum, EventSource, MotionEnum
 from bellis.core.models import TTSTask
-from bellis.core.state import AgentState
+from bellis.core.state import AgentState, get_context
 
 logger = logging.getLogger(__name__)
-
-
-def _get_context(state: AgentState) -> AgentContext:
-    ctx = state.get("_context")
-    if ctx is None:
-        raise RuntimeError("AgentState 中缺少 _context，请确保 BellisApp 已正确初始化")
-    return ctx
 
 
 def _response_to_actions(state: AgentState) -> list[Action]:
@@ -38,7 +30,7 @@ def _response_to_actions(state: AgentState) -> list[Action]:
             )
         )
 
-    if response.emotion:
+    if response.emotion and response.emotion != EmotionEnum.neutral:
         actions.append(
             Action(
                 type=ActionType.set_expression,
@@ -47,7 +39,7 @@ def _response_to_actions(state: AgentState) -> list[Action]:
             )
         )
 
-    if response.motion:
+    if response.motion and response.motion != MotionEnum.idle:
         actions.append(
             Action(
                 type=ActionType.set_motion,
@@ -71,7 +63,7 @@ def _response_to_actions(state: AgentState) -> list[Action]:
 
 
 async def act(state: AgentState) -> dict:
-    ctx = _get_context(state)
+    ctx = get_context(state)
     if ctx.hook_manager:
         state = await ctx.hook_manager.fire("pre_act", state)
 
@@ -79,18 +71,29 @@ async def act(state: AgentState) -> dict:
     if response is None:
         result = {}
     else:
+        # 流式模式下 TTS 已在 stream_think 中按句子推送，此处不再重复追加
         tts_queue = list(state.get("tts_queue", []))
-        tts_queue.append(
-            TTSTask(
-                text=response.text,
-                speed=response.tts_speed,
-                emotion=response.emotion,
-                target_user=response.target_user,
-                priority=response.priority,
+        if not state.get("_streaming_tts_pushed"):
+            tts_queue.append(
+                TTSTask(
+                    text=response.text,
+                    speed=response.tts_speed,
+                    emotion=response.emotion,
+                    target_user=response.target_user,
+                    priority=response.priority,
+                )
             )
-        )
 
         actions = _response_to_actions(state)
+
+        # 通过 ActionMiddleware 链过滤/修改 Action
+        if ctx.pipeline is not None:
+            filtered_actions: list[Action] = []
+            for action in actions:
+                processed = await ctx.pipeline.process_action(action)
+                if processed is not None:
+                    filtered_actions.append(processed)
+            actions = filtered_actions
 
         # 通过 OutputPipeline 执行（带错误隔离）
         if ctx.pipeline is not None:
@@ -132,18 +135,17 @@ async def handle_interrupt(state: AgentState) -> dict:
     }
     metrics = dict(state.get("metrics") or {})
 
-    if command_type == CommandType.SWITCH_PERSONA.value or command_type == "switch_persona":
+    if command_type == CommandType.SWITCH_PERSONA:
         persona_name = payload.get("name", "default")
         metrics["interrupt_action"] = f"switch_persona:{persona_name}"
-    elif command_type == CommandType.SWITCH_TOPIC.value or command_type == "switch_topic":
+    elif command_type == CommandType.SWITCH_TOPIC:
         metrics["interrupt_action"] = f"switch_topic:{payload.get('topic', '')}"
-    elif command_type == CommandType.FORCE_REPLY.value or command_type == "force_reply":
+    elif command_type == CommandType.FORCE_REPLY:
         metrics["interrupt_action"] = "force_reply"
-        updates["interrupt_flag"] = False
-    elif command_type == CommandType.INTERRUPT.value or command_type == "interrupt":
+    elif command_type == CommandType.INTERRUPT:
         metrics["interrupt_action"] = "interrupt"
         updates["interrupt_flag"] = True
-    elif command_type == CommandType.RESUME.value or command_type == "resume":
+    elif command_type == CommandType.RESUME:
         metrics["interrupt_action"] = "resume"
         updates["interrupt_flag"] = False
 

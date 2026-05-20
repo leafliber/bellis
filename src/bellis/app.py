@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import sys
 
 from bellis.agent.graph import build_main_graph
 from bellis.config.loader import ConfigCenter
@@ -13,6 +14,8 @@ from bellis.core.state import AgentState
 from bellis.observability.tracing import Tracer
 from bellis.plugin.registry import PluginRegistry
 from bellis.runtime.bus import EventBus
+from bellis.runtime.executors import Live2DExecutor, TTSExecutor
+from bellis.runtime.sync import TimelineSync
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +44,8 @@ class BellisApp:
             base_url=self._config.model.base_url,
             api_key=self._config.model.api_key,
             compat_mode=self._config.model.compat_mode,
+            idle_threshold=self._config.platform.idle_threshold,
+            idle_monitor_interval=self._config.platform.idle_monitor_interval,
         )
 
     @property
@@ -68,6 +73,20 @@ class BellisApp:
         # 同步 context 中的 output_plugins 引用
         self._context.output_plugins = self._registry.outputs
 
+    def _build_timeline_sync(self) -> TimelineSync | None:
+        """从已注册的 OutputPlugin 中提取 TTSExecutor 和 Live2DExecutor，构建 TimelineSync。"""
+        tts_driver: TTSExecutor | None = None
+        live2d_driver: Live2DExecutor | None = None
+        for plugin in self._registry.outputs:
+            if hasattr(plugin, "driver"):
+                if isinstance(plugin.driver, TTSExecutor) and tts_driver is None:
+                    tts_driver = plugin.driver
+                if isinstance(plugin.driver, Live2DExecutor) and live2d_driver is None:
+                    live2d_driver = plugin.driver
+        if tts_driver is not None and live2d_driver is not None:
+            return TimelineSync(tts=tts_driver, live2d=live2d_driver)
+        return None
+
     def _build_initial_state(self) -> AgentState:
         persona = self._config.get_active_persona()
         return {
@@ -88,15 +107,15 @@ class BellisApp:
         }
 
     async def start(self) -> None:
-        """启动应用：初始化 EventBus → 启动输入插件 → 编译图 → 进入主循环。"""
+        """启动应用：初始化 EventBus → 启动所有插件 → 编译图 → 进入主循环。"""
         self._running = True
         self._event_bus = EventBus(maxsize=self._config.platform.max_queue_size)
 
-        # 启动输入插件
-        await self._registry.start_inputs()
+        # 启动所有插件
+        await self._registry.start_all()
 
-        # 启动平台插件
-        await self._registry.start_platforms()
+        # 构建 TimelineSync（需要已注册的插件实例）
+        self._context.timeline_sync = self._build_timeline_sync()
 
         # 编译图
         self._graph = build_main_graph(streaming=self._streaming)
@@ -116,8 +135,7 @@ class BellisApp:
             self._running = False
             collect_task.cancel()
             idle_task.cancel()
-            await self._registry.stop_inputs()
-            await self._registry.stop_platforms()
+            await self._registry.stop_all()
 
     async def _collect_events(self) -> None:
         """从所有 InputPlugin 收集事件并推入 EventBus。"""
@@ -137,6 +155,8 @@ class BellisApp:
                     await self._event_bus.publish(event)
         except asyncio.CancelledError:
             pass
+        except Exception:
+            logger.exception("InputPlugin %s 收集事件异常，任务终止", plugin.name)
 
     async def _idle_monitor(self) -> None:
         """监控空闲状态，当长时间无事件时注入 IdleEvent。"""
@@ -163,7 +183,7 @@ class BellisApp:
 
             # 更新 state
             state["event_queue"] = event_queue
-            state["current_event"] = None
+            state["current_event"] = event
             state["idle_ticks"] = 0
 
             # 调用图（带异常捕获，防止单次失败终止主循环）
@@ -183,6 +203,7 @@ class BellisApp:
                     state["_context"] = ctx
 
     async def stop(self) -> None:
+        """停止应用：设置标志位，等待主循环退出。"""
         self._running = False
 
 
@@ -197,7 +218,8 @@ def main() -> None:
         loop.call_soon_threadsafe(lambda: asyncio.ensure_future(app.stop()))
 
     signal.signal(signal.SIGINT, lambda *_: _shutdown())
-    signal.signal(signal.SIGTERM, lambda *_: _shutdown())
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, lambda *_: _shutdown())
 
     print("Bellis - Live Streaming AI Agent Framework")
     print("输入弹幕内容与 AI 互动，Ctrl+C 退出")

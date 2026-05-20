@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from bellis.core.enums import ActionType, EmotionEnum, MotionEnum
 
@@ -20,4 +20,4 @@ class Action(BaseModel):
     target_user: str | None = None
     tts_speed: float = 1.0
     priority: int = 0
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)

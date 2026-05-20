@@ -50,8 +50,6 @@ class AggregateStrategy(SamplingStrategy):
 
     def _evict_stale_keys(self, now: datetime) -> None:
         """淘汰过期的 key，防止内存无限增长。"""
-        if len(self._buckets) <= self._max_keys:
-            return
         stale = [
             k for k, times in self._buckets.items()
             if not times or (now - times[-1]).total_seconds() >= self._window_seconds
@@ -65,13 +63,16 @@ class AggregateStrategy(SamplingStrategy):
             return True
         key = self._normalize(event.content)
         now = datetime.now()
+        # 每次调用都清理过期 key
         self._evict_stale_keys(now)
         self._buckets[key] = [t for t in self._buckets[key] if (now - t).total_seconds() < self._window_seconds]
         self._buckets[key].append(now)
-        if len(self._buckets[key]) >= self._threshold:
+        count = len(self._buckets[key])
+        if count >= self._threshold:
             last_emitted = self._emitted.get(key)
             if last_emitted and (now - last_emitted).total_seconds() < self._window_seconds:
                 return False
             self._emitted[key] = now
             return True
-        return len(self._buckets[key]) == 1
+        # 未达到阈值前保留所有事件
+        return True

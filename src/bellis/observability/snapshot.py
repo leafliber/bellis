@@ -21,7 +21,7 @@ class SnapshotExporter:
         try:
             snapshot = copy.deepcopy(dict(state))
         except Exception:
-            logger.warning("无法 deep copy state，使用浅拷贝")
+            logger.warning("无法 deep copy state，使用浅拷贝", exc_info=True)
             snapshot = dict(state)
         snapshot["_snapshot_time"] = datetime.now().isoformat()
         self._snapshots.append(snapshot)

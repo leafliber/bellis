@@ -28,7 +28,7 @@ class ConsoleInputPlugin(InputPlugin):
     async def listen(self) -> AsyncIterator[LiveEvent]:
         import asyncio
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         while self.state.value == "running":
             try:
                 line = await loop.run_in_executor(None, input, "[弹幕] ")

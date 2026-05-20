@@ -12,7 +12,7 @@ class SceneContext(BaseModel):
     streamer_name: str = ""
     viewer_count: int = 0
     topic: str = ""
-    products: list[str] = []
+    products: list[str] = Field(default_factory=list)
     phase: str = "idle"
 
 
@@ -33,8 +33,8 @@ class ActionRecord(BaseModel):
 class PersonaConfig(BaseModel):
     name: str = "default"
     system_prompt: str = ""
-    emotion_map: dict[str, EmotionEnum] = {}
-    motion_map: dict[str, MotionEnum] = {}
+    emotion_map: dict[str, EmotionEnum] = Field(default_factory=dict)
+    motion_map: dict[str, MotionEnum] = Field(default_factory=dict)
     tts_voice: str = "default"
     tts_speed_range: tuple[float, float] = (0.8, 1.5)
 

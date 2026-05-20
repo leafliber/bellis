@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import collections
+import inspect
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from bellis.core.actions import Action
 from bellis.core.enums import EventPriority
@@ -24,7 +26,7 @@ class OutputPipeline:
     def __init__(self) -> None:
         self._middlewares: list[OutputMiddleware] = []
         self._action_middlewares: list[ActionMiddleware] = []
-        self._executors: list[Callable[[LiveResponse], None]] = []
+        self._executors: list[Callable[[LiveResponse], Awaitable[None] | None]] = []
 
     def add_middleware(self, middleware: OutputMiddleware) -> OutputPipeline:
         self._middlewares.append(middleware)
@@ -34,7 +36,7 @@ class OutputPipeline:
         self._action_middlewares.append(middleware)
         return self
 
-    def add_executor(self, executor: Callable[[LiveResponse], None]) -> OutputPipeline:
+    def add_executor(self, executor: Callable[[LiveResponse], Awaitable[None] | None]) -> OutputPipeline:
         self._executors.append(executor)
         return self
 
@@ -46,7 +48,9 @@ class OutputPipeline:
             current = await middleware.process(current)
         if current is not None:
             for executor in self._executors:
-                executor(current)
+                result = executor(current)
+                if inspect.isawaitable(result):
+                    await result
         return current
 
     async def process_action(self, action: Action) -> Action | None:
@@ -60,10 +64,15 @@ class OutputPipeline:
 
 
 class AuditMiddleware(OutputMiddleware):
-    def __init__(self, sensitive_words: list[str] | None = None, replacement: str = "***") -> None:
+    def __init__(
+        self,
+        sensitive_words: list[str] | None = None,
+        replacement: str = "***",
+        max_log_size: int = 1000,
+    ) -> None:
         self._sensitive_words = sensitive_words or []
         self._replacement = replacement
-        self._audit_log: list[dict] = []
+        self._audit_log: collections.deque[dict] = collections.deque(maxlen=max_log_size)
 
     @property
     def audit_log(self) -> list[dict]:
@@ -98,6 +107,7 @@ class ThrottleMiddleware(OutputMiddleware):
 
     async def process(self, response: LiveResponse) -> LiveResponse | None:
         if self._pending_count >= self._queue_limit:
-            if response.priority <= EventPriority.NORMAL.value:
+            # 队列满时丢弃 LOW 优先级（value >= 3），保留 CRITICAL/HIGH/NORMAL
+            if response.priority >= EventPriority.LOW.value:
                 return None
         return response

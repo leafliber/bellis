@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -102,7 +103,6 @@ class BasePlugin(ABC):
         try:
             await self._on_stop()
         except Exception:
-            import logging
             logging.getLogger(__name__).warning("插件 %s 停止时发生异常", self.name, exc_info=True)
         finally:
             self._state = PluginState.STOPPED
