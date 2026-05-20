@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useConfigStore } from "@/store/useConfigStore";
 import { Save } from "lucide-react";
 
@@ -9,6 +9,14 @@ export default function PlatformPanel() {
   const [queueSize, setQueueSize] = useState(String(config.platform.max_queue_size));
   const [qps, setQps] = useState(String(config.platform.danmaku_qps_limit));
   const [ttsLimit, setTtsLimit] = useState(String(config.platform.tts_queue_limit));
+
+  useEffect(() => {
+    setDanmakuUri(config.platform.danmaku_ws_uri);
+    setCommandUri(config.platform.command_ws_uri);
+    setQueueSize(String(config.platform.max_queue_size));
+    setQps(String(config.platform.danmaku_qps_limit));
+    setTtsLimit(String(config.platform.tts_queue_limit));
+  }, [config.platform]);
 
   const handleSave = () => {
     updatePlatformConfig({

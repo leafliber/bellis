@@ -1,13 +1,7 @@
 import pytest
 
-from bellis.core.actions import Action
-from bellis.core.enums import ActionType, EmotionEnum, EventPriority, MotionEnum
-from bellis.core.events import CommandEvent, DanmakuEvent, EnterEvent, FollowEvent, GiftEvent, IdleEvent, SuperChatEvent
-from bellis.core.response import LiveResponse
-from bellis.core.state import AgentState
-from bellis.graph.execution import _response_to_actions, act, handle_interrupt, route_after_act
-from bellis.graph.perception import (
-    IDLE_THRESHOLD,
+from bellis.agent.execution import _response_to_actions, act, handle_interrupt, route_after_act
+from bellis.agent.perception import (
     _analyze_emotion,
     _classify_intent,
     _reassess_priority,
@@ -15,6 +9,14 @@ from bellis.graph.perception import (
     perceive,
     route_after_perception,
 )
+from bellis.core.actions import Action
+from bellis.core.context import AgentContext
+from bellis.core.enums import ActionType, EmotionEnum, EventPriority, MotionEnum
+from bellis.core.events import CommandEvent, DanmakuEvent, EnterEvent, FollowEvent, GiftEvent, IdleEvent, SuperChatEvent
+from bellis.core.response import LiveResponse
+from bellis.core.state import AgentState
+
+_IDLE_THRESHOLD = 5
 
 
 class TestPerceptionHelpers:
@@ -119,7 +121,7 @@ class TestPerceptionNodes:
     @pytest.mark.asyncio
     async def test_perceive_with_event(self):
         event = GiftEvent(content="送火箭", coin_value=2000)
-        state: AgentState = {"current_event": event, "metrics": {}}
+        state: AgentState = {"current_event": event, "metrics": {}, "_context": AgentContext()}
         result = await perceive(state)
         assert result["metrics"]["perception"]["intent"] == "gift"
         assert result["metrics"]["perception"]["reassessed_priority"] == "CRITICAL"
@@ -127,7 +129,7 @@ class TestPerceptionNodes:
 
     @pytest.mark.asyncio
     async def test_perceive_no_event_increments_idle(self):
-        state: AgentState = {"current_event": None, "idle_ticks": 3, "metrics": {}}
+        state: AgentState = {"current_event": None, "idle_ticks": 3, "metrics": {}, "_context": AgentContext()}
         result = await perceive(state)
         assert result["idle_ticks"] == 4
 
@@ -135,7 +137,7 @@ class TestPerceptionNodes:
     async def test_perceive_idle_event_increments_idle(self):
         """IdleEvent 应累加 idle_ticks 并清除 current_event。"""
         event = IdleEvent(content="idle_tick")
-        state: AgentState = {"current_event": event, "idle_ticks": 2, "metrics": {}}
+        state: AgentState = {"current_event": event, "idle_ticks": 2, "metrics": {}, "_context": AgentContext()}
         result = await perceive(state)
         assert result["idle_ticks"] == 3
         assert result["current_event"] is None
@@ -144,7 +146,7 @@ class TestPerceptionNodes:
     async def test_perceive_normal_event_resets_idle(self):
         """普通事件应重置 idle_ticks 为 0。"""
         event = DanmakuEvent(content="你好", user_level=10, fan_badge="铁粉")
-        state: AgentState = {"current_event": event, "idle_ticks": 5, "metrics": {}}
+        state: AgentState = {"current_event": event, "idle_ticks": 5, "metrics": {}, "_context": AgentContext()}
         result = await perceive(state)
         assert result["idle_ticks"] == 0
 
@@ -169,7 +171,12 @@ class TestPerceptionNodes:
         assert route_after_perception(state) == "end"
 
     def test_route_to_think_when_idle_threshold(self):
-        state: AgentState = {"current_event": None, "idle_ticks": IDLE_THRESHOLD, "metrics": {}}
+        state: AgentState = {
+            "current_event": None,
+            "idle_ticks": _IDLE_THRESHOLD,
+            "metrics": {},
+            "_context": AgentContext(),
+        }
         assert route_after_perception(state) == "think"
 
     def test_route_to_interrupt(self):
@@ -203,7 +210,7 @@ class TestActNode:
         state: AgentState = {
             "live_response": response,
             "current_event": event,
-            "metrics": {"_output_plugins": [], "_hook_manager": None},
+            "_context": AgentContext(),
         }
         result = await act(state)
         assert len(result.get("actions", [])) > 0
@@ -215,7 +222,7 @@ class TestActNode:
         """无 LiveResponse 时 act 不产生 Action。"""
         state: AgentState = {
             "live_response": None,
-            "metrics": {"_output_plugins": [], "_hook_manager": None},
+            "_context": AgentContext(),
         }
         result = await act(state)
         assert result == {}
@@ -223,9 +230,11 @@ class TestActNode:
     @pytest.mark.asyncio
     async def test_act_dispatches_to_output_plugins(self):
         """act 应将 Action 分发给 OutputPlugin。"""
-        from bellis.plugins.base import OutputPlugin
+        from bellis.plugin.base import OutputPlugin, PluginCategory, PluginMeta
 
         class Collector(OutputPlugin):
+            plugin_meta = PluginMeta(name="collector", category=PluginCategory.OUTPUT)
+
             def __init__(self):
                 self.actions = []
 
@@ -238,7 +247,7 @@ class TestActNode:
         state: AgentState = {
             "live_response": response,
             "current_event": event,
-            "metrics": {"_output_plugins": [collector], "_hook_manager": None},
+            "_context": AgentContext(output_plugins=[collector]),
         }
         await act(state)
         assert len(collector.actions) > 0
@@ -246,7 +255,7 @@ class TestActNode:
     @pytest.mark.asyncio
     async def test_act_with_hooks(self):
         """act 节点应触发 pre_act 和 post_act hooks。"""
-        from bellis.plugins.hooks import HookManager
+        from bellis.plugin.hooks import HookManager
 
         hook_mgr = HookManager()
         calls = []
@@ -266,7 +275,7 @@ class TestActNode:
         state: AgentState = {
             "live_response": response,
             "current_event": DanmakuEvent(content="你好"),
-            "metrics": {"_output_plugins": [], "_hook_manager": hook_mgr},
+            "_context": AgentContext(hook_manager=hook_mgr),
         }
         await act(state)
         assert "pre_act" in calls

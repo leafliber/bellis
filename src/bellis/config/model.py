@@ -12,3 +12,4 @@ class ModelConfig(BaseModel):
     temperature: float = 0.7
     base_url: str | None = None
     api_key: str | None = None
+    compat_mode: bool = False

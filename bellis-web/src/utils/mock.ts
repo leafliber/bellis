@@ -33,7 +33,7 @@ function randomInt(min: number, max: number): number {
 }
 
 export function createMockEvent(): GUIEvent {
-  const sources: Array<"danmaku" | "gift" | "command" | "system"> = ["danmaku", "danmaku", "danmaku", "gift", "command", "system"];
+  const sources: Array<"danmaku" | "gift" | "command" | "rag" | "system"> = ["danmaku", "danmaku", "danmaku", "gift", "command", "rag", "system"];
   const source = randomItem(sources);
   let displayText = "";
   let userName = "";
@@ -50,6 +50,9 @@ export function createMockEvent(): GUIEvent {
     case "command":
       userName = "管理员";
       displayText = randomItem(["切换话题", "强制回复", "切换人格", "中断当前回复"]);
+      break;
+    case "rag":
+      displayText = randomItem(["检索到相关文档片段", "知识库匹配成功", "RAG 检索完成"]);
       break;
     case "system":
       displayText = randomItem(["智能体已启动", "配置已更新", "连接已恢复", "弹幕采样率调整"]);

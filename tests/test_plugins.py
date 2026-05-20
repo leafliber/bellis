@@ -4,10 +4,18 @@ from bellis.core.actions import Action
 from bellis.core.enums import ActionType, EmotionEnum
 from bellis.core.events import LiveEvent
 from bellis.core.state import AgentState
-from bellis.plugins.base import HookPlugin, InputPlugin, OutputPlugin, PlatformPlugin, ToolPlugin
-from bellis.plugins.console import ConsoleOutputPlugin
-from bellis.plugins.hooks import HookManager
-from bellis.plugins.registry import PluginRegistry
+from bellis.plugin.base import (
+    HookPlugin,
+    InputPlugin,
+    OutputPlugin,
+    PlatformPlugin,
+    PluginCategory,
+    PluginMeta,
+    ToolPlugin,
+)
+from bellis.plugin.hooks import HookManager
+from bellis.plugin.registry import PluginRegistry
+from plugins.console import ConsoleOutputPlugin
 
 
 class TestHookManager:
@@ -66,14 +74,10 @@ class TestPluginRegistry:
         registry = PluginRegistry()
 
         class FakeInput(InputPlugin):
+            plugin_meta = PluginMeta(name="fake_input", category=PluginCategory.INPUT)
+
             async def listen(self):
                 yield LiveEvent(content="test")
-
-            async def start(self):
-                pass
-
-            async def stop(self):
-                pass
 
         plugin = FakeInput()
         registry.register_input(plugin)
@@ -83,6 +87,8 @@ class TestPluginRegistry:
         registry = PluginRegistry()
 
         class FakeOutput(OutputPlugin):
+            plugin_meta = PluginMeta(name="fake_output", category=PluginCategory.OUTPUT)
+
             async def emit(self, action: Action):
                 pass
 
@@ -94,6 +100,8 @@ class TestPluginRegistry:
         registry = PluginRegistry()
 
         class FakePlatform(PlatformPlugin):
+            plugin_meta = PluginMeta(name="fake_platform", category=PluginCategory.PLATFORM)
+
             async def start_stream(self):
                 pass
 
@@ -111,6 +119,8 @@ class TestPluginRegistry:
         registry = PluginRegistry()
 
         class FakeTool(ToolPlugin):
+            plugin_meta = PluginMeta(name="fake_tool", category=PluginCategory.TOOL)
+
             def get_tools(self):
                 return [lambda: "tool"]
 
@@ -124,6 +134,8 @@ class TestPluginRegistry:
         registry = PluginRegistry()
 
         class FakeHook(HookPlugin):
+            plugin_meta = PluginMeta(name="fake_hook", category=PluginCategory.HOOK)
+
             def register_hooks(self, hook_mgr: HookManager):
                 async def hook(state):
                     return state
@@ -138,6 +150,8 @@ class TestPluginRegistry:
         registry = PluginRegistry()
 
         class FakeOutput(OutputPlugin):
+            plugin_meta = PluginMeta(name="fake_output_chained", category=PluginCategory.OUTPUT)
+
             async def emit(self, action: Action):
                 pass
 

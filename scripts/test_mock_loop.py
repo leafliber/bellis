@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
+from bellis.agent import decision as decision_module
+from bellis.agent.graph import build_main_graph
 from bellis.config.loader import ConfigCenter
 from bellis.core.actions import Action
-from bellis.core.enums import ActionType, EmotionEnum, EventPriority, EventSource, MotionEnum
+from bellis.core.context import AgentContext
+from bellis.core.enums import ActionType, EmotionEnum, MotionEnum
 from bellis.core.events import (
     CommandEvent,
     DanmakuEvent,
@@ -21,15 +24,12 @@ from bellis.core.events import (
     LiveEvent,
     SuperChatEvent,
 )
-from bellis.core.models import ActionRecord, EmotionState, PersonaConfig, SceneContext
+from bellis.core.models import EmotionState, SceneContext
 from bellis.core.response import LiveResponse
 from bellis.core.state import AgentState
-from bellis.graph import decision as decision_module
-from bellis.graph.main import build_main_graph
-from bellis.plugins.base import HookPlugin, InputPlugin, OutputPlugin
-from bellis.plugins.hooks import HookManager
-from bellis.plugins.registry import PluginRegistry
-
+from bellis.plugin.base import HookPlugin, InputPlugin, OutputPlugin, PluginCategory, PluginMeta
+from bellis.plugin.hooks import HookManager
+from bellis.plugin.registry import PluginRegistry
 
 # ─── Mock LLM 回复映射 ──────────────────────────────────────────────────
 
@@ -39,7 +39,10 @@ MOCK_RESPONSES: list[tuple[str, LiveResponse]] = [
     ("醒目", LiveResponse(text="感谢醒目留言！你太给力了！", emotion=EmotionEnum.excited, motion=MotionEnum.bow)),
     ("关注", LiveResponse(text="感谢关注！新朋友你好呀~", emotion=EmotionEnum.happy, motion=MotionEnum.wave)),
     ("切换", LiveResponse(text="好的，收到指令！", emotion=EmotionEnum.calm, motion=MotionEnum.nod)),
-    ("安静", LiveResponse(text="嗯...直播间好安静呀，大家都在忙什么呢？", emotion=EmotionEnum.calm, motion=MotionEnum.think)),
+    ("安静", LiveResponse(
+        text="嗯...直播间好安静呀，大家都在忙什么呢？",
+        emotion=EmotionEnum.calm, motion=MotionEnum.think,
+    )),
     ("还在", LiveResponse(text="在的在的！我一直在呢~", emotion=EmotionEnum.happy, motion=MotionEnum.wave)),
 ]
 
@@ -56,6 +59,8 @@ def _mock_response_for_prompt(prompt: str) -> LiveResponse:
 # ─── Mock 输入插件 ──────────────────────────────────────────────────────
 
 class MockInputPlugin(InputPlugin):
+    plugin_meta = PluginMeta(name="mock_input", category=PluginCategory.INPUT)
+
     def __init__(self, events: list[LiveEvent]) -> None:
         self._events = events
         self._running = False
@@ -76,6 +81,8 @@ class MockInputPlugin(InputPlugin):
 # ─── Mock 输出插件 ──────────────────────────────────────────────────────
 
 class MockOutputPlugin(OutputPlugin):
+    plugin_meta = PluginMeta(name="mock_output", category=PluginCategory.OUTPUT)
+
     def __init__(self, name: str = "mock") -> None:
         self.name = name
         self.actions: list[Action] = []
@@ -90,6 +97,8 @@ class MockOutputPlugin(OutputPlugin):
 # ─── Mock Hook 插件 ─────────────────────────────────────────────────────
 
 class MockHookPlugin(HookPlugin):
+    plugin_meta = PluginMeta(name="mock_hook", category=PluginCategory.HOOK)
+
     def __init__(self) -> None:
         self.calls: list[str] = []
 
@@ -181,11 +190,12 @@ async def run_mock_test() -> None:
         "interrupt_flag": False,
         "tts_queue": [],
         "idle_ticks": 0,
-        "metrics": {
-            "_hook_manager": registry.hook_manager,
-            "_output_plugins": registry.outputs,
-            "_extra_tools": [],
-        },
+        "metrics": {},
+        "_context": AgentContext(
+            hook_manager=registry.hook_manager,
+            output_plugins=registry.outputs,
+            extra_tools=[],
+        ),
     }
 
     # 4. 逐事件送入主循环
@@ -208,13 +218,10 @@ async def run_mock_test() -> None:
         result = await graph.ainvoke(state)
 
         # 合并结果
-        old_metrics = state.get("metrics", {})
+        old_context = state.get("_context")
         state = dict(result) if result else state
-        new_metrics = state.get("metrics", {})
-        for key in ("_hook_manager", "_output_plugins", "_extra_tools"):
-            if key in old_metrics and key not in new_metrics:
-                new_metrics[key] = old_metrics[key]
-        state["metrics"] = new_metrics
+        if "_context" not in state and old_context is not None:
+            state["_context"] = old_context
 
         # 打印本轮结果
         response = state.get("live_response")
@@ -261,7 +268,7 @@ async def run_mock_test() -> None:
             detail += f" @{a.target_user}"
         print(f"  [{a.type.value}]{detail}")
 
-    print(f"\n按类型统计:")
+    print("\n按类型统计:")
     for at in ActionType:
         count = len(mock_output.get_actions_by_type(at))
         if count:
@@ -270,7 +277,7 @@ async def run_mock_test() -> None:
     print(f"\nMockHookPlugin 调用记录: {mock_hook.calls}")
     print(f"Hook 调用总次数: {len(mock_hook.calls)}")
 
-    print(f"\n最终 state:")
+    print("\n最终 state:")
     print(f"  state_version: {state.get('state_version', 0)}")
     print(f"  idle_ticks: {state.get('idle_ticks', 0)}")
     print(f"  action_history: {len(state.get('action_history', []))} 条")

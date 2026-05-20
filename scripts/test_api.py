@@ -2,7 +2,7 @@
 import asyncio
 from pathlib import Path
 
-from bellis.graph.decision import create_decision_agent, LiveDeps
+from bellis.agent.decision import LiveDeps, create_decision_agent
 from bellis.core.models import EmotionState, PersonaConfig, SceneContext
 
 
@@ -51,7 +51,7 @@ async def test():
         print(f"Output type: {type(output).__name__}")
         print(f"Output: {output!r}")
 
-        from bellis.graph.decision import _parse_compat_response
+        from bellis.agent.decision import _parse_compat_response
         response = _parse_compat_response(output)
         print(f"Parsed: text={response.text}")
         print(f"emotion={response.emotion.value}, motion={response.motion.value}")

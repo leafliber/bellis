@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useConfigStore } from "@/store/useConfigStore";
 import { Save } from "lucide-react";
 
@@ -9,6 +9,12 @@ export default function PersonaPanel() {
   const [name, setName] = useState(active?.name || "");
   const [systemPrompt, setSystemPrompt] = useState(active?.system_prompt || "");
   const [ttsVoice, setTtsVoice] = useState(active?.tts_voice || "");
+
+  useEffect(() => {
+    setName(active?.name || "");
+    setSystemPrompt(active?.system_prompt || "");
+    setTtsVoice(active?.tts_voice || "");
+  }, [active]);
 
   const handleSave = () => {
     registerPersona({ name, system_prompt: systemPrompt, tts_voice: ttsVoice });

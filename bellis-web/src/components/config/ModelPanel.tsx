@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useConfigStore } from "@/store/useConfigStore";
 import { Save } from "lucide-react";
 
@@ -8,6 +8,13 @@ export default function ModelPanel() {
   const [fallback, setFallback] = useState(config.model.fallback_model);
   const [retries, setRetries] = useState(String(config.model.max_retries));
   const [temperature, setTemperature] = useState(String(config.model.temperature));
+
+  useEffect(() => {
+    setPrimary(config.model.primary_model);
+    setFallback(config.model.fallback_model);
+    setRetries(String(config.model.max_retries));
+    setTemperature(String(config.model.temperature));
+  }, [config.model]);
 
   const handleSave = () => {
     updateModelConfig({

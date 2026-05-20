@@ -6,7 +6,10 @@
 
 import pytest
 
+from bellis.agent.decision import LiveDeps, ResilientCaller, create_decision_agent, reset_agent
+from bellis.agent.graph import build_main_graph
 from bellis.core.actions import Action
+from bellis.core.context import AgentContext
 from bellis.core.enums import ActionType, EmotionEnum, MotionEnum
 from bellis.core.events import (
     DanmakuEvent,
@@ -18,11 +21,9 @@ from bellis.core.events import (
 from bellis.core.models import ActionRecord, EmotionState, PersonaConfig, SceneContext
 from bellis.core.response import LiveResponse
 from bellis.core.state import AgentState
-from bellis.graph.decision import LiveDeps, ResilientCaller, create_decision_agent, reset_agent
-from bellis.graph.main import build_main_graph
-from bellis.plugins.base import HookPlugin, OutputPlugin
-from bellis.plugins.hooks import HookManager
-from bellis.plugins.registry import PluginRegistry
+from bellis.plugin.base import HookPlugin, OutputPlugin, PluginCategory, PluginMeta
+from bellis.plugin.hooks import HookManager
+from bellis.plugin.registry import PluginRegistry
 
 pytestmark = pytest.mark.llm
 
@@ -31,6 +32,8 @@ pytestmark = pytest.mark.llm
 
 
 class RecorderPlugin(OutputPlugin):
+    plugin_meta = PluginMeta(name="recorder", category=PluginCategory.OUTPUT)
+
     def __init__(self) -> None:
         self.actions: list[Action] = []
 
@@ -53,6 +56,13 @@ def _build_state(
     hook_manager: HookManager | None = None,
     **overrides,
 ) -> AgentState:
+    ctx = AgentContext(
+        hook_manager=hook_manager,
+        output_plugins=output_plugins or [],
+        base_url=(llm_env or {}).get("base_url"),
+        api_key=(llm_env or {}).get("api_key"),
+        model=_model(llm_env) if llm_env else None,
+    )
     state: AgentState = {
         "event_queue": [event] if event else [],
         "current_event": None,
@@ -69,14 +79,8 @@ def _build_state(
         "interrupt_flag": False,
         "tts_queue": [],
         "idle_ticks": 0,
-        "metrics": {
-            "_base_url": (llm_env or {}).get("base_url"),
-            "_api_key": (llm_env or {}).get("api_key"),
-            "_model": _model(llm_env) if llm_env else None,
-            "_extra_tools": [],
-            "_output_plugins": output_plugins or [],
-            "_hook_manager": hook_manager,
-        },
+        "metrics": {},
+        "_context": ctx,
     }
     state.update(overrides)
     return state
@@ -91,7 +95,7 @@ class TestThinkNode:
     @pytest.mark.asyncio
     async def test_danmaku_reply(self, llm_env):
         """弹幕 → LLM 返回合法 LiveResponse。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         agent = create_decision_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
         deps = LiveDeps(
             scene_context=SceneContext(stream_title="测试直播间", viewer_count=100),
@@ -110,7 +114,7 @@ class TestThinkNode:
     @pytest.mark.asyncio
     async def test_gift_reply(self, llm_env):
         """礼物 → LLM 返回感谢回复。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         agent = create_decision_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
         deps = LiveDeps(
             scene_context=SceneContext(stream_title="测试直播间", viewer_count=100),
@@ -127,7 +131,7 @@ class TestThinkNode:
     @pytest.mark.asyncio
     async def test_super_chat_reply(self, llm_env):
         """醒目留言 → LLM 返回高优先级回复。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         agent = create_decision_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
         deps = LiveDeps(
             scene_context=SceneContext(stream_title="测试直播间", viewer_count=100),
@@ -147,7 +151,7 @@ class TestThinkNode:
     @pytest.mark.asyncio
     async def test_idle_self_talk(self, llm_env):
         """空闲自言自语 → LLM 主动发言。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         agent = create_decision_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
         deps = LiveDeps(
             scene_context=SceneContext(stream_title="测试直播间", viewer_count=50),
@@ -166,7 +170,7 @@ class TestThinkNode:
     @pytest.mark.asyncio
     async def test_action_history_influences_reply(self, llm_env):
         """action_history 传入 deps 后 LLM 能参考上下文。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         agent = create_decision_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
         history = [
             ActionRecord(action_type="response", description="刚才聊了天气", emotion=EmotionEnum.calm),
@@ -194,7 +198,7 @@ class TestFullLoop:
     @pytest.mark.asyncio
     async def test_danmaku_full_loop(self, llm_env):
         """弹幕事件走完整主循环，验证 Action 生成 + OutputPlugin 收到。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -216,7 +220,7 @@ class TestFullLoop:
     @pytest.mark.asyncio
     async def test_gift_full_loop(self, llm_env):
         """礼物事件走完整主循环。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -236,7 +240,7 @@ class TestFullLoop:
     @pytest.mark.asyncio
     async def test_super_chat_full_loop(self, llm_env):
         """醒目留言走完整主循环。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -255,7 +259,7 @@ class TestFullLoop:
     @pytest.mark.asyncio
     async def test_follow_full_loop(self, llm_env):
         """关注事件走完整主循环。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -274,7 +278,7 @@ class TestFullLoop:
     @pytest.mark.asyncio
     async def test_idle_self_talk_loop(self, llm_env):
         """idle_ticks 超阈值后触发自言自语。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -296,7 +300,7 @@ class TestFullLoop:
     @pytest.mark.asyncio
     async def test_multiple_events_loop(self, llm_env):
         """多事件队列：第一个事件处理后，剩余事件留在队列中。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -326,8 +330,8 @@ class TestStreaming:
     @pytest.mark.asyncio
     async def test_stream_think(self, llm_env):
         """流式 think 输出。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
-        from bellis.graph.decision import stream_think
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
+        from bellis.agent.decision import stream_think
 
         state = _build_state(
             event=DanmakuEvent(content="讲个笑话吧", user_name="观众", user_level=10, fan_badge="铁粉"),
@@ -344,7 +348,7 @@ class TestStreaming:
     @pytest.mark.asyncio
     async def test_streaming_graph(self, llm_env):
         """使用 streaming=True 构建图并运行。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -370,11 +374,13 @@ class TestHookWithLLM:
     @pytest.mark.asyncio
     async def test_hooks_fired(self, llm_env):
         """验证 post_think / pre_act / post_act hook 在 LLM 调用期间被触发。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
 
         hook_calls: list[str] = []
 
         class TrackingHook(HookPlugin):
+            plugin_meta = PluginMeta(name="tracking_hook", category=PluginCategory.HOOK)
+
             def register_hooks(self, hook_mgr: HookManager) -> None:
                 async def track(name: str, state: AgentState) -> AgentState:
                     hook_calls.append(name)
@@ -405,9 +411,11 @@ class TestHookWithLLM:
     @pytest.mark.asyncio
     async def test_hook_modifies_state(self, llm_env):
         """验证 hook 能修改 state（如添加标记）。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
 
         class MarkerHook(HookPlugin):
+            plugin_meta = PluginMeta(name="marker_hook", category=PluginCategory.HOOK)
+
             def register_hooks(self, hook_mgr: HookManager) -> None:
                 async def mark_post_think(state: AgentState) -> AgentState:
                     metrics = dict(state.get("metrics", {}))
@@ -442,7 +450,7 @@ class TestActionDispatch:
     @pytest.mark.asyncio
     async def test_speak_action_generated(self, llm_env):
         """弹幕事件产生 speak Action。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -462,7 +470,7 @@ class TestActionDispatch:
     @pytest.mark.asyncio
     async def test_expression_action_generated(self, llm_env):
         """LLM 回复产生 set_expression Action。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -481,7 +489,7 @@ class TestActionDispatch:
     @pytest.mark.asyncio
     async def test_motion_action_generated(self, llm_env):
         """LLM 回复产生 set_motion Action。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -500,7 +508,7 @@ class TestActionDispatch:
     @pytest.mark.asyncio
     async def test_reply_danmaku_action_generated(self, llm_env):
         """有 user_name 的事件产生 reply_danmaku Action。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         recorder = RecorderPlugin()
         registry = PluginRegistry()
         registry.register_output(recorder)
@@ -527,7 +535,7 @@ class TestPersonaSwitch:
     @pytest.mark.asyncio
     async def test_cat_girl_persona(self, llm_env):
         """猫娘人设下 LLM 回复风格不同。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         agent = create_decision_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
         deps = LiveDeps(
             scene_context=SceneContext(stream_title="测试直播间", viewer_count=100),
@@ -556,7 +564,7 @@ class TestResilienceWithLLM:
     @pytest.mark.asyncio
     async def test_successful_call_resets_breaker(self, llm_env):
         """成功调用后 CircuitBreaker 保持 closed。"""
-        reset_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
+        reset_agent(AgentContext(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"]))
         agent = create_decision_agent(model=_model(llm_env), base_url=llm_env["base_url"], api_key=llm_env["api_key"])
         deps = LiveDeps(
             scene_context=SceneContext(),

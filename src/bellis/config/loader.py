@@ -47,6 +47,16 @@ class ConfigCenter:
         }
 
     def get_active_persona(self) -> PersonaConfig:
+        if self.active_persona not in self.personas:
+            # 回退到第一个可用的 persona
+            if self.personas:
+                fallback = next(iter(self.personas))
+                self.active_persona = fallback
+            else:
+                # 无任何 persona 时返回默认
+                default = PersonaConfig(name="default", system_prompt="你是一个友好的直播助手。")
+                self.personas["default"] = default
+                self.active_persona = "default"
         return self.personas[self.active_persona]
 
     def switch_persona(self, name: str) -> None:

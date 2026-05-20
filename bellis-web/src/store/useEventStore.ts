@@ -1,7 +1,10 @@
 import { create } from "zustand";
-import type { GUIEvent, ServerMessage } from "@/types";
+import type { GUIEvent, ServerMessage, ClientMessage } from "@/types";
 import { MAX_EVENTS } from "@/utils/constants";
 import { createMockEvent } from "@/utils/mock";
+import { useStateStore } from "@/store/useStateStore";
+import { useObservabilityStore } from "@/store/useObservabilityStore";
+import { useConfigStore } from "@/store/useConfigStore";
 
 interface EventState {
   events: GUIEvent[];
@@ -11,6 +14,7 @@ interface EventState {
   stopMockStream: () => void;
   connectWS: (url?: string) => void;
   disconnectWS: () => void;
+  sendWS: (msg: ClientMessage) => void;
   wsConnected: boolean;
 }
 
@@ -20,8 +24,22 @@ let ws: WebSocket | null = null;
 function handleWSMessage(data: string) {
   try {
     const msg: ServerMessage = JSON.parse(data);
-    if (msg.type === "event") {
-      useEventStore.getState().addEvent(msg.payload);
+    switch (msg.type) {
+      case "event":
+        useEventStore.getState().addEvent(msg.payload);
+        break;
+      case "state":
+        useStateStore.getState().updateState(msg.payload);
+        break;
+      case "response":
+        useStateStore.getState().updateResponse(msg.payload);
+        break;
+      case "metrics":
+        useObservabilityStore.getState().updateMetrics(msg.payload);
+        break;
+      case "config":
+        useConfigStore.getState().updateConfig(msg.payload);
+        break;
     }
   } catch {
     // ignore
@@ -80,5 +98,10 @@ export const useEventStore = create<EventState>((set, get) => ({
       ws = null;
     }
     set({ wsConnected: false });
+  },
+  sendWS: (msg) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+    }
   },
 }));

@@ -2,9 +2,7 @@ import pytest
 
 from bellis.core.enums import EmotionEnum
 from bellis.core.response import LiveResponse
-from bellis.output.middleware.audit import AuditMiddleware
-from bellis.output.middleware.throttle import ThrottleMiddleware
-from bellis.output.pipeline import OutputPipeline
+from bellis.runtime.middleware import AuditMiddleware, OutputPipeline, ThrottleMiddleware
 
 
 class TestAuditMiddleware:

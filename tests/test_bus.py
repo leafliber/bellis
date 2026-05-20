@@ -2,8 +2,8 @@ import pytest
 
 from bellis.core.enums import EventPriority
 from bellis.core.events import LiveEvent
-from bellis.input.bus import EventBus
-from bellis.input.sampling import AggregateStrategy, TokenBucketStrategy
+from bellis.runtime.bus import EventBus
+from bellis.runtime.sampling import AggregateStrategy, TokenBucketStrategy
 
 
 class TestEventBus:

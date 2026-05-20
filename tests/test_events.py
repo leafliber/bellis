@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from bellis.core.enums import ActionType, EmotionEnum, EventPriority, EventSource, MotionEnum
 from bellis.core.events import (
@@ -76,7 +77,7 @@ class TestLiveEvent:
 
     def test_frozen_event(self):
         event = LiveEvent(content="hello")
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             event.content = "changed"
 
 
@@ -106,9 +107,9 @@ class TestLiveResponse:
         assert resp.motion_duration == 2.0
 
     def test_tts_speed_validation(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LiveResponse(text="test", tts_speed=0.5)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             LiveResponse(text="test", tts_speed=2.0)
 
 

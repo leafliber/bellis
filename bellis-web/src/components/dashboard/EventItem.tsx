@@ -1,5 +1,5 @@
 import type { GUIEvent } from "@/types";
-import { SOURCE_COLORS, SOURCE_LABELS } from "@/utils/constants";
+import { SOURCE_LABELS } from "@/utils/constants";
 import { cn } from "@/lib/utils";
 
 interface EventItemProps {

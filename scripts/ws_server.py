@@ -44,8 +44,12 @@ try:
 except Exception as e:
     print(f"[Patch] Warning: Could not patch OpenAI: {e}")
 
+from bellis.agent.decision import CircuitBreaker, ResilientCaller, reset_agent
+from bellis.agent.graph import build_main_graph
 from bellis.config.loader import ConfigCenter
-from bellis.core.enums import ActionType, EmotionEnum, EventPriority, EventSource, MotionEnum
+from bellis.core.actions import Action
+from bellis.core.context import AgentContext
+from bellis.core.enums import ActionType
 from bellis.core.events import (
     DanmakuEvent,
     FollowEvent,
@@ -56,13 +60,8 @@ from bellis.core.events import (
 )
 from bellis.core.models import EmotionState, PersonaConfig, SceneContext
 from bellis.core.state import AgentState
-from bellis.graph.decision import CircuitBreaker, ResilientCaller, reset_agent
-from bellis.graph.main import build_main_graph
-from bellis.plugins.base import OutputPlugin
-from bellis.plugins.hooks import HookManager
-from bellis.plugins.registry import PluginRegistry
-from bellis.core.actions import Action
-
+from bellis.plugin.base import OutputPlugin, PluginCategory, PluginMeta
+from bellis.plugin.registry import PluginRegistry
 
 # ─── 从 .env 加载配置 ──────────────────────────────────────────────────
 
@@ -131,6 +130,8 @@ def build_real_danmaku_events() -> list[LiveEvent]:
 
 class WSOutputPlugin(OutputPlugin):
     """将 Action 通过 WebSocket 推送到前端。"""
+
+    plugin_meta = PluginMeta(name="ws_output", category=PluginCategory.OUTPUT)
 
     def __init__(self) -> None:
         self.actions: list[Action] = []
@@ -285,7 +286,7 @@ class BellisWSServer:
         )
 
         # 替换全局 _caller，使 think/stream_think 使用自定义 caller
-        from bellis.graph import decision as decision_module
+        from bellis.agent import decision as decision_module
         decision_module._caller = self.caller
 
     def _build_initial_state(self) -> AgentState:
@@ -304,15 +305,16 @@ class BellisWSServer:
             "interrupt_flag": False,
             "tts_queue": [],
             "idle_ticks": 0,
-            "metrics": {
-                "_base_url": self.env["base_url"],
-                "_api_key": self.env["api_key"],
-                "_model": self.model_str,
-                "_compat_mode": True,
-                "_hook_manager": self.registry.hook_manager,
-                "_output_plugins": self.registry.outputs,
-                "_extra_tools": [],
-            },
+            "metrics": {},
+            "_context": AgentContext(
+                hook_manager=self.registry.hook_manager,
+                output_plugins=self.registry.outputs,
+                extra_tools=[],
+                base_url=self.env["base_url"],
+                api_key=self.env["api_key"],
+                model=self.model_str,
+                compat_mode=True,
+            ),
         }
 
     async def process_event(self, event: LiveEvent) -> None:
@@ -336,13 +338,10 @@ class BellisWSServer:
         elapsed = (time.monotonic() - t0) * 1000
 
         # 合并结果
-        old_metrics = self.state.get("metrics", {})
+        old_context = self.state.get("_context")
         self.state = dict(result) if result else self.state
-        new_metrics = self.state.get("metrics", {})
-        for key in ("_hook_manager", "_output_plugins", "_extra_tools", "_base_url", "_api_key", "_model", "_compat_mode"):
-            if key in old_metrics and key not in new_metrics:
-                new_metrics[key] = old_metrics[key]
-        self.state["metrics"] = new_metrics
+        if "_context" not in self.state and old_context is not None:
+            self.state["_context"] = old_context
 
         # 推送状态更新
         state_msg = _state_to_ws_message(self.state)
@@ -441,18 +440,19 @@ async def main() -> None:
     server = BellisWSServer()
 
     # 初始化 Agent（兼容模式：不支持 tool calling 的 API）
-    reset_agent(
+    ctx = AgentContext(
         model=server.model_str,
         base_url=server.env["base_url"],
         api_key=server.env["api_key"],
         compat_mode=True,
     )
+    reset_agent(ctx)
 
     print("=" * 60)
     print("Bellis WebSocket 服务")
     print(f"模型: {server.model_str}")
     print(f"API: {server.env['base_url']}")
-    print(f"WebSocket: ws://localhost:8765")
+    print("WebSocket: ws://localhost:8765")
     print("=" * 60)
 
     # 启动 WebSocket 服务

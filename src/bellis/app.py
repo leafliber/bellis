@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 
+from bellis.agent.graph import build_main_graph
 from bellis.config.loader import ConfigCenter
+from bellis.core.context import AgentContext
 from bellis.core.events import IdleEvent
 from bellis.core.models import EmotionState, SceneContext
 from bellis.core.state import AgentState
-from bellis.graph.main import build_main_graph
-from bellis.input.bus import EventBus
 from bellis.observability.tracing import Tracer
-from bellis.plugins.console import ConsoleInputPlugin, ConsoleOutputPlugin
-from bellis.plugins.registry import PluginRegistry
+from bellis.plugin.registry import PluginRegistry
+from bellis.runtime.bus import EventBus
+
+logger = logging.getLogger(__name__)
 
 
 class BellisApp:
@@ -30,6 +33,15 @@ class BellisApp:
         self._graph = None
         self._event_bus: EventBus | None = None
         self._tracer = Tracer()
+        self._context = AgentContext(
+            hook_manager=self._registry.hook_manager,
+            output_plugins=self._registry.outputs,
+            extra_tools=self._registry.collect_tools(),
+            model=self._config.model.primary_model,
+            base_url=self._config.model.base_url,
+            api_key=self._config.model.api_key,
+            compat_mode=self._config.model.compat_mode,
+        )
 
     @property
     def config(self) -> ConfigCenter:
@@ -43,10 +55,18 @@ class BellisApp:
     def event_bus(self) -> EventBus | None:
         return self._event_bus
 
+    @property
+    def context(self) -> AgentContext:
+        return self._context
+
     def setup_defaults(self) -> None:
         """注册默认的 Console 插件（用于调试）。"""
+        from plugins.console import ConsoleInputPlugin, ConsoleOutputPlugin
+
         self._registry.register_input(ConsoleInputPlugin())
         self._registry.register_output(ConsoleOutputPlugin())
+        # 同步 context 中的 output_plugins 引用
+        self._context.output_plugins = self._registry.outputs
 
     def _build_initial_state(self) -> AgentState:
         persona = self._config.get_active_persona()
@@ -63,11 +83,8 @@ class BellisApp:
             "interrupt_flag": False,
             "tts_queue": [],
             "idle_ticks": 0,
-            "metrics": {
-                "_hook_manager": self._registry.hook_manager,
-                "_output_plugins": self._registry.outputs,
-                "_extra_tools": self._registry.collect_tools(),
-            },
+            "metrics": {},
+            "_context": self._context,
         }
 
     async def start(self) -> None:
@@ -124,7 +141,7 @@ class BellisApp:
     async def _idle_monitor(self) -> None:
         """监控空闲状态，当长时间无事件时注入 IdleEvent。"""
         while self._running:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(self._context.idle_monitor_interval)
             if self._event_bus and self._event_bus.queue_size == 0:
                 idle_event = IdleEvent(content="idle_tick")
                 await self._event_bus.publish(idle_event)
@@ -149,19 +166,21 @@ class BellisApp:
             state["current_event"] = None
             state["idle_ticks"] = 0
 
-            # 调用图
+            # 调用图（带异常捕获，防止单次失败终止主循环）
             with self._tracer.span("process_event", {"source": event.source.value}):
-                result = await self._graph.ainvoke(state)
+                try:
+                    result = await self._graph.ainvoke(state)
+                except Exception:
+                    logger.exception("Graph 执行失败，跳过本轮事件")
+                    continue
 
-            # 合并结果到 state（保留 metrics 中的内部引用）
-            old_metrics = state.get("metrics", {})
-            state = dict(result) if result else state
-            new_metrics = state.get("metrics", {})
-            # 保留内部引用
-            for key in ("_hook_manager", "_output_plugins", "_extra_tools"):
-                if key in old_metrics and key not in new_metrics:
-                    new_metrics[key] = old_metrics[key]
-            state["metrics"] = new_metrics
+            # 合并结果到 state
+            if result:
+                # 保留 _context 引用
+                ctx = state.get("_context")
+                state = dict(result)
+                if ctx is not None:
+                    state["_context"] = ctx
 
     async def stop(self) -> None:
         self._running = False

@@ -3,16 +3,14 @@ import { Play, Square, Send, ChevronDown, Wifi, WifiOff } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
 import { useConfigStore } from "@/store/useConfigStore";
 import { useEventStore } from "@/store/useEventStore";
-import { useStateStore, handleStateWSMessage } from "@/store/useStateStore";
+import { useStateStore } from "@/store/useStateStore";
 import { useObservabilityStore } from "@/store/useObservabilityStore";
 import { cn } from "@/lib/utils";
 
-let _ws: WebSocket | null = null;
-
 export default function ControlBar() {
-  const { isAgentRunning, setAgentRunning, wsConnected, setWsConnected } = useAppStore();
+  const { isAgentRunning, setAgentRunning } = useAppStore();
   const { config, switchPersona } = useConfigStore();
-  const { startMockStream, stopMockStream, connectWS, disconnectWS, wsConnected: eventWsConnected } = useEventStore();
+  const { startMockStream, stopMockStream, connectWS, disconnectWS, sendWS, wsConnected } = useEventStore();
   const { startMockPolling: startStatePolling, stopMockPolling: stopStatePolling } = useStateStore();
   const { startMockPolling: startObsPolling, stopMockPolling: stopObsPolling } = useObservabilityStore();
   const [command, setCommand] = useState("");
@@ -20,68 +18,38 @@ export default function ControlBar() {
 
   const handleStart = () => {
     setAgentRunning(true);
-    startMockStream();
-    startStatePolling();
-    startObsPolling();
+    if (wsConnected) {
+      sendWS({ type: "start_agent" });
+    } else {
+      startMockStream();
+      startStatePolling();
+      startObsPolling();
+    }
   };
 
   const handleStop = () => {
     setAgentRunning(false);
-    stopMockStream();
-    stopStatePolling();
-    stopObsPolling();
+    if (wsConnected) {
+      sendWS({ type: "stop_agent" });
+    } else {
+      stopMockStream();
+      stopStatePolling();
+      stopObsPolling();
+    }
   };
 
   const handleConnectWS = () => {
-    if (_ws) {
-      _ws.close();
-      _ws = null;
-      setWsConnected(false);
+    if (wsConnected) {
       disconnectWS();
       return;
     }
-
-    const url = "ws://localhost:8765";
-    _ws = new WebSocket(url);
-
-    _ws.onopen = () => {
-      setWsConnected(true);
-      setAgentRunning(true);
-      connectWS(url);
-      console.log("[WS] Connected to backend");
-    };
-
-    _ws.onmessage = (e) => {
-      if (typeof e.data !== "string") return;
-      // 分发给各 store
-      handleStateWSMessage(e.data);
-      // event store 的消息由 connectWS 内部处理
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "event") {
-          useEventStore.getState().addEvent(msg.payload);
-        }
-      } catch {
-        // ignore
-      }
-    };
-
-    _ws.onclose = () => {
-      setWsConnected(false);
-      disconnectWS();
-      _ws = null;
-      console.log("[WS] Disconnected");
-    };
-
-    _ws.onerror = () => {
-      _ws?.close();
-    };
+    connectWS("ws://localhost:8765");
   };
 
   const handleCommand = () => {
     if (!command.trim()) return;
-    if (_ws && _ws.readyState === WebSocket.OPEN) {
-      _ws.send(JSON.stringify({ type: "command", payload: { command } }));
+    if (wsConnected) {
+      sendWS({ type: "command", payload: { command } });
     } else {
       console.log("Command (mock):", command);
     }
@@ -94,15 +62,23 @@ export default function ControlBar() {
     }
   };
 
+  const handleSwitchPersona = (name: string) => {
+    switchPersona(name);
+    setPersonaOpen(false);
+    if (wsConnected) {
+      sendWS({ type: "switch_persona", payload: { name } });
+    }
+  };
+
   return (
     <div className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border-t border-[var(--border)]">
       {/* Start/Stop buttons */}
       <button
         onClick={handleStart}
-        disabled={isAgentRunning && !wsConnected}
+        disabled={isAgentRunning}
         className={cn(
           "flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all",
-          isAgentRunning && !wsConnected
+          isAgentRunning
             ? "bg-[var(--overlay)]/30 text-[var(--text-muted)] cursor-not-allowed"
             : "bg-[var(--success)]/20 text-[var(--success)] hover:bg-[var(--success)]/30 glow-success"
         )}
@@ -153,8 +129,7 @@ export default function ControlBar() {
               <button
                 key={name}
                 onClick={() => {
-                  switchPersona(name);
-                  setPersonaOpen(false);
+                  handleSwitchPersona(name);
                 }}
                 className={cn(
                   "w-full text-left px-3 py-2 text-xs transition-colors",

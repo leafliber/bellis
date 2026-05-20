@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
+from bellis.agent.decision import CircuitBreaker, CircuitOpenError, ResilientCaller
 from bellis.core.enums import EmotionEnum, MotionEnum
-from bellis.graph.decision import CircuitBreaker, CircuitOpenError, ResilientCaller
 
 
 async def _ok():
@@ -30,7 +30,7 @@ class TestCircuitBreaker:
     async def test_opens_after_threshold(self):
         breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=100.0)
         for _ in range(3):
-            with pytest.raises(Exception):
+            with pytest.raises(RuntimeError):
                 await breaker.call(_fail)
         assert breaker.state == "open"
 

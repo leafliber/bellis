@@ -1,13 +1,11 @@
 import pytest
 
+from bellis.agent.perception import dequeue_event, perceive, route_after_perception
 from bellis.config import ConfigCenter
-from bellis.core.enums import ActionType
+from bellis.core.context import AgentContext
 from bellis.core.events import CommandEvent, DanmakuEvent, GiftEvent
 from bellis.core.models import EmotionState, PersonaConfig, SceneContext
-from bellis.core.response import LiveResponse
 from bellis.core.state import AgentState
-from bellis.graph.execution import _response_to_actions, route_after_act
-from bellis.graph.perception import dequeue_event, perceive, route_after_perception
 
 
 class TestEndToEndPerception:
@@ -26,6 +24,7 @@ class TestEndToEndPerception:
             "tts_queue": [],
             "idle_ticks": 0,
             "metrics": {},
+            "_context": AgentContext(),
         }
         result = dequeue_event(state)
         state.update(result)
@@ -54,6 +53,7 @@ class TestEndToEndPerception:
             "tts_queue": [],
             "idle_ticks": 0,
             "metrics": {},
+            "_context": AgentContext(),
         }
         result = dequeue_event(state)
         state.update(result)
@@ -79,6 +79,7 @@ class TestEndToEndPerception:
             "tts_queue": [],
             "idle_ticks": 0,
             "metrics": {},
+            "_context": AgentContext(),
         }
         result = dequeue_event(state)
         state.update(result)
@@ -102,6 +103,7 @@ class TestEndToEndPerception:
             "tts_queue": [],
             "idle_ticks": 0,
             "metrics": {},
+            "_context": AgentContext(),
         }
         result = dequeue_event(state)
         state.update(result)
@@ -110,41 +112,6 @@ class TestEndToEndPerception:
         assert state["metrics"]["perception"]["intent"] == "spam"
         route = route_after_perception(state)
         assert route == "end"
-
-
-class TestActionConversion:
-    def test_response_to_actions(self):
-        from bellis.core.enums import EmotionEnum, MotionEnum
-
-        response = LiveResponse(
-            text="谢谢！",
-            emotion=EmotionEnum.happy,
-            motion=MotionEnum.wave,
-            target_user="粉丝A",
-        )
-        event = DanmakuEvent(content="送礼物", user_name="粉丝A")
-        state: AgentState = {
-            "live_response": response,
-            "current_event": event,
-        }
-        actions = _response_to_actions(state)
-        assert len(actions) >= 3  # speak + set_expression + set_motion + reply_danmaku
-        assert any(a.type == ActionType.speak for a in actions)
-        assert any(a.type == ActionType.set_expression for a in actions)
-        assert any(a.type == ActionType.set_motion for a in actions)
-        assert any(a.type == ActionType.reply_danmaku for a in actions)
-
-    def test_route_after_act_with_more_events(self):
-        state: AgentState = {
-            "event_queue": [DanmakuEvent(content="next")],
-        }
-        assert route_after_act(state) == "perceive"
-
-    def test_route_after_act_empty_queue(self):
-        state: AgentState = {
-            "event_queue": [],
-        }
-        assert route_after_act(state) == "end"
 
 
 class TestConfigCenter:

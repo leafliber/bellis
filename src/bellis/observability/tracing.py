@@ -5,6 +5,8 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
+MAX_TRACES = 1000
+
 
 class TraceSpan:
     def __init__(self, name: str, metadata: dict | None = None) -> None:
@@ -34,9 +36,10 @@ class TraceSpan:
 
 
 class Tracer:
-    def __init__(self) -> None:
+    def __init__(self, max_traces: int = MAX_TRACES) -> None:
         self._traces: list[TraceSpan] = []
         self._current: TraceSpan | None = None
+        self._max_traces = max_traces
 
     @contextmanager
     def span(self, name: str, metadata: dict | None = None) -> Generator[TraceSpan]:
@@ -46,6 +49,9 @@ class Tracer:
             self._current.children.append(span)
         else:
             self._traces.append(span)
+            # 超过上限时淘汰最旧的
+            if len(self._traces) > self._max_traces:
+                self._traces = self._traces[-self._max_traces:]
         prev = self._current
         self._current = span
         try:

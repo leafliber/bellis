@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GUIState, GUIResponse, ServerMessage } from "@/types";
+import type { GUIState, GUIResponse } from "@/types";
 import { MOCK_STATE, MOCK_RESPONSE } from "@/utils/mock";
 
 interface StateStore {
@@ -12,26 +12,6 @@ interface StateStore {
 }
 
 let stateInterval: ReturnType<typeof setInterval> | null = null;
-
-// 全局 WebSocket 引用，供 store 使用
-let _ws: WebSocket | null = null;
-
-export function setStateWS(ws: WebSocket | null) {
-  _ws = ws;
-}
-
-export function handleStateWSMessage(data: string) {
-  try {
-    const msg: ServerMessage = JSON.parse(data);
-    if (msg.type === "state") {
-      useStateStore.getState().updateState(msg.payload);
-    } else if (msg.type === "response") {
-      useStateStore.getState().updateResponse(msg.payload);
-    }
-  } catch {
-    // ignore
-  }
-}
 
 export const useStateStore = create<StateStore>((set) => ({
   state: MOCK_STATE,

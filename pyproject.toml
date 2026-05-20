@@ -13,7 +13,6 @@ dependencies = [
     "opentelemetry-api>=1.28.0",
     "opentelemetry-sdk>=1.28.0",
     "pyyaml>=6.0.3",
-    "textual>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -25,11 +24,18 @@ dev = [
 
 [project.scripts]
 bellis = "bellis:main"
-bellis-gui = "bellis_gui:main"
 
 [build-system]
 requires = ["uv_build>=0.11.11,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+bellis = { workspace = true }
+plugins = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["bellis*", "plugins*"]
 
 [tool.ruff]
 target-version = "py313"
