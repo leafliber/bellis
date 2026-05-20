@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import yaml
@@ -8,6 +9,8 @@ from bellis.config.model import ModelConfig
 from bellis.config.platform import PlatformConfig
 from bellis.core.enums import EmotionEnum, MotionEnum
 from bellis.core.models import PersonaConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigCenter:
@@ -48,6 +51,7 @@ class ConfigCenter:
 
     def get_active_persona(self) -> PersonaConfig:
         if self.active_persona not in self.personas:
+            logger.warning("Persona '%s' 不存在，回退到默认", self.active_persona)
             # 回退到第一个可用的 persona
             if self.personas:
                 fallback = next(iter(self.personas))
@@ -92,6 +96,7 @@ class ConfigCenter:
     @classmethod
     def from_yaml(cls, path: str) -> ConfigCenter:
         file_path = Path(path)
+        logger.info("从 YAML 加载配置: %s", path)
         with file_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
         return cls.from_dict(data or {})

@@ -85,7 +85,7 @@ class ResilientCaller:
             except CircuitOpenError:
                 break
             except Exception as exc:
-                logger.debug("Agent call attempt %d failed: %s", attempt + 1, exc)
+                logger.warning("Agent call attempt %d failed: %s", attempt + 1, exc)
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(min(self.base_delay * (2**attempt), self.max_delay))
         if self.fallback_model is not None:

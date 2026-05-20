@@ -84,7 +84,7 @@ class EventBus:
 
         # 仅在新事件优先级高于被丢弃事件时才替换
         if new_priority_value < lowest[0]:
-            logger.debug("丢弃低优先级事件(priority=%d)以容纳高优先级事件(priority=%d)", lowest[0], new_priority_value)
+            logger.info("丢弃低优先级事件(priority=%d)以容纳高优先级事件(priority=%d)", lowest[0], new_priority_value)
             return True
 
         # 新事件优先级不高于被丢弃事件，放弃替换，将 lowest 放回

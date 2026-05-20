@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -7,6 +8,8 @@ from datetime import datetime
 
 from bellis.core.enums import EventPriority
 from bellis.core.events import LiveEvent
+
+logger = logging.getLogger(__name__)
 
 
 class SamplingStrategy(ABC):
@@ -34,6 +37,7 @@ class TokenBucketStrategy(SamplingStrategy):
         if self._tokens >= 1.0:
             self._tokens -= 1.0
             return True
+        logger.debug("TokenBucket 丢弃事件: source=%s tokens=%.1f", event.source.value, self._tokens)
         return False
 
 
@@ -71,6 +75,7 @@ class AggregateStrategy(SamplingStrategy):
         if count >= self._threshold:
             last_emitted = self._emitted.get(key)
             if last_emitted and (now - last_emitted).total_seconds() < self._window_seconds:
+                logger.debug("AggregateStrategy 聚合丢弃: key=%r count=%d", key[:50], count)
                 return False
             self._emitted[key] = now
             return True

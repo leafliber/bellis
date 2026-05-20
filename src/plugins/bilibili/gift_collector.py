@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 
 from bellis.core.events import GiftEvent, LiveEvent
 from bellis.plugin.base import InputPlugin, PluginCategory, PluginMeta
+
+logger = logging.getLogger(__name__)
 
 
 class GiftCollector(InputPlugin):
@@ -41,13 +44,18 @@ class GiftCollector(InputPlugin):
 
     async def on_gift_callback(self, raw_data: dict) -> None:
         """外部回调接口，由 bilibili-api SDK 调用。"""
-        event = GiftEvent(
-            content=raw_data.get("content", ""),
-            user_id=raw_data.get("user_id", ""),
-            user_name=raw_data.get("user_name", ""),
-            gift_name=raw_data.get("gift_name", ""),
-            gift_count=raw_data.get("gift_count", 1),
-            coin_value=raw_data.get("coin_value", 0),
-            metadata=raw_data.get("metadata", {}),
-        )
-        await self._event_queue.put(event)
+        try:
+            event = GiftEvent(
+                content=raw_data.get("content", ""),
+                user_id=raw_data.get("user_id", ""),
+                user_name=raw_data.get("user_name", ""),
+                gift_name=raw_data.get("gift_name", ""),
+                gift_count=raw_data.get("gift_count", 1),
+                coin_value=raw_data.get("coin_value", 0),
+                metadata=raw_data.get("metadata", {}),
+            )
+            await self._event_queue.put(event)
+            logger.info("收到礼物: user=%s gift=%s count=%d coin=%d",
+                        event.user_name, event.gift_name, event.gift_count, event.coin_value)
+        except Exception:
+            logger.exception("礼物回调处理失败: %s", raw_data)

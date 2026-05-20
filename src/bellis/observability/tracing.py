@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 MAX_TRACES = 1000
 
@@ -58,6 +61,7 @@ class Tracer:
             yield span
         except Exception as exc:
             span.metadata["error"] = f"{type(exc).__name__}: {exc}"
+            logger.error("Span '%s' 发生异常: %s", name, exc, exc_info=True)
             raise
         finally:
             span.end_time = time.monotonic()

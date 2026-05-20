@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from bellis.plugin.base import (
     BasePlugin,
     HookPlugin,
@@ -12,6 +14,8 @@ from bellis.plugin.base import (
     ToolPlugin,
 )
 from bellis.plugin.hooks import HookManager
+
+logger = logging.getLogger(__name__)
 
 
 class PluginRegistry:
@@ -115,28 +119,63 @@ class PluginRegistry:
     async def start_all(self) -> None:
         """按顺序启动所有插件：输入 → 输出 → 平台 → 工具 → Hook。"""
         for plugin in self._inputs:
-            await plugin.start()
+            try:
+                await plugin.start()
+                logger.info("插件已启动: %s", plugin.name)
+            except Exception:
+                logger.exception("插件启动失败: %s", plugin.name)
         for plugin in self._outputs:
-            await plugin.start()
+            try:
+                await plugin.start()
+                logger.info("插件已启动: %s", plugin.name)
+            except Exception:
+                logger.exception("插件启动失败: %s", plugin.name)
         for plugin in self._platforms:
-            await plugin.start()
+            try:
+                await plugin.start()
+                logger.info("插件已启动: %s", plugin.name)
+            except Exception:
+                logger.exception("插件启动失败: %s", plugin.name)
         for plugin in self._tools:
-            await plugin.start()
+            try:
+                await plugin.start()
+                logger.info("插件已启动: %s", plugin.name)
+            except Exception:
+                logger.exception("插件启动失败: %s", plugin.name)
         for plugin in self._hooks:
-            await plugin.start()
+            try:
+                await plugin.start()
+                logger.info("插件已启动: %s", plugin.name)
+            except Exception:
+                logger.exception("插件启动失败: %s", plugin.name)
 
     async def stop_all(self) -> None:
         """按逆序停止所有插件：Hook → 工具 → 平台 → 输出 → 输入。"""
         for plugin in self._hooks:
-            await plugin.stop()
+            try:
+                await plugin.stop()
+            except Exception:
+                logger.exception("插件停止失败: %s", plugin.name)
         for plugin in self._tools:
-            await plugin.stop()
+            try:
+                await plugin.stop()
+            except Exception:
+                logger.exception("插件停止失败: %s", plugin.name)
         for plugin in self._platforms:
-            await plugin.stop()
+            try:
+                await plugin.stop()
+            except Exception:
+                logger.exception("插件停止失败: %s", plugin.name)
         for plugin in self._outputs:
-            await plugin.stop()
+            try:
+                await plugin.stop()
+            except Exception:
+                logger.exception("插件停止失败: %s", plugin.name)
         for plugin in self._inputs:
-            await plugin.stop()
+            try:
+                await plugin.stop()
+            except Exception:
+                logger.exception("插件停止失败: %s", plugin.name)
 
     async def start_inputs(self) -> None:
         for plugin in self._inputs:

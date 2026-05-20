@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 # ─── 插件元数据 ──────────────────────────────────────────────────────
 
 
@@ -103,7 +105,7 @@ class BasePlugin(ABC):
         try:
             await self._on_stop()
         except Exception:
-            logging.getLogger(__name__).warning("插件 %s 停止时发生异常", self.name, exc_info=True)
+            logger.warning("插件 %s 停止时发生异常", self.name, exc_info=True)
         finally:
             self._state = PluginState.STOPPED
 

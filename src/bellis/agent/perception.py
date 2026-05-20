@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from bellis.core.context import AgentContext
 from bellis.core.enums import EventPriority, EventSource
 from bellis.core.events import (
@@ -14,6 +16,8 @@ from bellis.core.events import (
     SuperChatEvent,
 )
 from bellis.core.state import AgentState, get_context
+
+logger = logging.getLogger(__name__)
 
 _GREETING_KEYWORDS = (
     "你好", "嗨", "哈喽", "hello", "hi",
@@ -112,12 +116,18 @@ async def perceive(state: AgentState) -> dict:
     else:
         metrics = dict(state.get("metrics") or {})
         reassessed = _reassess_priority(event)
+        intent = _classify_intent(event)
+        emotion = _analyze_emotion(event)
         metrics["perception"] = {
-            "intent": _classify_intent(event),
-            "emotion": _analyze_emotion(event),
+            "intent": intent,
+            "emotion": emotion,
             "original_priority": event.priority.name,
             "reassessed_priority": reassessed.name,
         }
+        logger.debug(
+            "感知事件: source=%s intent=%s emotion=%s priority=%s→%s",
+            event.source.value, intent, emotion, event.priority.name, reassessed.name,
+        )
         result = {"metrics": metrics, "idle_ticks": 0}
 
     if ctx.hook_manager:
@@ -150,6 +160,7 @@ def route_after_perception(state: AgentState) -> str:
     try:
         priority = EventPriority[priority_name]
     except KeyError:
+        logger.warning("未知的优先级 '%s'，回退到事件原始优先级 %s", priority_name, event.priority.name)
         priority = event.priority
 
     if priority in (EventPriority.CRITICAL, EventPriority.HIGH, EventPriority.NORMAL):
@@ -160,6 +171,7 @@ def route_after_perception(state: AgentState) -> str:
             return "think"
         return "end"
     if priority == EventPriority.LOW or intent == "spam":
+        logger.debug("跳过事件: intent=%s priority=%s", intent, priority.name)
         return "end"
 
     return "end"

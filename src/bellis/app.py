@@ -9,6 +9,7 @@ from bellis.agent.graph import build_main_graph
 from bellis.config.loader import ConfigCenter
 from bellis.core.context import AgentContext
 from bellis.core.events import IdleEvent
+from bellis.core.logging import setup_logging
 from bellis.core.models import EmotionState, SceneContext
 from bellis.core.state import AgentState
 from bellis.observability.tracing import Tracer
@@ -209,6 +210,8 @@ class BellisApp:
 
 def main() -> None:
     """CLI 入口。"""
+    setup_logging()
+
     app = BellisApp()
     app.setup_defaults()
 
@@ -221,9 +224,8 @@ def main() -> None:
     if sys.platform != "win32":
         signal.signal(signal.SIGTERM, lambda *_: _shutdown())
 
-    print("Bellis - Live Streaming AI Agent Framework")
-    print("输入弹幕内容与 AI 互动，Ctrl+C 退出")
-    print("-" * 40)
+    logger.info("Bellis - Live Streaming AI Agent Framework")
+    logger.info("输入弹幕内容与 AI 互动，Ctrl+C 退出")
 
     try:
         loop.run_until_complete(app.start())

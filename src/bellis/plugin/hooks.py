@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 
 from bellis.core.state import AgentState
+
+logger = logging.getLogger(__name__)
 
 HookPoint = str
 HookFn = Callable[[AgentState], Awaitable[AgentState]]
@@ -30,7 +33,10 @@ class HookManager:
 
     async def fire(self, point: HookPoint, state: AgentState) -> AgentState:
         for fn in self._hooks.get(point, []):
-            state = await fn(state)
+            try:
+                state = await fn(state)
+            except Exception:
+                logger.exception("Hook %s 在 %s 点执行失败", fn.__name__, point)
         return state
 
     def clear(self) -> None:

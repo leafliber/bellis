@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import logging
+
 from bellis.core.events import DanmakuEvent
 from bellis.plugin.base import PluginCategory, PluginMeta
 from plugins.bilibili._ws_base import BilibiliWSInputPlugin
+
+logger = logging.getLogger(__name__)
 
 
 class DanmakuCollector(BilibiliWSInputPlugin):
@@ -22,11 +27,10 @@ class DanmakuCollector(BilibiliWSInputPlugin):
         super().__init__(uri=uri)
 
     def _parse_message(self, raw: str) -> DanmakuEvent | None:
-        import json
-
         try:
             data = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
+            logger.warning("弹幕消息 JSON 解析失败: %s", raw[:200])
             return None
         return DanmakuEvent(
             content=data.get("content", ""),
