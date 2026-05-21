@@ -10,3 +10,6 @@ wheels/
 .venv
 .trae
 .env
+
+# Persistent data directory
+data/

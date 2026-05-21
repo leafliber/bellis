@@ -14,10 +14,11 @@ import sys
 from bellis.agent.graph import build_main_graph
 from bellis.config.loader import ConfigCenter
 from bellis.core.context import AgentContext
-from bellis.core.events import IdleEvent
+from bellis.core.events import DanmakuEvent, IdleEvent
 from bellis.core.logging import setup_logging
 from bellis.core.models import EmotionState, SceneContext
 from bellis.core.state import AgentState
+from bellis.gateway import Gateway, GatewayCallbacks
 from bellis.observability.tracing import Tracer
 from bellis.plugin.registry import PluginRegistry
 from bellis.runtime.bus import EventBus
@@ -27,11 +28,12 @@ from bellis.runtime.sync import TimelineSync
 logger = logging.getLogger(__name__)
 
 
-class BellisApp:
+class BellisApp(GatewayCallbacks):
     """Bellis 主应用：加载插件 → 编译图 → 跑主循环。
 
     负责管理应用的完整生命周期，包括插件启动/停止、事件收集、
-    空闲检测、主循环驱动及优雅关闭。
+    空闲检测、主循环驱动及优雅关闭。同时实现 GatewayCallbacks 接口，
+    处理前端通过 Gateway 发来的控制指令。
 
     Attributes:
         _config: 配置中心实例。
@@ -42,6 +44,7 @@ class BellisApp:
         _event_bus: 事件总线实例。
         _tracer: 链路追踪器实例。
         _context: Agent 上下文，贯穿主循环的共享依赖容器。
+        _gateway: 前端通信网关实例。
     """
 
     def __init__(
@@ -49,6 +52,9 @@ class BellisApp:
         config: ConfigCenter | None = None,
         registry: PluginRegistry | None = None,
         streaming: bool = False,
+        gateway_host: str = "localhost",
+        gateway_port: int = 8765,
+        enable_gateway: bool = False,
     ) -> None:
         self._config = config or ConfigCenter()
         self._registry = registry or PluginRegistry()
@@ -69,6 +75,14 @@ class BellisApp:
             idle_threshold=self._config.platform.idle_threshold,
             idle_monitor_interval=self._config.platform.idle_monitor_interval,
         )
+        # 前端通信网关，默认不启用
+        self._gateway: Gateway | None = None
+        if enable_gateway:
+            self._gateway = Gateway(
+                callbacks=self,
+                host=gateway_host,
+                port=gateway_port,
+            )
 
     @property
     def config(self) -> ConfigCenter:
@@ -89,6 +103,32 @@ class BellisApp:
     def context(self) -> AgentContext:
         """返回 Agent 上下文实例。"""
         return self._context
+
+    @property
+    def gateway(self) -> Gateway | None:
+        """返回前端通信网关实例，未启用时为 None。"""
+        return self._gateway
+
+    # ─── GatewayCallbacks 实现 ─────────────────────────────────────
+
+    async def on_command(self, text: str) -> None:
+        """前端弹幕 → 注入 EventBus。"""
+        event = DanmakuEvent(content=text, user_name="你", user_level=10, fan_badge="铁粉")
+        if self._event_bus:
+            await self._event_bus.publish(event)
+
+    async def on_start_agent(self) -> None:
+        """前端请求启动 Agent。"""
+        if not self._running:
+            asyncio.create_task(self.start())
+
+    async def on_stop_agent(self) -> None:
+        """前端请求停止 Agent。"""
+        await self.stop()
+
+    async def on_switch_persona(self, name: str) -> None:
+        """前端请求切换人设。"""
+        self._config.switch_persona(name)
 
     def setup_defaults(self) -> None:
         """注册默认的 Console 插件（用于调试）。"""
@@ -149,6 +189,7 @@ class BellisApp:
 
         启动后会创建事件收集和空闲检测两个后台任务，
         主循环退出后自动取消后台任务并停止所有插件。
+        若 Gateway 已启用，则同时启动 WebSocket 服务。
         """
         self._running = True
         self._event_bus = EventBus(maxsize=self._config.platform.max_queue_size)
@@ -161,6 +202,10 @@ class BellisApp:
 
         # 编译图
         self._graph = build_main_graph(streaming=self._streaming)
+
+        # 启动 Gateway
+        if self._gateway is not None:
+            await self._gateway.start()
 
         # 启动事件收集任务
         collect_task = asyncio.create_task(self._collect_events())
@@ -177,6 +222,9 @@ class BellisApp:
             self._running = False
             collect_task.cancel()
             idle_task.cancel()
+            # 停止 Gateway
+            if self._gateway is not None:
+                await self._gateway.stop()
             await self._registry.stop_all()
 
     async def _collect_events(self) -> None:
@@ -229,6 +277,7 @@ class BellisApp:
         每轮循环从 EventBus 订阅一个事件，将其加入状态的事件队列后
         调用编译后的图进行推理，最后将图输出合并回状态。
         单次图执行失败不会终止主循环，仅跳过本轮事件。
+        若 Gateway 已启用，则每轮推送事件、状态和响应到前端。
         """
         if not self._event_bus:
             return
@@ -248,6 +297,10 @@ class BellisApp:
             state["current_event"] = event
             state["idle_ticks"] = 0
 
+            # 推送原始事件到前端
+            if self._gateway is not None:
+                await self._gateway.broadcast_event(event)
+
             # 调用图（带异常捕获，防止单次失败终止主循环）
             with self._tracer.span("process_event", {"source": event.source.value}):
                 try:
@@ -263,6 +316,11 @@ class BellisApp:
                 state = dict(result)
                 if ctx is not None:
                     state["_context"] = ctx
+
+            # 推送状态和响应到前端
+            if self._gateway is not None:
+                await self._gateway.broadcast_state(state)
+                await self._gateway.broadcast_response(state)
 
     async def stop(self) -> None:
         """停止应用：设置标志位，等待主循环退出。"""

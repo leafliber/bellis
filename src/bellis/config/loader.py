@@ -3,6 +3,7 @@
 提供 ConfigCenter 类，负责管理直播助手的全部运行时配置，
 包括人物设定（Persona）、模型配置和平台配置。
 支持从字典或 YAML 文件加载配置，并支持运行时切换人物设定。
+配置变更可持久化到 data/ 目录下的 YAML 文件，确保重启后配置不丢失。
 """
 
 from __future__ import annotations
@@ -18,6 +19,33 @@ from bellis.core.enums import EmotionEnum, MotionEnum
 from bellis.core.models import PersonaConfig
 
 logger = logging.getLogger(__name__)
+
+# 默认持久化目录（项目根目录下的 data/）
+DEFAULT_DATA_DIR = Path("data")
+DEFAULT_CONFIG_FILENAME = "config.yaml"
+
+
+def _persona_to_safe_dict(persona: PersonaConfig) -> dict:
+    """将 PersonaConfig 转为 yaml.safe_load 兼容的字典。
+
+    枚举值转为字符串、元组转为列表，确保序列化后可被 yaml.safe_load 反序列化。
+
+    Args:
+        persona: 人物设定实例。
+
+    Returns:
+        安全的字典表示。
+    """
+    data = persona.model_dump()
+    # emotion_map / motion_map 的值从枚举转为字符串
+    for key in ("emotion_map", "motion_map"):
+        raw_map = data.get(key, {})
+        if isinstance(raw_map, dict):
+            data[key] = {k: v.value if isinstance(v, EmotionEnum | MotionEnum) else str(v) for k, v in raw_map.items()}
+    # tts_speed_range 从元组转为列表
+    if "tts_speed_range" in data and isinstance(data["tts_speed_range"], tuple):
+        data["tts_speed_range"] = list(data["tts_speed_range"])
+    return data
 
 
 class ConfigCenter:
@@ -36,6 +64,7 @@ class ConfigCenter:
         model: ModelConfig | None = None,
         platform: PlatformConfig | None = None,
         active_persona: str = "default",
+        persist_path: str | Path | None = None,
     ) -> None:
         """初始化配置中心。
 
@@ -44,11 +73,14 @@ class ConfigCenter:
             model: 模型配置，为 None 时使用默认 ModelConfig。
             platform: 平台配置，为 None 时使用默认 PlatformConfig。
             active_persona: 初始激活的人物设定名称，默认为 "default"。
+            persist_path: 持久化文件路径，为 None 时使用 data/config.yaml。
+                传入路径后，save() 和 save_to_yaml() 默认写入此路径。
         """
         self.personas: dict[str, PersonaConfig] = personas if personas is not None else self._default_personas()
         self.model: ModelConfig = model if model is not None else ModelConfig()
         self.platform: PlatformConfig = platform if platform is not None else PlatformConfig()
         self.active_persona: str = active_persona
+        self._persist_path: Path = Path(persist_path) if persist_path else DEFAULT_DATA_DIR / DEFAULT_CONFIG_FILENAME
 
     @staticmethod
     def _default_personas() -> dict[str, PersonaConfig]:
@@ -100,11 +132,12 @@ class ConfigCenter:
                 self.active_persona = "default"
         return self.personas[self.active_persona]
 
-    def switch_persona(self, name: str) -> None:
+    def switch_persona(self, name: str, auto_save: bool = True) -> None:
         """切换当前激活的人物设定。
 
         Args:
             name: 要激活的人物设定名称。
+            auto_save: 是否自动持久化到默认路径，默认为 True。
 
         Raises:
             KeyError: 指定名称的人物设定不存在。
@@ -112,35 +145,55 @@ class ConfigCenter:
         if name not in self.personas:
             raise KeyError(f"Persona '{name}' not found. Available: {list(self.personas.keys())}")
         self.active_persona = name
+        if auto_save:
+            self.save()
 
-    def register_persona(self, persona: PersonaConfig) -> None:
+    def register_persona(self, persona: PersonaConfig, auto_save: bool = True) -> None:
+        """注册新的人物设定。
+
+        Args:
+            persona: 要注册的人物设定实例。
+            auto_save: 是否自动持久化到默认路径，默认为 True。
+        """
         self.personas[persona.name] = persona
+        if auto_save:
+            self.save()
 
     def to_dict(self) -> dict:
         """将配置中心序列化为字典。
+
+        所有枚举值转为字符串、元组转为列表，确保输出可被 yaml.safe_load 安全反序列化。
 
         Returns:
             包含 personas、model、platform 和 active_persona 的字典。
         """
         return {
-            "personas": {name: persona.model_dump() for name, persona in self.personas.items()},
+            "personas": {name: _persona_to_safe_dict(persona) for name, persona in self.personas.items()},
             "model": self.model.model_dump(),
             "platform": self.platform.model_dump(),
             "active_persona": self.active_persona,
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> ConfigCenter:
+    def from_dict(cls, data: dict, persist_path: str | Path | None = None) -> ConfigCenter:
         """从字典反序列化创建 ConfigCenter 实例。
+
+        自动将 tts_speed_range 从列表还原为元组，以匹配 PersonaConfig 的类型定义。
 
         Args:
             data: 包含配置信息的字典，键应包括 personas、model、platform、active_persona。
+            persist_path: 持久化文件路径，为 None 时使用默认 data/config.yaml。
 
         Returns:
             重建的 ConfigCenter 实例。
         """
         personas_data = data.get("personas", {})
-        personas = {name: PersonaConfig(**p_data) for name, p_data in personas_data.items()}
+        personas = {}
+        for name, p_data in personas_data.items():
+            # YAML 反序列化后 tts_speed_range 为列表，需转回元组
+            if "tts_speed_range" in p_data and isinstance(p_data["tts_speed_range"], list):
+                p_data["tts_speed_range"] = tuple(p_data["tts_speed_range"])
+            personas[name] = PersonaConfig(**p_data)
         model = ModelConfig(**data.get("model", {}))
         platform = PlatformConfig(**data.get("platform", {}))
         active_persona = data.get("active_persona", "default")
@@ -149,6 +202,7 @@ class ConfigCenter:
             model=model,
             platform=platform,
             active_persona=active_persona,
+            persist_path=persist_path,
         )
 
     @classmethod
@@ -165,4 +219,54 @@ class ConfigCenter:
         logger.info("从 YAML 加载配置: %s", path)
         with file_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
-        return cls.from_dict(data or {})
+        return cls.from_dict(data or {}, persist_path=path)
+
+    def save_to_yaml(self, path: str | Path | None = None) -> Path:
+        """将当前配置序列化并写入 YAML 文件。
+
+        自动创建目标目录。若未指定路径，则使用初始化时
+        设置的 persist_path（默认 data/config.yaml）。
+
+        Args:
+            path: 目标文件路径，为 None 时使用 self._persist_path。
+
+        Returns:
+            实际写入的文件路径。
+        """
+        target = Path(path) if path is not None else self._persist_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = self.to_dict()
+        with target.open("w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        logger.info("配置已保存到: %s", target)
+        return target
+
+    def save(self) -> Path:
+        """快捷保存：将配置写入默认持久化路径。
+
+        等价于 save_to_yaml() 不传参数，使用初始化时设置的 persist_path。
+
+        Returns:
+            实际写入的文件路径。
+        """
+        return self.save_to_yaml()
+
+    @classmethod
+    def load_or_default(cls, persist_path: str | Path | None = None) -> ConfigCenter:
+        """尝试从持久化路径加载配置，文件不存在时返回默认配置。
+
+        此方法适合应用启动时调用：若 data/config.yaml 存在则加载，
+        否则使用内置默认值并立即持久化一份。
+
+        Args:
+            persist_path: 持久化文件路径，为 None 时使用 data/config.yaml。
+
+        Returns:
+            加载或默认创建的 ConfigCenter 实例。
+        """
+        target = Path(persist_path) if persist_path else DEFAULT_DATA_DIR / DEFAULT_CONFIG_FILENAME
+        if target.exists():
+            return cls.from_yaml(str(target))
+        config = cls(persist_path=target)
+        config.save_to_yaml(target)
+        return config

@@ -7,6 +7,7 @@
 import pytest
 
 from bellis.agent.execution import _response_to_actions, act, handle_interrupt, route_after_act
+from bellis.agent.graph import build_main_graph
 from bellis.agent.perception import (
     _analyze_emotion,
     _classify_intent,
@@ -19,8 +20,10 @@ from bellis.core.actions import Action
 from bellis.core.context import AgentContext
 from bellis.core.enums import ActionType, EmotionEnum, EventPriority, MotionEnum
 from bellis.core.events import CommandEvent, DanmakuEvent, EnterEvent, FollowEvent, GiftEvent, IdleEvent, SuperChatEvent
+from bellis.core.models import EmotionState
 from bellis.core.response import LiveResponse
 from bellis.core.state import AgentState
+from unittest.mock import AsyncMock, patch
 
 _IDLE_THRESHOLD = 5  # 空闲自言自语触发阈值，与 Agent 配置保持一致
 
@@ -389,3 +392,90 @@ class TestResponseToActions:
         speak = [a for a in actions if a.type == ActionType.speak]
         assert len(speak) == 1
         assert speak[0].text == "你好世界"
+
+
+class TestGraphCompilation:
+    """图编译测试：验证 build_main_graph 能正常编译返回图对象。"""
+
+    def test_build_main_graph_compiles(self):
+        """build_main_graph() 应返回编译后的图对象。"""
+        graph = build_main_graph()
+        # 编译后的图对象应具有 invoke / ainvoke 方法
+        assert hasattr(graph, "invoke")
+        assert hasattr(graph, "ainvoke")
+
+    def test_build_streaming_graph_compiles(self):
+        """build_main_graph(streaming=True) 应返回编译后的图对象。"""
+        graph = build_main_graph(streaming=True)
+        assert hasattr(graph, "invoke")
+        assert hasattr(graph, "ainvoke")
+
+
+class TestGraphExecution:
+    """图执行测试：验证图在端到端场景下的行为。"""
+
+    @pytest.mark.asyncio
+    async def test_graph_processes_single_danmaku(self):
+        """测试图处理单条弹幕：mock think 节点，验证 live_response 被生成。"""
+        mock_response = LiveResponse(text="你好！", emotion=EmotionEnum.happy, motion=MotionEnum.wave)
+        mock_think = AsyncMock(return_value={
+            "live_response": mock_response,
+            "emotion_state": EmotionState(),
+            "action_history": [],
+            "state_version": 1,
+            "idle_ticks": 0,
+        })
+
+        # 在 build_main_graph 内部延迟导入 decision.think 之前进行 patch
+        with patch("bellis.agent.decision.think", mock_think):
+            graph = build_main_graph()
+            event = DanmakuEvent(content="你好", user_level=10, fan_badge="铁粉")
+            initial_state: AgentState = {
+                "event_queue": [event],
+                "current_event": None,
+                "idle_ticks": 0,
+                "metrics": {},
+                "_context": AgentContext(),
+            }
+            result = await graph.ainvoke(initial_state)
+            # 图应成功执行并生成 live_response
+            assert result.get("live_response") is not None
+
+    @pytest.mark.asyncio
+    async def test_graph_with_empty_queue_routes_to_end(self):
+        """测试空事件队列且无空闲 tick 时，图应快速路由到 end，不生成 live_response。"""
+        graph = build_main_graph()
+        initial_state: AgentState = {
+            "event_queue": [],
+            "current_event": None,
+            "idle_ticks": 0,
+            "metrics": {},
+            "_context": AgentContext(),
+        }
+        result = await graph.ainvoke(initial_state)
+        # 空队列 + idle_ticks < 阈值 → dequeue → perceive → end，不应生成 live_response
+        assert result.get("live_response") is None
+
+
+class TestDequeueEventEdgeCases:
+    """出队边界情况测试：验证多事件出队和单事件出队行为。"""
+
+    def test_dequeue_preserves_remaining_events(self):
+        """出队第一个事件后，剩余事件应保留在队列中。"""
+        event1 = DanmakuEvent(content="第一条")
+        event2 = DanmakuEvent(content="第二条")
+        event3 = DanmakuEvent(content="第三条")
+        state: AgentState = {"event_queue": [event1, event2, event3]}
+        result = dequeue_event(state)
+        # 第一个事件被出队
+        assert result["current_event"] == event1
+        # 剩余事件仍保留在队列中
+        assert result["event_queue"] == [event2, event3]
+
+    def test_dequeue_single_event(self):
+        """单事件队列出队后应变为空。"""
+        event = DanmakuEvent(content="唯一一条")
+        state: AgentState = {"event_queue": [event]}
+        result = dequeue_event(state)
+        assert result["current_event"] == event
+        assert result["event_queue"] == []

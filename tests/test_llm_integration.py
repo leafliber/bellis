@@ -6,7 +6,7 @@
 
 import pytest
 
-from bellis.agent.decision import LiveDeps, ResilientCaller, create_decision_agent, reset_agent
+from bellis.agent.decision import LiveDeps, ResilientCaller, create_decision_agent, reset_agent, _parse_compat_response
 from bellis.agent.graph import build_main_graph
 from bellis.core.actions import Action
 from bellis.core.context import AgentContext
@@ -617,3 +617,67 @@ class TestResilienceWithLLM:
         caller = ResilientCaller(max_retries=2)
         await caller.call_with_retry(agent, "事件内容：你好", deps)
         assert caller.breaker.state == "closed"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 8. 兼容模式（compat_mode）
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestCompatMode:
+    """兼容模式测试：验证 compat_mode 下 Agent 创建和 _parse_compat_response 解析。"""
+
+    @pytest.mark.asyncio
+    async def test_compat_mode_json_response(self, llm_env):
+        """compat_mode=True 时 Agent 输出类型为 str，_parse_compat_response 能正确解析。"""
+        reset_agent(
+            AgentContext(
+                model=_model(llm_env),
+                base_url=llm_env["base_url"],
+                api_key=llm_env["api_key"],
+                compat_mode=True,
+            )
+        )
+        agent = create_decision_agent(
+            model=_model(llm_env),
+            base_url=llm_env["base_url"],
+            api_key=llm_env["api_key"],
+            compat_mode=True,
+        )
+        # compat_mode 下 Agent 的输出类型应为 str
+        assert agent.output_type is str
+
+        deps = LiveDeps(
+            scene_context=SceneContext(stream_title="测试直播间", viewer_count=100),
+            emotion_state=EmotionState(),
+            persona=PersonaConfig(name="default", system_prompt="你是一个友好的直播助手，回复简短。"),
+            action_history=[],
+        )
+        caller = ResilientCaller(max_retries=2)
+        raw = await caller.call_with_retry(agent, "事件内容：你好主播！\n来源：danmaku", deps)
+
+        # 原始输出应为字符串
+        assert isinstance(raw, str)
+        # 通过 _parse_compat_response 解析后应为 LiveResponse
+        response = _parse_compat_response(raw)
+        assert isinstance(response, LiveResponse)
+        assert len(response.text) > 0
+
+    def test_compat_mode_markdown_wrapped_json(self):
+        """_parse_compat_response 能解析 ```json...``` 包裹的 JSON 响应。"""
+        raw = '```json\n{"text": "你好喵~", "emotion": "happy", "motion": "wave", "tts_speed": 1.0, "priority": 0, "target_user": null, "motion_duration": 1.0, "wait_for_next": false}\n```'
+        response = _parse_compat_response(raw)
+        assert isinstance(response, LiveResponse)
+        assert response.text == "你好喵~"
+        assert response.emotion == EmotionEnum.happy
+        assert response.motion == MotionEnum.wave
+
+    def test_compat_mode_mixed_text_json(self):
+        """_parse_compat_response 能解析 JSON 前后有其他文本的响应。"""
+        raw = '好的，这是我的回复：\n{"text": "谢谢你的礼物！", "emotion": "excited", "motion": "cheer", "tts_speed": 1.2, "priority": 0, "target_user": "土豪", "motion_duration": 2.0, "wait_for_next": false}\n以上是回复内容。'
+        response = _parse_compat_response(raw)
+        assert isinstance(response, LiveResponse)
+        assert response.text == "谢谢你的礼物！"
+        assert response.emotion == EmotionEnum.excited
+        assert response.motion == MotionEnum.cheer
+        assert response.target_user == "土豪"
