@@ -1,13 +1,11 @@
 """插件系统单元测试。
 
-覆盖 HookManager（注册、触发、清除）、PluginRegistry（各类插件注册）
-以及 ConsoleOutputPlugin 的输出格式化。
+覆盖 HookManager（注册、触发、清除）和 PluginRegistry（各类插件注册）。
 """
 
 import pytest
 
 from bellis.core.actions import Action
-from bellis.core.enums import ActionType, EmotionEnum
 from bellis.core.events import LiveEvent
 from bellis.core.state import AgentState
 from bellis.plugin.base import (
@@ -21,7 +19,6 @@ from bellis.plugin.base import (
 )
 from bellis.plugin.hooks import HookManager
 from bellis.plugin.registry import PluginRegistry
-from plugins.console import ConsoleOutputPlugin
 
 
 class TestHookManager:
@@ -165,33 +162,3 @@ class TestPluginRegistry:
 
         registry.register_output(FakeOutput()).register_output(FakeOutput())
         assert len(registry.outputs) == 2
-
-
-class TestConsoleOutputPlugin:
-    """ConsoleOutputPlugin 输出格式化测试。"""
-    @pytest.mark.asyncio
-    async def test_emit_speak(self, capsys):
-        plugin = ConsoleOutputPlugin()
-        action = Action(type=ActionType.speak, text="你好", emotion=EmotionEnum.happy)
-        await plugin.emit(action)
-        captured = capsys.readouterr()
-        assert "你好" in captured.out
-        assert "happy" in captured.out
-
-    @pytest.mark.asyncio
-    async def test_emit_expression(self, capsys):
-        plugin = ConsoleOutputPlugin()
-        action = Action(type=ActionType.set_expression, expression="happy")
-        await plugin.emit(action)
-        captured = capsys.readouterr()
-        assert "表情" in captured.out
-
-    @pytest.mark.asyncio
-    async def test_emit_motion(self, capsys):
-        from bellis.core.enums import MotionEnum
-
-        plugin = ConsoleOutputPlugin()
-        action = Action(type=ActionType.set_motion, motion=MotionEnum.wave, motion_duration=1.5)
-        await plugin.emit(action)
-        captured = capsys.readouterr()
-        assert "动作" in captured.out

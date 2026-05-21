@@ -26,6 +26,7 @@ from bellis.core.events import (
     SuperChatEvent,
 )
 from bellis.core.state import AgentState, get_context
+from bellis.observability.otel import traced
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,7 @@ def _reassess_priority(event: LiveEvent) -> EventPriority:
     return event.priority
 
 
+@traced("bellis.node.dequeue_event")
 def dequeue_event(state: AgentState) -> dict:
     """从事件队列中出队第一个事件。
 
@@ -176,6 +178,7 @@ def dequeue_event(state: AgentState) -> dict:
     return {"current_event": queue[0], "event_queue": queue[1:]}
 
 
+@traced("bellis.node.perceive")
 async def perceive(state: AgentState) -> dict:
     """执行感知：对当前事件进行意图分类、情绪分析和优先级重评估。
 

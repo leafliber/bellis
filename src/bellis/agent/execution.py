@@ -16,6 +16,7 @@ from bellis.core.actions import Action
 from bellis.core.enums import ActionType, CommandType, EmotionEnum, EventSource, MotionEnum
 from bellis.core.models import TTSTask
 from bellis.core.state import AgentState, get_context
+from bellis.observability.otel import traced
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ def _response_to_actions(state: AgentState) -> list[Action]:
     return actions
 
 
+@traced("bellis.node.act")
 async def act(state: AgentState) -> dict:
     """执行动作：将决策结果分发到输出管道和插件。
 
@@ -168,6 +170,7 @@ async def act(state: AgentState) -> dict:
     return result
 
 
+@traced("bellis.node.handle_interrupt")
 async def handle_interrupt(state: AgentState) -> dict:
     """处理中断命令：根据命令类型更新 Agent 状态。
 

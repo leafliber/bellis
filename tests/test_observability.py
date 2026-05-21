@@ -2,19 +2,24 @@
 
 验证 Tracer 的 span 上下文管理、嵌套关系、异常记录、
 追踪导出与淘汰策略，以及 SnapshotExporter 的快照采集、
-深拷贝降级、JSON 导出与淘汰策略。
+深拷贝降级、JSON 导出与淘汰策略，以及 OTel 集成的
+@traced 装饰器和 setup_observability 初始化。
 """
 
-import copy
 import json
 import time
 
 import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 from bellis.core.state import AgentState
+from bellis.observability.otel import traced
 from bellis.observability.snapshot import SnapshotExporter
 from bellis.observability.tracing import Tracer
-
 
 # ---------------------------------------------------------------------------
 # Tracer 测试
@@ -216,3 +221,137 @@ class TestSnapshotExporter:
         assert "_snapshot_time" in snapshot
         # 浅拷贝降级后，_context 应存在（引用同一对象）
         assert "_context" in snapshot
+
+
+# ---------------------------------------------------------------------------
+# OTel @traced 装饰器测试
+# ---------------------------------------------------------------------------
+
+# 模块级 OTel 配置：只设置一次 TracerProvider，所有测试共享
+_otel_exporter = InMemorySpanExporter()
+_otel_provider = TracerProvider()
+_otel_provider.add_span_processor(SimpleSpanProcessor(_otel_exporter))
+trace.set_tracer_provider(_otel_provider)
+
+
+class TestTracedDecorator:
+    """@traced 装饰器与 OTel 集成测试。"""
+
+    def setup_method(self):
+        """每个测试前清空 exporter。"""
+        _otel_exporter.clear()
+
+    def test_traced_async_creates_span(self):
+        """@traced 装饰的异步函数应创建 OTel span。"""
+
+        @traced("test.async_op")
+        async def async_op(state: AgentState) -> dict:
+            return {"result": "ok"}
+
+        import asyncio
+
+        result = asyncio.get_event_loop().run_until_complete(async_op({"state_version": 1}))
+        assert result == {"result": "ok"}
+
+        spans = _otel_exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].name == "test.async_op"
+
+    def test_traced_sync_creates_span(self):
+        """@traced 装饰的同步函数应创建 OTel span。"""
+
+        @traced("test.sync_op")
+        def sync_op(state: AgentState) -> dict:
+            return {"result": "ok"}
+
+        result = sync_op({"state_version": 1})
+        assert result == {"result": "ok"}
+
+        spans = _otel_exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].name == "test.sync_op"
+
+    def test_traced_records_exception(self):
+        """@traced 装饰的函数抛异常时，span 应记录错误状态。"""
+
+        @traced("test.failing_op")
+        async def failing_op(state: AgentState) -> dict:
+            raise ValueError("test error")
+
+        import asyncio
+
+        with pytest.raises(ValueError, match="test error"):
+            asyncio.get_event_loop().run_until_complete(failing_op({"state_version": 1}))
+
+        spans = _otel_exporter.get_finished_spans()
+        assert len(spans) == 1
+        span = spans[0]
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_traced_extracts_state_attributes(self):
+        """@traced 应从 AgentState 提取关键属性注入 span。"""
+
+        @traced("test.with_attrs")
+        async def with_attrs(state: AgentState) -> dict:
+            return {"result": "ok"}
+
+        import asyncio
+
+        # 构造带 metrics.perception 的 state
+        state = {
+            "state_version": 1,
+            "current_event": None,
+            "metrics": {
+                "perception": {
+                    "intent": "greeting",
+                    "emotion": "happy",
+                    "reassessed_priority": "HIGH",
+                }
+            },
+        }
+        asyncio.get_event_loop().run_until_complete(with_attrs(state))
+
+        spans = _otel_exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes or {})
+        assert attrs.get("perception.intent") == "greeting"
+        assert attrs.get("perception.emotion") == "happy"
+        assert attrs.get("perception.priority") == "HIGH"
+
+    def test_traced_default_name(self):
+        """@traced 不指定 name 时应使用默认名称。"""
+
+        @traced()
+        async def my_node(state: AgentState) -> dict:
+            return {}
+
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(my_node({"state_version": 1}))
+
+        spans = _otel_exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].name == "bellis.node.my_node"
+
+    def test_traced_nested_spans(self):
+        """嵌套的 @traced 调用应建立父子关系。"""
+
+        @traced("test.child")
+        async def child(state: AgentState) -> dict:
+            return {}
+
+        @traced("test.parent")
+        async def parent(state: AgentState) -> dict:
+            await child(state)
+            return {}
+
+        import asyncio
+
+        asyncio.get_event_loop().run_until_complete(parent({"state_version": 1}))
+
+        spans = _otel_exporter.get_finished_spans()
+        assert len(spans) == 2
+        # 后完成的 span 是子 span
+        parent_span = next(s for s in spans if s.name == "test.parent")
+        child_span = next(s for s in spans if s.name == "test.child")
+        assert child_span.parent.span_id == parent_span.context.span_id

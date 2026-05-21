@@ -24,6 +24,7 @@ from bellis.core.enums import EmotionEnum, MotionEnum
 from bellis.core.models import ActionRecord, EmotionState, PersonaConfig, SceneContext, TTSTask
 from bellis.core.response import LiveResponse
 from bellis.core.state import AgentState, get_context
+from bellis.observability.otel import traced
 
 logger = logging.getLogger(__name__)
 
@@ -402,6 +403,7 @@ def _build_deps(state: AgentState) -> LiveDeps:
     )
 
 
+@traced("bellis.node.think")
 async def think(state: AgentState) -> dict:
     """执行同步思考：调用决策 Agent 生成回复并更新状态。
 
@@ -511,6 +513,7 @@ def _parse_compat_response(raw: str | LiveResponse) -> LiveResponse:
 _SENTENCE_PATTERN = re.compile(r"(.*?[。！？!?.])")  # 按中英文标点断句的正则模式
 
 
+@traced("bellis.node.stream_think")
 async def stream_think(state: AgentState) -> dict:
     """执行流式思考：通过流式输出实时推送 TTS 任务并生成回复。
 

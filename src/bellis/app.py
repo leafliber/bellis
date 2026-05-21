@@ -1,24 +1,30 @@
 """Bellis 主应用模块 — 应用生命周期管理与主循环入口。
 
 本模块实现 BellisApp 类，负责组装配置、插件注册表、事件总线、
-追踪器等核心组件，并驱动 Agent 主循环的运行。同时提供 CLI 入口函数 main()。
+追踪器等核心组件，并驱动 Agent 主循环的运行。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import signal
-import sys
+import time
+
+from opentelemetry import trace as otel_trace
 
 from bellis.agent.graph import build_main_graph
 from bellis.config.loader import ConfigCenter
 from bellis.core.context import AgentContext
 from bellis.core.events import DanmakuEvent, IdleEvent
-from bellis.core.logging import setup_logging
 from bellis.core.models import EmotionState, SceneContext
 from bellis.core.state import AgentState
 from bellis.gateway import Gateway, GatewayCallbacks
+from bellis.observability.otel import (
+    error_counter,
+    events_counter,
+    loop_duration,
+    setup_observability,
+)
 from bellis.observability.tracing import Tracer
 from bellis.plugin.registry import PluginRegistry
 from bellis.runtime.bus import EventBus
@@ -55,6 +61,9 @@ class BellisApp(GatewayCallbacks):
         gateway_host: str = "localhost",
         gateway_port: int = 8765,
         enable_gateway: bool = False,
+        otlp_endpoint: str | None = None,
+        enable_otel: bool = True,
+        enable_langsmith: bool = True,
     ) -> None:
         self._config = config or ConfigCenter()
         self._registry = registry or PluginRegistry()
@@ -63,6 +72,14 @@ class BellisApp(GatewayCallbacks):
         self._graph = None
         self._event_bus: EventBus | None = None
         self._tracer = Tracer()
+
+        # 初始化可观测性（OTel + LangSmith）
+        if enable_otel:
+            setup_observability(
+                service_name="bellis-agent",
+                otlp_endpoint=otlp_endpoint,
+                enable_langsmith=enable_langsmith,
+            )
         # 构建 Agent 上下文，将插件注册表和配置中心的依赖注入其中
         self._context = AgentContext(
             hook_manager=self._registry.hook_manager,
@@ -129,15 +146,6 @@ class BellisApp(GatewayCallbacks):
     async def on_switch_persona(self, name: str) -> None:
         """前端请求切换人设。"""
         self._config.switch_persona(name)
-
-    def setup_defaults(self) -> None:
-        """注册默认的 Console 插件（用于调试）。"""
-        from plugins.console import ConsoleInputPlugin, ConsoleOutputPlugin
-
-        self._registry.register_input(ConsoleInputPlugin())
-        self._registry.register_output(ConsoleOutputPlugin())
-        # 同步 context 中的 output_plugins 引用
-        self._context.output_plugins = self._registry.outputs
 
     def _build_timeline_sync(self) -> TimelineSync | None:
         """从已注册的 OutputPlugin 中提取 TTSExecutor 和 Live2DExecutor，构建 TimelineSync。
@@ -304,9 +312,25 @@ class BellisApp(GatewayCallbacks):
             # 调用图（带异常捕获，防止单次失败终止主循环）
             with self._tracer.span("process_event", {"source": event.source.value}):
                 try:
-                    result = await self._graph.ainvoke(state)
+                    start = time.monotonic()
+                    # 创建 OTel 根 span，子节点 @traced 装饰器会自动关联
+                    with otel_trace.get_tracer("bellis.agent").start_as_current_span(
+                        "bellis.process_event",
+                        attributes={"event.source": event.source.value},
+                    ) as otel_span:
+                        result = await self._graph.ainvoke(state)
+                        otel_span.set_status(otel_trace.StatusCode.OK)
+
+                    # 记录指标
+                    duration_ms = (time.monotonic() - start) * 1000
+                    if loop_duration is not None:
+                        loop_duration.record(duration_ms, {"source": event.source.value})
+                    if events_counter is not None:
+                        events_counter.add(1, {"source": event.source.value})
                 except Exception:
                     logger.exception("Graph 执行失败，跳过本轮事件")
+                    if error_counter is not None:
+                        error_counter.add(1, {"phase": "process_event"})
                     continue
 
             # 合并结果到 state
@@ -325,40 +349,3 @@ class BellisApp(GatewayCallbacks):
     async def stop(self) -> None:
         """停止应用：设置标志位，等待主循环退出。"""
         self._running = False
-
-
-def main() -> None:
-    """CLI 入口。
-
-    初始化日志、创建默认应用实例、注册信号处理器，
-    然后在事件循环中启动应用。支持 Ctrl+C 优雅退出。
-    """
-    setup_logging()
-
-    app = BellisApp()
-    app.setup_defaults()
-
-    loop = asyncio.new_event_loop()
-
-    def _shutdown():
-        """信号处理回调：线程安全地调度应用停止。"""
-        loop.call_soon_threadsafe(lambda: asyncio.ensure_future(app.stop()))
-
-    signal.signal(signal.SIGINT, lambda *_: _shutdown())
-    if sys.platform != "win32":
-        # Windows 不支持 SIGTERM 信号
-        signal.signal(signal.SIGTERM, lambda *_: _shutdown())
-
-    logger.info("Bellis - Live Streaming AI Agent Framework")
-    logger.info("输入弹幕内容与 AI 互动，Ctrl+C 退出")
-
-    try:
-        loop.run_until_complete(app.start())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        loop.close()
-
-
-if __name__ == "__main__":
-    main()
