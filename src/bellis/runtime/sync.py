@@ -24,7 +24,7 @@ class TimelineSync:
     """TTS 与 Live2D 时间轴同步播放器。
 
     通过组合方式持有 TTSExecutor 和 Live2DExecutor 实例，
-    可从 DummyTTSExecutor.driver / DummyLive2DExecutor.driver 获取。
+    可从 TTSPlugin.driver / Live2D 插件的 driver 属性获取。
     """
 
     def __init__(self, tts: TTSExecutor, live2d: Live2DExecutor) -> None:

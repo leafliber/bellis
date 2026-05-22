@@ -1,7 +1,7 @@
 """客户端指令处理器。
 
 解析前端发来的 ClientMessage，通过 GatewayCallbacks 回调接口
-与 BellisApp 交互，实现控制面逻辑（弹幕注入、Agent 启停、人设切换）。
+与 BellisApp 交互，实现控制面逻辑（弹幕注入、Agent 启停、人设切换、配置更新）。
 """
 
 from __future__ import annotations
@@ -36,6 +36,14 @@ class GatewayCallbacks:
         """前端请求切换人设。"""
         raise NotImplementedError
 
+    async def on_update_config(self, updates: dict) -> None:
+        """前端请求更新配置（局部更新）。"""
+        raise NotImplementedError
+
+    async def on_reload_config(self) -> None:
+        """前端请求从 YAML 重新加载配置。"""
+        raise NotImplementedError
+
 
 async def handle_client_message(
     msg: ClientMessage,
@@ -59,5 +67,9 @@ async def handle_client_message(
         case "switch_persona":
             name = msg.payload.get("name", "default")
             await callbacks.on_switch_persona(name)
+        case "update_config":
+            await callbacks.on_update_config(msg.payload)
+        case "reload_config":
+            await callbacks.on_reload_config()
         case _:
             logger.warning("未知客户端消息类型: %s", msg.type)

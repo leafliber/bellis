@@ -63,10 +63,22 @@ class PluginState(StrEnum):
 
 
 class BasePlugin(ABC):
-    """所有插件的公共基类，提供元数据、生命周期状态和模板方法。"""
+    """所有插件的公共基类，提供元数据、生命周期状态和模板方法。
+
+    Attributes:
+        plugin_meta: 插件元数据，子类必须覆盖此属性。
+        config_schema: 插件配置字段描述，子类可覆盖以声明可配置项。
+            每个字段为字典，包含 type/label/default/description 等键。
+        _state: 插件生命周期状态。
+        _config: 插件专属配置字典，由 ConfigCenter.plugins 注入。
+    """
 
     # 子类必须覆盖此属性
     plugin_meta: PluginMeta
+
+    # 子类可覆盖此属性声明配置字段
+    # 格式: { "field_name": { "type": "str"|"int"|"float"|"bool", "label": "显示名", "default": 默认值, "description": "说明" } }
+    config_schema: dict[str, dict[str, Any]] = {}
 
     def __init__(self) -> None:
         if not hasattr(self, "plugin_meta") or not isinstance(self.plugin_meta, PluginMeta):
@@ -74,6 +86,7 @@ class BasePlugin(ABC):
                 f"{type(self).__name__} 必须定义 plugin_meta 类属性 (PluginMeta 实例)"
             )
         self._state: PluginState = PluginState.CREATED
+        self._config: dict[str, Any] = {}
 
     @property
     def state(self) -> PluginState:
@@ -82,6 +95,22 @@ class BasePlugin(ABC):
     @property
     def name(self) -> str:
         return self.plugin_meta.name
+
+    @property
+    def config(self) -> dict[str, Any]:
+        """返回插件专属配置字典。"""
+        return self._config
+
+    def set_config(self, cfg: dict[str, Any]) -> None:
+        """注入插件专属配置。
+
+        由 PluginRegistry.inject_configs() 在插件启动前调用，
+        将 ConfigCenter.plugins 中对应的配置段注入插件实例。
+
+        Args:
+            cfg: 插件配置字典。
+        """
+        self._config = cfg
 
     async def start(self) -> None:
         """启动插件。子类可覆盖 ``_on_start`` 添加自定义逻辑。"""

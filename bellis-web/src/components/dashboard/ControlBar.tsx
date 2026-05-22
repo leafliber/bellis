@@ -3,38 +3,28 @@ import { Play, Square, Send, ChevronDown, Wifi, WifiOff } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
 import { useConfigStore } from "@/store/useConfigStore";
 import { useEventStore } from "@/store/useEventStore";
-import { useStateStore } from "@/store/useStateStore";
-import { useObservabilityStore } from "@/store/useObservabilityStore";
 import { cn } from "@/lib/utils";
 
 export default function ControlBar() {
   const { isAgentRunning, setAgentRunning } = useAppStore();
   const { config, switchPersona } = useConfigStore();
-  const { startMockStream, stopMockStream, connectWS, disconnectWS, sendWS, wsConnected } = useEventStore();
-  const { startMockPolling: startStatePolling, stopMockPolling: stopStatePolling } = useStateStore();
-  const { startMockPolling: startObsPolling, stopMockPolling: stopObsPolling } = useObservabilityStore();
+  const { connectWS, disconnectWS, sendWS, wsConnected } = useEventStore();
   const [command, setCommand] = useState("");
   const [personaOpen, setPersonaOpen] = useState(false);
+  const [wsUrl, setWsUrl] = useState("ws://localhost:8765");
 
   const handleStart = () => {
     setAgentRunning(true);
     if (wsConnected) {
       sendWS({ type: "start_agent" });
-    } else {
-      startMockStream();
-      startStatePolling();
-      startObsPolling();
     }
+    // TODO: 未连接后端时需要提示用户先连接
   };
 
   const handleStop = () => {
     setAgentRunning(false);
     if (wsConnected) {
       sendWS({ type: "stop_agent" });
-    } else {
-      stopMockStream();
-      stopStatePolling();
-      stopObsPolling();
     }
   };
 
@@ -43,15 +33,15 @@ export default function ControlBar() {
       disconnectWS();
       return;
     }
-    connectWS("ws://localhost:8765");
+    if (wsUrl.trim()) {
+      connectWS(wsUrl.trim());
+    }
   };
 
   const handleCommand = () => {
     if (!command.trim()) return;
     if (wsConnected) {
       sendWS({ type: "command", payload: { command } });
-    } else {
-      console.log("Command (mock):", command);
     }
     setCommand("");
   };
@@ -84,7 +74,7 @@ export default function ControlBar() {
         )}
       >
         <Play className="w-3.5 h-3.5" />
-        Mock
+        启动
       </button>
       <button
         onClick={handleStop}
@@ -100,19 +90,28 @@ export default function ControlBar() {
         停止
       </button>
 
-      {/* WebSocket 连接按钮 */}
-      <button
-        onClick={handleConnectWS}
-        className={cn(
-          "flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all",
-          wsConnected
-            ? "bg-[var(--primary)]/20 text-[var(--primary)] hover:bg-[var(--primary)]/30"
-            : "bg-[var(--warning)]/20 text-[var(--warning)] hover:bg-[var(--warning)]/30"
-        )}
-      >
-        {wsConnected ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
-        {wsConnected ? "已连接" : "连接后端"}
-      </button>
+      {/* WebSocket 连接 */}
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={wsUrl}
+          onChange={(e) => setWsUrl(e.target.value)}
+          placeholder="ws://host:port"
+          className="w-36 px-2 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--border)] text-xs text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)] transition-colors"
+        />
+        <button
+          onClick={handleConnectWS}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all",
+            wsConnected
+              ? "bg-[var(--primary)]/20 text-[var(--primary)] hover:bg-[var(--primary)]/30"
+              : "bg-[var(--warning)]/20 text-[var(--warning)] hover:bg-[var(--warning)]/30"
+          )}
+        >
+          {wsConnected ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+          {wsConnected ? "已连接" : "连接"}
+        </button>
+      </div>
 
       {/* Persona selector */}
       <div className="relative">
@@ -120,7 +119,7 @@ export default function ControlBar() {
           onClick={() => setPersonaOpen(!personaOpen)}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-[var(--overlay)]/30 text-[var(--text)] hover:bg-[var(--overlay)]/50 transition-all"
         >
-          {config.active_persona}
+          {config.active_persona || "人设"}
           <ChevronDown className="w-3 h-3" />
         </button>
         {personaOpen && (

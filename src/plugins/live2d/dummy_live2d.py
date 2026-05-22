@@ -1,4 +1,7 @@
-"""占位 Live2D 执行器 — 实现 OutputPlugin 接口，内部组合 Live2DExecutor。"""
+"""占位 Live2D 执行器 — 实现 OutputPlugin 接口，内部组合 Live2DExecutor。
+
+TODO: 替换为真实 Live2D 驱动实现。
+"""
 
 from __future__ import annotations
 

@@ -98,6 +98,18 @@ class GUIMetrics(BaseModel):
     events_per_minute: float
 
 
+class GUITraceSpan(BaseModel):
+    """前端展示的追踪跨度载荷，支持树形嵌套。"""
+
+    model_config = {"frozen": True}
+
+    name: str
+    duration_ms: float
+    input_summary: str = ""
+    output_summary: str = ""
+    children: list[GUITraceSpan] = Field(default_factory=list)
+
+
 class GUIConfig(BaseModel):
     """前端展示的配置载荷。"""
 
@@ -107,6 +119,8 @@ class GUIConfig(BaseModel):
     active_persona: str
     model: dict
     platform: dict
+    plugins: dict[str, dict] = Field(default_factory=dict)
+    plugin_schemas: dict[str, dict] = Field(default_factory=dict)
 
 
 # ─── 服务端消息 ──────────────────────────────────────────────────────
@@ -117,7 +131,7 @@ class ServerMessage(BaseModel):
 
     model_config = {"frozen": True}
 
-    type: str  # "event" | "state" | "response" | "action" | "metrics" | "config"
+    type: str  # "event" | "state" | "response" | "action" | "metrics" | "trace" | "config"
     payload: dict
 
 
@@ -136,11 +150,24 @@ class SwitchPersonaPayload(BaseModel):
     name: str
 
 
+class UpdateConfigPayload(BaseModel):
+    """客户端更新配置的载荷。
+
+    支持局部更新：只传需要修改的字段，未传的字段保持不变。
+    """
+
+    personas: dict[str, dict] | None = None
+    active_persona: str | None = None
+    model: dict | None = None
+    platform: dict | None = None
+    plugins: dict[str, dict] | None = None
+
+
 # ─── 客户端消息 ──────────────────────────────────────────────────────
 
 
 class ClientMessage(BaseModel):
     """客户端 → 服务端的统一消息信封。"""
 
-    type: str  # "command" | "start_agent" | "stop_agent" | "switch_persona"
+    type: str  # "command" | "start_agent" | "stop_agent" | "switch_persona" | "update_config" | "reload_config"
     payload: dict = Field(default_factory=dict)

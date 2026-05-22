@@ -1,4 +1,7 @@
-"""占位 TTS 执行器 — 实现 OutputPlugin 接口，内部组合 TTSExecutor。"""
+"""占位 TTS 执行器 — 实现 OutputPlugin 接口，内部组合 TTSExecutor。
+
+TODO: 替换为真实 TTS 驱动实现（如 Edge-TTS、VITS 等）。
+"""
 
 from __future__ import annotations
 

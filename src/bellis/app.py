@@ -62,8 +62,8 @@ class BellisApp(GatewayCallbacks):
         gateway_port: int = 8765,
         enable_gateway: bool = False,
         otlp_endpoint: str | None = None,
+        console_export: bool = False,
         enable_otel: bool = True,
-        enable_langsmith: bool = True,
     ) -> None:
         self._config = config or ConfigCenter()
         self._registry = registry or PluginRegistry()
@@ -73,12 +73,12 @@ class BellisApp(GatewayCallbacks):
         self._event_bus: EventBus | None = None
         self._tracer = Tracer()
 
-        # 初始化可观测性（OTel + LangSmith）
+        # 初始化可观测性（OTel）
         if enable_otel:
             setup_observability(
                 service_name="bellis-agent",
                 otlp_endpoint=otlp_endpoint,
-                enable_langsmith=enable_langsmith,
+                console_export=console_export,
             )
         # 构建 Agent 上下文，将插件注册表和配置中心的依赖注入其中
         self._context = AgentContext(
@@ -130,7 +130,7 @@ class BellisApp(GatewayCallbacks):
 
     async def on_command(self, text: str) -> None:
         """前端弹幕 → 注入 EventBus。"""
-        event = DanmakuEvent(content=text, user_name="你", user_level=10, fan_badge="铁粉")
+        event = DanmakuEvent(content=text, user_name="你", user_level=0, fan_badge=None)  # TODO: 从前端传递真实用户信息
         if self._event_bus:
             await self._event_bus.publish(event)
 
@@ -146,6 +146,34 @@ class BellisApp(GatewayCallbacks):
     async def on_switch_persona(self, name: str) -> None:
         """前端请求切换人设。"""
         self._config.switch_persona(name)
+        await self._push_config()
+
+    async def on_update_config(self, updates: dict) -> None:
+        """前端请求更新配置（局部更新）。"""
+        self._config.update_config(updates)
+        # 如果 plugins 配置有变更，重新注入到插件实例
+        if "plugins" in updates and updates.get("plugins"):
+            self._registry.inject_configs(self._config.plugins)
+        await self._push_config()
+
+    async def on_reload_config(self) -> None:
+        """前端请求从 YAML 重新加载配置。"""
+        if self._config._persist_path.exists():
+            reloaded = ConfigCenter.from_yaml(str(self._config._persist_path))
+            self._config.personas = reloaded.personas
+            self._config.model = reloaded.model
+            self._config.platform = reloaded.platform
+            self._config.plugins = reloaded.plugins
+            self._config.active_persona = reloaded.active_persona
+            # 重新注入插件配置
+            if self._config.plugins:
+                self._registry.inject_configs(self._config.plugins)
+        await self._push_config()
+
+    async def _push_config(self) -> None:
+        """将当前配置推送到前端。"""
+        if self._gateway is not None:
+            await self._gateway.broadcast_config(self._config, self._registry)
 
     def _build_timeline_sync(self) -> TimelineSync | None:
         """从已注册的 OutputPlugin 中提取 TTSExecutor 和 Live2DExecutor，构建 TimelineSync。
@@ -202,6 +230,10 @@ class BellisApp(GatewayCallbacks):
         self._running = True
         self._event_bus = EventBus(maxsize=self._config.platform.max_queue_size)
 
+        # 将 ConfigCenter 中的插件配置注入到已注册的插件实例
+        if self._config.plugins:
+            self._registry.inject_configs(self._config.plugins)
+
         # 启动所有插件
         await self._registry.start_all()
 
@@ -214,6 +246,8 @@ class BellisApp(GatewayCallbacks):
         # 启动 Gateway
         if self._gateway is not None:
             await self._gateway.start()
+            # 推送初始配置到前端
+            await self._push_config()
 
         # 启动事件收集任务
         collect_task = asyncio.create_task(self._collect_events())
@@ -345,6 +379,9 @@ class BellisApp(GatewayCallbacks):
             if self._gateway is not None:
                 await self._gateway.broadcast_state(state)
                 await self._gateway.broadcast_response(state)
+                # 推送追踪和指标数据到前端可观测性面板
+                await self._gateway.broadcast_traces(self._tracer.get_traces())
+                await self._gateway.broadcast_metrics(state)
 
     async def stop(self) -> None:
         """停止应用：设置标志位，等待主循环退出。"""

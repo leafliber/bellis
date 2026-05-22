@@ -13,11 +13,14 @@ from bellis.core.response import LiveResponse
 from bellis.core.state import AgentState
 from bellis.gateway.protocol import (
     GUIActionRecord,
+    GUIConfig,
     GUIEmotionState,
     GUIEvent,
+    GUIMetrics,
     GUIResponse,
     GUISceneContext,
     GUIState,
+    GUITraceSpan,
     ServerMessage,
 )
 
@@ -137,3 +140,79 @@ def serialize_response(state: AgentState) -> ServerMessage | None:
         motion_duration=response.motion_duration,
     )
     return ServerMessage(type="response", payload=payload.model_dump())
+
+
+def _convert_trace_span(span_dict: dict) -> GUITraceSpan:
+    """将自建 Tracer 的 TraceSpan.to_dict() 字典转换为 GUITraceSpan 协议模型。"""
+    children = [_convert_trace_span(child) for child in span_dict.get("children", [])]
+    return GUITraceSpan(
+        name=span_dict.get("name", "unknown"),
+        duration_ms=round(span_dict.get("duration_ms", 0.0), 1),
+        input_summary=span_dict.get("input") or "",
+        output_summary=span_dict.get("output") or "",
+        children=children,
+    )
+
+
+def serialize_traces(traces: list[dict]) -> ServerMessage:
+    """将自建 Tracer 的追踪记录序列化为前端可消费的 WebSocket 消息。"""
+    gui_spans = [_convert_trace_span(t) for t in traces]
+    payload = {"spans": [span.model_dump() for span in gui_spans]}
+    return ServerMessage(type="trace", payload=payload)
+
+
+def serialize_metrics(state: AgentState) -> ServerMessage:
+    """将 AgentState 中的运行指标序列化为前端可消费的 WebSocket 消息。"""
+    metrics_data = state.get("metrics", {})
+    # 从 perception 结果中提取熔断器状态
+    circuit_state = "closed"
+    if isinstance(metrics_data, dict):
+        cb = metrics_data.get("circuit_breaker_state")
+        if cb:
+            circuit_state = cb
+
+    payload = GUIMetrics(
+        event_queue_size=len(state.get("event_queue", [])),
+        tts_queue_size=len(state.get("tts_queue", [])),
+        circuit_breaker_state=circuit_state,
+        state_version=state.get("state_version", 0),
+        events_per_minute=0.0,  # 由前端根据事件时间戳计算
+    )
+    return ServerMessage(type="metrics", payload=payload.model_dump())
+
+
+def serialize_config(config_center: Any, registry: Any = None) -> ServerMessage:
+    """将 ConfigCenter 序列化为前端可消费的 WebSocket 消息。
+
+    Args:
+        config_center: ConfigCenter 实例。
+        registry: PluginRegistry 实例，用于提取插件 config_schema。
+
+    Returns:
+        包含完整配置的 ServerMessage。
+    """
+    data = config_center.to_dict()
+
+    # 从已注册插件中提取 config_schema
+    plugin_schemas: dict[str, dict] = {}
+    if registry is not None:
+        for plugin in registry.get_all_plugins():
+            if plugin.config_schema:
+                plugin_schemas[plugin.name] = {
+                    "meta": {
+                        "name": plugin.plugin_meta.name,
+                        "description": plugin.plugin_meta.description,
+                        "category": plugin.plugin_meta.category.value,
+                    },
+                    "fields": plugin.config_schema,
+                }
+
+    payload = GUIConfig(
+        personas=data.get("personas", {}),
+        active_persona=data.get("active_persona", "default"),
+        model=data.get("model", {}),
+        platform=data.get("platform", {}),
+        plugins=data.get("plugins", {}),
+        plugin_schemas=plugin_schemas,
+    )
+    return ServerMessage(type="config", payload=payload.model_dump())

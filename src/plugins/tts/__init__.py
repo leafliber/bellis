@@ -1,5 +1,5 @@
 """TTS 插件 — 语音合成输出。"""
 
-from .dummy_tts import DummyTTSExecutor
+from .tts_plugin import TTSPlugin
 
-__all__ = ["DummyTTSExecutor"]
+__all__ = ["TTSPlugin"]

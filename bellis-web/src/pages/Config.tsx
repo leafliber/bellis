@@ -2,14 +2,16 @@ import { useState } from "react";
 import PersonaPanel from "@/components/config/PersonaPanel";
 import ModelPanel from "@/components/config/ModelPanel";
 import PlatformPanel from "@/components/config/PlatformPanel";
+import PluginPanel from "@/components/config/PluginPanel";
 import { useConfigStore } from "@/store/useConfigStore";
-import { RefreshCw, User, Cpu, Wifi } from "lucide-react";
+import { RefreshCw, User, Cpu, Wifi, Puzzle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const tabs = [
   { id: "persona", label: "Persona", icon: User },
   { id: "model", label: "Model", icon: Cpu },
   { id: "platform", label: "Platform", icon: Wifi },
+  { id: "plugins", label: "Plugins", icon: Puzzle },
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
@@ -45,6 +47,7 @@ export default function Config() {
           {activeTab === "persona" && <PersonaPanel />}
           {activeTab === "model" && <ModelPanel />}
           {activeTab === "platform" && <PlatformPanel />}
+          {activeTab === "plugins" && <PluginPanel />}
         </div>
 
         {/* Reload button */}

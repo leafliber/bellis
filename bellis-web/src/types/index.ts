@@ -53,25 +53,58 @@ export interface GUIResponse {
   motion_duration: number;
 }
 
+/** 人格配置 — 对齐后端 PersonaConfig 全部字段 */
 export interface GUIPersonaConfig {
   name: string;
   system_prompt: string;
+  emotion_map: Record<string, EmotionType>;
+  motion_map: Record<string, MotionType>;
   tts_voice: string;
+  tts_speed_range: [number, number];
 }
 
+/** 模型配置 — 对齐后端 ModelConfig 全部字段 */
 export interface GUIModelConfig {
   primary_model: string;
   fallback_model: string;
   max_retries: number;
-  temperature: number;
+  base_delay: number;
+  max_delay: number;
+  base_url: string | null;
+  api_key: string | null;
+  compat_mode: boolean;
 }
 
+/** 平台配置 — 对齐后端 PlatformConfig 全部字段 */
 export interface GUIPlatformConfig {
   danmaku_ws_uri: string;
   command_ws_uri: string;
+  callback_secret: string;
   max_queue_size: number;
   danmaku_qps_limit: number;
   tts_queue_limit: number;
+  idle_threshold: number;
+  idle_monitor_interval: number;
+}
+
+/** 插件配置字段描述 */
+export interface PluginConfigField {
+  type: "str" | "int" | "float" | "bool" | "enum";
+  label: string;
+  default: unknown;
+  description: string;
+  /** enum 类型专用：可选值列表 */
+  options?: string[];
+}
+
+/** 插件配置 schema */
+export interface PluginSchema {
+  meta: {
+    name: string;
+    description: string;
+    category: string;
+  };
+  fields: Record<string, PluginConfigField>;
 }
 
 export interface GUIConfig {
@@ -79,6 +112,8 @@ export interface GUIConfig {
   active_persona: string;
   model: GUIModelConfig;
   platform: GUIPlatformConfig;
+  plugins: Record<string, Record<string, unknown>>;
+  plugin_schemas: Record<string, PluginSchema>;
 }
 
 export interface GUITraceSpan {
@@ -108,11 +143,14 @@ export type ClientMessage =
   | { type: "command"; payload: { command: string } }
   | { type: "start_agent" }
   | { type: "stop_agent" }
-  | { type: "switch_persona"; payload: { name: string } };
+  | { type: "switch_persona"; payload: { name: string } }
+  | { type: "update_config"; payload: Record<string, unknown> }
+  | { type: "reload_config" };
 
 export type ServerMessage =
   | { type: "event"; payload: GUIEvent }
   | { type: "state"; payload: GUIState }
   | { type: "response"; payload: GUIResponse }
   | { type: "metrics"; payload: GUIMetrics }
+  | { type: "trace"; payload: { spans: GUITraceSpan[] } }
   | { type: "config"; payload: GUIConfig };

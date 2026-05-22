@@ -208,6 +208,24 @@ class PluginRegistry:
         result.extend(self._hooks)
         return result
 
+    # --- 配置注入 ---
+
+    def inject_configs(self, configs: dict[str, dict]) -> None:
+        """将插件配置注入到已注册的插件实例中。
+
+        遍历所有已注册插件，若 configs 中存在与插件名称匹配的配置段，
+        则调用插件的 set_config() 方法注入。未匹配的插件保持空配置。
+
+        应在插件启动前调用，确保插件在 _on_start() 中可访问到配置。
+
+        Args:
+            configs: 插件配置映射表，键为插件名称，值为配置字典。
+        """
+        for plugin in self.get_all_plugins():
+            if plugin.name in configs:
+                plugin.set_config(configs[plugin.name])
+                logger.info("已注入配置到插件: %s", plugin.name)
+
     # --- 生命周期 ---
 
     async def start_all(self) -> None:

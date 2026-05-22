@@ -17,6 +17,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import StatusCode
 
 from bellis.core.state import AgentState
+from bellis.gateway.serializers import serialize_metrics, serialize_traces
 from bellis.observability.otel import traced
 from bellis.observability.snapshot import SnapshotExporter
 from bellis.observability.tracing import Tracer
@@ -355,3 +356,83 @@ class TestTracedDecorator:
         parent_span = next(s for s in spans if s.name == "test.parent")
         child_span = next(s for s in spans if s.name == "test.child")
         assert child_span.parent.span_id == parent_span.context.span_id
+
+
+# ---------------------------------------------------------------------------
+# 序列化器测试（trace + metrics 推送到前端）
+# ---------------------------------------------------------------------------
+
+
+class TestSerializeTraces:
+    """serialize_traces 将自建 Tracer 数据转换为前端协议消息。"""
+
+    def test_serialize_empty_traces(self):
+        """空追踪列表应生成 trace 类型消息，payload.spans 为空列表。"""
+        msg = serialize_traces([])
+        assert msg.type == "trace"
+        assert msg.payload["spans"] == []
+
+    def test_serialize_single_trace(self):
+        """单条追踪应正确转换。"""
+        tracer = Tracer()
+        with tracer.span("process_event", {"source": "danmaku"}) as span:
+            span.input_data = "弹幕内容"
+            span.output_data = "回复内容"
+
+        msg = serialize_traces(tracer.get_traces())
+        assert msg.type == "trace"
+        spans = msg.payload["spans"]
+        assert len(spans) == 1
+        t = spans[0]
+        assert t["name"] == "process_event"
+        assert t["duration_ms"] >= 0
+        assert t["input_summary"] == "弹幕内容"
+        assert t["output_summary"] == "回复内容"
+
+    def test_serialize_nested_traces(self):
+        """嵌套追踪应正确转换子节点。"""
+        tracer = Tracer()
+        with tracer.span("parent"):
+            with tracer.span("child_1"):
+                pass
+            with tracer.span("child_2"):
+                pass
+
+        msg = serialize_traces(tracer.get_traces())
+        spans = msg.payload["spans"]
+        assert len(spans) == 1
+        parent = spans[0]
+        assert parent["name"] == "parent"
+        assert len(parent["children"]) == 2
+        assert parent["children"][0]["name"] == "child_1"
+        assert parent["children"][1]["name"] == "child_2"
+
+
+class TestSerializeMetrics:
+    """serialize_metrics 将 AgentState 指标转换为前端协议消息。"""
+
+    def test_serialize_metrics_basic(self):
+        """基本指标应正确提取。"""
+        state: AgentState = {
+            "event_queue": [1, 2, 3],
+            "tts_queue": [1],
+            "state_version": 42,
+            "metrics": {},
+        }
+        msg = serialize_metrics(state)
+        assert msg.type == "metrics"
+        assert msg.payload["event_queue_size"] == 3
+        assert msg.payload["tts_queue_size"] == 1
+        assert msg.payload["state_version"] == 42
+        assert msg.payload["circuit_breaker_state"] == "closed"
+
+    def test_serialize_metrics_with_circuit_breaker(self):
+        """熔断器状态应从 metrics 中提取。"""
+        state: AgentState = {
+            "event_queue": [],
+            "tts_queue": [],
+            "state_version": 1,
+            "metrics": {"circuit_breaker_state": "open"},
+        }
+        msg = serialize_metrics(state)
+        assert msg.payload["circuit_breaker_state"] == "open"

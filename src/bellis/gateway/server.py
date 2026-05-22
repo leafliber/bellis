@@ -18,9 +18,12 @@ import websockets
 from bellis.gateway.handlers import GatewayCallbacks, handle_client_message
 from bellis.gateway.protocol import ClientMessage, ServerMessage
 from bellis.gateway.serializers import (
+    serialize_config,
     serialize_event,
+    serialize_metrics,
     serialize_response,
     serialize_state,
+    serialize_traces,
 )
 
 if TYPE_CHECKING:
@@ -105,6 +108,19 @@ class Gateway:
         msg = serialize_response(state)
         if msg is not None:
             await self.broadcast(msg)
+
+    async def broadcast_traces(self, traces: list[dict]) -> None:
+        """序列化并广播追踪记录。"""
+        if traces:
+            await self.broadcast(serialize_traces(traces))
+
+    async def broadcast_metrics(self, state: AgentState) -> None:
+        """序列化并广播运行指标。"""
+        await self.broadcast(serialize_metrics(state))
+
+    async def broadcast_config(self, config_center: Any, registry: Any = None) -> None:
+        """序列化并广播完整配置。"""
+        await self.broadcast(serialize_config(config_center, registry))
 
     # ─── 客户端处理 ────────────────────────────────────────────────
 

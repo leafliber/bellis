@@ -49,12 +49,13 @@ def _persona_to_safe_dict(persona: PersonaConfig) -> dict:
 
 
 class ConfigCenter:
-    """配置中心，统一管理人物设定、模型和平台配置。
+    """配置中心，统一管理人物设定、模型、平台和插件配置。
 
     Attributes:
         personas: 所有人物设定的映射表，键为 persona 名称。
         model: LLM 模型相关配置。
         platform: 平台连接与运行参数配置。
+        plugins: 插件专属配置映射表，键为插件名称，值为配置字典。
         active_persona: 当前激活的人物设定名称。
     """
 
@@ -63,6 +64,7 @@ class ConfigCenter:
         personas: dict[str, PersonaConfig] | None = None,
         model: ModelConfig | None = None,
         platform: PlatformConfig | None = None,
+        plugins: dict[str, dict] | None = None,
         active_persona: str = "default",
         persist_path: str | Path | None = None,
     ) -> None:
@@ -72,6 +74,8 @@ class ConfigCenter:
             personas: 人物设定映射表，为 None 时使用默认设定。
             model: 模型配置，为 None 时使用默认 ModelConfig。
             platform: 平台配置，为 None 时使用默认 PlatformConfig。
+            plugins: 插件专属配置映射表，键为插件名称，值为配置字典。
+                为 None 时使用空字典。每个插件的配置字典结构由插件自行定义。
             active_persona: 初始激活的人物设定名称，默认为 "default"。
             persist_path: 持久化文件路径，为 None 时使用 data/config.yaml。
                 传入路径后，save() 和 save_to_yaml() 默认写入此路径。
@@ -79,6 +83,7 @@ class ConfigCenter:
         self.personas: dict[str, PersonaConfig] = personas if personas is not None else self._default_personas()
         self.model: ModelConfig = model if model is not None else ModelConfig()
         self.platform: PlatformConfig = platform if platform is not None else PlatformConfig()
+        self.plugins: dict[str, dict] = plugins if plugins is not None else {}
         self.active_persona: str = active_persona
         self._persist_path: Path = Path(persist_path) if persist_path else DEFAULT_DATA_DIR / DEFAULT_CONFIG_FILENAME
 
@@ -159,18 +164,72 @@ class ConfigCenter:
         if auto_save:
             self.save()
 
+    def update_config(self, updates: dict, auto_save: bool = True) -> None:
+        """从前端接收局部配置更新并应用。
+
+        支持局部更新：只传需要修改的字段，未传的字段保持不变。
+        对于 dict 类型字段（personas、plugins），采用合并策略而非替换。
+
+        Args:
+            updates: 需要更新的配置字段，可包含：
+                - personas: dict[str, dict]，合并到现有 personas
+                - active_persona: str，切换激活的 persona
+                - model: dict，合并到现有 model 配置
+                - platform: dict，合并到现有 platform 配置
+                - plugins: dict[str, dict]，合并到现有 plugins 配置
+            auto_save: 是否自动持久化到默认路径，默认为 True。
+        """
+        # 更新 personas（合并策略）
+        if "personas" in updates and updates["personas"] is not None:
+            for name, p_data in updates["personas"].items():
+                if isinstance(p_data, dict):
+                    # tts_speed_range 从列表还原为元组
+                    if "tts_speed_range" in p_data and isinstance(p_data["tts_speed_range"], list):
+                        p_data["tts_speed_range"] = tuple(p_data["tts_speed_range"])
+                    if name in self.personas:
+                        # 合并：用新值覆盖已有字段
+                        existing = self.personas[name].model_dump()
+                        existing.update(p_data)
+                        self.personas[name] = PersonaConfig(**existing)
+                    else:
+                        self.personas[name] = PersonaConfig(**p_data)
+
+        # 切换 active_persona
+        if "active_persona" in updates and updates["active_persona"] is not None:
+            self.active_persona = updates["active_persona"]
+
+        # 更新 model（合并策略）
+        if "model" in updates and updates["model"] is not None:
+            existing = self.model.model_dump()
+            existing.update(updates["model"])
+            self.model = ModelConfig(**existing)
+
+        # 更新 platform（合并策略）
+        if "platform" in updates and updates["platform"] is not None:
+            existing = self.platform.model_dump()
+            existing.update(updates["platform"])
+            self.platform = PlatformConfig(**existing)
+
+        # 更新 plugins（合并策略）
+        if "plugins" in updates and updates["plugins"] is not None:
+            self.plugins.update(updates["plugins"])
+
+        if auto_save:
+            self.save()
+
     def to_dict(self) -> dict:
         """将配置中心序列化为字典。
 
         所有枚举值转为字符串、元组转为列表，确保输出可被 yaml.safe_load 安全反序列化。
 
         Returns:
-            包含 personas、model、platform 和 active_persona 的字典。
+            包含 personas、model、platform、plugins 和 active_persona 的字典。
         """
         return {
             "personas": {name: _persona_to_safe_dict(persona) for name, persona in self.personas.items()},
             "model": self.model.model_dump(),
             "platform": self.platform.model_dump(),
+            "plugins": self.plugins,
             "active_persona": self.active_persona,
         }
 
@@ -181,7 +240,7 @@ class ConfigCenter:
         自动将 tts_speed_range 从列表还原为元组，以匹配 PersonaConfig 的类型定义。
 
         Args:
-            data: 包含配置信息的字典，键应包括 personas、model、platform、active_persona。
+            data: 包含配置信息的字典，键应包括 personas、model、platform、plugins、active_persona。
             persist_path: 持久化文件路径，为 None 时使用默认 data/config.yaml。
 
         Returns:
@@ -196,11 +255,13 @@ class ConfigCenter:
             personas[name] = PersonaConfig(**p_data)
         model = ModelConfig(**data.get("model", {}))
         platform = PlatformConfig(**data.get("platform", {}))
+        plugins = data.get("plugins", {})
         active_persona = data.get("active_persona", "default")
         return cls(
             personas=personas,
             model=model,
             platform=platform,
+            plugins=plugins,
             active_persona=active_persona,
             persist_path=persist_path,
         )

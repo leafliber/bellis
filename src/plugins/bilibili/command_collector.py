@@ -23,6 +23,15 @@ class CommandCollector(BilibiliWSInputPlugin):
         tags=("bilibili", "command"),
     )
 
+    config_schema = {
+        "uri": {
+            "type": "str",
+            "label": "WebSocket 地址",
+            "default": "ws://localhost:8080/command",
+            "description": "命令 WebSocket 服务地址",
+        },
+    }
+
     def __init__(self, uri: str = "ws://localhost:8080/command") -> None:
         """初始化命令收集器。
 
@@ -30,6 +39,12 @@ class CommandCollector(BilibiliWSInputPlugin):
             uri: 命令 WebSocket 服务地址，默认 ``ws://localhost:8080/command``。
         """
         super().__init__(uri=uri)
+
+    async def _on_start(self) -> None:
+        """启动时从 self.config 读取 uri 覆盖构造函数默认值。"""
+        if "uri" in self._config:
+            self._uri = self._config["uri"]
+        await super()._on_start()
 
     def _parse_message(self, raw: str) -> CommandEvent | None:
         """将原始 JSON 字符串解析为 CommandEvent。
