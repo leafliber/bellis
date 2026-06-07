@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 
 from opentelemetry import trace as otel_trace
 
@@ -33,6 +34,34 @@ from bellis.runtime.sync import TimelineSync
 
 logger = logging.getLogger(__name__)
 
+# .env 文件中 KEY/URL/MODEL → ConfigCenter model 字段的映射
+_ENV_KEY_MAP = {"KEY": "api_key", "URL": "base_url", "MODEL": "primary_model"}
+
+
+def _load_dotenv(path: str | Path | None = None) -> dict[str, str | None]:
+    """从 .env 文件加载 LLM 配置。
+
+    Args:
+        path: .env 文件路径，默认为项目根目录下的 .env。
+
+    Returns:
+        包含 api_key、base_url、model 三个键的字典，值可能为 None。
+    """
+    env_path = Path(path) if path else Path(__file__).resolve().parent.parent.parent / ".env"
+    env: dict[str, str | None] = {"api_key": None, "base_url": None, "model": None}
+    if not env_path.exists():
+        return env
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+            field = _ENV_KEY_MAP.get(key.strip().upper())
+            if field:
+                env[field] = value.strip()
+    return env
+
 
 class BellisApp(GatewayCallbacks):
     """Bellis 主应用：加载插件 → 编译图 → 跑主循环。
@@ -40,6 +69,9 @@ class BellisApp(GatewayCallbacks):
     负责管理应用的完整生命周期，包括插件启动/停止、事件收集、
     空闲检测、主循环驱动及优雅关闭。同时实现 GatewayCallbacks 接口，
     处理前端通过 Gateway 发来的控制指令。
+
+    使用 ``BellisApp.create()`` 工厂方法可自动完成 .env 加载、
+    配置构建和内置插件注册；也可手动传入 config/registry 进行测试。
 
     Attributes:
         _config: 配置中心实例。
@@ -100,6 +132,85 @@ class BellisApp(GatewayCallbacks):
                 host=gateway_host,
                 port=gateway_port,
             )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        dotenv_path: str | Path | None = None,
+        streaming: bool = False,
+        gateway_host: str = "localhost",
+        gateway_port: int = 8765,
+        enable_gateway: bool = True,
+        otlp_endpoint: str | None = None,
+        console_export: bool = False,
+        enable_otel: bool = True,
+    ) -> BellisApp:
+        """工厂方法：自动完成配置加载和插件注册，创建就绪的 BellisApp。
+
+        执行以下组装步骤：
+        1. 从 .env 文件加载 LLM 配置（api_key / base_url / model）
+        2. 加载或创建 ConfigCenter，用 .env 值覆盖模型配置
+        3. 创建 PluginRegistry 并注册内置插件（TTSPlugin 等）
+        4. 构建 BellisApp 实例
+
+        Args:
+            dotenv_path: .env 文件路径，默认为项目根目录下的 .env。
+            streaming: 是否启用流式输出模式。
+            gateway_host: Gateway 监听地址。
+            gateway_port: Gateway 监听端口。
+            enable_gateway: 是否启用前端通信网关。
+            otlp_endpoint: OpenTelemetry OTLP 导出端点。
+            console_export: 是否启用 OTel 控制台导出。
+            enable_otel: 是否启用 OpenTelemetry。
+
+        Returns:
+            已完成组装的 BellisApp 实例。
+        """
+        # 1. 加载 .env
+        env = _load_dotenv(dotenv_path)
+
+        # 2. 构建 ConfigCenter
+        config = ConfigCenter.load_or_default()
+        model_updates = {k: v for k, v in env.items() if v}
+        if model_updates:
+            config.update_config({"model": model_updates}, auto_save=False)
+
+        # 3. 注册内置插件
+        registry = PluginRegistry()
+        cls._register_builtin_plugins(registry)
+
+        logger.info(
+            "BellisApp 组装完成: model=%s, plugins=%s",
+            config.model.primary_model,
+            [p.name for p in registry.get_all_plugins()],
+        )
+
+        return cls(
+            config=config,
+            registry=registry,
+            streaming=streaming,
+            gateway_host=gateway_host,
+            gateway_port=gateway_port,
+            enable_gateway=enable_gateway,
+            otlp_endpoint=otlp_endpoint,
+            console_export=console_export,
+            enable_otel=enable_otel,
+        )
+
+    @staticmethod
+    def _register_builtin_plugins(registry: PluginRegistry) -> None:
+        """注册内置插件到注册表。
+
+        Args:
+            registry: 插件注册表实例。
+        """
+        from plugins.tts import TTSPlugin
+
+        from plugins.live2d import Live2DPlugin
+
+        registry.register_output(TTSPlugin())
+        registry.register_output(Live2DPlugin())
 
     @property
     def config(self) -> ConfigCenter:
@@ -175,6 +286,32 @@ class BellisApp(GatewayCallbacks):
         if self._gateway is not None:
             await self._gateway.broadcast_config(self._config, self._registry)
 
+    def _inject_live2d_broadcast(self) -> None:
+        """将 Gateway 广播函数注入到 Live2D 插件。
+
+        仅在 Gateway 已启用且 Live2D 插件已注册时执行。
+        注入后 Live2D 插件可通过 Gateway 向前端发送控制命令。
+        """
+        if self._gateway is None:
+            return
+        for plugin in self._registry.outputs:
+            if hasattr(plugin, "set_broadcast_fn") and callable(plugin.set_broadcast_fn):
+                plugin.set_broadcast_fn(self._broadcast_live2d)
+                logger.info("Live2D 插件广播函数已注入")
+                break
+
+    def _broadcast_live2d(self, command) -> None:
+        """同步广播函数，将 Live2D 命令提交到事件循环。
+
+        由 Live2D 驱动器调用，将命令通过 Gateway 异步广播到前端。
+
+        Args:
+            command: Live2DCommand 对象。
+        """
+        if self._gateway is None:
+            return
+        asyncio.ensure_future(self._gateway.broadcast_live2d_command(command))
+
     def _build_timeline_sync(self) -> TimelineSync | None:
         """从已注册的 OutputPlugin 中提取 TTSExecutor 和 Live2DExecutor，构建 TimelineSync。
 
@@ -248,6 +385,8 @@ class BellisApp(GatewayCallbacks):
             await self._gateway.start()
             # 推送初始配置到前端
             await self._push_config()
+            # 注入 Live2D 广播函数
+            self._inject_live2d_broadcast()
 
         # 启动事件收集任务
         collect_task = asyncio.create_task(self._collect_events())

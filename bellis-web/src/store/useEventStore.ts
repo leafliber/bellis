@@ -4,6 +4,7 @@ import { MAX_EVENTS } from "@/utils/constants";
 import { useStateStore } from "@/store/useStateStore";
 import { useObservabilityStore } from "@/store/useObservabilityStore";
 import { useConfigStore } from "@/store/useConfigStore";
+import { useLive2DStore } from "@/store/useLive2DStore";
 
 interface EventState {
   events: GUIEvent[];
@@ -38,6 +39,9 @@ function handleWSMessage(data: string) {
         break;
       case "config":
         useConfigStore.getState().updateConfig(msg.payload);
+        break;
+      case "live2d":
+        useLive2DStore.getState().enqueueCommand(msg.payload);
         break;
     }
   } catch {

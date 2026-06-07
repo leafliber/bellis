@@ -40,3 +40,22 @@ class Live2DExecutor(ABC):
             duration: 动作持续时间（秒），默认 1.0 秒。
         """
         ...
+
+    async def send_command(self, command: object) -> None:
+        """发送细粒度 Live2D 控制命令。
+
+        子类可覆盖此方法以支持更细粒度的模型参数控制。
+        默认实现将 set_emotion 类型命令委托给 drive() 方法，
+        其他类型命令不做处理（需要子类自行实现）。
+
+        Args:
+            command: Live2D 控制命令对象，具体类型由插件定义。
+        """
+        # 默认实现：尝试从命令对象中提取情绪信息
+        if hasattr(command, "type") and hasattr(command, "emotion"):
+            if getattr(command, "type", None) == "set_emotion" and getattr(command, "emotion", None):
+                try:
+                    emotion = EmotionEnum(getattr(command, "emotion"))
+                    await self.drive(emotion=emotion, motion=None)
+                except ValueError:
+                    pass

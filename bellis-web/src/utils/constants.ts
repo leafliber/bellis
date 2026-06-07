@@ -9,6 +9,10 @@ export const EMOTION_ICONS: Record<EmotionType, string> = {
   sad: "😢",
   surprised: "😲",
   neutral: "😐",
+  think: "🤔",
+  awkward: "😅",
+  question: "❓",
+  curious: "🧐",
 };
 
 export const EMOTION_COLORS: Record<EmotionType, string> = {
@@ -20,6 +24,10 @@ export const EMOTION_COLORS: Record<EmotionType, string> = {
   sad: "#89dceb",
   surprised: "#fab387",
   neutral: "#a6adc8",
+  think: "#b4befe",
+  awkward: "#cba6f7",
+  question: "#94e2d5",
+  curious: "#74c7ec",
 };
 
 export const SOURCE_COLORS: Record<EventSource, string> = {

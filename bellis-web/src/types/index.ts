@@ -1,5 +1,5 @@
 export type EventSource = "danmaku" | "gift" | "command" | "rag" | "system";
-export type EmotionType = "happy" | "excited" | "calm" | "shy" | "angry" | "sad" | "surprised" | "neutral";
+export type EmotionType = "happy" | "excited" | "calm" | "shy" | "angry" | "sad" | "surprised" | "neutral" | "think" | "awkward" | "question" | "curious";
 export type MotionType = "idle" | "wave" | "nod" | "shake_head" | "bow" | "clap" | "point" | "think" | "cheer";
 
 export interface GUIEvent {
@@ -153,4 +153,5 @@ export type ServerMessage =
   | { type: "response"; payload: GUIResponse }
   | { type: "metrics"; payload: GUIMetrics }
   | { type: "trace"; payload: { spans: GUITraceSpan[] } }
-  | { type: "config"; payload: GUIConfig };
+  | { type: "config"; payload: GUIConfig }
+  | { type: "live2d"; payload: import("./live2d").Live2DCommand };

@@ -4,12 +4,13 @@ import { Save, Plus, Trash2, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { EmotionType, MotionType, GUIPersonaConfig } from "@/types";
 
-const EMOTION_OPTIONS: EmotionType[] = ["happy", "excited", "calm", "shy", "angry", "sad", "surprised", "neutral"];
+const EMOTION_OPTIONS: EmotionType[] = ["happy", "excited", "calm", "shy", "angry", "sad", "surprised", "neutral", "think", "awkward", "question", "curious"];
 const MOTION_OPTIONS: MotionType[] = ["idle", "wave", "nod", "shake_head", "bow", "clap", "point", "think", "cheer"];
 
 const EMOTION_LABELS: Record<EmotionType, string> = {
   happy: "开心", excited: "兴奋", calm: "平静", shy: "害羞",
   angry: "生气", sad: "悲伤", surprised: "惊讶", neutral: "中性",
+  think: "思考", awkward: "尴尬", question: "疑问", curious: "好奇",
 };
 
 const MOTION_LABELS: Record<MotionType, string> = {

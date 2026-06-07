@@ -36,6 +36,8 @@ class Action(BaseModel):
     expression: str | None = None
     motion: MotionEnum | None = None
     motion_duration: float = 1.0
+    parameters: dict[str, float] | None = None  # 细粒度参数控制（如 Cubism 参数）
+    intensity: float = 1.0  # 情绪/表情强度
     # danmaku reply
     reply_text: str | None = None
     # common

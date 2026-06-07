@@ -8,7 +8,8 @@ from enum import Enum, StrEnum
 
 
 class EmotionEnum(StrEnum):
-    """情感枚举，表示 Agent 当前的情感状态。"""
+    """情感枚举，表示 Agent 当前的情感状态。
+    """
 
     happy = "happy"          # 开心
     excited = "excited"      # 兴奋
@@ -18,6 +19,10 @@ class EmotionEnum(StrEnum):
     sad = "sad"              # 悲伤
     surprised = "surprised"  # 惊讶
     neutral = "neutral"      # 中性/默认
+    think = "think"          # 思考
+    awkward = "awkward"      # 尴尬
+    question = "question"    # 疑问
+    curious = "curious"      # 好奇
 
 
 class MotionEnum(StrEnum):

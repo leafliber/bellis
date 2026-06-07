@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import websockets
 
@@ -29,6 +29,7 @@ from bellis.gateway.serializers import (
 if TYPE_CHECKING:
     from bellis.core.events import LiveEvent
     from bellis.core.state import AgentState
+    from plugins.live2d.models import Live2DCommand
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,15 @@ class Gateway:
     async def broadcast_config(self, config_center: Any, registry: Any = None) -> None:
         """序列化并广播完整配置。"""
         await self.broadcast(serialize_config(config_center, registry))
+
+    async def broadcast_live2d_command(self, command: Live2DCommand) -> None:
+        """广播 Live2D 控制命令到所有连接的客户端。
+
+        Args:
+            command: Live2D 控制命令对象。
+        """
+        msg = ServerMessage(type="live2d", payload=command.model_dump(exclude_none=True))
+        await self.broadcast(msg)
 
     # ─── 客户端处理 ────────────────────────────────────────────────
 

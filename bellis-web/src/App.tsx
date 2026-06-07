@@ -4,6 +4,7 @@ import AppLayout from "@/components/layout/AppLayout";
 import Dashboard from "@/pages/Dashboard";
 import Config from "@/pages/Config";
 import Observability from "@/pages/Observability";
+import Live2DPage from "@/pages/Live2D";
 import { useAppStore } from "@/store/useAppStore";
 import { useEventStore } from "@/store/useEventStore";
 
@@ -38,6 +39,8 @@ export default function App() {
           <Route path="/config" element={<Config />} />
           <Route path="/observability" element={<Observability />} />
         </Route>
+        {/* Live2D 独立页面 — 全屏渲染，不使用 AppLayout */}
+        <Route path="/live2d" element={<Live2DPage />} />
       </Routes>
     </Router>
   );

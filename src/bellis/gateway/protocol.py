@@ -123,6 +123,23 @@ class GUIConfig(BaseModel):
     plugin_schemas: dict[str, dict] = Field(default_factory=dict)
 
 
+class GUILive2DCommand(BaseModel):
+    """Live2D 控制命令载荷，与前端 Live2DCommand 类型对应。"""
+
+    model_config = {"frozen": True}
+
+    type: str  # Live2DCommandType 值
+    emotion: str | None = None
+    intensity: float = 1.0
+    group: str | None = None
+    index: int = 0
+    param_id: str | None = None
+    value: float | None = None
+    parameters: dict[str, float] | None = None
+    expression_name: str | None = None
+    mouth_open: float | None = None
+
+
 # ─── 服务端消息 ──────────────────────────────────────────────────────
 
 
@@ -131,7 +148,7 @@ class ServerMessage(BaseModel):
 
     model_config = {"frozen": True}
 
-    type: str  # "event" | "state" | "response" | "action" | "metrics" | "trace" | "config"
+    type: str  # "event" | "state" | "response" | "action" | "metrics" | "trace" | "config" | "live2d"
     payload: dict
 
 

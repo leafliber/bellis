@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Settings, Activity, Bot } from "lucide-react";
+import { LayoutDashboard, Settings, Activity, Bot, User } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "仪表盘" },
+  { to: "/live2d", icon: User, label: "Live2D" },
   { to: "/config", icon: Settings, label: "配置" },
   { to: "/observability", icon: Activity, label: "可观测性" },
 ];
