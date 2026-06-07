@@ -20,7 +20,14 @@ class GatewayCallbacks:
     Gateway 不直接引用 BellisApp 的内部属性。
     """
 
-    async def on_command(self, text: str) -> None:
+    async def on_command(
+        self,
+        text: str,
+        *,
+        user_name: str = "你",
+        user_level: int = 0,
+        fan_badge: str | None = None,
+    ) -> None:
         """前端发送弹幕/命令。"""
         raise NotImplementedError
 
@@ -59,7 +66,12 @@ async def handle_client_message(
         case "command":
             text = msg.payload.get("command", "").strip()
             if text:
-                await callbacks.on_command(text)
+                await callbacks.on_command(
+                    text,
+                    user_name=msg.payload.get("user_name", "你"),
+                    user_level=msg.payload.get("user_level", 0),
+                    fan_badge=msg.payload.get("fan_badge"),
+                )
         case "start_agent":
             await callbacks.on_start_agent()
         case "stop_agent":

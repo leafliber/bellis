@@ -16,6 +16,9 @@ from bellis.runtime.executors import TTSExecutor
 
 logger = logging.getLogger(__name__)
 
+# OpenAI TTS 支持的音频格式
+_OPENAI_RESPONSE_FORMATS = ("mp3", "opus", "aac", "flac", "wav", "pcm")
+
 
 class ApiTTSDriver(TTSExecutor):
     """基于 HTTP API 的 TTS 驱动，兼容 OpenAI TTS 和本地 VITS 部署。
@@ -24,29 +27,32 @@ class ApiTTSDriver(TTSExecutor):
         _endpoint: API 端点 URL。
         _api_key: 认证密钥（本地部署可留空）。
         _voice: 音色标识。
-        _model: 模型名称（OpenAI 模式使用）。
+        _model: 模型名称（OpenAI 模式使用，如 ``tts-1``、``tts-1-hd``）。
         _api_format: API 格式，``"openai"`` 或 ``"vits"``。
+        _response_format: 音频输出格式（OpenAI 模式使用，如 ``mp3``、``wav``）。
     """
 
     def __init__(
         self,
-        endpoint: str = "http://localhost:9880/tts",
+        endpoint: str = "https://api.openai.com/v1/audio/speech",
         api_key: str = "",
-        voice: str = "default",
+        voice: str = "alloy",
         model: str = "tts-1",
         api_format: str = "openai",
+        response_format: str = "mp3",
     ) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._api_key = api_key
         self._voice = voice
         self._model = model
         self._api_format = api_format
+        self._response_format = response_format
 
     async def synthesize(self, task: TTSTask) -> bytes | None:
         """通过 HTTP API 合成语音。
 
         根据 api_format 选择请求格式：
-        - openai: POST /v1/audio/speech，body={"model", "input", "voice", "speed"}
+        - openai: POST /v1/audio/speech，body={"model", "input", "voice", "speed", "response_format"}
         - vits: POST /tts，body={"text", "speaker_id"/"voice", "speed"}
 
         Args:
@@ -65,30 +71,46 @@ class ApiTTSDriver(TTSExecutor):
             payload = self._build_vits_payload(task)
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(self._endpoint, json=payload, headers=headers)
                 resp.raise_for_status()
                 audio = resp.content
                 if audio:
-                    logger.debug("API TTS 合成成功: %d bytes, endpoint=%s", len(audio), self._endpoint)
+                    logger.debug(
+                        "API TTS 合成成功: %d bytes, endpoint=%s, format=%s",
+                        len(audio),
+                        self._endpoint,
+                        self._response_format,
+                    )
                     return audio
                 logger.warning("API TTS 返回空音频: endpoint=%s", self._endpoint)
                 return None
         except httpx.HTTPStatusError as e:
-            logger.error("API TTS HTTP 错误: %s %s", e.response.status_code, self._endpoint)
+            logger.error(
+                "API TTS HTTP 错误: %s %s, body=%s",
+                e.response.status_code,
+                self._endpoint,
+                e.response.text[:200],
+            )
             return None
         except httpx.RequestError:
             logger.exception("API TTS 请求异常: endpoint=%s", self._endpoint)
             return None
 
     def _build_openai_payload(self, task: TTSTask) -> dict:
-        """构建 OpenAI TTS API 请求体。"""
-        return {
+        """构建 OpenAI TTS API 请求体。
+
+        参考: https://platform.openai.com/docs/api-reference/audio/createSpeech
+        """
+        payload: dict = {
             "model": self._model,
             "input": task.text,
             "voice": self._voice,
             "speed": task.speed,
         }
+        if self._response_format in _OPENAI_RESPONSE_FORMATS:
+            payload["response_format"] = self._response_format
+        return payload
 
     def _build_vits_payload(self, task: TTSTask) -> dict:
         """构建 VITS 本地部署请求体。"""

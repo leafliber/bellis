@@ -39,6 +39,8 @@ function handleWSMessage(data: string) {
         break;
       case "config":
         useConfigStore.getState().updateConfig(msg.payload);
+        // 同步 Live2D 配置到 Live2D Store
+        useLive2DStore.getState().syncFromConfig();
         break;
       case "live2d":
         useLive2DStore.getState().enqueueCommand(msg.payload);

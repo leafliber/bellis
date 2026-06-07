@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Square, Send, ChevronDown, Wifi, WifiOff } from "lucide-react";
+import { Play, Square, Send, ChevronDown, Wifi, WifiOff, AlertCircle } from "lucide-react";
 import { useAppStore } from "@/store/useAppStore";
 import { useConfigStore } from "@/store/useConfigStore";
 import { useEventStore } from "@/store/useEventStore";
@@ -12,13 +12,16 @@ export default function ControlBar() {
   const [command, setCommand] = useState("");
   const [personaOpen, setPersonaOpen] = useState(false);
   const [wsUrl, setWsUrl] = useState("ws://localhost:8765");
+  const [disconnectedWarning, setDisconnectedWarning] = useState(false);
 
   const handleStart = () => {
-    setAgentRunning(true);
-    if (wsConnected) {
-      sendWS({ type: "start_agent" });
+    if (!wsConnected) {
+      setDisconnectedWarning(true);
+      setTimeout(() => setDisconnectedWarning(false), 3000);
+      return;
     }
-    // TODO: 未连接后端时需要提示用户先连接
+    setAgentRunning(true);
+    sendWS({ type: "start_agent" });
   };
 
   const handleStop = () => {
@@ -41,7 +44,7 @@ export default function ControlBar() {
   const handleCommand = () => {
     if (!command.trim()) return;
     if (wsConnected) {
-      sendWS({ type: "command", payload: { command } });
+      sendWS({ type: "command", payload: { command, user_name: "你" } });
     }
     setCommand("");
   };
@@ -61,7 +64,14 @@ export default function ControlBar() {
   };
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border-t border-[var(--border)]">
+    <div className="flex items-center gap-3 px-4 py-3 bg-[var(--surface)] border-t border-[var(--border)] relative">
+      {/* 未连接提示 */}
+      {disconnectedWarning && (
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--warning)]/20 text-[var(--warning)] text-xs font-medium whitespace-nowrap animate-pulse">
+          <AlertCircle className="w-3.5 h-3.5" />
+          请先连接后端
+        </div>
+      )}
       {/* Start/Stop buttons */}
       <button
         onClick={handleStart}

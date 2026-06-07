@@ -140,7 +140,7 @@ export interface Snapshot {
 
 // WebSocket message types
 export type ClientMessage =
-  | { type: "command"; payload: { command: string } }
+  | { type: "command"; payload: { command: string; user_name?: string; user_level?: number; fan_badge?: string | null } }
   | { type: "start_agent" }
   | { type: "stop_agent" }
   | { type: "switch_persona"; payload: { name: string } }

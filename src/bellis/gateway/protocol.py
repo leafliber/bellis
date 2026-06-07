@@ -159,6 +159,9 @@ class CommandPayload(BaseModel):
     """客户端发送弹幕的载荷。"""
 
     command: str
+    user_name: str = "你"
+    user_level: int = 0
+    fan_badge: str | None = None
 
 
 class SwitchPersonaPayload(BaseModel):

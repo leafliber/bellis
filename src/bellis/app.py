@@ -239,9 +239,21 @@ class BellisApp(GatewayCallbacks):
 
     # ─── GatewayCallbacks 实现 ─────────────────────────────────────
 
-    async def on_command(self, text: str) -> None:
+    async def on_command(
+        self,
+        text: str,
+        *,
+        user_name: str = "你",
+        user_level: int = 0,
+        fan_badge: str | None = None,
+    ) -> None:
         """前端弹幕 → 注入 EventBus。"""
-        event = DanmakuEvent(content=text, user_name="你", user_level=0, fan_badge=None)  # TODO: 从前端传递真实用户信息
+        event = DanmakuEvent(
+            content=text,
+            user_name=user_name,
+            user_level=user_level,
+            fan_badge=fan_badge,
+        )
         if self._event_bus:
             await self._event_bus.publish(event)
 

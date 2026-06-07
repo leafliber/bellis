@@ -59,14 +59,20 @@ class TTSPlugin(OutputPlugin):
         "voice": {
             "type": "str",
             "label": "音色",
-            "default": "zh-CN-XiaoxiaoNeural",
-            "description": "Edge-TTS 音色名 或 API 音色 ID",
+            "default": "alloy",
+            "description": "OpenAI 音色(alloy/echo/fable/onyx/nova/shimmer) 或 Edge-TTS 音色名",
+        },
+        "model": {
+            "type": "str",
+            "label": "模型",
+            "default": "tts-1",
+            "description": "OpenAI TTS 模型名称（tts-1 / tts-1-hd），Edge/dummy 模式忽略",
         },
         "api_endpoint": {
             "type": "str",
             "label": "API 地址",
-            "default": "http://localhost:9880/tts",
-            "description": "api 模式的 HTTP 端点（兼容 VITS/OpenAI 等）",
+            "default": "https://api.openai.com/v1/audio/speech",
+            "description": "api 模式的 HTTP 端点（兼容 OpenAI / VITS 等）",
         },
         "api_key": {
             "type": "str",
@@ -80,6 +86,13 @@ class TTSPlugin(OutputPlugin):
             "default": "openai",
             "description": "HTTP API 请求格式",
             "options": ["openai", "vits"],
+        },
+        "response_format": {
+            "type": "enum",
+            "label": "音频格式",
+            "default": "mp3",
+            "description": "OpenAI 模式的输出音频格式",
+            "options": ["mp3", "opus", "aac", "flac", "wav", "pcm"],
         },
         "sample_rate": {
             "type": "int",
@@ -119,10 +132,15 @@ class TTSPlugin(OutputPlugin):
             )
         elif driver_cls is ApiTTSDriver:
             return ApiTTSDriver(
-                endpoint=self._config.get("api_endpoint", "http://localhost:9880/tts"),
+                endpoint=self._config.get(
+                    "api_endpoint",
+                    "https://api.openai.com/v1/audio/speech",
+                ),
                 api_key=self._config.get("api_key", ""),
-                voice=self._config.get("voice", "default"),
+                voice=self._config.get("voice", "alloy"),
+                model=self._config.get("model", "tts-1"),
                 api_format=self._config.get("api_format", "openai"),
+                response_format=self._config.get("response_format", "mp3"),
             )
         return _DummyTTSDriver()
 

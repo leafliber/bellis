@@ -36,6 +36,21 @@ class Live2DPlugin(OutputPlugin):
         tags=("live2d",),
     )
 
+    config_schema = {
+        "enabled": {
+            "type": "bool",
+            "label": "启用 Live2D",
+            "default": True,
+            "description": "是否启用 Live2D 渲染",
+        },
+        "model_url": {
+            "type": "str",
+            "label": "模型 URL",
+            "default": "/data/live2d/shizuku/shizuku.model3.json",
+            "description": "Live2D 模型文件 URL（.model3.json），本地文件使用 /data/ 前缀",
+        },
+    }
+
     def __init__(self) -> None:
         super().__init__()
         self._driver: WebSocketLive2DDriver | None = None
