@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { JsonValueSchema } from "../common/json-value.js";
+import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 import { UuidSchema } from "../common/ids.js";
 import { CueLaneSchema } from "../scene/cue.js";
 import { SyncLevelSchema } from "../scene/scene.js";
@@ -14,7 +14,7 @@ import { SyncLevelSchema } from "../scene/scene.js";
  * SpeechIntent：唯一发言来源的内容（architecture-plan.md §7.3）。
  * TTS、字幕和口型读取同一份 SpeechIntent，不另存副本。
  */
-export const SpeechIntentSchema = z.looseObject({
+export const SpeechIntentSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   text: z.string().min(1).max(2000),
   purpose: z.enum(["answer", "tool_notice", "aside", "reaction"]),
@@ -89,7 +89,7 @@ export const GameIntentSchema = z.discriminatedUnion("timeRelation", [
  * Phase 1 仅固定身份与生命周期字段，内容由 Overlay 插件解释；
  * content 必须是 JSON 值。
  */
-export const OverlayIntentSchema = z.looseObject({
+export const OverlayIntentSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   intentId: UuidSchema,
   kind: z.string().min(1).max(64),
@@ -102,7 +102,7 @@ export const OverlayIntentSchema = z.looseObject({
  * hardLanes 列出必须整组对齐才开始（或整体降级）的 Lane；
  * softTimeoutMs 限制软同步项的最长等待。
  */
-export const SyncPolicySchema = z.looseObject({
+export const SyncPolicySchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   hardLanes: z.array(CueLaneSchema).max(8),
   softTimeoutMs: z.number().int().nonnegative().optional(),

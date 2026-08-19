@@ -33,7 +33,9 @@
     "intentId",
     "kind"
   ],
-  "additionalProperties": {},
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
   "definitions": {
     "__schema0": {
       "anyOf": [

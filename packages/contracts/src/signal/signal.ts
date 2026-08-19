@@ -1,13 +1,13 @@
 import { z } from "zod";
 import { UuidSchema } from "../common/ids.js";
-import { JsonValueSchema } from "../common/json-value.js";
+import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 
 /**
  * Signal：尚未被决策消费的输入事实（architecture-plan.md §5）。
  * kind/source 为插件自定义标识；payload 必须是 JSON 值，扩展字段
  * 以未知键形式透传（loose，配合 §6.6 的前向兼容策略）。
  */
-export const SignalSchema = z.looseObject({
+export const SignalSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   id: UuidSchema,
   kind: z.string().min(1).max(64),

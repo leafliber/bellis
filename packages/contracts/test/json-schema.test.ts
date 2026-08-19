@@ -4,7 +4,7 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, describe, it } from "vitest";
 import { CONTRACT_SCHEMA_ENTRIES, generateJsonSchemaFiles } from "../src/json-schema.js";
-import { SCHEMA_FIXTURES } from "./fixtures.js";
+import { BIGINT_PAYLOAD, SCHEMA_FIXTURES } from "./fixtures.js";
 
 /**
  * ajv 是 CJS 包，其子路径（dist/2020）与默认导出在 TypeScript 7 的
@@ -26,9 +26,8 @@ const Ajv2020 = require("ajv/dist/2020") as unknown as ValidatorConstructor;
 /**
  * JSON Schema 双目标语义等价测试（ADR 0001 §4）：
  * - 提交入库的 2020-12 与 Draft 7 生成物用同一组合法/非法 Fixture 验证。
- * - valid 三者（Zod / Ajv2020 / AjvDraft7）都必须接受；
- *   invalid 三者都必须拒绝；refinementOnly 只被 Zod 拒绝（跨字段约束
- *   无法映射到 JSON Schema，属文档化的运行期语义）。
+ * - valid 三者（Zod / Ajv2020 / AjvDraft7）都必须接受；invalid 三者
+ *   都必须拒绝。不存在只被单侧拒绝的样本类别（没有 refinementOnly）。
  */
 
 const generatedRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../generated");
@@ -102,6 +101,29 @@ describe("semantic equivalence across Zod / 2020-12 / Draft 7", () => {
     // 类别」的规则本身：Fixture 注册表只允许 valid / invalid 两类。
     for (const fixtures of Object.values(SCHEMA_FIXTURES)) {
       expect(Object.keys(fixtures).toSorted()).toEqual(["invalid", "valid"]);
+    }
+  });
+
+  it("non-JSON values in extension keys are rejected by all three validators", () => {
+    // 可扩展对象的未知扩展键以 JsonValueSchema 为 catch-all，闭合对象拒绝
+    // 一切未知键：向任何对象样本注入 bigint 扩展键都必须三方一致拒绝，
+    // 否则会出现「校验通过但 JSON.stringify 抛错」的样本。
+    for (const [key, fixtures] of Object.entries(SCHEMA_FIXTURES)) {
+      const schema = CONTRACT_SCHEMA_ENTRIES[key as keyof typeof CONTRACT_SCHEMA_ENTRIES];
+      const v2020 = validate2020.get(key);
+      const vDraft7 = validateDraft7.get(key);
+      if (v2020 === undefined || vDraft7 === undefined) {
+        throw new Error(`missing compiled validator for ${key}`);
+      }
+      for (const sample of fixtures.valid) {
+        if (typeof sample !== "object" || sample === null || Array.isArray(sample)) continue;
+        const probe = { ...(sample as Record<string, unknown>), extensionProbe: BIGINT_PAYLOAD };
+        expect(schema.safeParse(probe).success, `${key} zod should reject bigint extension`).toBe(
+          false,
+        );
+        expect(v2020(probe), `${key} ajv2020 should reject bigint extension`).toBe(false);
+        expect(vDraft7(probe), `${key} ajv draft7 should reject bigint extension`).toBe(false);
+      }
     }
   });
 });

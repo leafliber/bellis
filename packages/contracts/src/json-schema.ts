@@ -35,10 +35,14 @@ import { JsonValueSchema } from "./common/json-value.js";
  * - 生成内容必须完全确定：不含时间戳、随机数或环境相关信息。
  *
  * 语义等价策略（Zod ⇔ 生成物，任意输入判定一致）：
- * - Zod 4 的 toJSONSchema 会把 plain z.object 与 strictObject 都输出为
- *   additionalProperties:false，因此协议对象显式二选一：判别/互斥结构用
- *   strictObject（闭合），可前向扩展的数据对象用 looseObject（开放，
- *   生成物为 additionalProperties:{}）。不使用裸 z.object。
+ * - 协议对象显式二选一：闭合的规范形态用 strictObject（生成物为
+ *   additionalProperties:false，未知键被拒），可前向扩展的数据对象用
+ *   extensibleJsonObject（catch-all 为 JsonValueSchema，生成物为
+ *   additionalProperties: JsonValueSchema——未知扩展键必须是 JSON 值）。
+ *   不使用裸 z.object（strip 静默丢键），也不使用 z.looseObject（未知键
+ *   不受约束，生成物 additionalProperties:{} 无法拒绝 bigint 等非 JSON 值）。
+ * - DecisionPacket 顶层闭合：遗留顶层 message/speech 与一切未知顶层键
+ *   被结构性拒绝（ADR 0001「不设置顶层 message 或 speech」的可执行化）。
  * - 不使用任何跨字段 refine；「至少一个行动」「noOp 互斥」「wordIndex
  *   必填」等约束全部以 union/discriminated-union/min(1) 结构表达。
  * - 生产者不变量（clock.pong 的 r2≥r1、批次水位顺序）不属于 Schema 约束，

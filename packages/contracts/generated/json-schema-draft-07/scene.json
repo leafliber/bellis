@@ -59,7 +59,9 @@
           "lanes",
           "level"
         ],
-        "additionalProperties": {}
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
       }
     },
     "deadlineMs": {
@@ -84,5 +86,40 @@
     "deadlineMs",
     "interruptPolicy"
   ],
-  "additionalProperties": {}
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

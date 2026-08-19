@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TraceIdSchema } from "../common/ids.js";
-import { JsonValueSchema } from "../common/json-value.js";
+import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 
 /**
  * 错误使用稳定机器码，客户端不得解析错误文案（phase-1-build-guide.md §6.5）。
@@ -17,7 +17,7 @@ export const ErrorCodeSchema = z.enum([
   "internal_error",
 ]);
 
-export const ErrorEnvelopeSchema = z.looseObject({
+export const ErrorEnvelopeSchema = extensibleJsonObject({
   code: ErrorCodeSchema,
   message: z.string().min(1).max(4096),
   retryable: z.boolean(),

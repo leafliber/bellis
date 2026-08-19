@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DecimalStringSchema } from "../common/decimal-string.js";
 import { TraceIdSchema, UuidSchema } from "../common/ids.js";
+import { extensibleJsonObject } from "../common/json-value.js";
 
 /**
  * Binary Media WebSocket 的 JSON Header（phase-1-build-guide.md §8.4）。
@@ -8,7 +9,7 @@ import { TraceIdSchema, UuidSchema } from "../common/ids.js";
  * + header length(LE32) + UTF-8 JSON header + payload。
  * 解析与编码由 @bellis/transport（P1）实现；本 Schema 约束 Header 语义。
  */
-export const MediaFrameHeaderSchema = z.looseObject({
+export const MediaFrameHeaderSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   streamId: UuidSchema,
   frameId: UuidSchema,

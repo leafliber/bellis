@@ -37,14 +37,18 @@
             "heartbeatIntervalMs",
             "replayWindowSize"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -78,14 +82,18 @@
             "protocolVersion",
             "clientType"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -97,14 +105,18 @@
         "payload": {
           "type": "object",
           "properties": {},
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -116,14 +128,18 @@
         "payload": {
           "type": "object",
           "properties": {},
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -135,14 +151,18 @@
         "payload": {
           "type": "object",
           "properties": {},
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -162,14 +182,18 @@
           "required": [
             "c0"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -199,14 +223,18 @@
             "r1",
             "r2"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -268,7 +296,9 @@
                       "source",
                       "watermark"
                     ],
-                    "additionalProperties": {}
+                    "additionalProperties": {
+                      "$ref": "#/definitions/__schema0"
+                    }
                   }
                 },
                 "lastCommittedScene": {
@@ -298,7 +328,9 @@
                     "status",
                     "committedAtMs"
                   ],
-                  "additionalProperties": {}
+                  "additionalProperties": {
+                    "$ref": "#/definitions/__schema0"
+                  }
                 },
                 "activeScene": {
                   "type": "null"
@@ -331,20 +363,26 @@
                 "runtimeVersion",
                 "generatedAtMs"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             }
           },
           "required": [
             "snapshot"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -389,7 +427,9 @@
                   "cueId",
                   "lane"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
               }
             }
           },
@@ -398,14 +438,18 @@
             "cycleId",
             "cues"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -436,14 +480,18 @@
             "cycleId",
             "committedAtMs"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -474,14 +522,18 @@
             "cycleId",
             "reason"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -516,14 +568,18 @@
             "mediaKind",
             "contentType"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -549,14 +605,18 @@
             "streamId",
             "reason"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     },
     {
       "type": "object",
@@ -609,20 +669,26 @@
                 "retryable",
                 "traceId"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             }
           },
           "required": [
             "error"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
     }
   ],
   "definitions": {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { UuidSchema } from "../common/ids.js";
-import { JsonValueSchema } from "../common/json-value.js";
+import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 
 /**
  * Outbox Message：Scene Commit 事务内写入、事务提交后分发的消息。
@@ -8,7 +8,7 @@ import { JsonValueSchema } from "../common/json-value.js";
  * 跨重启调度时间（available_at_ms / lease_until_ms）由 DB Worker 维护，
  * 不进入本 Wire Schema。
  */
-export const OutboxMessageSchema = z.looseObject({
+export const OutboxMessageSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   outboxId: UuidSchema,
   topic: z.string().min(1).max(128),

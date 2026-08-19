@@ -35,7 +35,9 @@
           "required": [
             "traceId"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         },
         "sentAtUs": {
           "type": "string",
@@ -104,7 +106,9 @@
           "required": [
             "traceId"
           ],
-          "additionalProperties": {}
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
         },
         "sentAtUs": {
           "type": "string",

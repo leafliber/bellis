@@ -49,7 +49,9 @@
           "userId",
           "text"
         ],
-        "additionalProperties": {}
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
       }
     },
     "topics": {
@@ -89,7 +91,9 @@
           "participants",
           "examples"
         ],
-        "additionalProperties": {}
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
       }
     },
     "urgentSignals": {
@@ -139,7 +143,9 @@
           "priority",
           "payload"
         ],
-        "additionalProperties": {}
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
       }
     },
     "tokenEstimate": {
@@ -158,7 +164,9 @@
     "urgentSignals",
     "tokenEstimate"
   ],
-  "additionalProperties": {},
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
   "definitions": {
     "__schema0": {
       "anyOf": [

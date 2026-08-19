@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { UuidSchema } from "../common/ids.js";
+import { extensibleJsonObject } from "../common/json-value.js";
 import { CueLaneSchema } from "./cue.js";
 
 /**
@@ -8,7 +9,7 @@ import { CueLaneSchema } from "./cue.js";
  */
 export const SyncLevelSchema = z.enum(["hard", "soft", "detached"]);
 
-export const SyncGroupSchema = z.looseObject({
+export const SyncGroupSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   groupId: UuidSchema,
   lanes: z.array(CueLaneSchema).min(1).max(8),
@@ -22,7 +23,7 @@ export const SyncGroupSchema = z.looseObject({
  * 字段命名为 sceneId/cueId（与 Phase 1 session.snapshot 一致，
  * 见 architecture-plan.md §9.1 的冻结形态说明）。
  */
-export const SceneSchema = z.looseObject({
+export const SceneSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   sceneId: UuidSchema,
   cycleId: UuidSchema,

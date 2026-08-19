@@ -21,7 +21,7 @@ export {
   TraceIdSchema,
   UuidSchema,
 } from "./common/ids.js";
-export { JsonValueSchema } from "./common/json-value.js";
+export { JsonValueSchema, extensibleJsonObject } from "./common/json-value.js";
 export type { JsonValue } from "./common/json-value.js";
 export { TraceContextSchema } from "./common/trace-context.js";
 export type { TraceContext } from "./common/trace-context.js";

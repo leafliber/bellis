@@ -50,7 +50,9 @@
           "toolName",
           "arguments"
         ],
-        "additionalProperties": {}
+        "additionalProperties": {
+          "$ref": "#/$defs/__schema0"
+        }
       }
     },
     "action": {
@@ -93,7 +95,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -131,7 +135,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -438,7 +444,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
               }
             }
           },
@@ -487,7 +495,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -525,7 +535,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -832,7 +844,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
               }
             }
           },
@@ -881,7 +895,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -919,7 +935,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -1226,7 +1244,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
               }
             }
           },
@@ -1275,7 +1295,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -1313,7 +1335,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -1620,7 +1644,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
               }
             }
           },
@@ -1669,7 +1695,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
             },
             "noOp": {
               "type": "boolean",
@@ -1701,7 +1729,7 @@
     "action",
     "next"
   ],
-  "additionalProperties": {},
+  "additionalProperties": false,
   "$defs": {
     "__schema0": {
       "anyOf": [

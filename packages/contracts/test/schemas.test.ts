@@ -81,25 +81,27 @@ describe("DecisionPacket 单一发言来源（ADR 0001）", () => {
     expect(action.speech?.text).toBe("我看看现在的任务进度");
   });
 
-  it("top-level message/speech keys pass through but are never a speech source", () => {
-    // loose 对象允许未知键透传（前向兼容），但发言只读 action.speech；
-    // 领域代码禁止把顶层未知键解释为发言。
-    const parsed = DecisionPacketSchema.parse({
+  it("top-level legacy message/speech keys are structurally rejected", () => {
+    // 顶层闭合（strictObject）：ADR 0001 否决的遗留顶层 message/speech
+    // 与一切未知顶层键在 Schema 层被拒绝，不存在第二个发言字段，
+    // 不依赖下游「约定不读取」。
+    const base = {
       schemaVersion: 1,
       cycleId: "33333333-3333-4333-8333-333333333333",
-      message: "伪造的顶层发言",
-      speech: { text: "另一个顶层发言" },
       toolCalls: [],
       action: { schemaVersion: 1, sync: { schemaVersion: 1, hardLanes: [] }, noOp: true },
       next: "finish",
-    });
-    const action = parsed.action;
-    if (!("noOp" in action)) {
-      throw new Error("expected the noOp action variant");
-    }
-    expect(action.noOp).toBe(true);
-    expect("speech" in action).toBe(false);
-    expect(Object.hasOwn(parsed, "message")).toBe(true);
+    };
+    expect(DecisionPacketSchema.safeParse(base).success).toBe(true);
+    expect(DecisionPacketSchema.safeParse({ ...base, message: "伪造的顶层发言" }).success).toBe(
+      false,
+    );
+    expect(
+      DecisionPacketSchema.safeParse({ ...base, speech: { text: "另一个顶层发言" } }).success,
+    ).toBe(false);
+    expect(
+      DecisionPacketSchema.safeParse({ ...base, providerMeta: "任何未知顶层键" }).success,
+    ).toBe(false);
   });
 });
 
@@ -207,6 +209,18 @@ describe("JSON-safe 开放字段（JsonValueSchema）", () => {
         payload: BIGINT_PAYLOAD,
       }).success,
     ).toBe(false);
+  });
+
+  it("valid object fixtures parse to JSON-serializable output", () => {
+    // 含 catch-all 扩展键在内：校验通过 ⇔ JSON.stringify 不抛错。
+    for (const [key, fixtures] of Object.entries(SCHEMA_FIXTURES)) {
+      const schema = CONTRACT_SCHEMA_ENTRIES[key as keyof typeof CONTRACT_SCHEMA_ENTRIES];
+      for (const sample of fixtures.valid) {
+        if (typeof sample !== "object" || sample === null || Array.isArray(sample)) continue;
+        const parsed = schema.parse(sample);
+        expect(() => JSON.stringify(parsed), `${key} must stay JSON-serializable`).not.toThrow();
+      }
+    }
   });
 });
 

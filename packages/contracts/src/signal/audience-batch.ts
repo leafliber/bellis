@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DecimalStringSchema } from "../common/decimal-string.js";
 import { UuidSchema } from "../common/ids.js";
+import { extensibleJsonObject } from "../common/json-value.js";
 import { SignalSchema } from "./signal.js";
 
 /**
@@ -12,7 +13,7 @@ import { SignalSchema } from "./signal.js";
  * bigint 域保证（P2 持久化层校验），不作为跨校验器的 Schema 约束，
  * 以保持 Zod 与 JSON Schema 双 dialect 的语义一致（ADR 0001 §4）。
  */
-export const AudienceMessageSchema = z.looseObject({
+export const AudienceMessageSchema = extensibleJsonObject({
   signalId: UuidSchema,
   userId: z.string().min(1).max(128),
   text: z.string().min(1).max(2000),
@@ -20,14 +21,14 @@ export const AudienceMessageSchema = z.looseObject({
   weight: z.number().min(0).max(1).optional(),
 });
 
-export const AudienceTopicSchema = z.looseObject({
+export const AudienceTopicSchema = extensibleJsonObject({
   label: z.string().min(1).max(128),
   count: z.number().int().nonnegative(),
   participants: z.number().int().nonnegative(),
   examples: z.array(z.string().min(1).max(2000)).max(10),
 });
 
-export const AudienceBatchSchema = z.looseObject({
+export const AudienceBatchSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   id: UuidSchema,
   watermarkFrom: DecimalStringSchema,

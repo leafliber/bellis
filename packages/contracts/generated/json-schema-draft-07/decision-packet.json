@@ -50,7 +50,9 @@
           "toolName",
           "arguments"
         ],
-        "additionalProperties": {}
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
       }
     },
     "action": {
@@ -93,7 +95,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -131,7 +135,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -442,7 +448,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
               }
             }
           },
@@ -491,7 +499,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -529,7 +539,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -840,7 +852,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
               }
             }
           },
@@ -889,7 +903,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -927,7 +943,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -1238,7 +1256,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
               }
             }
           },
@@ -1287,7 +1307,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "speech": {
               "type": "object",
@@ -1325,7 +1347,9 @@
                 "purpose",
                 "interruptible"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "avatar": {
               "minItems": 1,
@@ -1636,7 +1660,9 @@
                   "intentId",
                   "kind"
                 ],
-                "additionalProperties": {}
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
               }
             }
           },
@@ -1685,7 +1711,9 @@
                 "schemaVersion",
                 "hardLanes"
               ],
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
             },
             "noOp": {
               "type": "boolean",
@@ -1717,7 +1745,7 @@
     "action",
     "next"
   ],
-  "additionalProperties": {},
+  "additionalProperties": false,
   "definitions": {
     "__schema0": {
       "anyOf": [

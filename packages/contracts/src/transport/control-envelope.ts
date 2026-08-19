@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DecimalStringSchema } from "../common/decimal-string.js";
 import { SpanIdSchema, TraceIdSchema, UuidSchema } from "../common/ids.js";
-import { JsonValueSchema } from "../common/json-value.js";
+import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 
 /**
  * Control WebSocket 的 Wire Envelope 规范形态（ADR 0001 / phase-1-build-guide.md §6.5）。
@@ -19,12 +19,15 @@ import { JsonValueSchema } from "../common/json-value.js";
  *   Envelope 的方向约束（服务端不得携带幂等字段、客户端不得伪造 seq）正是
  *   依靠闭合结构在 Zod 与 JSON Schema 两种校验器下同时成立，不使用
  *   无法映射到 JSON Schema 的跨字段 refine。
- * - 可前向扩展的消息 Payload 与领域对象使用 looseObject（见各文件）。
+ * - 可前向扩展的消息 Payload 与领域对象使用 extensibleJsonObject：未知
+ *   扩展键以 JsonValueSchema 作为 catch-all（common/json-value.ts），
+ *   在 Zod 与生成的 JSON Schema 两种校验器下同样保证
+ *   「校验通过 ⇔ 可无损 JSON 序列化」。
  */
 
 export const CONTROL_PROTOCOL_VERSION = 1;
 
-export const EnvelopeTraceSchema = z.looseObject({
+export const EnvelopeTraceSchema = extensibleJsonObject({
   traceId: TraceIdSchema,
   spanId: SpanIdSchema.optional(),
 });

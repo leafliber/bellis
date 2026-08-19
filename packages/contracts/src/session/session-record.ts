@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DecimalStringSchema } from "../common/decimal-string.js";
 import { TraceIdSchema, UuidSchema } from "../common/ids.js";
-import { JsonValueSchema } from "../common/json-value.js";
+import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 
 /**
  * Session Record：追加式会话记录，服务于审计、恢复和调试
@@ -9,7 +9,7 @@ import { JsonValueSchema } from "../common/json-value.js";
  * payload 写入前必须通过对应 recordType 的版本化 Schema；
  * 查询端读到未知 schemaVersion 时必须返回明确兼容性错误。
  */
-export const SessionRecordSchema = z.looseObject({
+export const SessionRecordSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   recordId: UuidSchema,
   sessionId: UuidSchema,

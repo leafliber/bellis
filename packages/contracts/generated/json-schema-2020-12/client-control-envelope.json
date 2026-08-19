@@ -33,7 +33,9 @@
       "required": [
         "traceId"
       ],
-      "additionalProperties": {}
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
     },
     "sentAtUs": {
       "type": "string",

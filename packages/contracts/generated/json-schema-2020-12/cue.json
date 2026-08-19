@@ -42,7 +42,9 @@
     "offsetMs",
     "intent"
   ],
-  "additionalProperties": {},
+  "additionalProperties": {
+    "$ref": "#/$defs/__schema0"
+  },
   "$defs": {
     "__schema0": {
       "anyOf": [

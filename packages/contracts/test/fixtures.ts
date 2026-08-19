@@ -12,8 +12,11 @@ import type { ContractSchemaKey } from "../src/json-schema.js";
  *   seq、任意未知 Envelope 字段都会被两侧同时拒绝。
  * - 行动数组 min(1)：空数组不构成行动；noOp 与实际行动互斥。
  * - at_speech_word 变体的 wordIndex 必填由判别 union 结构保证。
- * - payload/details/arguments/intent 必须是 JSON 值：bigint 等非 JSON
- *   输入被两侧同时拒绝。
+ * - payload/details/arguments/intent 必须是 JSON 值；可扩展对象的未知
+ *   扩展键同样以 JsonValueSchema 约束（catch-all）——bigint 等非 JSON
+ *   值被三方一致拒绝。
+ * - DecisionPacket 顶层闭合（strict）：遗留顶层 message/speech 连同一切
+ *   未知顶层键被三方一致拒绝，不存在第二个发言字段。
  * - 水位顺序（watermarkFrom≤To）与 clock.pong 的 r2≥r1 是生产者不变量，
  *   不是 Schema 约束：乱序样本在 Schema 层是合法的。
  */
@@ -129,6 +132,7 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
       { traceId: TRACE_ID, extensionField: "loose 对象允许未知扩展键" },
     ],
     invalid: [
+      { traceId: TRACE_ID, extensionField: BIGINT_PAYLOAD },
       { traceId: TRACE_ID.toUpperCase() },
       { traceId: "0123456789abcdef" },
       { traceId: TRACE_ID, spanId: "0123456789ABCDEF" },
@@ -247,6 +251,16 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
         occurredAt: 0,
         priority: 0,
         payload: BIGINT_PAYLOAD,
+      },
+      {
+        schemaVersion: 1,
+        id: SIGNAL_ID,
+        kind: "danmaku",
+        source: "x",
+        occurredAt: 0,
+        priority: 0,
+        payload: {},
+        extension: BIGINT_PAYLOAD,
       },
     ],
   },
@@ -458,6 +472,22 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
         toolCalls: [],
         action: { schemaVersion: 1, sync: syncPolicy },
         next: "finish",
+      },
+      {
+        schemaVersion: 1,
+        cycleId: CYCLE_ID,
+        toolCalls: [],
+        action: { schemaVersion: 1, sync: syncPolicy, noOp: true },
+        next: "finish",
+        message: "遗留顶层 message",
+      },
+      {
+        schemaVersion: 1,
+        cycleId: CYCLE_ID,
+        toolCalls: [],
+        action: { schemaVersion: 1, sync: syncPolicy, noOp: true },
+        next: "finish",
+        speech: { text: "遗留顶层 speech" },
       },
     ],
   },
@@ -779,6 +809,7 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
     ],
     invalid: [
       { type: "clock.unknown", payload: {} },
+      { type: "clock.ping", payload: { c0: "1", extra: BIGINT_PAYLOAD } },
       { type: "clock.pong", payload: { c0: "1" } },
       { type: "server.hello", payload: { protocolVersion: 2 } },
       { type: "session.snapshot", payload: { snapshot: { ...snapshotBase, reason: "sync" } } },
