@@ -407,11 +407,12 @@ interface ToolExecutionPolicy {
 
 ### 9.1 Scene 与 Cue
 
-Action Compiler 将 ActionFrame 转为 Scene：
+Action Compiler 将 ActionFrame 转为 Scene（字段命名与 `@bellis/contracts` 冻结形态一致：实体字段使用 `sceneId`/`cueId`，并携带 `schemaVersion`；`intent` 约束为 JSON 值）：
 
 ```ts
 interface Scene {
-  id: string;
+  schemaVersion: 1;
+  sceneId: string;
   cycleId: string;
   groups: SyncGroup[];
   deadlineMs: number;
@@ -419,11 +420,12 @@ interface Scene {
 }
 
 interface Cue {
-  id: string;
+  schemaVersion: 1;
+  cueId: string;
   lane: "audio" | "subtitle" | "avatar" | "game" | "overlay";
   anchor: "scene_start" | "speech_start" | "speech_end" | string;
   offsetMs: number;
-  intent: unknown;
+  intent: JsonValue;
 }
 ```
 

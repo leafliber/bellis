@@ -55,7 +55,7 @@
 
 本阶段必须完成：
 
-- 建立 pnpm Monorepo、Node.js 24 LTS、TypeScript 7.x、ESM 和严格类型基线。
+- 建立 pnpm Monorepo、Node.js 26（ADR 0002）、TypeScript 7.x、ESM 和严格类型基线。
 - 建立唯一的版本化协议源 `packages/contracts`。
 - 固定 JSON、WebSocket 和持久化边界上的 ID、时间、序号、版本与错误格式。
 - 实现 Runtime 单调时钟、浏览器可用的时钟同步协议和确定性 Virtual Clock。
@@ -111,7 +111,7 @@ Phase 1 是后续阶段共同依赖的协议与恢复底座，范围包含三个
 
 | 领域 | 冻结选择 | 本阶段约束 |
 | --- | --- | --- |
-| Runtime | Node.js 24 LTS，最低 24.15 | `engines.node` 固定 `>=24.15 <25`，CI/发布固定完整补丁版本 |
+| Runtime | Node.js 26，最低 26.5（ADR 0002） | `engines.node` 固定 `>=26.5 <27`，`.node-version` 与 CI 固定 26.5.0 |
 | 语言 | TypeScript 7.x、ESM | 全部业务包使用 `type: module` |
 | Monorepo | pnpm Workspace | 只维护一个根 lockfile |
 | Lint / Format | Oxlint + Oxfmt | P0 固定版本并完成 Windows/macOS 兼容验证 |
@@ -306,10 +306,10 @@ P0 必须完成工具链 Spike 并给出明确结论：
 
 CI 至少覆盖：
 
-- Windows 11 / 固定 Node.js 24 补丁版本：正式支持门槛。
-- macOS / 同一 Node.js 24 补丁版本：当前开发门槛。
+- Windows 11 / 固定 Node.js 26 补丁版本：正式支持门槛。
+- macOS / 同一 Node.js 26 补丁版本：当前开发门槛。
 
-本文修订时验证基线为 Node.js 24.19.0，最低不得低于 24.15.0；仓库版本文件、CI 和发布清单必须使用同一个完整版本。CI 使用 frozen lockfile，不访问真实外部服务。测试产生的数据库和日志必须写入临时目录并在 Job 结束时清理。
+验证基线为 Node.js 26.5.0（[ADR 0002](./adr/0002-node-26-baseline.md)），最低不得低于 26.5.0；仓库版本文件（`.node-version`）、CI 和发布清单必须使用同一个完整版本。CI 使用 frozen lockfile，不访问真实外部服务。测试产生的数据库和日志必须写入临时目录并在 Job 结束时清理。
 
 `verify-runtime-baseline.mjs` 必须通过短生命周期 Worker 导入和操作 `node:sqlite`，不能在主线程绕过 DB Worker 原则；脚本同时捕获 Worker `stderr`、输出 Node/SQLite 版本，并对两平台行为做相同断言。
 
@@ -704,7 +704,7 @@ Control 与 Media 使用不同队列，测试必须证明大 Media 流不会阻�
 
 `node:sqlite` 只能在 `packages/persistence/src/worker` 内导入。Runtime 通过类型化 Worker RPC 使用持久化能力：
 
-Node.js 24.15.0 起，`node:sqlite` 的官方状态为 Stability 1.2（Release Candidate），不再是早期 24.x 的 Stability 1.1，但仍未达到 Stability 2。Phase 1 的 CI/开发基线固定为通过验证的完整 Node 补丁版本（本文修订时为 24.19.0），并通过 Adapter + Worker 隔离其 API 变化风险。
+`node:sqlite` 在 Node.js 24.15.0 起的官方状态为 Stability 1.2（Release Candidate）；Node 26 基线（ADR 0002）内嵌 SQLite 3.53.3，Worker 导入、WAL、事务、BigInt 读取、强制终止与重开均由 `pnpm runtime:check` 实测验证。Phase 1 通过 Adapter + Worker 隔离其 API 变化风险。
 
 - 不支持 Node 24.0–24.14 作为开发或 CI 基线。
 - 不设置 `NODE_NO_WARNINGS`，也不全局关闭 `ExperimentalWarning`。
@@ -1346,7 +1346,7 @@ Phase 1 结束后，第二阶段只能通过以下稳定入口继续建设：
 
 以下官方资料用于 P0 核验，不以二手文章或记忆判断工具状态：
 
-- [Node.js 24 SQLite 文档](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html)：v24.15.0 起为 Stability 1.2，`DatabaseSync` API 同步，因此放入 Worker。
+- [Node.js SQLite 文档](https://nodejs.org/docs/latest/api/sqlite.html)：`DatabaseSync` API 同步，因此放入 Worker；Node 26 内嵌 SQLite 3.53.3。
 - [TypeScript 官方站点](https://www.typescriptlang.org/)：TypeScript 7.0 已正式可用。
 - [typescript-eslint 依赖版本](https://typescript-eslint.io/users/dependency-versions/)：本文修订时官方支持范围仍为 `>=4.8.4 <6.1.0`。
 - [Oxlint](https://oxc.rs/docs/guide/usage/linter.html) 与 [Type-Aware Linting](https://oxc.rs/docs/guide/usage/linter/type-aware.html)：基于 TypeScript 7 原生工具链；type-aware 规则需 P0 验证，完整 type-check 不替代 `tsc -b`。

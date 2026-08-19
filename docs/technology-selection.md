@@ -29,7 +29,7 @@ Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.j
 | --- | --- | --- |
 | 首发平台 | Windows 11 x64 | 游戏、OBS 和虚拟主播生态的正式支持平台 |
 | 次级平台 | macOS arm64 | 开发、调试和非游戏使用场景 |
-| Runtime | Node.js 24 LTS，最低 24.15 | 核心调度、网络、模型、插件和媒体协调 |
+| Runtime | Node.js 26，最低 26.5（ADR 0002） | 核心调度、网络、模型、插件和媒体协调 |
 | 主语言 | TypeScript 7.x、ESM | Runtime、协议、Studio 和插件 SDK |
 | 包管理 | pnpm Workspace | Monorepo、依赖锁定和任务编排 |
 | Lint / Format | Oxlint + Oxfmt | 与 TypeScript 7 原生工具链对齐；`tsc -b` 仍是类型检查真相源 |
@@ -51,7 +51,7 @@ Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.j
 | 系统能力 | Rust Launcher/Sidecar | 输入安全、进程守护、密钥和更新 |
 | 交付 | Rust Launcher + 内嵌 Node Runtime | 独立安装和浏览器启动 |
 
-核心依赖使用 lockfile 精确锁定。Node.js 固定在 24 LTS，开发、CI 和发布清单记录完整补丁版本；基线不得低于 24.15.0，补丁升级通过双平台 CI 后再更新。核心协议、Runtime 和媒体依赖不使用无界版本范围。
+核心依赖使用 lockfile 精确锁定。Node.js 固定在 26（开发与 CI 基线 26.5.0，见 [ADR 0002](./adr/0002-node-26-baseline.md)），开发、CI 和发布清单记录完整补丁版本；基线不得低于 26.5.0，补丁升级通过双平台 CI 后再更新。核心协议、Runtime 和媒体依赖不使用无界版本范围。
 
 ## 3. 运行与部署架构
 
@@ -143,7 +143,7 @@ workers/
 
 ### 5.1 Node.js 与 TypeScript
 
-Runtime 使用 Node.js 24 LTS（最低 24.15.0）和 TypeScript 7.x。本文修订时的验证基线为 Node.js 24.19.0；实际开工以仓库版本文件和发布清单固定的完整补丁版本为准：
+Runtime 使用 Node.js 26（最低 26.5.0，[ADR 0002](./adr/0002-node-26-baseline.md)）和 TypeScript 7.x。验证基线为 Node.js 26.5.0；实际开工以仓库版本文件（`.node-version`）和发布清单固定的完整补丁版本为准：
 
 - 全项目使用 ESM，不新增 CommonJS 包。
 - Runtime 通过 `tsc -b` 编译，不对后端做单文件 Bundle，保留动态插件加载能力。
@@ -379,7 +379,7 @@ Runtime、Stage 和 Game Sidecar 使用单调时钟，通过周期性 Ping 校�
 
 Runtime 使用 Node.js 内置 `node:sqlite`，但所有数据库操作放入独立 DB Worker。主事件循环禁止执行同步 SQL。
 
-Node.js 24.15.0 起将 `node:sqlite` 标记为 Stability 1.2（Release Candidate）；它已不是早期 24.x 的 Stability 1.1，但仍未达到 Stability 2。`node:sqlite` 必须隐藏在 `PersistenceAdapter` 后面，避免领域层绑定尚未完全冻结的 Driver API。发布包固定使用通过 CI 的完整 Node.js 补丁版本，并包含 SQLite 3.51.3 或更高版本。
+`node:sqlite` 在 Node.js 24.15.0 起为 Stability 1.2（Release Candidate），Node 26 内嵌 SQLite 3.53.3（≥ 本选型要求的 3.51.3，实测见 `pnpm runtime:check`）。`node:sqlite` 必须隐藏在 `PersistenceAdapter` 后面，避免领域层绑定尚未完全冻结的 Driver API。发布包固定使用通过 CI 的完整 Node.js 补丁版本。
 
 不得通过 `NODE_NO_WARNINGS` 或全局关闭 `ExperimentalWarning` 掩盖问题。P0/CI 必须在固定 Node 版本上记录 `process.versions.node` 和内嵌 SQLite 版本，并在 Windows/macOS 验证：Worker 导入、WAL、事务、BigInt 读取、Worker 终止和数据库重开。若固定版本产生新的实验警告或行为差异，CI 失败并评估补丁升级或 Adapter 兼容修复。
 
@@ -709,7 +709,7 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 
 以下内容应在实现开始前冻结，变更必须经过架构决策记录：
 
-1. Runtime 使用 Node.js 24 LTS（最低 24.15）+ TypeScript 7，不更换主语言；完整补丁版本由 CI/发布清单固定。
+1. Runtime 使用 Node.js 26（最低 26.5，ADR 0002）+ TypeScript 7，不更换主语言；完整补丁版本由 CI/发布清单固定。
 2. Studio 和 Stage 使用浏览器，不引入 Electron/Tauri。
 3. Decision Loop、Tool Runtime 和 Scene Director 的所有权保留在项目核心。
 4. 一次 LLM 请求只产生一个最终 DecisionPacket 和 ActionFrame。
