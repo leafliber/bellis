@@ -1,0 +1,31 @@
+{
+  "name": "@bellis/observability",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Trace、日志与指标基线：Gate 1 交付最小 Port 与 No-op 实现，P3 补充完整能力",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src test",
+    "format:check": "oxfmt --check src test"
+  },
+  "devDependencies": {
+    "vitest": "4.1.11"
+  }
+}
