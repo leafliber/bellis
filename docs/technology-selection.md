@@ -29,15 +29,16 @@ Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.j
 | --- | --- | --- |
 | 首发平台 | Windows 11 x64 | 游戏、OBS 和虚拟主播生态的正式支持平台 |
 | 次级平台 | macOS arm64 | 开发、调试和非游戏使用场景 |
-| Runtime | Node.js 24 LTS | 核心调度、网络、模型、插件和媒体协调 |
+| Runtime | Node.js 24 LTS，最低 24.15 | 核心调度、网络、模型、插件和媒体协调 |
 | 主语言 | TypeScript 7.x、ESM | Runtime、协议、Studio 和插件 SDK |
 | 包管理 | pnpm Workspace | Monorepo、依赖锁定和任务编排 |
+| Lint / Format | Oxlint + Oxfmt | 与 TypeScript 7 原生工具链对齐；`tsc -b` 仍是类型检查真相源 |
 | Runtime API | Fastify 5.10.x | REST、WebSocket、OpenAPI 和静态资源 |
 | Studio | React 19.2 + Vite 8.x | 操作台、配置、调试、监控和回放 |
 | UI | Tailwind CSS 4 + Radix UI | 设计系统和基础无障碍组件 |
 | 前端状态 | TanStack Query + Zustand | REST 服务端状态和高频实时状态分离 |
 | 状态机 | XState 5 | Session、Scene、Plugin 和连接生命周期 |
-| Schema | Zod 4 + JSON Schema Draft 7 | REST、WebSocket、LLM Tool 和插件协议 |
+| Schema | Zod 4 + JSON Schema 2020-12 / Draft 7 | OpenAPI 3.1 与运行期/LLM 兼容目标分别生成 |
 | LLM 接入 | 自有 `ModelProvider` + AI SDK Core Adapter | Provider 统一和流式结果标准化 |
 | Live2D | 官方 Cubism SDK for Web | 模型加载、动作、参数和口型 |
 | 浏览器媒体 | Web Audio + AudioWorklet | TTS 播放、媒体时钟和口型同步 |
@@ -50,7 +51,7 @@ Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.j
 | 系统能力 | Rust Launcher/Sidecar | 输入安全、进程守护、密钥和更新 |
 | 交付 | Rust Launcher + 内嵌 Node Runtime | 独立安装和浏览器启动 |
 
-核心依赖使用 lockfile 精确锁定。Node.js 固定在 24 LTS 大版本，补丁版本随发布构建更新；核心协议、Runtime 和媒体依赖不使用无界版本范围。
+核心依赖使用 lockfile 精确锁定。Node.js 固定在 24 LTS，开发、CI 和发布清单记录完整补丁版本；基线不得低于 24.15.0，补丁升级通过双平台 CI 后再更新。核心协议、Runtime 和媒体依赖不使用无界版本范围。
 
 ## 3. 运行与部署架构
 
@@ -142,13 +143,16 @@ workers/
 
 ### 5.1 Node.js 与 TypeScript
 
-Runtime 使用 Node.js 24 LTS 和 TypeScript 7.x：
+Runtime 使用 Node.js 24 LTS（最低 24.15.0）和 TypeScript 7.x。本文修订时的验证基线为 Node.js 24.19.0；实际开工以仓库版本文件和发布清单固定的完整补丁版本为准：
 
 - 全项目使用 ESM，不新增 CommonJS 包。
 - Runtime 通过 `tsc -b` 编译，不对后端做单文件 Bundle，保留动态插件加载能力。
 - 开发模式使用轻量 watch runner；生产环境只运行编译后的 JavaScript。
 - TypeScript 开启 `strict`、`noUncheckedIndexedAccess` 和 `exactOptionalPropertyTypes`。
 - 不依赖 TypeScript 编译器内部 API，避免编译器升级影响业务代码。
+- 使用 Oxlint 和 Oxfmt，不使用当前官方支持范围仍小于 TypeScript 6.1 的 `typescript-eslint` 作为 Phase 1 基线。
+- `tsc -b` 是类型正确性的唯一最终判定；Oxlint 负责 lint，可在 P0 验证通过后启用经过选择的 type-aware 规则，但不启用其仍属实验性的完整 type-check 模式。
+- P0 必须在 Windows 11 和 macOS 上验证固定版本的 `build`、`typecheck`、`lint`、`format:check` 和 declaration emit，并将版本与结论写入 Gate 1 交付记录。
 
 ### 5.2 Fastify API Edge
 
@@ -165,27 +169,49 @@ Fastify 只负责协议边缘：
 WebSocket Envelope 固定包含序列和追踪信息：
 
 ```ts
-interface Envelope<T> {
+interface ControlEnvelopeBase<T> {
   version: 1;
+  type: string;
+  messageId: string;
   sessionId: string;
-  seq: bigint;
-  ack?: bigint;
-  traceId: string;
-  sentAtUs: bigint;
-  deadlineUs?: bigint;
+  trace: {
+    traceId: string;
+    spanId?: string;
+  };
+  sentAtUs: string;
+  deadlineUs?: string;
   payload: T;
 }
+
+interface ServerControlEnvelope<T> extends ControlEnvelopeBase<T> {
+  direction: "server";
+  seq: string;
+}
+
+interface ClientControlEnvelope<T> extends ControlEnvelopeBase<T> {
+  direction: "client";
+  ack?: string;
+  idempotencyKey?: string;
+}
+
+type ControlEnvelope<T> =
+  | ServerControlEnvelope<T>
+  | ClientControlEnvelope<T>;
 ```
+
+这是 Wire 类型：微秒时间、序号和水位使用非负十进制字符串，进入 Runtime 后再无损转换为 `bigint`。裸 `bigint` 不能 JSON 序列化，因此不得出现在 REST 或 WebSocket JSON 中。`messageId` 负责去重；只有服务端 Envelope 产生 `seq`，只有客户端 Envelope 回传累计 `ack`，状态变更请求另带 `idempotencyKey`。规范化决定见 [ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md)。
+
+可靠性语义有意不对称：服务端到客户端使用 Seq/ACK/有界 Replay；客户端到服务端依赖单连接有序传输、`messageId` 短期去重和状态变更请求的持久化 `idempotencyKey`。断线后的不确定请求先读取 Snapshot，再用相同幂等键重试；不为客户端方向建立第二套累计 ACK 日志。
 
 每个连接使用有界发送队列。发生背压时依次丢弃调试遥测、World Snapshot 增量和非关键视觉 Cue；音频、Scene Commit、游戏取消和安全消息不得静默丢弃。
 
 ### 5.3 Schema 策略
 
-Zod 4 是 TypeScript 侧唯一 Schema 源，限制为可无损转换到 JSON Schema 的 JSON-safe 子集：
+Zod 4 是 TypeScript 侧唯一 Schema 源，限制为可无损转换到两种目标 dialect 的 JSON-safe 子集：
 
-- 对外 REST Schema 生成 OpenAPI 3.1。
-- Fastify 使用完整 JSON Schema 做请求和响应验证。
-- LLM Tool 使用 JSON Schema Draft 7 兼容子集。
+- 生成 JSON Schema 2020-12，供 OpenAPI 3.1 文档和对外契约使用。
+- 另行生成 JSON Schema Draft 7，供 Fastify/Ajv 运行期验证和 LLM Tool 使用。
+- 两套生成物来自同一个 Zod Schema，使用相同成功/失败 Fixture 做语义等价测试和独立漂移检查。
 - WebSocket 消息进入系统边界时执行 Zod 校验。
 - Rust/Python 跨语言协议独立使用 Protobuf，避免以 JSON 承载高频二进制数据。
 
@@ -223,16 +249,15 @@ interface ModelProvider {
 
 ```ts
 interface DecisionPacket {
+  schemaVersion: 1;
   cycleId: string;
-  speech?: {
-    text: string;
-    emotion?: string;
-  };
   toolCalls: ToolCall[];
   action: ActionFrame;
   next: "finish" | "after_tools" | "continue";
 }
 ```
+
+发言只存在于 `DecisionPacket.action.speech`，不再设置顶层 `speech` 或 `message`。模型适配层必须先完成规范化，再把 DecisionPacket 交给核心；参见 [ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md)。
 
 每次模型请求必须最终产生一个 ActionFrame：
 
@@ -354,7 +379,9 @@ Runtime、Stage 和 Game Sidecar 使用单调时钟，通过周期性 Ping 校�
 
 Runtime 使用 Node.js 内置 `node:sqlite`，但所有数据库操作放入独立 DB Worker。主事件循环禁止执行同步 SQL。
 
-`node:sqlite` 隐藏在 `PersistenceAdapter` 后面，避免领域层绑定具体 Driver。发布包固定使用包含 SQLite 3.51.3 或更高版本的 Node.js 构建。
+Node.js 24.15.0 起将 `node:sqlite` 标记为 Stability 1.2（Release Candidate）；它已不是早期 24.x 的 Stability 1.1，但仍未达到 Stability 2。`node:sqlite` 必须隐藏在 `PersistenceAdapter` 后面，避免领域层绑定尚未完全冻结的 Driver API。发布包固定使用通过 CI 的完整 Node.js 补丁版本，并包含 SQLite 3.51.3 或更高版本。
+
+不得通过 `NODE_NO_WARNINGS` 或全局关闭 `ExperimentalWarning` 掩盖问题。P0/CI 必须在固定 Node 版本上记录 `process.versions.node` 和内嵌 SQLite 版本，并在 Windows/macOS 验证：Worker 导入、WAL、事务、BigInt 读取、Worker 终止和数据库重开。若固定版本产生新的实验警告或行为差异，CI 失败并评估补丁升级或 Adapter 兼容修复。
 
 采用两个数据库：
 
@@ -370,6 +397,8 @@ PRAGMA busy_timeout = 3000;
 ```
 
 项目不引入 ORM，使用版本化 SQL Migration、Prepared Statement 和类型化 Repository。
+
+`state.db` 中的提交时间使用 Unix epoch milliseconds，只承担审计和展示；恢复顺序由追加记录序号与事务事实确定。`commitAtRuntimeUs` 等单调时间只服务于当前 Runtime 的 Timeline，不进入跨重启状态。Outbox 的跨重启时间使用 epoch ms 是明确妥协：DB Worker 在单次生命周期内使用“启动 epoch 锚点 + 单调增量”比较 Lease，重启时回收旧 Runtime Instance 的 `in_flight` 项，并依靠消费者幂等承受可能的重复交付。
 
 ### 10.2 提交与恢复
 
@@ -574,6 +603,7 @@ Studio 提供本地 Trace Timeline，用同一时间轴展示 LLM、Memory、Too
 
 ### 17.1 测试工具
 
+- Oxlint + Oxfmt：TypeScript 7 语法、lint、格式与双平台工具链基线。
 - Vitest：领域逻辑、Context Builder、Tool Runtime 和 Action Compiler。
 - fast-check：调度、幂等、资源租约和取消不变量。
 - Playwright：Studio、Stage、多窗口、断线和浏览器音频授权。
@@ -679,7 +709,7 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 
 以下内容应在实现开始前冻结，变更必须经过架构决策记录：
 
-1. Runtime 使用 Node.js 24 LTS + TypeScript，不更换主语言。
+1. Runtime 使用 Node.js 24 LTS（最低 24.15）+ TypeScript 7，不更换主语言；完整补丁版本由 CI/发布清单固定。
 2. Studio 和 Stage 使用浏览器，不引入 Electron/Tauri。
 3. Decision Loop、Tool Runtime 和 Scene Director 的所有权保留在项目核心。
 4. 一次 LLM 请求只产生一个最终 DecisionPacket 和 ActionFrame。
@@ -693,7 +723,12 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 ## 22. 参考资料
 
 - [Node.js Release Schedule](https://nodejs.org/en/about/previous-releases)
+- [Node.js 24 SQLite](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html)
 - [TypeScript Documentation](https://www.typescriptlang.org/docs/)
+- [Oxlint](https://oxc.rs/docs/guide/usage/linter.html)
+- [Oxlint Type-Aware Linting](https://oxc.rs/docs/guide/usage/linter/type-aware.html)
+- [Oxfmt](https://oxc.rs/docs/guide/usage/formatter)
+- [typescript-eslint Dependency Versions](https://typescript-eslint.io/users/dependency-versions/)
 - [React Versions](https://react.dev/versions)
 - [Vite 8 Announcement](https://vite.dev/blog/announcing-vite8)
 - [Fastify LTS](https://fastify.dev/docs/latest/Reference/LTS/)

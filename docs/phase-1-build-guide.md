@@ -27,6 +27,7 @@
 
 - `architecture-plan.md`：第 3、4、5、9、16、17、21、23 节。
 - `technology-selection.md`：第 3、4、5、9.3、10、15、16、17、20、21 节。
+- `adr/0001-canonical-core-and-wire-contracts.md`：完整阅读。
 - 本文全部内容。
 
 ## 1. 阶段定义
@@ -81,6 +82,10 @@
 
 允许使用 Fake 数据和测试客户端验证未来协议，但不得为尚未进入本阶段的能力构建半成品业务框架。
 
+### 1.4 排期口径
+
+Phase 1 是后续阶段共同依赖的协议与恢复底座，范围包含三个 Gate 和真实 Crash Window 验证，不按“一个普通冲刺”承诺。排期应分别估算 P0、并行的 P1/P2/P3、P4 集成以及 Gate 修复缓冲；任一 Gate 未通过时不得用压缩验证范围换取名义进度。
+
 ## 2. 阶段完成定义
 
 只有同时满足以下条件，Phase 1 才能标记为完成：
@@ -106,12 +111,13 @@
 
 | 领域 | 冻结选择 | 本阶段约束 |
 | --- | --- | --- |
-| Runtime | Node.js 24 LTS | `engines.node` 固定 `>=24 <25` |
+| Runtime | Node.js 24 LTS，最低 24.15 | `engines.node` 固定 `>=24.15 <25`，CI/发布固定完整补丁版本 |
 | 语言 | TypeScript 7.x、ESM | 全部业务包使用 `type: module` |
 | Monorepo | pnpm Workspace | 只维护一个根 lockfile |
+| Lint / Format | Oxlint + Oxfmt | P0 固定版本并完成 Windows/macOS 兼容验证 |
 | API | Fastify 5.10.x | Handler 只做边界工作 |
 | Schema | Zod 4 | 类型由 Schema 推导，不复制手写接口 |
-| 外部 JSON Schema | Draft 7 兼容子集 | 生成物必须做漂移检查 |
+| 外部 JSON Schema | 2020-12 + Draft 7 | 两种 target 独立生成、测试和漂移检查 |
 | 本地通信 | REST + WebSocket | 本阶段不引入 WebRTC/WebTransport |
 | 数据库 | SQLite WAL + `node:sqlite` | 只能由 DB Worker 使用 |
 | 日志与追踪 | Pino + OpenTelemetry | 本阶段至少完成上下文传播和本地导出接口 |
@@ -156,7 +162,8 @@ packages/
       errors/
       index.ts
     generated/
-      json-schema/
+      json-schema-2020-12/
+      json-schema-draft-07/
     test/
 
   observability/
@@ -202,6 +209,7 @@ docs/
 
 scripts/
   check-generated-contracts.mjs
+  verify-runtime-baseline.mjs
   phase-1-demo.mjs
 ```
 
@@ -265,13 +273,23 @@ flowchart LR
     "test": "pnpm -r --if-present test",
     "test:integration": "pnpm -r --if-present test:integration",
     "contracts:check": "node scripts/check-generated-contracts.mjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm contracts:check && pnpm test && pnpm test:integration",
+    "runtime:check": "node scripts/verify-runtime-baseline.mjs",
+    "check": "pnpm runtime:check && pnpm typecheck && pnpm lint && pnpm format:check && pnpm contracts:check && pnpm test && pnpm test:integration",
     "demo:phase1": "node scripts/phase-1-demo.mjs"
   }
 }
 ```
 
-具体 lint/format 工具属于普通工程选择，但必须满足以下结果：本地与 CI 使用同一命令、不会隐式修改文件、不会因包执行顺序产生不同结果。
+Lint/format 固定使用 Oxlint + Oxfmt。TypeScript 7 已正式发布，但本文修订时 `typescript-eslint` 官方支持范围仍是 `>=4.8.4 <6.1.0`，因此 Phase 1 不使用它，也不通过关闭版本警告强行兼容。
+
+P0 必须完成工具链 Spike 并给出明确结论：
+
+- 固定 TypeScript、Oxlint、Oxfmt 的完整版本。
+- `tsc -b` 仍是类型检查和 declaration emit 的唯一真相源。
+- Oxlint 先启用稳定的 correctness/suspicious 规则；选定的 type-aware 规则只有在 `oxlint-tsgolint` 与当前 TS 7 配置在 Windows/macOS 都通过后才启用。
+- 不启用 Oxlint 仍属实验性的完整 `--type-check` 来替代 `tsc -b`。
+- `lint`、`format:check` 和 `typecheck` 在两平台输出一致且不会隐式修改文件。
+- 结果记录在 Gate 1 交付说明；任一工具无法解析项目 TS 7 代码或配置时，P0 阻塞并提交 ADR，不得静默降级 TypeScript、跳过 lint 或换回未受支持的 parser。
 
 ### 5.2 包规范
 
@@ -288,10 +306,12 @@ flowchart LR
 
 CI 至少覆盖：
 
-- Windows 11 / Node.js 24：正式支持门槛。
-- macOS / Node.js 24：当前开发门槛。
+- Windows 11 / 固定 Node.js 24 补丁版本：正式支持门槛。
+- macOS / 同一 Node.js 24 补丁版本：当前开发门槛。
 
-CI 使用 frozen lockfile，不访问真实外部服务。测试产生的数据库和日志必须写入临时目录并在 Job 结束时清理。
+本文修订时验证基线为 Node.js 24.19.0，最低不得低于 24.15.0；仓库版本文件、CI 和发布清单必须使用同一个完整版本。CI 使用 frozen lockfile，不访问真实外部服务。测试产生的数据库和日志必须写入临时目录并在 Job 结束时清理。
+
+`verify-runtime-baseline.mjs` 必须通过短生命周期 Worker 导入和操作 `node:sqlite`，不能在主线程绕过 DB Worker 原则；脚本同时捕获 Worker `stderr`、输出 Node/SQLite 版本，并对两平台行为做相同断言。
 
 ## 6. Contracts：唯一协议源
 
@@ -299,15 +319,17 @@ CI 使用 frozen lockfile，不访问真实外部服务。测试产生的数据�
 
 `packages/contracts` 中的 Zod Schema 是 TypeScript 领域类型、REST、WebSocket 和持久化 Payload 的唯一真相来源。
 
+本节是跨模块协议的实现基线。`architecture-plan.md` 和 `technology-selection.md` 中的 `DecisionPacket` 与 Envelope 示例已同步为本节形态；后续若仍发现示例差异，以 Contracts 和 ADR 0001 为准，并立即回写上游文档，不能以“示例不算协议”为由长期保留漂移。
+
 每个公开 Schema 必须具备：
 
 - 显式 `schemaVersion`。
 - 成功样例和失败样例。
 - `safeParse` 边界测试。
-- 生成的 JSON Schema。
+- JSON Schema 2020-12 与 Draft 7 两套生成物。
 - 明确的向后兼容规则。
 
-不得维护“Zod Schema + 手写 interface + 另一份 JSON Schema”三份来源。TypeScript 类型使用 `z.infer` 推导；生成的 JSON Schema 作为可审查产物提交，并由 `contracts:check` 防止漂移。
+不得维护“Zod Schema + 手写 interface + 另一份 JSON Schema”三份来源。TypeScript 类型使用 `z.infer` 推导。生成器必须从同一 Zod Schema 分别输出 `json-schema-2020-12/` 和 `json-schema-draft-07/`：前者供 OpenAPI 3.1 和对外契约，后者供 Fastify/Ajv 运行期验证以及后续 LLM Tool。两套生成物作为可审查产物提交，由 `contracts:check` 分别防止漂移，并用同一组合法/非法 Fixture 验证语义一致。
 
 ### 6.2 ID、数字与时间
 
@@ -318,17 +340,20 @@ CI 使用 frozen lockfile，不访问真实外部服务。测试产生的数据�
 | 实体 ID | `string` | `string` | 使用 UUID，不从时间推断顺序 |
 | `traceId` | `string` | 32 位小写十六进制 | 对齐 W3C Trace Context |
 | `spanId` | `string` | 16 位小写十六进制 | 可选传播，不替代业务 ID |
-| 墙上时间 | `number` | JSON number | Unix epoch milliseconds，只用于审计和展示 |
+| 墙上事实时间 | `number` | JSON number | Unix epoch milliseconds，用于事件发生时间、审计和展示 |
 | 单调时间 | `bigint` | 十进制字符串 | 字段后缀 `Us`，单位微秒 |
 | 序号/水位 | `bigint` | 十进制字符串 | 禁止用 JSON number 避免精度丢失 |
+| 持久化提交时间 | `number` | SQLite INTEGER | Unix epoch milliseconds，字段后缀 `AtMs`，不决定恢复顺序 |
+| 持久化截止时间 | `number` | SQLite INTEGER | 仅用于必须跨重启的 Outbox 调度，由 DB Worker 按 §9.4 规则比较 |
 
 `bigint` 不直接进入 `JSON.stringify`。Contracts 提供单一的编码/解码 Helper，把非负十进制字符串转换为内部 `bigint`，并拒绝负数、小数、指数、前导符号和超限输入。
 
 Runtime 内：
 
 - 调度时间来自 `process.hrtime.bigint()` 转换后的微秒值。
-- `Date.now()` 只用于 `occurredAt`、日志日期和用户展示。
+- `Date.now()` 用于 `occurredAt`、日志日期和用户展示；唯一调度例外是 DB Worker 为跨重启 Outbox 时间建立启动 epoch 锚点，具体限制见 §9.4。
 - 禁止比较不同进程的原始单调时间；必须先经过时钟偏移映射。
+- `state.db` 不保存用于恢复判断的单调时间。若 `telemetry.db` 为调试保留单调采样，必须同时保存 `runtimeInstanceId` 并标记为“仅诊断，禁止跨实例比较”。
 
 ### 6.3 第一阶段必须落地的 Schema
 
@@ -351,14 +376,17 @@ SceneSchema
 CueSchema
 SessionRecordSchema
 ControlEnvelopeSchema
+ServerControlEnvelopeSchema
+ClientControlEnvelopeSchema
 ControlPayloadSchema
+Phase1SessionSnapshotSchema
 MediaFrameHeaderSchema
 OutboxMessageSchema
 ```
 
 本阶段不实现这些对象对应的完整业务，但先固定跨模块必需的身份、版本、追踪、时序、幂等和取消字段。
 
-Gate 1 还必须由 `@bellis/contracts` 导出不包含实现的 `MonotonicClock` 接口，并由 `@bellis/observability` 空壳导出最小 Logger/Metrics Port 与 No-op 实现。这样 P1、P2、P3 可以从同一 Commit 开始：P1 实现生产时钟，P2 通过 Clock Port 驱动 Lease 和重试，P3 在保持公开 Port 不变的前提下实现 Virtual Clock 和完整观测适配。Port 只描述能力，不得反向引入 Transport、Persistence 或 Runtime。
+Gate 1 还必须由 `@bellis/contracts` 导出不包含实现的 `MonotonicClock` 接口，由 `@bellis/testkit` 交付可直接使用的最小 `VirtualClock`，并由 `@bellis/observability` 空壳导出最小 Logger/Metrics Port 与 No-op 实现。这样 P1、P2、P3 可以从同一 Commit 开始：P1/P2 直接把 `@bellis/testkit` 作为 devDependency 使用，P3 在保持公开 Port 和 VirtualClock 行为不变的前提下补充其他测试与观测能力。Port 只描述能力，不得反向引入 Transport、Persistence 或 Runtime。
 
 ### 6.4 DecisionPacket 的单一发言来源
 
@@ -383,20 +411,18 @@ interface DecisionPacket {
 - TTS、字幕和口型读取同一个 SpeechIntent。
 - 不会发生顶层文本与 ActionFrame 文本不一致。
 
-该收敛决定需要记录为 `docs/adr/0001-canonical-decision-packet.md`，说明它是在不改变既有不变量的前提下消除示例歧义。
+该收敛决定连同 Wire Envelope 的十进制字符串、嵌套 Trace、`messageId/type` 设计已记录在 `docs/adr/0001-canonical-core-and-wire-contracts.md`。ADR 列出了三个文档旧示例与最终形态的差异，并说明这些变更是在不改变既有不变量的前提下消除歧义和 JSON 不可序列化问题。
 
 ### 6.5 Envelope 与错误
 
 Control WebSocket 的 Wire Envelope 固定为：
 
 ```ts
-interface ControlEnvelope<T> {
+interface ControlEnvelopeBase<T> {
   version: 1;
   type: string;
   messageId: string;
   sessionId: string;
-  seq: string;
-  ack?: string;
   trace: {
     traceId: string;
     spanId?: string;
@@ -405,7 +431,24 @@ interface ControlEnvelope<T> {
   deadlineUs?: string;
   payload: T;
 }
+
+interface ServerControlEnvelope<T> extends ControlEnvelopeBase<T> {
+  direction: "server";
+  seq: string;
+}
+
+interface ClientControlEnvelope<T> extends ControlEnvelopeBase<T> {
+  direction: "client";
+  ack?: string;
+  idempotencyKey?: string;
+}
+
+type ControlEnvelope<T> =
+  | ServerControlEnvelope<T>
+  | ClientControlEnvelope<T>;
 ```
+
+`direction` 是 Schema 判别字段。服务端 Envelope 必须有 `seq` 且不能带客户端幂等字段；客户端 Envelope 不产生 `seq`，可以累计确认 `ack`，状态变更请求必须提供 `idempotencyKey`。禁止通过填充 `seq: "0"` 把两种方向伪装成同一种结构。
 
 错误使用稳定机器码，不让客户端解析错误文案：
 
@@ -453,7 +496,7 @@ interface MonotonicClock {
 实现：
 
 - `SystemMonotonicClock`：基于 Node 单调时钟。
-- `VirtualClock`：测试手动推进，不调用真实 `setTimeout` 等待业务时长。
+- `VirtualClock`：由 P0 在 Gate 1 交付，测试手动推进，不调用真实 `setTimeout` 等待业务时长；P1、P2、P3 从并行开发第一天即可使用。
 
 `sleepUntil` 必须支持：目标已过立即完成、Abort、多个等待者按目标顺序释放、推进大步时一次释放所有到期任务。
 
@@ -556,6 +599,40 @@ error
 - `messageId` 用于去重，`seq` 用于排序，两者不能互相替代。
 - 重复收到同一个 `messageId` 不得再次产生持久化副作用。
 
+客户端到服务端方向不建立第二套累计 ACK/重放日志：
+
+- 单次 WebSocket 连接内依赖协议自身的可靠、有序传输。
+- 每条客户端业务消息仍必须携带 `messageId`；连接内短期去重由 Transport 处理。
+- 会改变持久状态的请求还必须携带业务 `idempotencyKey`，由持久化层跨连接、跨重启去重。
+- 断线时尚未收到业务结果的消息状态是“不确定”，客户端先重连并读取 Snapshot，再用相同 `idempotencyKey` 重试允许重试的命令。
+- 心跳、时钟采样等瞬时消息不重放；非幂等且没有幂等键的命令不得自动重试。
+- `ack` 字段只表示客户端对服务端序号的累计确认，服务端不为客户端消息发明对称序号。
+
+Phase 1 的 `session.snapshot` 固定包含：
+
+```ts
+interface Phase1SessionSnapshot {
+  schemaVersion: 1;
+  reason: "initial" | "replay_gap" | "requested";
+  sessionId: string;
+  sessionStatus: "starting" | "ready" | "draining";
+  latestServerSeq: string;
+  signalWatermarks: Array<{ source: string; watermark: string }>;
+  lastCommittedScene?: {
+    sceneId: string;
+    cycleId: string;
+    status: "committed";
+    committedAtMs: number;
+  };
+  activeScene: null;
+  openMediaStreams: [];
+  runtimeVersion: string;
+  generatedAtMs: number;
+}
+```
+
+Phase 1 尚不执行真实 Scene，因此 `activeScene` 恒为 `null`。Media Stream 属于连接级资源，重连后必须重新打开，所以 Snapshot 不声称恢复旧 Stream。Outbox 是 Runtime 内部状态，不暴露给普通客户端。后续阶段扩展 Snapshot 只能新增版本化可选字段或提升 Schema 版本。
+
 ### 8.3 背压策略
 
 每个 Control 连接有有界发送队列，默认门槛必须配置化并至少覆盖“消息数”和“总字节数”。初始建议值：512 条或 8 MiB，任一达到即进入背压。
@@ -627,6 +704,13 @@ Control 与 Media 使用不同队列，测试必须证明大 Media 流不会阻�
 
 `node:sqlite` 只能在 `packages/persistence/src/worker` 内导入。Runtime 通过类型化 Worker RPC 使用持久化能力：
 
+Node.js 24.15.0 起，`node:sqlite` 的官方状态为 Stability 1.2（Release Candidate），不再是早期 24.x 的 Stability 1.1，但仍未达到 Stability 2。Phase 1 的 CI/开发基线固定为通过验证的完整 Node 补丁版本（本文修订时为 24.19.0），并通过 Adapter + Worker 隔离其 API 变化风险。
+
+- 不支持 Node 24.0–24.14 作为开发或 CI 基线。
+- 不设置 `NODE_NO_WARNINGS`，也不全局关闭 `ExperimentalWarning`。
+- CI 捕获 Worker `stderr`；固定版本若出现新的 SQLite 实验警告或平台差异，测试失败并要求评估。
+- Windows/macOS 都要验证 Worker 导入、WAL、事务、BigInt 读取、强制终止和数据库重开，并记录 Node 与内嵌 SQLite 版本。
+
 ```ts
 interface PersistenceClient {
   migrate(signal?: AbortSignal): Promise<void>;
@@ -643,6 +727,23 @@ interface PersistenceClient {
 Worker RPC 必须包含 `requestId`、操作名、Deadline、TraceContext 和 Payload Schema。主线程不得向 Worker 发送任意 SQL 字符串；只允许调用版本化操作。
 
 测试要静态检查除 Worker 目录外没有 `node:sqlite` 导入，并用事件循环延迟测试证明批量写入不会同步阻塞 Runtime。
+
+P2 必须在 Persistence 公开装配接口中预留可选的受控检查点观察器，生产默认使用 No-op：
+
+```ts
+interface PersistenceCheckpointObserver {
+  reached(
+    checkpoint:
+      | "before_scene_transaction_commit"
+      | "after_scene_transaction_commit_before_outbox_dispatch"
+      | "after_outbox_publish_before_mark_delivered",
+    context: { traceId: string; sceneId?: string; outboxId?: string },
+    signal: AbortSignal,
+  ): Promise<void>;
+}
+```
+
+测试适配器通过测试父进程继承的私有 IPC 通道报告“已到达”并等待释放；Harness 收到通知后可以精确终止子进程。生产入口永远不注册测试适配器，HTTP/WS 不暴露 Fault Route，也不通过普通环境变量开启远程检查点。这样 P4 能构建 Demo，而不必侵入式修改事务代码。
 
 ### 9.2 数据库文件
 
@@ -688,11 +789,15 @@ idempotency_keys
 
 - `session_records`：`record_id`、`session_id`、`record_type`、`aggregate_id`、`aggregate_seq`、`trace_id`、`occurred_at_ms`、`schema_version`、`payload_json`。
 - `signal_watermarks`：`session_id`、`source`、`watermark`、`updated_at_ms`，其中 Watermark 按无损方式保存。
-- `scenes`：`scene_id`、`cycle_id`、`status`、`committed_at_us`、`schema_version`、`payload_json`、`idempotency_key`。
-- `outbox`：`outbox_id`、`topic`、`partition_key`、`payload_json`、`status`、`attempts`、`available_at_ms`、`lease_until_ms`、`last_error_code`、`created_at_ms`。
+- `scenes`：`scene_id`、`cycle_id`、`status`、`committed_at_ms`、`schema_version`、`payload_json`、`idempotency_key`。
+- `outbox`：`outbox_id`、`topic`、`partition_key`、`payload_json`、`status`、`attempts`、`available_at_ms`、`lease_until_ms`、`lease_owner_instance_id`、`last_error_code`、`created_at_ms`。
 - `idempotency_keys`：作用域、Key、请求摘要、结果引用和过期策略。
 
 所有 JSON Payload 写入前必须通过对应版本 Schema。查询端读到未知版本时返回明确兼容性错误，不能盲目强转为当前类型。
+
+`committed_at_ms` 是 Unix epoch milliseconds，只用于持久化审计和展示；恢复顺序以追加记录序号和事务事实为准，不按墙上时间推断。Scene 真正执行的 `commitAtRuntimeUs` 只存在于当前 Runtime/Timeline 的单调时钟域，不写入 `state.db`。如调试确需保留该值，只能写入 `telemetry.db`，同时带 `runtimeInstanceId`，且禁止跨实例比较或参与恢复决策。
+
+Outbox 的 `available_at_ms` 与 `lease_until_ms` 必须跨重启存在，因此采用墙上时间是有意识的妥协。所有 Lease 比较只在 DB Worker 内完成：Worker 启动时记录 `bootEpochMs` 和 `bootMonotonicUs`，运行期间用 `bootEpochMs + monotonicDelta` 计算不受 NTP 跳变影响的 `leaseNowMs`；重启后，属于旧 `lease_owner_instance_id` 的 `in_flight` 项直接回到可领取状态。系统选择“可能重复、依靠幂等去重”，不选择因墙钟回拨而无限卡住交付。
 
 ### 9.5 原子 Scene Commit
 
@@ -729,7 +834,8 @@ Dispatcher：
 - 可重试错误使用带抖动的指数退避。
 - 不可重试错误进入 `dead`，记录安全错误码。
 - Runtime 退出时停止领取新任务，允许当前小批次在 Grace Period 内结束。
-- Runtime 崩溃后，过期 `in_flight` Lease 回到可领取状态。
+- 同一 Worker 生命周期内，Lease 到期由单调投影的 `leaseNowMs` 判断。
+- Runtime 崩溃后，旧 Runtime Instance 持有的 `in_flight` Lease 无需等待墙上截止时间，启动恢复时直接回到可领取状态。
 
 恢复测试必须模拟：
 
@@ -819,6 +925,8 @@ bellis_scene_commit_duration_ms
 - 启动 Token 只能成功交换一次。
 - Host/Origin/Session 不合法时拒绝连接。
 - Control WS 完成 Hello、ACK、心跳、时钟同步和重连。
+- 客户端状态变更消息在断线不确定状态下使用相同幂等键重试，瞬时消息不重放。
+- Replay Window 缺口返回本文定义的 Phase 1 `session.snapshot`，Media Stream 要求重新打开。
 - Media WS 的 Stream 注册、合法帧、非法帧和大小限制。
 - Media 压力下 Control 的心跳和取消仍能及时处理。
 - Scene Commit 事务成功、回滚、幂等和冲突。
@@ -827,7 +935,7 @@ bellis_scene_commit_duration_ms
 
 ### 11.4 故障与恢复测试
 
-测试进程必须能在受控检查点终止 Runtime/DB Worker，再用同一临时数据目录启动。禁止只 Mock Repository 来声称完成恢复验证。
+测试进程必须通过 P2 注入的 `PersistenceCheckpointObserver` 和私有父子进程 IPC，在受控检查点终止 Runtime/DB Worker，再用同一临时数据目录启动。禁止只 Mock Repository 来声称完成恢复验证，也禁止为了测试增加生产 HTTP/WS 调试接口。
 
 至少覆盖：
 
@@ -876,15 +984,17 @@ flowchart LR
 
 ### 12.3 文件所有权
 
-| 任务 | 独占修改路径 | 可读但不可修改 |
+文件所有权按 Wave 生效：P0 在 Wave 0 负责创建包骨架，Gate 1 通过后将非冻结空壳移交给 Wave 1 对应任务。`packages/testkit/src/virtual-clock.ts` 和 `packages/testkit/test/virtual-clock.test.ts` 是例外，P3 只能使用，不能修改。`packages/testkit/src/index.ts` 在 Gate 1 后可由 P3 追加新导出，但不得删除、重命名或改变既有 VirtualClock 导出。
+
+| 任务 | 本任务允许修改路径 | 可读但不可修改 |
 | --- | --- | --- |
-| P0 骨架与 Contracts | 根工程配置、`packages/contracts/**`、ADR 0001；其他包只允许创建 `package.json` 与公开 Port 空壳 | 现有两份设计文档 |
+| P0 骨架与 Contracts | 根工程配置、`packages/contracts/**`、`packages/testkit` 的包配置、公开入口、`src/virtual-clock.ts`、`test/virtual-clock.test.ts`；其他包只允许创建 `package.json` 与公开 Port 空壳 | 现有设计文档与已接受的 ADR 0001 |
 | P1 Clock/Transport | `packages/transport/**`、两份 WS 协议文档 | contracts、observability 公开入口 |
 | P2 Persistence | `packages/persistence/**`、持久化协议文档 | contracts、observability 公开入口 |
-| P3 Observability/Testkit | `packages/observability/**`、`packages/testkit/**` | contracts、transport 公开入口 |
+| P3 Observability/Testkit | `packages/observability/**`、`packages/testkit/**`，但排除 `src/virtual-clock.ts` 和 `test/virtual-clock.test.ts`；`src/index.ts` 只追加导出 | contracts、transport 公开入口、Gate 1 VirtualClock 实现与契约测试 |
 | P4 Runtime 集成 | `apps/runtime/**`、Demo 脚本、CI 集成文件 | 所有包公开入口 |
 
-任何任务需要修改别人的独占路径时，先提交接口变更请求：说明当前契约、阻塞点、最小改动和兼容影响。不得直接跨区修补。
+任何任务需要修改冻结文件或本任务未获准修改的路径时，先提交接口变更请求：说明当前契约、阻塞点、最小改动和兼容影响。不得直接跨区修补。
 
 ## 13. 可直接交给 Agent 的工作包
 
@@ -896,10 +1006,12 @@ flowchart LR
 
 - 初始化 Monorepo、Node/TypeScript/ESM/CI 基线。
 - 创建 contracts 包和全部第一阶段 Schema。
-- 创建 JSON Schema 生成与漂移检查。
-- 创建 ADR 0001，确定 DecisionPacket 发言只来自 ActionFrame。
+- 创建 JSON Schema 2020-12 / Draft 7 双目标生成、语义等价测试与独立漂移检查。
+- 按已接受的 ADR 0001 实现 DecisionPacket 与 Wire Envelope Contracts，并验证三个文档不存在示例漂移。
 - 冻结 `MonotonicClock` 与最小 Logger/Metrics Port。
+- 在 `@bellis/testkit` 交付经过测试的最小 `VirtualClock`，从 `packages/testkit/src/index.ts` 公开 re-export，并在 `package.json.exports` 暴露包根入口，使 P1/P2 可以通过 `@bellis/testkit` 导入而无需等待 P3。
 - 建立所有包的最小 package 边界和 No-op 实现，使后续任务可从同一 Commit 独立开始。
+- 固定 TypeScript 7、Oxlint、Oxfmt 和 Node 24 完整版本，完成 Windows/macOS 工具链与 `node:sqlite` Smoke 验证并记录结论。
 
 **禁止项**：不实现 WebSocket、SQLite、Runtime 业务或未来 Provider。
 
@@ -910,6 +1022,11 @@ pnpm install
 pnpm contracts:check
 pnpm --filter @bellis/contracts typecheck
 pnpm --filter @bellis/contracts test
+pnpm --filter @bellis/testkit typecheck
+pnpm --filter @bellis/testkit test
+pnpm runtime:check
+pnpm lint
+pnpm format:check
 ```
 
 **交付说明必须包含**：公开导出列表、生成物策略、所有协议歧义、后续 Agent 应依赖的 Gate 1 Commit。
@@ -917,7 +1034,7 @@ pnpm --filter @bellis/contracts test
 可复制任务提示：
 
 ```text
-实现 docs/phase-1-build-guide.md 的 P0。先阅读该文档第 0–6、12 节以及关联设计文档指定章节。只修改 P0 文件所有权范围。以 Zod 4 作为唯一协议源，完成 Monorepo、严格 TypeScript/ESM、contracts、JSON Schema 生成与 ADR 0001；同时冻结 MonotonicClock、Logger/Metrics Port，并为后续包建立可编译的 No-op 空壳。不要实现传输、数据库或业务 Provider。完成后运行 P0 验收命令，报告公开导出、测试结果、未决协议问题和 Gate 1 Commit。
+实现 docs/phase-1-build-guide.md 的 P0。先阅读该文档第 0–6、12 节、ADR 0001 以及关联设计文档指定章节。只修改 P0 文件所有权范围。以 Zod 4 作为唯一协议源，完成 Monorepo、严格 TypeScript/ESM，并按 ADR 0001 生成 2020-12/Draft 7 双目标 Contracts；同时冻结 MonotonicClock、Logger/Metrics Port，交付最小可用 VirtualClock 及契约测试，通过 src/index.ts re-export 并在 package.json.exports 暴露 @bellis/testkit 包根入口，然后为后续包建立可编译的 No-op 空壳。固定 Node 24、TypeScript 7、Oxlint、Oxfmt 完整版本，在 Windows/macOS 验证工具链和 node:sqlite Smoke。不要实现传输、数据库或业务 Provider。完成后运行 P0 验收命令，报告公开导出、版本兼容结论、测试结果、未决协议问题和 Gate 1 Commit。
 ```
 
 ### 13.2 P1：Clock、Control WS 与 Binary Media WS
@@ -929,6 +1046,8 @@ pnpm --filter @bellis/contracts test
 - `SystemMonotonicClock` 与 Clock 同步算法。
 - Control Envelope 编解码、连接状态、序号、ACK、Replay Window、心跳和背压。
 - Media Frame 编解码、增量 Parser、Stream Registry 和大小限制。
+- 客户端→服务端的 `messageId + idempotencyKey` 语义，以及服务端→客户端的 Seq/ACK/Replay 语义。
+- 本文规定的 Phase 1 `session.snapshot` Schema 和 Replay Gap 行为。
 - `control-websocket.md` 与 `binary-media-websocket.md`。
 - 单元、性质和传输集成测试使用的服务适配接口。
 
@@ -940,10 +1059,18 @@ pnpm --filter @bellis/contracts test
 - Media 压力不饿死 Control 高优先级消息。
 - 所有等待都可 Abort，测试不使用长时间 sleep。
 
+**验收命令**：
+
+```bash
+pnpm --filter @bellis/transport typecheck
+pnpm --filter @bellis/transport test
+pnpm --filter @bellis/transport test:integration
+```
+
 可复制任务提示：
 
 ```text
-基于 Gate 1 Commit 实现 docs/phase-1-build-guide.md 的 P1。只修改 transport 包和两份 WS 协议文档。严格依赖 @bellis/contracts，不复制协议类型。完成 Clock、Control 状态与队列、ACK/Replay、时钟同步、Media Frame Parser 和 Stream Registry；不接入真实媒体或业务。使用 Vitest/fast-check 覆盖边界、分片、乱序、Abort 和背压。完成后报告公开 API、性能/大小限制、测试结果和集成注意事项。
+基于 Gate 1 Commit 实现 docs/phase-1-build-guide.md 的 P1。只修改 transport 包和两份 WS 协议文档。严格依赖 @bellis/contracts，不复制协议类型。使用 Gate 1 VirtualClock，完成 Clock、Control 状态与队列、服务端 Seq/ACK/Replay、客户端 messageId/idempotency 语义、Phase 1 Snapshot、时钟同步、Media Frame Parser 和 Stream Registry；不接入真实媒体或业务。使用 Vitest/fast-check 覆盖边界、分片、乱序、Abort 和背压。完成后报告公开 API、性能/大小限制、测试结果和集成注意事项。
 ```
 
 ### 13.3 P2：SQLite Worker、Session Records、事务与恢复
@@ -957,6 +1084,7 @@ pnpm --filter @bellis/contracts test
 - Session Record Repository。
 - 原子 `commitScene`。
 - Outbox Dispatcher 的持久化状态机、Lease、重试和恢复。
+- `PersistenceCheckpointObserver`、生产 No-op 和私有 IPC 测试适配点。
 - 真实进程/Worker 终止恢复测试。
 - `persistence-and-recovery.md`。
 
@@ -969,10 +1097,18 @@ pnpm --filter @bellis/contracts test
 - Crash Window 全覆盖。
 - 数据库永不写进仓库目录的默认位置。
 
+**验收命令**：
+
+```bash
+pnpm --filter @bellis/persistence typecheck
+pnpm --filter @bellis/persistence test
+pnpm --filter @bellis/persistence test:integration
+```
+
 可复制任务提示：
 
 ```text
-基于 Gate 1 Commit 实现 docs/phase-1-build-guide.md 的 P2。只修改 persistence 包和持久化协议文档。使用 node:sqlite，但只能在 DB Worker 内导入；主线程通过版本化 RPC 操作。实现 Migration checksum、两个数据库、Session Records、原子 commitScene、Outbox Lease/重试/恢复。使用临时目录和真实 Worker/进程中断验证 Crash Window，不用纯 Mock 替代恢复测试。完成后报告 Schema、事务边界、恢复证据、测试结果和已知限制。
+基于 Gate 1 Commit 实现 docs/phase-1-build-guide.md 的 P2。只修改 persistence 包和持久化协议文档。使用 node:sqlite，但只能在 DB Worker 内导入；主线程通过版本化 RPC 操作。实现 Migration checksum、两个数据库、Session Records、原子 commitScene、Outbox Lease/重试/恢复，并预留 PersistenceCheckpointObserver 和私有 IPC 测试适配点。使用 Gate 1 VirtualClock、临时目录和真实 Worker/进程中断验证 Crash Window，不用纯 Mock 替代恢复测试。完成后报告 Node/SQLite 版本、Schema、事务边界、恢复证据、测试结果和已知限制。
 ```
 
 ### 13.4 P3：Observability 与 Testkit
@@ -984,8 +1120,7 @@ pnpm --filter @bellis/contracts test
 - TraceContext 创建、解析、传播和 Redaction。
 - Pino Logger Factory 与稳定日志字段。
 - 第一阶段 Metrics 接口和内存实现。
-- Virtual Clock。
-- 确定性 ID、临时数据目录和协议 Fixture 等 Testkit。
+- 在不改变 Gate 1 VirtualClock 契约的前提下，补充确定性 ID、临时数据目录和协议 Fixture 等 Testkit。
 - 为 P1/P2/P4 提供不依赖真实时间和网络服务的测试能力。
 
 **禁止项**：不建立外部观测基础设施，不把 Testkit 依赖带入生产包。
@@ -994,13 +1129,22 @@ pnpm --filter @bellis/contracts test
 
 - 固定种子下测试结果可重放。
 - 日志 Redaction 测试包含 Token、Cookie 和授权头。
-- Virtual Clock 无真实业务等待。
+- Gate 1 VirtualClock 的既有测试继续通过，新增 Testkit 不引入真实业务等待。
 - Metrics 高基数字段受到限制。
+
+**验收命令**：
+
+```bash
+pnpm --filter @bellis/observability typecheck
+pnpm --filter @bellis/observability test
+pnpm --filter @bellis/testkit typecheck
+pnpm --filter @bellis/testkit test
+```
 
 可复制任务提示：
 
 ```text
-基于 Gate 1 Commit 实现 docs/phase-1-build-guide.md 的 P3。只修改 observability 和 testkit，并保持 P0 已冻结的 Port 兼容。实现 W3C 兼容 TraceContext、Pino 字段与脱敏、Phase 1 Metrics 接口、Virtual Clock 和确定性测试工具。生产包不能依赖 testkit；不部署 Collector。完成后运行包级 typecheck/test，报告公开 API、Redaction 覆盖、确定性保证和 P1/P2/P4 的使用示例。
+基于 Gate 1 Commit 实现 docs/phase-1-build-guide.md 的 P3。只修改 observability 和 testkit，并保持 P0 已冻结的 Port 与 VirtualClock 行为兼容。实现 W3C 兼容 TraceContext、Pino 字段与脱敏、Phase 1 Metrics 接口和其余确定性测试工具。生产包不能依赖 testkit；不部署 Collector。完成后运行包级验收命令，报告公开 API、Redaction 覆盖、确定性保证和 P1/P2/P4 的使用示例。
 ```
 
 ### 13.5 P4：Runtime 集成、故障验证与 Demo
@@ -1041,8 +1185,13 @@ pnpm --filter @bellis/contracts test
 - Wire 中没有裸 `bigint`。
 - 所有跨边界时间都标明单位与时钟域。
 - DecisionPacket 只有一个发言来源。
+- ADR 0001 同时记录 DecisionPacket 与 Envelope 的上游示例收敛。
+- Client→Server 与 Server→Client 的可靠性语义明确且不对称。
+- Phase 1 `session.snapshot` 内容已经冻结。
 - Error Code、版本策略和未知字段策略明确。
-- JSON Schema 生成结果稳定。
+- JSON Schema 2020-12 与 Draft 7 生成结果分别稳定，Fixture 语义一致。
+- Gate 1 VirtualClock 可被 P1/P2 直接作为 devDependency 使用。
+- Node/TypeScript/Oxlint/Oxfmt 固定版本已在 Windows/macOS 验证并记录。
 - 后续三条并行任务不需要修改 Contracts 才能开始主体开发。
 
 若 Gate 1 后确需改协议，必须先更新 Schema、文档和兼容性测试，再通知所有任务 Agent 同步同一 Commit。
@@ -1056,6 +1205,7 @@ pnpm --filter @bellis/contracts test
 - Clock、Trace 和 Abort 是否在三条链路采用相同语义。
 - Worker、WS 和后台任务是否都有关闭方法。
 - 是否有真实时间 sleep、无限队列或无 Deadline 的操作。
+- P2 是否已提供生产 No-op、测试私有 IPC 的受控检查点注入，而没有公开 Debug Route。
 - 是否擅自进入 Phase 2 业务范围。
 
 ### 14.3 Gate 3：Phase 1 验收
@@ -1089,7 +1239,7 @@ pnpm demo:phase1
 5. 注册测试 Media Stream，发送并确认一个合法二进制测试帧。
 6. 提交一个包含模拟 Speech/Avatar Cue 的 Scene 和 Signal Watermark。
 7. 收到数据库 Commit 后发布的 `scene.committed`。
-8. 在 Outbox 完成前的受控检查点终止 Runtime。
+8. 通过仅测试装配可用的 `PersistenceCheckpointObserver` 和私有父子进程 IPC，在 Outbox 完成前的受控检查点终止 Runtime。
 9. 使用同一数据目录重启 Runtime。
 10. 确认 Scene 和 Watermark 已恢复，Outbox 重新交付且未产生第二个逻辑 Commit。
 11. 输出同一个 `traceId` 下的关键事件摘要。
@@ -1167,8 +1317,8 @@ Git：
 最终仓库应具备：
 
 - [ ] 可复现的 Monorepo 与 lockfile。
-- [ ] `@bellis/contracts` 及生成的 JSON Schema。
-- [ ] ADR 0001。
+- [ ] `@bellis/contracts` 及生成的 JSON Schema 2020-12 / Draft 7。
+- [ ] ADR 0001：Canonical Core and Wire Contracts。
 - [ ] `@bellis/transport` 的 Clock、Control 和 Media 协议实现。
 - [ ] `@bellis/persistence` 的 DB Worker、Migration、Records、事务和 Outbox。
 - [ ] `@bellis/observability` 的 Trace、日志和指标基线。
@@ -1191,3 +1341,15 @@ Phase 1 结束后，第二阶段只能通过以下稳定入口继续建设：
 - Runtime Application Service：接入 Action Compiler 和 Scene Director，不把业务下沉到 Route Handler。
 
 第二阶段开始前应先创建新的实施指南，细化 Fake Signal/Fake Model、Action Compiler、Scene Director、Stage、AudioWorklet、字幕、Live2D Adapter 和同步偏差测试。本阶段不为这些模块提前确定内部实现，但已经把它们所依赖的协议、时间、传输、提交和恢复语义冻结下来。
+
+## 20. 外部事实核验基线
+
+以下官方资料用于 P0 核验，不以二手文章或记忆判断工具状态：
+
+- [Node.js 24 SQLite 文档](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html)：v24.15.0 起为 Stability 1.2，`DatabaseSync` API 同步，因此放入 Worker。
+- [TypeScript 官方站点](https://www.typescriptlang.org/)：TypeScript 7.0 已正式可用。
+- [typescript-eslint 依赖版本](https://typescript-eslint.io/users/dependency-versions/)：本文修订时官方支持范围仍为 `>=4.8.4 <6.1.0`。
+- [Oxlint](https://oxc.rs/docs/guide/usage/linter.html) 与 [Type-Aware Linting](https://oxc.rs/docs/guide/usage/linter/type-aware.html)：基于 TypeScript 7 原生工具链；type-aware 规则需 P0 验证，完整 type-check 不替代 `tsc -b`。
+- [Oxfmt](https://oxc.rs/docs/guide/usage/formatter)：原生支持 TypeScript/TSX，并提供只检查不写入的格式命令。
+
+版本状态会变化。P0 应记录核验日期、固定版本、官方支持范围和双平台实测结果；后续升级通过独立依赖 PR 与 CI，不在业务任务中顺手漂移。

@@ -185,7 +185,8 @@ interface DecisionInput {
 }
 
 interface DecisionPacket {
-  message: string;
+  schemaVersion: 1;
+  cycleId: string;
   toolCalls: ToolCall[];
   action: ActionFrame;
   next: "finish" | "after_tools" | "continue";
@@ -199,6 +200,8 @@ interface ActionFrame {
   sync: SyncPolicy;
 }
 ```
+
+`DecisionPacket` 不再保留顶层 `message` 或 `speech`。发言只有一个来源：`DecisionPacket.action.speech`。模型 Provider 的原始输出可以不同，但进入核心前必须规范化为上述形态，避免文本、TTS、字幕和动作读取到互相冲突的内容。收敛记录见 [ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md)。
 
 - `Signal`：尚未被决策消费的输入事实。
 - `WorldSnapshot`：某一水位上的只读直播世界状态。
