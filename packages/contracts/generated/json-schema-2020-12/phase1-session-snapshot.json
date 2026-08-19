@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "initial",
+        "replay_gap",
+        "requested"
+      ]
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "sessionStatus": {
+      "type": "string",
+      "enum": [
+        "starting",
+        "ready",
+        "draining"
+      ]
+    },
+    "latestServerSeq": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "signalWatermarks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "watermark": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+          }
+        },
+        "required": [
+          "source",
+          "watermark"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "lastCommittedScene": {
+      "type": "object",
+      "properties": {
+        "sceneId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "cycleId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "status": {
+          "type": "string",
+          "const": "committed"
+        },
+        "committedAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "sceneId",
+        "cycleId",
+        "status",
+        "committedAtMs"
+      ],
+      "additionalProperties": false
+    },
+    "activeScene": {
+      "type": "null"
+    },
+    "openMediaStreams": {
+      "maxItems": 0,
+      "type": "array",
+      "items": {}
+    },
+    "runtimeVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "generatedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "reason",
+    "sessionId",
+    "sessionStatus",
+    "latestServerSeq",
+    "signalWatermarks",
+    "activeScene",
+    "openMediaStreams",
+    "runtimeVersion",
+    "generatedAtMs"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,28 @@
+{
+  "target": "draft-7",
+  "dialect": "http://json-schema.org/draft-07/schema#",
+  "schemas": [
+    "action-frame",
+    "audience-batch",
+    "avatar-intent",
+    "client-control-envelope",
+    "control-envelope",
+    "control-payload",
+    "cue",
+    "decision-packet",
+    "error-envelope",
+    "game-intent",
+    "media-frame-header",
+    "outbox-message",
+    "overlay-intent",
+    "phase1-session-snapshot",
+    "scene",
+    "server-control-envelope",
+    "session-record",
+    "signal",
+    "speech-intent",
+    "sync-policy",
+    "tool-call",
+    "trace-context"
+  ]
+}

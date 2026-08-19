@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "invalid_message",
+        "unsupported_version",
+        "unauthorized",
+        "deadline_exceeded",
+        "backpressure",
+        "not_ready",
+        "internal_error"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "details": {},
+    "traceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  },
+  "required": [
+    "code",
+    "message",
+    "retryable",
+    "traceId"
+  ],
+  "additionalProperties": false
+}
