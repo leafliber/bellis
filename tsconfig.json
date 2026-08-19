@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./packages/observability" },
+    { "path": "./packages/testkit" },
+    { "path": "./packages/transport" },
+    { "path": "./packages/persistence" },
+    { "path": "./apps/runtime" }
+  ]
+}

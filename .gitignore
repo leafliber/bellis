@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# test & coverage
+coverage/
+
+# runtime local data — 数据库与日志永不写入仓库默认位置
+*.db
+*.db-shm
+*.db-wal
+data/
+logs/
+*.log
+
+# pnpm
+.pnpm-store/
+
+# editor & os
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.zcode/

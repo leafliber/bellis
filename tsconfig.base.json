@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "paths": {
+      "@bellis/contracts": ["./packages/contracts/src/index.ts"],
+      "@bellis/observability": ["./packages/observability/src/index.ts"],
+      "@bellis/testkit": ["./packages/testkit/src/index.ts"],
+      "@bellis/transport": ["./packages/transport/src/index.ts"],
+      "@bellis/persistence": ["./packages/persistence/src/index.ts"]
+    }
+  }
+}
