@@ -30,5 +30,5 @@
     "schemaVersion",
     "hardLanes"
   ],
-  "additionalProperties": false
+  "additionalProperties": {}
 }

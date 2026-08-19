@@ -25,6 +25,7 @@ import {
 import { ControlPayloadSchema } from "./transport/control-payload.js";
 import { MediaFrameHeaderSchema } from "./transport/media-frame-header.js";
 import { TraceContextSchema } from "./common/trace-context.js";
+import { JsonValueSchema } from "./common/json-value.js";
 
 /**
  * JSON Schema 双目标生成（ADR 0001 §4）：
@@ -32,13 +33,23 @@ import { TraceContextSchema } from "./common/trace-context.js";
  * - 2020-12 供 OpenAPI 3.1 与对外契约；Draft 7 供 Fastify/Ajv 运行期验证与 LLM Tool。
  * - 生成物作为可审查产物提交入库，由 `pnpm contracts:check` 防漂移。
  * - 生成内容必须完全确定：不含时间戳、随机数或环境相关信息。
- * - Zod 侧的跨字段 refine（如 Envelope 方向约束、水位顺序）无法映射到
- *   JSON Schema，属于 Zod 运行期校验语义；两套 dialect 生成物共享同一
- *   Fixture 做语义等价测试，Fixture 覆盖这些约束的输入面。
+ *
+ * 语义等价策略（Zod ⇔ 生成物，任意输入判定一致）：
+ * - Zod 4 的 toJSONSchema 会把 plain z.object 与 strictObject 都输出为
+ *   additionalProperties:false，因此协议对象显式二选一：判别/互斥结构用
+ *   strictObject（闭合），可前向扩展的数据对象用 looseObject（开放，
+ *   生成物为 additionalProperties:{}）。不使用裸 z.object。
+ * - 不使用任何跨字段 refine；「至少一个行动」「noOp 互斥」「wordIndex
+ *   必填」等约束全部以 union/discriminated-union/min(1) 结构表达。
+ * - 生产者不变量（clock.pong 的 r2≥r1、批次水位顺序）不属于 Schema 约束，
+ *   由 Transport/Persistence 在 bigint 域校验。
+ * - 同一组合法/非法 Fixture 必须在 Zod、Ajv2020、AjvDraft7 三者上判定
+ *   一致；不存在任何只被单侧拒绝的样本。
  */
 
 /** 参与双目标生成的全部公开 Schema。key 即生成文件名。 */
 export const CONTRACT_SCHEMA_ENTRIES = {
+  "json-value": JsonValueSchema,
   "trace-context": TraceContextSchema,
   "error-envelope": ErrorEnvelopeSchema,
   signal: SignalSchema,

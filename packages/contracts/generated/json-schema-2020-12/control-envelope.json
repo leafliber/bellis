@@ -35,7 +35,7 @@
           "required": [
             "traceId"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "sentAtUs": {
           "type": "string",
@@ -45,7 +45,9 @@
           "type": "string",
           "pattern": "^(?:0|[1-9][0-9]{0,29})$"
         },
-        "payload": {},
+        "payload": {
+          "$ref": "#/$defs/__schema0"
+        },
         "direction": {
           "type": "string",
           "const": "server"
@@ -66,7 +68,7 @@
         "direction",
         "seq"
       ],
-      "additionalProperties": {}
+      "additionalProperties": false
     },
     {
       "type": "object",
@@ -102,7 +104,7 @@
           "required": [
             "traceId"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "sentAtUs": {
           "type": "string",
@@ -112,7 +114,9 @@
           "type": "string",
           "pattern": "^(?:0|[1-9][0-9]{0,29})$"
         },
-        "payload": {},
+        "payload": {
+          "$ref": "#/$defs/__schema0"
+        },
         "direction": {
           "type": "string",
           "const": "client"
@@ -137,7 +141,40 @@
         "payload",
         "direction"
       ],
-      "additionalProperties": {}
+      "additionalProperties": false
     }
-  ]
+  ],
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

@@ -30,7 +30,9 @@
       "minimum": -9007199254740991,
       "maximum": 9007199254740991
     },
-    "intent": {}
+    "intent": {
+      "$ref": "#/$defs/__schema0"
+    }
   },
   "required": [
     "schemaVersion",
@@ -40,5 +42,38 @@
     "offsetMs",
     "intent"
   ],
-  "additionalProperties": false
+  "additionalProperties": {},
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

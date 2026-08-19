@@ -36,12 +36,18 @@ export function parseDecimalString(value: string): bigint {
   return BigInt(value);
 }
 
-/** 把非负 bigint 编码为规范十进制字符串；负数直接拒绝。 */
+/** 把非负 bigint 编码为规范十进制字符串；负数与超上限值直接拒绝。 */
 export function formatDecimalString(value: bigint): string {
   if (value < 0n) {
     throw new RangeError("negative values cannot be encoded as decimal strings");
   }
-  return value.toString(10);
+  const formatted = value.toString(10);
+  if (formatted.length > MAX_DECIMAL_STRING_LENGTH) {
+    throw new RangeError(
+      `value exceeds the ${MAX_DECIMAL_STRING_LENGTH}-digit decimal string limit`,
+    );
+  }
+  return formatted;
 }
 
 /**

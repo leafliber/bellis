@@ -15,7 +15,13 @@
       "minLength": 1,
       "maxLength": 64
     },
-    "content": {},
+    "content": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/__schema0"
+        }
+      ]
+    },
     "durationMs": {
       "type": "integer",
       "minimum": 0,
@@ -27,5 +33,38 @@
     "intentId",
     "kind"
   ],
-  "additionalProperties": false
+  "additionalProperties": {},
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

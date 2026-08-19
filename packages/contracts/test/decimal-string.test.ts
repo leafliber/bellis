@@ -60,4 +60,11 @@ describe("parseDecimalString / formatDecimalString", () => {
   it("formatDecimalString rejects negative values", () => {
     expect(() => formatDecimalString(-1n)).toThrow(RangeError);
   });
+
+  it("formatDecimalString rejects values beyond the 30-digit schema limit", () => {
+    expect(formatDecimalString(10n ** 29n)).toBe("1" + "0".repeat(29));
+    expect(() => formatDecimalString(10n ** 30n)).toThrow(RangeError);
+    // 编码结果必须能被对应 Schema 接受（恒等映射保证）。
+    expect(DecimalStringSchema.safeParse(formatDecimalString(10n ** 29n)).success).toBe(true);
+  });
 });

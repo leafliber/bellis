@@ -6,7 +6,7 @@ import { SpanIdSchema, TraceIdSchema, UuidSchema } from "./ids.js";
  * 业务标识（sessionId/turnId/cycleId/sceneId/cueId/toolRunId）按需携带；
  * spanId 是可选传播字段，不替代业务 ID。
  */
-export const TraceContextSchema = z.object({
+export const TraceContextSchema = z.looseObject({
   traceId: TraceIdSchema,
   spanId: SpanIdSchema.optional(),
   sessionId: UuidSchema.optional(),

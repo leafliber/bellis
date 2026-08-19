@@ -49,7 +49,7 @@
           "userId",
           "text"
         ],
-        "additionalProperties": false
+        "additionalProperties": {}
       }
     },
     "topics": {
@@ -89,7 +89,7 @@
           "participants",
           "examples"
         ],
-        "additionalProperties": false
+        "additionalProperties": {}
       }
     },
     "urgentSignals": {
@@ -126,7 +126,9 @@
             "minimum": 0,
             "maximum": 1000
           },
-          "payload": {}
+          "payload": {
+            "$ref": "#/$defs/__schema0"
+          }
         },
         "required": [
           "schemaVersion",
@@ -137,7 +139,7 @@
           "priority",
           "payload"
         ],
-        "additionalProperties": false
+        "additionalProperties": {}
       }
     },
     "tokenEstimate": {
@@ -156,5 +158,38 @@
     "urgentSignals",
     "tokenEstimate"
   ],
-  "additionalProperties": false
+  "additionalProperties": {},
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

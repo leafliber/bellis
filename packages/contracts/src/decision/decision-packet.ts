@@ -7,10 +7,11 @@ import { ToolCallSchema } from "./tool-call.js";
  * DecisionPacket：一次模型请求的完整规范形态（ADR 0001）。
  *
  * - 恰好包含一个 ActionFrame；发言只存在于 action.speech。
- * - 不保留顶层 message 或 speech 字段。
+ * - 不保留顶层 message 或 speech 字段（未知顶层字段会被透传为扩展键，
+ *   但绝不解释为发言；TTS/字幕/口型只读 action.speech）。
  * - Model Provider 原始输出可以不同，但进入核心前必须规范化为该形态。
  */
-export const DecisionPacketSchema = z.object({
+export const DecisionPacketSchema = z.looseObject({
   schemaVersion: z.literal(1),
   cycleId: UuidSchema,
   toolCalls: z.array(ToolCallSchema).max(8),

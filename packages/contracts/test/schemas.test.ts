@@ -1,12 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  ActionFrameSchema,
   ClientControlEnvelopeSchema,
   ControlEnvelopeSchema,
   DecisionPacketSchema,
+  GameIntentSchema,
   ServerControlEnvelopeSchema,
+  SignalSchema,
 } from "../src/index.js";
 import { CONTRACT_SCHEMA_ENTRIES } from "../src/json-schema.js";
-import { MAX_U64, MESSAGE_ID, SCHEMA_FIXTURES, SESSION_ID, TRACE_ID } from "./fixtures.js";
+import {
+  BIGINT_PAYLOAD,
+  MAX_U64,
+  MESSAGE_ID,
+  SCHEMA_FIXTURES,
+  SESSION_ID,
+  TRACE_ID,
+  gameIntent as gameIntentFixture,
+} from "./fixtures.js";
 
 /**
  * 契约测试：每个公开 Schema 至少具备成功样例与失败样例（phase-1-build-guide.md §6.1），
@@ -40,19 +51,7 @@ describe("schema fixtures", () => {
     const schema = CONTRACT_SCHEMA_ENTRIES[key as keyof typeof CONTRACT_SCHEMA_ENTRIES];
     for (const sample of fixtures.invalid) {
       const result = schema.safeParse(sample);
-      expect(result.success, `${key} should reject: ${JSON.stringify(sample)}`).toBe(false);
-    }
-  });
-
-  it.each(
-    Object.entries(SCHEMA_FIXTURES).filter(([, fixtures]) => fixtures.refinementOnly !== undefined),
-  )("%s: refinement-only fixtures are rejected by Zod", (key, fixtures) => {
-    const schema = CONTRACT_SCHEMA_ENTRIES[key as keyof typeof CONTRACT_SCHEMA_ENTRIES];
-    for (const sample of fixtures.refinementOnly ?? []) {
-      const result = schema.safeParse(sample);
-      expect(result.success, `${key} refinement should reject: ${JSON.stringify(sample)}`).toBe(
-        false,
-      );
+      expect(result.success, `${key} should reject: ${String(sample)}`).toBe(false);
     }
   });
 });
@@ -75,12 +74,16 @@ describe("DecisionPacket 单一发言来源（ADR 0001）", () => {
       },
       next: "after_tools",
     });
-    expect(packet.action.speech?.text).toBe("我看看现在的任务进度");
-    expect("speech" in packet && packet.speech !== undefined).toBe(false);
-    expect("message" in packet).toBe(false);
+    const action = packet.action;
+    if ("noOp" in action) {
+      throw new Error("expected a speech action variant");
+    }
+    expect(action.speech?.text).toBe("我看看现在的任务进度");
   });
 
-  it("top-level message or speech fields are stripped, not trusted", () => {
+  it("top-level message/speech keys pass through but are never a speech source", () => {
+    // loose 对象允许未知键透传（前向兼容），但发言只读 action.speech；
+    // 领域代码禁止把顶层未知键解释为发言。
     const parsed = DecisionPacketSchema.parse({
       schemaVersion: 1,
       cycleId: "33333333-3333-4333-8333-333333333333",
@@ -90,8 +93,120 @@ describe("DecisionPacket 单一发言来源（ADR 0001）", () => {
       action: { schemaVersion: 1, sync: { schemaVersion: 1, hardLanes: [] }, noOp: true },
       next: "finish",
     });
-    expect("message" in parsed).toBe(false);
-    expect("speech" in parsed).toBe(false);
+    const action = parsed.action;
+    if (!("noOp" in action)) {
+      throw new Error("expected the noOp action variant");
+    }
+    expect(action.noOp).toBe(true);
+    expect("speech" in action).toBe(false);
+    expect(Object.hasOwn(parsed, "message")).toBe(true);
+  });
+});
+
+describe("ActionFrame 行动约束（结构化，无跨字段 refine）", () => {
+  const sync = { schemaVersion: 1, hardLanes: [] };
+
+  it("rejects a frame without any action or noOp", () => {
+    expect(ActionFrameSchema.safeParse({ schemaVersion: 1, sync }).success).toBe(false);
+  });
+
+  it("rejects empty action arrays — they are not actions", () => {
+    expect(ActionFrameSchema.safeParse({ schemaVersion: 1, sync, avatar: [] }).success).toBe(false);
+    expect(ActionFrameSchema.safeParse({ schemaVersion: 1, sync, game: [] }).success).toBe(false);
+    expect(ActionFrameSchema.safeParse({ schemaVersion: 1, sync, overlay: [] }).success).toBe(
+      false,
+    );
+  });
+
+  it("noOp is mutually exclusive with real actions", () => {
+    const avatarIntent = {
+      schemaVersion: 1,
+      intentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      motion: "nod_agree",
+      channels: ["head"],
+      priority: 80,
+      durationMs: 100,
+      interruptible: true,
+      exclusive: false,
+      mutexTags: [],
+    };
+    expect(
+      ActionFrameSchema.safeParse({ schemaVersion: 1, sync, noOp: true, avatar: [avatarIntent] })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("GameIntent at_speech_word 判别约束", () => {
+  it("requires wordIndex only for at_speech_word", () => {
+    const {
+      intentId,
+      skillId,
+      arguments: args,
+    } = gameIntentFixture as {
+      intentId: string;
+      skillId: string;
+      arguments: Record<string, unknown>;
+    };
+    expect(
+      GameIntentSchema.safeParse({
+        schemaVersion: 1,
+        intentId,
+        skillId,
+        timeRelation: "at_scene_start",
+        arguments: args,
+      }).success,
+    ).toBe(true);
+    expect(
+      GameIntentSchema.safeParse({
+        schemaVersion: 1,
+        intentId,
+        skillId,
+        timeRelation: "at_speech_word",
+        arguments: args,
+      }).success,
+    ).toBe(false);
+    expect(
+      GameIntentSchema.safeParse({
+        schemaVersion: 1,
+        intentId,
+        skillId,
+        timeRelation: "at_speech_word",
+        wordIndex: 2,
+        arguments: args,
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("JSON-safe 开放字段（JsonValueSchema）", () => {
+  it("envelope rejects payloads that cannot be JSON serialized", () => {
+    const envelope = {
+      version: 1,
+      type: "clock.ping",
+      messageId: MESSAGE_ID,
+      sessionId: SESSION_ID,
+      trace: { traceId: TRACE_ID },
+      sentAtUs: "1",
+      payload: BIGINT_PAYLOAD,
+      direction: "client",
+    };
+    expect(ServerControlEnvelopeSchema.safeParse(envelope).success).toBe(false);
+    expect(() => JSON.stringify(envelope)).toThrow(TypeError);
+  });
+
+  it("signal rejects non-JSON payload values", () => {
+    expect(
+      SignalSchema.safeParse({
+        schemaVersion: 1,
+        id: "66666666-6666-4666-8666-666666666666",
+        kind: "danmaku",
+        source: "test",
+        occurredAt: 0,
+        priority: 0,
+        payload: BIGINT_PAYLOAD,
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -140,6 +255,18 @@ describe("Control Envelope 方向判别（ADR 0001）", () => {
     ).toBe(true);
     expect(
       ClientControlEnvelopeSchema.safeParse(envelopeBase({ direction: "client", seq: "0" }))
+        .success,
+    ).toBe(false);
+  });
+
+  it("envelope is closed: unknown envelope-level keys are rejected", () => {
+    expect(
+      ServerControlEnvelopeSchema.safeParse(
+        envelopeBase({ direction: "server", seq: "5", "x-extra": 1 }),
+      ).success,
+    ).toBe(false);
+    expect(
+      ClientControlEnvelopeSchema.safeParse(envelopeBase({ direction: "client", "x-extra": 1 }))
         .success,
     ).toBe(false);
   });

@@ -8,22 +8,23 @@ import { UuidSchema } from "../common/ids.js";
  * - Phase 1 不执行真实 Scene，activeScene 恒为 null。
  * - Media Stream 是连接级资源，重连后必须重新打开，Snapshot 不声称恢复旧 Stream。
  * - Outbox 是 Runtime 内部状态，不暴露给普通客户端。
- * - 后续阶段扩展只能新增版本化可选字段或提升 schemaVersion。
+ * - 后续阶段扩展只能新增版本化可选字段或提升 schemaVersion；
+ *   loose 对象允许未知扩展键透传，配合该兼容策略。
  */
-export const Phase1SessionSnapshotSchema = z.object({
+export const Phase1SessionSnapshotSchema = z.looseObject({
   schemaVersion: z.literal(1),
   reason: z.enum(["initial", "replay_gap", "requested"]),
   sessionId: UuidSchema,
   sessionStatus: z.enum(["starting", "ready", "draining"]),
   latestServerSeq: DecimalStringSchema,
   signalWatermarks: z.array(
-    z.object({
+    z.looseObject({
       source: z.string().min(1).max(64),
       watermark: DecimalStringSchema,
     }),
   ),
   lastCommittedScene: z
-    .object({
+    .looseObject({
       sceneId: UuidSchema,
       cycleId: UuidSchema,
       status: z.literal("committed"),

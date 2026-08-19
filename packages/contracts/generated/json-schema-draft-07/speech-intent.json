@@ -35,5 +35,5 @@
     "purpose",
     "interruptible"
   ],
-  "additionalProperties": false
+  "additionalProperties": {}
 }

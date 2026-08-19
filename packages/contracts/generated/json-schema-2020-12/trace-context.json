@@ -38,5 +38,5 @@
   "required": [
     "traceId"
   ],
-  "additionalProperties": false
+  "additionalProperties": {}
 }

@@ -15,7 +15,9 @@
       "minLength": 1,
       "maxLength": 64
     },
-    "content": {},
+    "content": {
+      "$ref": "#/$defs/__schema0"
+    },
     "durationMs": {
       "type": "integer",
       "minimum": 0,
@@ -27,5 +29,38 @@
     "intentId",
     "kind"
   ],
-  "additionalProperties": false
+  "additionalProperties": {},
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DecimalStringSchema } from "../common/decimal-string.js";
 import { SpanIdSchema, TraceIdSchema, UuidSchema } from "../common/ids.js";
+import { JsonValueSchema } from "../common/json-value.js";
 
 /**
  * Control WebSocket 的 Wire Envelope 规范形态（ADR 0001 / phase-1-build-guide.md §6.5）。
@@ -8,14 +9,22 @@ import { SpanIdSchema, TraceIdSchema, UuidSchema } from "../common/ids.js";
  * - 微秒时间、序号、ACK 与水位使用非负十进制字符串，进入 Runtime 后再无损转 bigint。
  * - direction 是判别字段：只有服务端 Envelope 包含 seq；只有客户端 Envelope
  *   可以包含累计 ack 与业务 idempotencyKey。禁止用 seq: "0" 伪装方向。
- * - messageId 用于去重，seq/ack 用于服务端消息排序与累计确认，三者不能互换。
- * - Envelope 层使用 passthrough + 显式跨字段校验，以便对「服务端携带幂等字段」
- *   「客户端伪造 seq」给出明确协议错误；Payload 层统一 strip 未知字段（§6.6）。
+ * - messageId 用于消息去重，seq/ack 用于服务端消息排序与累计确认，三者不能互换。
+ * - payload 必须是 JSON 值（JsonValueSchema），保证校验通过即可 JSON 序列化。
+ *
+ * 语义等价策略（与 ADR 0001 §4 的双 dialect Fixture 一致性要求配套）：
+ * - 本 Schema 是严格闭合对象（strictObject）。Zod 4 的 toJSONSchema 会把
+ *   plain z.object 与 strictObject 都输出为 additionalProperties:false，
+ *   因此只有 strictObject 的「拒绝未知字段」语义能与生成的 JSON Schema 对齐；
+ *   Envelope 的方向约束（服务端不得携带幂等字段、客户端不得伪造 seq）正是
+ *   依靠闭合结构在 Zod 与 JSON Schema 两种校验器下同时成立，不使用
+ *   无法映射到 JSON Schema 的跨字段 refine。
+ * - 可前向扩展的消息 Payload 与领域对象使用 looseObject（见各文件）。
  */
 
 export const CONTROL_PROTOCOL_VERSION = 1;
 
-export const EnvelopeTraceSchema = z.object({
+export const EnvelopeTraceSchema = z.looseObject({
   traceId: TraceIdSchema,
   spanId: SpanIdSchema.optional(),
 });
@@ -33,91 +42,24 @@ const controlEnvelopeBaseShape = {
   trace: EnvelopeTraceSchema,
   sentAtUs: DecimalStringSchema,
   deadlineUs: DecimalStringSchema.optional(),
-  payload: z.unknown(),
+  payload: JsonValueSchema,
 } as const;
 
-/** 只有客户端 Envelope 允许携带的字段。 */
-const CLIENT_ONLY_FIELDS = ["ack", "idempotencyKey"] as const;
+export const ServerControlEnvelopeSchema = z.strictObject({
+  ...controlEnvelopeBaseShape,
+  direction: z.literal("server"),
+  /** 服务端消息序号：每个逻辑 Session 严格递增的非负十进制字符串。 */
+  seq: DecimalStringSchema,
+});
 
-/** 只有服务端 Envelope 允许携带的字段。 */
-const SERVER_ONLY_FIELDS = ["seq"] as const;
-
-/** zod 原生 check 上下文的最小结构视图（只依赖公共形态，不引用内部类型）。 */
-interface RawIssueLike {
-  readonly code?: string | undefined;
-  readonly message?: string | undefined;
-  readonly path?: readonly PropertyKey[] | undefined;
-}
-
-interface CheckContextLike {
-  readonly value: unknown;
-  readonly issues: RawIssueLike[];
-}
-
-interface CustomIssue {
-  code: "custom";
-  message: string;
-  path: PropertyKey[];
-}
-
-function findForbiddenField(
-  value: Record<string, unknown>,
-  fields: readonly string[],
-  direction: "server" | "client",
-): CustomIssue | null {
-  for (const field of fields) {
-    if (field in value) {
-      return {
-        code: "custom",
-        message: `${direction} envelope must not carry "${field}"`,
-        path: [field],
-      };
-    }
-  }
-  return null;
-}
-
-function serverRejectsClientFields(ctx: CheckContextLike): void {
-  const issue = findForbiddenField(
-    ctx.value as Record<string, unknown>,
-    CLIENT_ONLY_FIELDS,
-    "server",
-  );
-  if (issue !== null) {
-    ctx.issues.push(issue);
-  }
-}
-
-function clientRejectsServerFields(ctx: CheckContextLike): void {
-  const issue = findForbiddenField(
-    ctx.value as Record<string, unknown>,
-    SERVER_ONLY_FIELDS,
-    "client",
-  );
-  if (issue !== null) {
-    ctx.issues.push(issue);
-  }
-}
-
-export const ServerControlEnvelopeSchema = z
-  .looseObject({
-    ...controlEnvelopeBaseShape,
-    direction: z.literal("server"),
-    /** 服务端消息序号：每个逻辑 Session 严格递增的非负十进制字符串。 */
-    seq: DecimalStringSchema,
-  })
-  .check(serverRejectsClientFields);
-
-export const ClientControlEnvelopeSchema = z
-  .looseObject({
-    ...controlEnvelopeBaseShape,
-    direction: z.literal("client"),
-    /** 客户端已处理的最大连续服务端序号（累计确认）。 */
-    ack: DecimalStringSchema.optional(),
-    /** 会改变持久状态的请求必须携带的业务幂等键。 */
-    idempotencyKey: z.string().min(1).max(128).optional(),
-  })
-  .check(clientRejectsServerFields);
+export const ClientControlEnvelopeSchema = z.strictObject({
+  ...controlEnvelopeBaseShape,
+  direction: z.literal("client"),
+  /** 客户端已处理的最大连续服务端序号（累计确认）。 */
+  ack: DecimalStringSchema.optional(),
+  /** 会改变持久状态的请求必须携带的业务幂等键。 */
+  idempotencyKey: z.string().min(1).max(128).optional(),
+});
 
 export const ControlEnvelopeSchema = z.discriminatedUnion("direction", [
   ServerControlEnvelopeSchema,
@@ -126,27 +68,23 @@ export const ControlEnvelopeSchema = z.discriminatedUnion("direction", [
 
 /** 用具体 Payload Schema 组装服务端 Envelope（供 P1 Transport 使用）。 */
 export function createServerControlEnvelopeSchema<P extends z.ZodType>(payloadSchema: P) {
-  return z
-    .looseObject({
-      ...controlEnvelopeBaseShape,
-      direction: z.literal("server"),
-      seq: DecimalStringSchema,
-      payload: payloadSchema,
-    })
-    .check(serverRejectsClientFields);
+  return z.strictObject({
+    ...controlEnvelopeBaseShape,
+    direction: z.literal("server"),
+    seq: DecimalStringSchema,
+    payload: payloadSchema,
+  });
 }
 
 /** 用具体 Payload Schema 组装客户端 Envelope（供 P1 Transport 使用）。 */
 export function createClientControlEnvelopeSchema<P extends z.ZodType>(payloadSchema: P) {
-  return z
-    .looseObject({
-      ...controlEnvelopeBaseShape,
-      direction: z.literal("client"),
-      ack: DecimalStringSchema.optional(),
-      idempotencyKey: z.string().min(1).max(128).optional(),
-      payload: payloadSchema,
-    })
-    .check(clientRejectsServerFields);
+  return z.strictObject({
+    ...controlEnvelopeBaseShape,
+    direction: z.literal("client"),
+    ack: DecimalStringSchema.optional(),
+    idempotencyKey: z.string().min(1).max(128).optional(),
+    payload: payloadSchema,
+  });
 }
 
 export type EnvelopeTrace = z.infer<typeof EnvelopeTraceSchema>;

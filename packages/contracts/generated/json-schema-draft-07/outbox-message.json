@@ -20,7 +20,9 @@
       "minLength": 1,
       "maxLength": 256
     },
-    "payload": {},
+    "payload": {
+      "$ref": "#/definitions/__schema0"
+    },
     "createdAtMs": {
       "type": "integer",
       "minimum": 0,
@@ -35,5 +37,38 @@
     "payload",
     "createdAtMs"
   ],
-  "additionalProperties": false
+  "additionalProperties": {},
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

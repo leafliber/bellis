@@ -37,14 +37,14 @@
             "heartbeatIntervalMs",
             "replayWindowSize"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -78,14 +78,14 @@
             "protocolVersion",
             "clientType"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -97,14 +97,14 @@
         "payload": {
           "type": "object",
           "properties": {},
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -116,14 +116,14 @@
         "payload": {
           "type": "object",
           "properties": {},
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -135,14 +135,14 @@
         "payload": {
           "type": "object",
           "properties": {},
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -162,14 +162,14 @@
           "required": [
             "c0"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -199,14 +199,14 @@
             "r1",
             "r2"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -268,7 +268,7 @@
                       "source",
                       "watermark"
                     ],
-                    "additionalProperties": false
+                    "additionalProperties": {}
                   }
                 },
                 "lastCommittedScene": {
@@ -298,7 +298,7 @@
                     "status",
                     "committedAtMs"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": {}
                 },
                 "activeScene": {
                   "type": "null"
@@ -331,20 +331,20 @@
                 "runtimeVersion",
                 "generatedAtMs"
               ],
-              "additionalProperties": false
+              "additionalProperties": {}
             }
           },
           "required": [
             "snapshot"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -389,7 +389,7 @@
                   "cueId",
                   "lane"
                 ],
-                "additionalProperties": false
+                "additionalProperties": {}
               }
             }
           },
@@ -398,14 +398,14 @@
             "cycleId",
             "cues"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -436,14 +436,14 @@
             "cycleId",
             "committedAtMs"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -474,14 +474,14 @@
             "cycleId",
             "reason"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -516,14 +516,14 @@
             "mediaKind",
             "contentType"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -549,14 +549,14 @@
             "streamId",
             "reason"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     {
       "type": "object",
@@ -591,7 +591,9 @@
                 "retryable": {
                   "type": "boolean"
                 },
-                "details": {},
+                "details": {
+                  "$ref": "#/$defs/__schema0"
+                },
                 "traceId": {
                   "type": "string",
                   "pattern": "^[0-9a-f]{32}$"
@@ -603,20 +605,53 @@
                 "retryable",
                 "traceId"
               ],
-              "additionalProperties": false
+              "additionalProperties": {}
             }
           },
           "required": [
             "error"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [
         "type",
         "payload"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     }
-  ]
+  ],
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
 }

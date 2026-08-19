@@ -94,9 +94,14 @@ describe("semantic equivalence across Zod / 2020-12 / Draft 7", () => {
         expect(v2020(sample), `${key} ajv2020 should reject`).toBe(false);
         expect(vDraft7(sample), `${key} ajv draft7 should reject`).toBe(false);
       }
-      for (const sample of fixtures.refinementOnly ?? []) {
-        expect(schema.safeParse(sample).success, `${key} zod refinement should reject`).toBe(false);
-      }
     },
   );
+
+  it("no fixture is accepted by only one validator (equivalence has no exceptions)", () => {
+    // 上面的 it.each 已逐样本断言三方一致；此用例固化「不存在 refinementOnly
+    // 类别」的规则本身：Fixture 注册表只允许 valid / invalid 两类。
+    for (const fixtures of Object.values(SCHEMA_FIXTURES)) {
+      expect(Object.keys(fixtures).toSorted()).toEqual(["invalid", "valid"]);
+    }
+  });
 });

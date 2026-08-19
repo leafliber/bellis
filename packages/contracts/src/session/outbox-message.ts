@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { UuidSchema } from "../common/ids.js";
+import { JsonValueSchema } from "../common/json-value.js";
 
 /**
  * Outbox Message：Scene Commit 事务内写入、事务提交后分发的消息。
@@ -7,12 +8,12 @@ import { UuidSchema } from "../common/ids.js";
  * 跨重启调度时间（available_at_ms / lease_until_ms）由 DB Worker 维护，
  * 不进入本 Wire Schema。
  */
-export const OutboxMessageSchema = z.object({
+export const OutboxMessageSchema = z.looseObject({
   schemaVersion: z.literal(1),
   outboxId: UuidSchema,
   topic: z.string().min(1).max(128),
   partitionKey: z.string().min(1).max(256),
-  payload: z.unknown(),
+  payload: JsonValueSchema,
   /** Unix epoch milliseconds，仅审计用途。 */
   createdAtMs: z.number().int().nonnegative(),
 });

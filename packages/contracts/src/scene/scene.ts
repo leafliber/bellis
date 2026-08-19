@@ -8,7 +8,7 @@ import { CueLaneSchema } from "./cue.js";
  */
 export const SyncLevelSchema = z.enum(["hard", "soft", "detached"]);
 
-export const SyncGroupSchema = z.object({
+export const SyncGroupSchema = z.looseObject({
   schemaVersion: z.literal(1),
   groupId: UuidSchema,
   lanes: z.array(CueLaneSchema).min(1).max(8),
@@ -19,8 +19,10 @@ export const SyncGroupSchema = z.object({
  * Scene：ActionFrame 经校验和编译后的可执行计划。
  * Scene 真正执行的单调时间（commitAtRuntimeUs）只存在于当前 Runtime 的
  * Timeline 时钟域，不进入本 Schema，也不写入 state.db。
+ * 字段命名为 sceneId/cueId（与 Phase 1 session.snapshot 一致，
+ * 见 architecture-plan.md §9.1 的冻结形态说明）。
  */
-export const SceneSchema = z.object({
+export const SceneSchema = z.looseObject({
   schemaVersion: z.literal(1),
   sceneId: UuidSchema,
   cycleId: UuidSchema,

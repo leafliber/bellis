@@ -59,7 +59,7 @@
           "lanes",
           "level"
         ],
-        "additionalProperties": false
+        "additionalProperties": {}
       }
     },
     "deadlineMs": {
@@ -84,5 +84,5 @@
     "deadlineMs",
     "interruptPolicy"
   ],
-  "additionalProperties": false
+  "additionalProperties": {}
 }

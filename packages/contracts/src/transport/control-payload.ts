@@ -1,13 +1,17 @@
 import { z } from "zod";
-import { DecimalStringSchema, decimalStringLte } from "../common/decimal-string.js";
+import { DecimalStringSchema } from "../common/decimal-string.js";
 import { UuidSchema } from "../common/ids.js";
 import { ErrorEnvelopeSchema } from "../errors/error-envelope.js";
-import { Phase1SessionSnapshotSchema } from "../session/session-snapshot.js";
 import { CueLaneSchema } from "../scene/cue.js";
+import { Phase1SessionSnapshotSchema } from "../session/session-snapshot.js";
 
 /**
  * Phase 1 Control WebSocket 支持的全部消息类型（phase-1-build-guide.md §8.2）。
  * Scene 消息只用于协议与持久化集成测试，不执行真实 TTS、Avatar 或游戏动作。
+ *
+ * Payload 对象一律 loose（允许未知扩展键透传），配合 §6.6
+ * 「同一主版本新增可选字段属于兼容变更」；跨校验器语义一致
+ * （生成的 JSON Schema 不限制 additionalProperties，ADR 0001 §4）。
  */
 export const KNOWN_CONTROL_MESSAGE_TYPES = [
   "server.hello",
@@ -56,22 +60,20 @@ export const EITHER_DIRECTION_MESSAGE_TYPES = ["media.stream.closed"] as const;
 /**
  * 时钟同步协议（§7.2）：客户端记录 c0 → clock.ping(c0)；
  * Runtime 收到时记录 r1、发出时记录 r2 → clock.pong(c0, r1, r2)。
+ * r2 ≥ r1 属于服务端生产者不变量，由 P1 Transport 在 bigint 域断言，
+ * 不作为跨校验器的 Schema 约束。
  */
-export const ClockPingPayloadSchema = z.object({
+export const ClockPingPayloadSchema = z.looseObject({
   c0: DecimalStringSchema,
 });
 
-export const ClockPongPayloadSchema = z
-  .object({
-    c0: DecimalStringSchema,
-    r1: DecimalStringSchema,
-    r2: DecimalStringSchema,
-  })
-  .refine((payload) => decimalStringLte(payload.r1, payload.r2), {
-    message: "r2 must be greater than or equal to r1",
-  });
+export const ClockPongPayloadSchema = z.looseObject({
+  c0: DecimalStringSchema,
+  r1: DecimalStringSchema,
+  r2: DecimalStringSchema,
+});
 
-export const ServerHelloPayloadSchema = z.object({
+export const ServerHelloPayloadSchema = z.looseObject({
   protocolVersion: z.literal(1),
   runtimeVersion: z.string().min(1).max(64),
   heartbeatIntervalMs: z.number().int().positive().max(600_000),
@@ -79,73 +81,76 @@ export const ServerHelloPayloadSchema = z.object({
   replayWindowSize: z.number().int().positive().max(100_000),
 });
 
-export const ClientHelloPayloadSchema = z.object({
+export const ClientHelloPayloadSchema = z.looseObject({
   protocolVersion: z.literal(1),
   clientType: z.enum(["studio", "stage", "overlay", "test-client"]),
   /** 重连时携带的最后 ACK（累计确认）。 */
   lastAck: DecimalStringSchema.optional(),
 });
 
-export const ServerReadyPayloadSchema = z.object({});
+export const ServerReadyPayloadSchema = z.looseObject({});
 
-export const HeartbeatPingPayloadSchema = z.object({});
+export const HeartbeatPingPayloadSchema = z.looseObject({});
 
-export const HeartbeatPongPayloadSchema = z.object({});
+export const HeartbeatPongPayloadSchema = z.looseObject({});
 
-export const SessionSnapshotPayloadSchema = z.object({
+export const SessionSnapshotPayloadSchema = z.looseObject({
   snapshot: Phase1SessionSnapshotSchema,
 });
 
-export const ScenePreparedPayloadSchema = z.object({
+export const ScenePreparedPayloadSchema = z.looseObject({
   sceneId: UuidSchema,
   cycleId: UuidSchema,
-  cues: z.array(z.object({ cueId: UuidSchema, lane: CueLaneSchema })).max(64),
+  cues: z.array(z.looseObject({ cueId: UuidSchema, lane: CueLaneSchema })).max(64),
 });
 
-export const SceneCommittedPayloadSchema = z.object({
+export const SceneCommittedPayloadSchema = z.looseObject({
   sceneId: UuidSchema,
   cycleId: UuidSchema,
   committedAtMs: z.number().int().nonnegative(),
 });
 
-export const SceneCancelledPayloadSchema = z.object({
+export const SceneCancelledPayloadSchema = z.looseObject({
   sceneId: UuidSchema,
   cycleId: UuidSchema,
   reason: z.string().min(1).max(256),
 });
 
-export const MediaStreamOpenPayloadSchema = z.object({
+export const MediaStreamOpenPayloadSchema = z.looseObject({
   streamId: UuidSchema,
   /** Phase 1 只用 binary-test 验证传输；audio/viseme 为后续阶段保留枚举位。 */
   mediaKind: z.enum(["audio", "viseme", "binary-test"]),
   contentType: z.string().min(1).max(128),
 });
 
-export const MediaStreamClosedPayloadSchema = z.object({
+export const MediaStreamClosedPayloadSchema = z.looseObject({
   streamId: UuidSchema,
   reason: z.string().min(1).max(256),
 });
 
-export const ErrorPayloadSchema = z.object({
+export const ErrorPayloadSchema = z.looseObject({
   error: ErrorEnvelopeSchema,
 });
 
 /** type + payload 的判别联合：Envelope 外层校验通过后按 type 校验 Payload。 */
 export const ControlPayloadSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("server.hello"), payload: ServerHelloPayloadSchema }),
-  z.object({ type: z.literal("client.hello"), payload: ClientHelloPayloadSchema }),
-  z.object({ type: z.literal("server.ready"), payload: ServerReadyPayloadSchema }),
-  z.object({ type: z.literal("heartbeat.ping"), payload: HeartbeatPingPayloadSchema }),
-  z.object({ type: z.literal("heartbeat.pong"), payload: HeartbeatPongPayloadSchema }),
-  z.object({ type: z.literal("clock.ping"), payload: ClockPingPayloadSchema }),
-  z.object({ type: z.literal("clock.pong"), payload: ClockPongPayloadSchema }),
-  z.object({ type: z.literal("session.snapshot"), payload: SessionSnapshotPayloadSchema }),
-  z.object({ type: z.literal("scene.prepared"), payload: ScenePreparedPayloadSchema }),
-  z.object({ type: z.literal("scene.committed"), payload: SceneCommittedPayloadSchema }),
-  z.object({ type: z.literal("scene.cancelled"), payload: SceneCancelledPayloadSchema }),
-  z.object({ type: z.literal("media.stream.open"), payload: MediaStreamOpenPayloadSchema }),
-  z.object({ type: z.literal("media.stream.closed"), payload: MediaStreamClosedPayloadSchema }),
-  z.object({ type: z.literal("error"), payload: ErrorPayloadSchema }),
+  z.looseObject({ type: z.literal("server.hello"), payload: ServerHelloPayloadSchema }),
+  z.looseObject({ type: z.literal("client.hello"), payload: ClientHelloPayloadSchema }),
+  z.looseObject({ type: z.literal("server.ready"), payload: ServerReadyPayloadSchema }),
+  z.looseObject({ type: z.literal("heartbeat.ping"), payload: HeartbeatPingPayloadSchema }),
+  z.looseObject({ type: z.literal("heartbeat.pong"), payload: HeartbeatPongPayloadSchema }),
+  z.looseObject({ type: z.literal("clock.ping"), payload: ClockPingPayloadSchema }),
+  z.looseObject({ type: z.literal("clock.pong"), payload: ClockPongPayloadSchema }),
+  z.looseObject({ type: z.literal("session.snapshot"), payload: SessionSnapshotPayloadSchema }),
+  z.looseObject({ type: z.literal("scene.prepared"), payload: ScenePreparedPayloadSchema }),
+  z.looseObject({ type: z.literal("scene.committed"), payload: SceneCommittedPayloadSchema }),
+  z.looseObject({ type: z.literal("scene.cancelled"), payload: SceneCancelledPayloadSchema }),
+  z.looseObject({ type: z.literal("media.stream.open"), payload: MediaStreamOpenPayloadSchema }),
+  z.looseObject({
+    type: z.literal("media.stream.closed"),
+    payload: MediaStreamClosedPayloadSchema,
+  }),
+  z.looseObject({ type: z.literal("error"), payload: ErrorPayloadSchema }),
 ]);
 
 export type ControlPayload = z.infer<typeof ControlPayloadSchema>;

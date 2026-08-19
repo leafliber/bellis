@@ -76,4 +76,19 @@ describe("envelope JSON round-trip", () => {
       expect(parseDecimalString(wire.seq as string)).toBe(value);
     }
   });
+
+  it("accepts arbitrary JSON payloads and serializes them losslessly", () => {
+    fc.assert(
+      fc.property(fc.json(), decimalArb, (jsonText, sentAtUs) => {
+        const payload = JSON.parse(jsonText) as unknown;
+        const envelope = {
+          ...serverEnvelope("1", sentAtUs),
+          payload,
+        };
+        const parsed = ServerControlEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope)));
+        expect(JSON.stringify(parsed.payload)).toBe(JSON.stringify(payload));
+      }),
+      { numRuns: 200 },
+    );
+  });
 });

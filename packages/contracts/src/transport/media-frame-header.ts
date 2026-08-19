@@ -8,7 +8,7 @@ import { TraceIdSchema, UuidSchema } from "../common/ids.js";
  * + header length(LE32) + UTF-8 JSON header + payload。
  * 解析与编码由 @bellis/transport（P1）实现；本 Schema 约束 Header 语义。
  */
-export const MediaFrameHeaderSchema = z.object({
+export const MediaFrameHeaderSchema = z.looseObject({
   schemaVersion: z.literal(1),
   streamId: UuidSchema,
   frameId: UuidSchema,

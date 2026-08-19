@@ -12,6 +12,7 @@
     "decision-packet",
     "error-envelope",
     "game-intent",
+    "json-value",
     "media-frame-header",
     "outbox-message",
     "overlay-intent",
