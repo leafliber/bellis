@@ -1,385 +1,655 @@
-# Bellis Live Harness 架构计划
+# Bellis Autonomous Live：自主游戏直播系统设计
 
-> 状态：Main 分支设计基线（v1）  
-> 历史实现：`day0` 分支，固定于提交 `a43e63d`  
-> 目标：重新构建一个面向游戏直播的插件化 Agent Runtime，在降低端到端等待的同时，保证语音、字幕、Live2D 和游戏动作对齐。
+> 文档状态：独立项目设计基线 v1
+>
+> 项目属性：从零建设的产品，不以现有代码结构为实现边界
+>
+> 核心目标：让 AI 主播能够听懂直播间、记住长期关系、自然表达、主动表现并操作游戏，同时在低等待下保持语音、字幕、Live2D 与游戏行为一致。
 
-## 1. 结论先行
+## 1. 项目定义
 
-新框架不再把“LLM、工具、TTS、Live2D、字幕、游戏控制”串成一条长流水线，而采用以下结构：
+Bellis Autonomous Live 是一个完整的自主游戏直播系统。它既不是聊天机器人加一个 Live2D 页面，也不是把若干 AI 接口串起来的工作流，而是同时包含以下能力的实时产品：
 
-1. **一个极小内核**：只管理插件生命周期、能力服务、事件日志、调度、权限、取消和可观测性。
-2. **多速率循环**：弹幕接入、Agent Step、游戏实时控制、Live2D 主动行为、媒体时间线、记忆写入各自运行，不让最慢组件拖住全部系统。
-3. **请求并行、行动对齐**：上下文读取、外部记忆、工具调用和媒体准备尽可能并行；对外产生效果前经过 `prepare -> commit` 屏障，在统一时间线上同步执行。
-4. **Step 必有 ActionFrame**：每次 LLM 请求对应一个 Step，每个 Step 都产生一次可提交的行动帧；行动帧中的一句话是可选的，因而工具执行时可边说“我先看一下”边调用工具，也可以只做表情、姿态或状态提示。
-5. **记忆是能力，不是 Prompt 补丁**：外部记忆系统同时可提供 `ToolProvider` 与 `ContextProvider`；所有注入内容都经统一 Context Assembler 预算、去重、审计并写入 Session Log。
-6. **Live2D 具有自主性**：Agent 只提交高层意图。独立的 Behavior Engine 负责眨眼、呼吸、注视、空闲动作和受规则约束的随机动作，再由 Avatar Mixer 与 Agent 动作、口型和物理效果混合。
-7. **LLM 负责策略，不负责每帧控制**：游戏插件暴露观测、技能和受限动作；20–60 Hz 的快循环由确定性控制器执行，LLM 在事件触发或 0.5–2 Hz 的慢循环中规划。
+- 读取并理解批量弹幕、礼物、关注、语音和平台事件。
+- 观察游戏状态，规划游戏目标并通过受控技能操作游戏。
+- 通过 LLM 持续决策，按需调用工具，并在工具执行期间自然回应观众。
+- 通过 TTS、字幕、表情、动作、口型和直播画面共同完成一次表达。
+- 在没有 LLM 指令时仍保持自然的 Live2D 主动行为。
+- 连接内置或外部长期记忆，形成跨直播、跨会话的连续关系。
+- 允许直播平台、模型、记忆、TTS、Avatar、游戏和 Overlay 以插件形式替换。
 
-核心公式是：
+项目从直播体验反推技术结构。任何抽象只有在改善响应速度、动作一致性、扩展能力或运行可靠性时才进入核心设计。
 
-> **并行 Prepare + 有界等待 + 原子 Commit + 可取消 Timeline**
+## 2. 产品体验目标
 
-## 2. 目标、边界与验收指标
+### 2.1 四个关键场景
 
-### 2.1 功能目标
+#### 场景 A：正常弹幕互动
 
-- 直播输入：弹幕、礼物、关注、语音、游戏状态、系统事件统一接入。
-- 弹幕批处理：按时间窗、优先级、用户去重和语义聚类生成 Audience Batch。
-- LLM Loop：支持多 Step、并行工具、途中插入事件、可选的工具前发言和每 Step 行动帧。
-- 长期记忆：内置实现可替换；支持外部进程、HTTP/gRPC 或 MCP 适配器。
-- 输出同步：TTS、字幕、Live2D、Overlay、OBS 和游戏动作在同一 Cue Timeline 上执行。
-- 主动表现：即使 Agent Loop 暂时没有请求，Live2D 仍保持自然的主动行为。
-- 插件化：输入、模型、记忆、工具、TTS、Avatar、游戏和 Overlay 均可独立替换。
-- 可重放：任意模型可见信息、工具结果和高层行动都可由 Session Log 追踪。
+观众连续发送多条相关弹幕，系统在短时间窗内聚合并识别主题。主播选择值得回答的内容，在开口的同一时刻改变表情、转向镜头并显示字幕；其余弹幕保留到后续批次，而不是阻塞当前回答。
 
-### 2.2 非目标
+#### 场景 B：边说边调用工具
 
-- 不让 LLM 直接发送逐帧按键、鼠标或 Live2D 参数流。
-- 不允许插件绕过权限、时间线和资源锁直接执行高风险副作用。
-- 不追求所有外部系统的强一致分布式事务；跨进程失败采用幂等、补偿和降级。
-- 不把未经筛选的完整弹幕、全部历史或外部记忆直接塞入上下文。
+观众询问需要搜索或读取游戏信息的问题。LLM 的本次请求可以同时返回一句短话和工具调用，例如“我看看现在的任务进度”。这句话的 TTS、字幕和 Live2D 思考动作立即准备，工具也并行执行。工具完成后，下一次 LLM 请求基于结果继续回答。
 
-### 2.3 首版 SLO
+#### 场景 C：说话与游戏行动同步
 
-| 指标 | 目标 | 降级策略 |
+主播说“我们现在冲进去”，语音到达相应词语时，Live2D 切换到兴奋动作，游戏技能开始执行，Overlay 显示行动目标。各输出由同一场景时间线控制，而不是各插件收到消息后自行开始。
+
+#### 场景 D：没有 LLM 请求时仍然自然
+
+主播在等待加载或暂时不说话时，仍会眨眼、呼吸、看向游戏、对礼物做轻量反应，偶尔执行符合当前情绪和场景的随机动作。这些动作由独立的角色表现系统产生，不需要持续调用 LLM。
+
+### 2.2 第一阶段指标
+
+| 指标 | 目标值 | 说明 |
 | --- | ---: | --- |
-| 弹幕进入批次 P95 | ≤ 500 ms | 高优先级事件立即封窗 |
-| Step 前置上下文 P95 | ≤ 250 ms | 超时 Provider 本 Step 跳过 |
-| 首个可见反馈 P95 | ≤ 800 ms | 先提交表情/状态，再接语音 |
-| TTS 首音频块 P95 | ≤ 600 ms | 流式 TTS、句级切分与预热 |
-| 同一 SyncGroup 音频/字幕/口型偏差 | ≤ 50 ms | 以音频时钟为主时钟重采样 |
-| 工具失败隔离 | 单插件失败不终止 Runtime | 熔断、超时、重试或替代 Provider |
-| Loop 可恢复性 | 进程重启后从最后提交事件恢复 | Append-only Session Log + 投影 |
+| 普通弹幕进入可决策批次 P95 | ≤ 500 ms | 紧急事件不等待完整窗口 |
+| 触发后首个视觉反馈 P95 | ≤ 500 ms | 表情、注视或状态反馈 |
+| 模型请求到 TTS 首音频块 P95 | ≤ 900 ms | 取决于模型和音色 Provider |
+| 同场景语音、字幕、口型起始偏差 | ≤ 50 ms | 使用同一单调时钟 |
+| 游戏技能取消到释放输入 P99 | ≤ 100 ms | 安全硬指标 |
+| 单插件故障影响范围 | 不超过该能力域 | 不能终止整场直播 |
+| 长会话恢复 | 重启后恢复已提交状态 | 未提交动作不得重复执行 |
 
-指标是工程目标，不是硬编码常量；不同模型和直播平台可由 Profile 覆盖。
+## 3. 设计原则
 
-## 3. 总体架构
+### 3.1 并行准备，统一生效
+
+上下文、外部记忆、工具、TTS、字幕、动作资源和游戏技能尽可能并行准备；真正对观众或游戏产生效果时，由场景导演统一确定开始时间。
+
+系统优化的是关键路径，而不是追求所有模块表面上的并发。存在数据依赖的工作仍需等待，不影响本次决策的工作必须退出关键路径。
+
+### 3.2 每次模型请求都对应一次行动机会
+
+一次 LLM 请求称为一个 `DecisionCycle`。每个 Cycle 必须返回一个 `ActionFrame`，但不强制每次都说话：
+
+- 可以发言并调用工具。
+- 可以只发言，不调用工具。
+- 可以不发言，只做表情、动作、状态提示或游戏行为。
+- 可以明确静默，维持当前场景。
+
+这样既保证每次请求都能同步驱动角色，又避免为了协议生成没有意义的填充话术。
+
+### 3.3 单一决策权，多路能力供应
+
+一个 Cycle 只有一个最终决策包，避免两个并行 LLM 同时争夺角色和游戏控制权。记忆、检索、视觉分析、内容过滤、工具和媒体生成可以多路并行，它们作为供应者服务于同一个决策。
+
+### 3.4 LLM 不进入帧级实时环
+
+LLM 负责理解、取舍、规划和选择技能。游戏按键、Live2D 参数、口型和音频播放由本地确定性控制器执行。网络抖动或模型变慢时，角色仍然能自然表现，游戏输入也不会失控。
+
+### 3.5 所有外部能力都经过明确边界
+
+外部记忆、工具和插件不能任意篡改 Prompt、共享状态或直接操作输出设备。它们通过稳定协议贡献上下文、工具、意图或媒体，并接受权限、预算、超时和取消控制。
+
+## 4. 总体架构
 
 ```mermaid
 flowchart TB
-    subgraph Inputs["输入插件"]
-        Chat["弹幕 / 礼物"]
+    subgraph SignalSources["信号来源"]
+        Platform["弹幕 / 礼物 / 关注"]
         Voice["语音输入"]
-        GameObs["游戏观测"]
-        System["系统 / 定时事件"]
+        GameSensor["游戏观测"]
+        Timer["定时器 / 系统事件"]
     end
 
-    subgraph Kernel["Harness Kernel"]
-        Registry["Capability Registry"]
-        Lifecycle["Plugin Lifecycle & Effects"]
-        Ingress["Ingress Bus"]
-        Log["Append-only Session Log"]
-        Control["Control Bus"]
-        Scheduler["DAG Scheduler"]
-        Timeline["Cue Timeline / Commit Barrier"]
-        Policy["Policy / Permissions / Resource Locks"]
+    subgraph Understanding["直播理解层"]
+        SignalHub["Signal Hub"]
+        Audience["Audience Batcher"]
+        World["World State"]
+        Trigger["Decision Trigger"]
     end
 
-    subgraph Intelligence["智能与上下文"]
-        Batch["Audience Batcher"]
-        Loop["Turn / Step Agent Loop"]
-        Context["Context Assembler"]
+    subgraph Decision["决策层"]
+        Loop["Decision Loop"]
+        Context["Context Builder"]
         Memory["Memory Gateway"]
-        Tools["Tool Gateway"]
-        Model["Model Provider"]
+        ToolRuntime["Tool Runtime"]
+        Model["LLM Provider"]
     end
 
-    subgraph Outputs["并行输出与快循环"]
-        TTS["TTS"]
-        Subtitle["Subtitle / Overlay"]
+    subgraph Direction["场景导演层"]
+        Compiler["Action Compiler"]
+        Director["Scene Director"]
+        Clock["Timeline Clock"]
+        Policy["Policy / Resource Arbiter"]
+    end
+
+    subgraph Performance["表现与执行层"]
+        VoiceRuntime["TTS / Subtitle"]
         Avatar["Avatar Mixer"]
-        Behavior["Proactive Behavior Engine"]
-        Game["Game Skill Runtime"]
-        OBS["OBS / Scene Control"]
+        Presence["Presence Engine"]
+        GameRuntime["Game Skill Runtime"]
+        Overlay["Overlay / OBS"]
     end
 
-    Inputs --> Ingress
-    Ingress --> Batch
-    Ingress --> Log
-    Batch --> Loop
-    Log --> Context
+    subgraph Foundation["项目基础设施"]
+        Plugins["Plugin Host"]
+        Records["Session Records"]
+        Cache["Cache"]
+        Telemetry["Tracing / Metrics"]
+        Credentials["Credentials / Permissions"]
+    end
+
+    SignalSources --> SignalHub
+    SignalHub --> Audience
+    SignalHub --> World
+    Audience --> Trigger
+    World --> Trigger
+    Trigger --> Loop
     Loop --> Context
     Context <--> Memory
     Context --> Model
     Model --> Loop
-    Loop <--> Tools
-    Tools <--> Memory
-    Loop --> Scheduler
-    Scheduler --> Timeline
-    TTS --> Timeline
-    Subtitle --> Timeline
-    Behavior --> Avatar
-    Timeline --> Avatar
-    Timeline --> Game
-    Timeline --> OBS
-    Timeline --> Control
-    Control --> Loop
-    Registry --- Lifecycle
-    Policy --- Scheduler
-    Log --> Outputs
+    Loop <--> ToolRuntime
+    Loop --> Compiler
+    Compiler --> Director
+    Director --> Clock
+    Policy --> Director
+    Director --> VoiceRuntime
+    Director --> Avatar
+    Director --> GameRuntime
+    Director --> Overlay
+    Presence --> Avatar
+    Performance --> World
+    Foundation --- Understanding
+    Foundation --- Decision
+    Foundation --- Direction
+    Foundation --- Performance
 ```
 
-### 3.1 四类通道必须分离
+架构中心不是 LLM，而是 `Scene Director`。LLM 产出高层意图，Scene Director 将它编译成可准备、可同步、可取消的直播场景。Live2D 主动表现和游戏快循环能够独立运行，但它们的高优先级行为仍接受场景与资源仲裁。
 
-| 通道 | 语义 | 是否持久化 | 典型内容 |
-| --- | --- | --- | --- |
-| Ingress Bus | 高吞吐、允许采样和背压 | 默认否 | 原始弹幕、游戏帧摘要、音量事件 |
-| Session Log | 模型可见与可重放的事实源 | 是 | Batch、ContextPatch、模型响应、工具结果、ActionFrame |
-| Control Bus | 控制循环与插件生命周期 | 按需 | cancel、steer、followup、健康状态、配置切换 |
-| Cue Bus | 有时间戳的对外效果 | 高层 Cue 持久化 | 语音、字幕、动作、表情、游戏技能、OBS Cue |
+## 5. 核心领域对象
 
-不能用一个 EventBus 同时承担四种语义。否则持久事件会被采样、实时事件会撑爆日志、取消信号会和普通消息竞争。
-
-### 3.2 Session Log 是单一事实源
-
-所有会影响模型判断或对外行动的高层信息必须被具体化为事件：
-
-- `AudienceBatchCreated`
-- `ContextPatchMaterialized`
-- `ModelStepStarted` / `ModelStepCompleted`
-- `ToolCallRequested` / `ToolCallCompleted`
-- `ActionFrameProposed` / `ActionFrameCommitted`
-- `CuePrepared` / `CueStarted` / `CueCancelled` / `CueCompleted`
-- `MemoryWriteScheduled` / `MemoryWriteCompleted`
-- `PluginHealthChanged`
-
-低层 Live2D 参数和每帧游戏输入不逐条写日志。日志记录高层 Intent、随机种子、控制器版本和结果摘要，即可确定性重放或分析。
-
-## 4. 多循环模型
-
-Runtime 内至少存在六个相互协作的循环：
-
-| 循环 | 触发/频率 | 职责 | 不应承担 |
-| --- | --- | --- | --- |
-| Ingress/Batch Loop | 事件驱动，100–500 ms 窗 | 接入、排序、聚类、批次快照 | 调模型、播音频 |
-| Agent Turn/Step Loop | 事件驱动，约 0.5–2 Hz | 推理、工具选择、产出 ActionFrame | 每帧控制 |
-| Game Fast Loop | 20–60 Hz | 执行技能、读状态、保护输入 | 自由文本推理 |
-| Avatar Behavior Loop | 2–10 Hz，高层动作按秒 | 空闲/随机/反应行为 | 覆盖口型或关键剧情动作 |
-| Timeline Loop | 音频时钟或单调时钟 | 同步 Cue、取消、抢占、补偿 | 生成内容 |
-| Memory Worker Loop | 异步、低优先级 | 摘要、归档、去重、长期写入 | 阻塞当前 Step |
-
-每个循环通过带版本的快照和高层事件交互，不共享可随意修改的全局字典。
-
-## 5. Agent Loop：Turn、Step 与同步行动
-
-### 5.1 术语
-
-- **Turn**：由一个 Audience Batch、系统事件或 followup 唤醒的一轮处理，可包含多个 Step。
-- **Step**：一次模型请求，以及该响应触发的工具和 ActionFrame。
-- **ActionFrame**：一次 Step 对观众、Avatar、游戏或 Overlay 的高层行动提案。
-- **CueSheet**：ActionFrame 经解析、策略校验和媒体准备后形成的可执行时间线。
-
-### 5.2 Step 输出协议
-
-每次模型请求必须返回一个结构化 `StepOutput`。`action` 必须存在，但其中的 `utterance` 可为空：
+项目使用少量稳定对象串联各能力：
 
 ```ts
-interface StepOutput {
-  assistantMessage: string;          // 写入会话；可以很短
-  toolCalls: ToolCall[];              // 0..N
-  action: ActionFrame;                // 每 Step 恰好一个
-  continuation: "stop" | "after_tools" | "followup";
+interface Signal {
+  id: string;
+  kind: string;
+  source: string;
+  occurredAt: number;
+  priority: number;
+  payload: unknown;
+}
+
+interface DecisionInput {
+  turnId: string;
+  cycleId: string;
+  signalWatermark: bigint;
+  audienceBatch?: AudienceBatch;
+  worldSnapshot: WorldSnapshot;
+  contextBlocks: ContextBlock[];
+}
+
+interface DecisionPacket {
+  message: string;
+  toolCalls: ToolCall[];
+  action: ActionFrame;
+  next: "finish" | "after_tools" | "continue";
 }
 
 interface ActionFrame {
-  utterance?: {
-    text: string;
-    mode: "say" | "aside" | "tool_announcement";
-    interruptible: boolean;
-  };
+  speech?: SpeechIntent;
   avatar?: AvatarIntent[];
-  subtitle?: SubtitleIntent;
   game?: GameIntent[];
   overlay?: OverlayIntent[];
-  syncPolicy: "hard" | "soft" | "independent";
-  deadlineMs?: number;
+  sync: SyncPolicy;
 }
 ```
 
-由此得到统一行为：
+- `Signal`：尚未被决策消费的输入事实。
+- `WorldSnapshot`：某一水位上的只读直播世界状态。
+- `DecisionPacket`：一次模型请求的完整结果。
+- `ActionFrame`：该请求对应的一次行动机会。
+- `Scene`：ActionFrame 经校验和编译后的可执行计划。
+- `Cue`：Scene 中具有时间锚点的最小输出单位。
 
-1. 模型决定调用工具，并输出一句“我看一下背包”。
-2. 句子一旦完整且通过策略校验，TTS 准备与工具调用并行开始。
-3. Live2D 的思考表情、字幕和首个音频块进入同一 `SyncGroup`。
-4. 工具完成后写入 Session Log，Loop 发起下一个 Step 总结或继续行动。
+领域对象采用版本化 Schema。插件可以扩展 payload，但不能改变基础的身份、时序、权限和取消字段。
 
-如果不适合说话，`utterance` 留空，ActionFrame 仍可提交点头、思考表情、状态徽标或无操作心跳。不要为了满足协议强制生成无意义的填充话术。
+## 6. 信号接入与弹幕批处理
 
-### 5.3 工具前发言策略
+### 6.1 Signal Hub
 
-Profile 可配置：
+平台插件只负责把外部事件转换为标准 Signal，不直接唤醒模型。Signal Hub 完成：
 
-```yaml
-agentLoop:
-  toolAnnouncement: auto  # off | auto | always
-  maxParallelToolCalls: 8
-  maxStepsPerTurn: 8
-  stepDeadlineMs: 15000
+- 来源鉴权与时间戳校正。
+- 事件去重和平台断线后的游标恢复。
+- 优先级、频道、用户和隐私域标记。
+- 有界队列、过载采样和紧急事件旁路。
+- 更新 World State，并把弹幕类事件送入 Audience Batcher。
+
+### 6.2 Audience Batcher
+
+弹幕批次采用自适应窗口，而不是固定每 N 条请求一次模型：
+
+- 正常流量使用 200–500 ms 的短窗口。
+- 高额礼物、管理员命令、连续点名和游戏危险事件可立即封窗。
+- 流量激增时扩大聚合窗口，但限制最大 Token 和最大等待时间。
+- 相同内容按语义聚类，同时保留人数和热度，避免去重后丢失群众信号。
+- 同一用户的刷屏按策略降权，长期互动用户可由记忆提供关系权重。
+
+```ts
+interface AudienceBatch {
+  id: string;
+  watermarkFrom: bigint;
+  watermarkTo: bigint;
+  highlights: AudienceMessage[];
+  topics: Array<{
+    label: string;
+    count: number;
+    participants: number;
+    examples: string[];
+  }>;
+  urgentSignals: Signal[];
+  tokenEstimate: number;
+}
 ```
 
-- `off`：工具 Step 不生成可听发言。
-- `auto`：预计耗时超过阈值、内容适合直播反馈时生成一句短话。
-- `always`：除安全或连贯性策略阻止外，每个工具 Step 均发言。
+Batcher 只整理事实，不代替 LLM 做角色决策。它可以使用廉价模型或 embedding 做聚类，但结果必须保留原始 Signal 游标以便审计。
 
-发言不得泄漏隐藏工具名、凭据、内部错误或尚未确认的工具结果。
+### 6.3 忙碌期间的新输入
 
-### 5.4 Inbox 语义
+当 Decision Loop 正在工作时，新事件按三类进入收件箱：
 
-吸收 DeepSeek Harness 的 Loop 设计，将途中输入分成三种明确语义：
+| 模式 | 行为 | 示例 |
+| --- | --- | --- |
+| `interrupt` | 取消尚未提交的当前行动，尽快重新决策 | 管理员命令、游戏死亡风险 |
+| `next_cycle` | 工具返回后的下一次模型请求一并读取 | 新的高价值弹幕 |
+| `next_turn` | 当前 Turn 正常结束后启动新 Turn | 普通弹幕批次 |
 
-- `followup`：当前 Turn 结束后立即开启下一 Turn。
-- `steer`：取消或收束当前未提交 Step，在下一 Step 注入高优先级指令。
-- `inject`：不主动唤醒，只在下一次自然 Step 中加入信息。
+已开始播放的语音或游戏技能不会被粗暴终止，而由 Scene Director 执行淡出、回中、松键等补偿动作。
 
-弹幕批次默认使用 `followup`；高额礼物、管理员命令和游戏危险状态可使用 `steer`；普通状态刷新使用 `inject`。
+## 7. Decision Loop
 
-## 6. 并行请求与行动对齐
+### 7.1 Turn 与 Cycle
 
-### 6.1 关键原则
+- `Turn`：处理一个主触发及其工具往返的完整过程。
+- `DecisionCycle`：一次 LLM 请求。
 
-并行化的对象是“准备工作”，而不是无约束的外部副作用。一次 Step 分四阶段：
+一个 Turn 的典型流程：
+
+```text
+触发 Turn
+  -> 构建 Cycle 1 上下文
+  -> LLM 返回“短句 + ToolCalls + ActionFrame”
+  -> 短句表现与工具并行执行
+  -> 工具结果进入 Cycle 2
+  -> LLM 返回最终回答 + ActionFrame
+  -> Turn 结束
+```
+
+### 7.2 每个 Cycle 的状态机
 
 ```mermaid
-sequenceDiagram
-    participant L as Loop
-    participant C as Context Providers
-    participant M as Model
-    participant T as Tools
-    participant P as Media/Action Prepare
-    participant X as Timeline Commit
-
-    L->>C: 固定输入游标，fan-out 并行读取
-    C-->>L: 有界等待，返回 ContextBlocks
-    L->>M: 发起流式模型请求
-    M-->>L: utterance / toolCalls / ActionFrame
-    par 可安全并行的工具
-        L->>T: Tool A
-        L->>T: Tool B
-    and 行动准备
-        L->>P: TTS / Subtitle / Avatar / Game Skill prepare
-    end
-    T-->>L: 结果按完成顺序入日志
-    P-->>L: Ready / Degraded / Failed
-    L->>X: commitAt(T0, SyncGroup)
-    X-->>L: Cue lifecycle events
+stateDiagram-v2
+    [*] --> Snapshot
+    Snapshot --> GatherContext
+    GatherContext --> RequestModel
+    RequestModel --> ValidatePacket
+    ValidatePacket --> PrepareScene
+    ValidatePacket --> ExecuteTools
+    PrepareScene --> CommitScene
+    ExecuteTools --> NextCycle: 需要工具结果
+    CommitScene --> NextCycle: next = continue
+    NextCycle --> Snapshot
+    CommitScene --> Complete: next = finish
+    Complete --> [*]
 ```
 
-### 6.2 Step 前置 fan-out
+`PrepareScene` 与 `ExecuteTools` 在没有依赖冲突时并行。工具执行不需要等待一句话播完，一句话也不需要等待工具返回。
 
-在固定 `inputCursor` 后，下列任务并行启动：
+### 7.3 工具执行时的可选发言
 
-- Audience Batch 摘要与高优先级原文选择。
-- 游戏状态、直播场景和 Avatar 当前状态快照。
-- 多个外部记忆 Provider 的 `contributeContext`。
-- Persona、规则、Tool Catalog、权限与 Token Budget 投影。
-- Prompt/Tool Schema 缓存读取。
-
-Context Coordinator 使用总 Deadline，而不是依次给每个 Provider 完整超时。到期后用已完成结果组装上下文；慢 Provider 的结果可进入下一 Step，不阻塞当前请求。
-
-### 6.3 工具 DAG 与资源锁
-
-工具声明副作用和资源：
+模型协议将工具前发言设为 ActionFrame 中的普通 SpeechIntent：
 
 ```ts
-type ToolConcurrency =
-  | { kind: "parallel_read" }
-  | { kind: "exclusive"; resource: string }
-  | { kind: "keyed"; resource: string; keyFromArgs: string }
-  | { kind: "realtime"; resource: string; preemptible: boolean };
+interface SpeechIntent {
+  text: string;
+  purpose: "answer" | "tool_notice" | "aside" | "reaction";
+  interruptible: boolean;
+  emotion?: string;
+}
 ```
 
-- `parallel_read`：天气、百科、只读记忆搜索可并行。
-- `exclusive`：OBS 切场景、存档、支付类副作用按资源串行。
-- `keyed`：不同用户或不同存档键可并行，同键串行。
-- `realtime`：游戏控制和 Avatar 独占动作可抢占，但必须经过 Timeline。
+Profile 控制生成策略：
 
-Tool Scheduler 根据显式依赖构建 DAG，支持 `all`、`any`、`quorum` 或 `background` 等待策略。只有模型后续推理必需的工具位于关键路径；日志归档、记忆写入、遥测不应阻塞下一 Step。
+```yaml
+decisionLoop:
+  toolSpeech: auto       # off | auto | always
+  toolSpeechMaxChars: 32
+  maxCyclesPerTurn: 8
+  maxParallelTools: 8
+```
 
-### 6.4 两阶段 Action Commit
+- `off`：调用工具时保持静默，但仍产生 ActionFrame。
+- `auto`：预计工具耗时较长或直播需要反馈时生成一句短话。
+- `always`：通常每次工具 Cycle 都发言，安全策略可阻止。
 
-所有输出适配器实现：
+工具前发言只能描述即将做什么，不能提前声称工具已经成功，也不能暴露内部工具名、密钥或未经确认的数据。
+
+### 7.4 流式响应
+
+模型流被增量解析为四类片段：文本、结构化工具调用、Avatar 意图和其他 Action 意图。
+
+- 一句话达到稳定边界并通过内容策略后，可提前启动 TTS Prepare。
+- 工具参数在 JSON 完整并验证后立即进入 Tool Scheduler。
+- 所有准备均可提前开始，但只有完整 DecisionPacket 通过校验后才能 Commit。
+- 模型断流时，未提交内容全部取消；已经播放的内容记录为 partial，并由下一 Cycle 自然衔接。
+
+## 8. 面向低等待的并行执行
+
+### 8.1 并行边界
+
+系统按依赖关系而不是固定阶段决定并行度：
+
+| 工作 | 是否可并行 | 是否阻塞模型请求 | 是否阻塞场景开始 |
+| --- | --- | --- | --- |
+| 弹幕聚类、游戏快照、Avatar 状态 | 是 | 仅等待统一 Deadline | 否 |
+| 多外部记忆召回 | 是 | 最多等待上下文 Deadline | 否 |
+| 稳定 Prompt 和工具目录缓存 | 是 | 命中立即返回 | 否 |
+| 多个只读工具 | 是 | 仅阻塞依赖其结果的下一 Cycle | 否 |
+| TTS 首块、字幕、主动作资源 | 是 | 否 | 只等待硬同步项 |
+| 记忆写入、遥测、摘要 | 是 | 否 | 否 |
+| 相互冲突的游戏动作 | 否 | 否 | 由资源仲裁串行 |
+
+### 8.2 Cycle 开始时的快照屏障
+
+Cycle 开始时先固定 `signalWatermark` 和 `worldVersion`。Audience、Game、Avatar、Memory 和配置 Provider 都基于这两个版本提供数据，防止模型同时看到“游戏已经结束”和“仍在战斗”的不同快照。
+
+固定快照后立即 fan-out：
+
+1. 读取热 World State。
+2. 查询多个 Memory Context Provider。
+3. 准备 Persona、规则和工具目录。
+4. 读取当前 Turn 历史及 Token Budget。
+
+Context Builder 使用一个总 Deadline，例如 150–250 ms。到期后用已返回结果开始模型请求；迟到结果缓存到下一 Cycle，不继续拖慢当前关键路径。
+
+### 8.3 预取代替前台等待
+
+对于高频数据，最有效的优化不是在 Cycle 内开更多 Promise，而是提前维护热投影：
+
+- 新弹幕进入时异步预取相关用户记忆。
+- 游戏状态变化时更新结构化 World State，而不是请求前临时 OCR 全屏。
+- Persona、规则和工具 Schema 在插件变化时编译，不在每次请求时重建。
+- 常用 TTS 音色和 Live2D 动作资源在开播前预热。
+- 当前话题的外部记忆结果使用短 TTL 缓存并后台刷新。
+
+### 8.4 Tool Scheduler
+
+工具在注册时声明依赖和副作用：
 
 ```ts
-interface CueParticipant<T> {
-  prepare(intent: T, scope: CancellationScope): Promise<PreparedCue>;
+interface ToolExecutionPolicy {
+  mode: "parallel_read" | "exclusive" | "keyed" | "background";
+  resource?: string;
+  keyArgument?: string;
+  timeoutMs: number;
+  idempotent: boolean;
+  cancellable: boolean;
+}
+```
+
+- 多个 `parallel_read` 工具同时执行。
+- `exclusive` 工具对同一资源加锁，如 OBS 场景或游戏输入。
+- `keyed` 工具只在相同实体键上串行。
+- `background` 工具不在当前 Cycle 的关键路径，例如普通记忆归档。
+
+模型可以声明工具依赖，Scheduler 将调用编译为 DAG。默认等待真正被下一 Cycle 使用的结果，不为无关的日志、缓存刷新和异步写入停顿。
+
+## 9. Scene Director：动作对齐中心
+
+### 9.1 Scene 与 Cue
+
+Action Compiler 将 ActionFrame 转为 Scene：
+
+```ts
+interface Scene {
+  id: string;
+  cycleId: string;
+  groups: SyncGroup[];
+  deadlineMs: number;
+  interruptPolicy: "finish" | "fade" | "immediate";
+}
+
+interface Cue {
+  id: string;
+  lane: "audio" | "subtitle" | "avatar" | "game" | "overlay";
+  anchor: "scene_start" | "speech_start" | "speech_end" | string;
+  offsetMs: number;
+  intent: unknown;
+}
+```
+
+常用锚点包括：
+
+- `scene_start`
+- `tool_start`
+- `speech_start`
+- `speech.word:<index>`
+- `speech_end`
+- `tool_end`
+
+工具结束时间不可预知，因此工具前发言属于以 `tool_start` 为锚点的 Scene；工具结果回来后由下一 Cycle 产生新的 Scene。
+
+### 9.2 Prepare、Barrier、Commit
+
+所有产生外部效果的 Provider 实现三段协议：
+
+```ts
+interface SceneParticipant<TIntent> {
+  prepare(intent: TIntent, signal: AbortSignal): Promise<PreparedCue>;
   commit(cue: PreparedCue, at: MonotonicTime): Promise<CueHandle>;
   cancel(handle: CueHandle, reason: string): Promise<void>;
 }
 ```
 
-1. **Prepare**：TTS 生成首块音频、字幕分句、Live2D 解析动作、游戏技能校验、OBS 场景预载；各项并行。
-2. **Barrier**：等待硬同步项 Ready；软同步项超过 Deadline 后降级；失败项按策略移除或取消整组。
-3. **Commit**：Timeline 分配统一 `T0`，所有参与者按相同主时钟启动。
-4. **Compensate/Cancel**：steer、异常或新高优先级事件触发淡出、动作回中、松键和字幕撤回。
+1. **Prepare**：TTS 生成首块音频、字幕完成首句断句、Live2D 检查动作资源、游戏技能完成安全校验。所有项目并行。
+2. **Barrier**：只等待当前 SyncGroup 的硬同步项目。软同步项目超时后可以缺席或稍后追上。
+3. **Commit**：Scene Director 分配统一 `T0`，各 Lane 根据同一时钟开始。
+4. **Cancel/Compensate**：中断时执行音频淡出、字幕清理、Avatar 回中、游戏松键和 Overlay 撤回。
 
-同步等级：
+### 9.3 同步等级
 
-- `hard`：语音、字幕、口型；任一关键项失败则整体降级或取消。
-- `soft`：表情、手势、Overlay；允许小幅延迟或缺席。
-- `independent`：记忆写入、遥测、非关键视觉装饰。
+| 等级 | 适用内容 | 失败处理 |
+| --- | --- | --- |
+| `hard` | 语音首块、首句字幕、口型、必须同时开始的游戏技能 | 整组等待或整体降级 |
+| `soft` | 表情、手势、Overlay 动画 | 超时可缺席或晚到 |
+| `detached` | 遥测、记忆写入、预加载 | 不影响 Scene |
 
-### 6.5 主时钟与锚点
+系统只等待首个可播放音频块和首屏字幕，不等待整段 TTS 生成完成。后续音频、字幕和口型流式进入已提交的 Timeline，从而兼顾低首延迟和同步。
 
-- 有语音时使用音频设备/浏览器 `AudioContext.currentTime` 对应的单调时钟作为主时钟。
-- 无语音时使用 Runtime 单调时钟；禁止使用可被 NTP 调整的墙上时间做 Cue 调度。
-- 字幕锚定句、词或音素时间；口型优先使用 TTS 音素/viseme，无法取得时回退到音量包络。
-- 跨进程消息携带 `timelineId`、`syncGroupId`、`sequence`、`deadline` 与时钟偏移估计。
+### 9.4 主时钟
 
-## 7. 弹幕批量读取
+- 有音频时，以音频设备或浏览器 `AudioContext` 的单调时钟为主时钟。
+- 无音频时，以 Runtime 单调时钟为主。
+- 不使用可能被系统校时改变的墙上时间直接调度 Cue。
+- 跨进程同步维护时钟偏移估计，消息携带 `timelineId`、`sequence`、`targetTime` 和 `deadline`。
+- TTS 有音素/viseme 时直接驱动口型；没有时使用音量包络回退。
 
-`AudienceBatcher` 不是简单收集 N 秒文本，而是自适应窗口：
+## 10. 语音与字幕系统
 
-1. 普通流量使用 250–500 ms 窗口。
-2. 高价值事件、管理员指令或游戏紧急事件立即封窗。
-3. 高流量时延长聚合但限制最大 Token，并按用户和语义去重。
-4. 当前 Turn 忙时持续收集；批次根据优先级进入 `followup/steer/inject` Inbox。
-5. 保留原始事件游标，模型只看到经过选择的摘要与少量代表性原文。
+### 10.1 TTS Pipeline
 
-建议批次结构：
+TTS Provider 面向流式输出：
 
 ```ts
-interface AudienceBatch {
-  id: string;
-  cursorFrom: bigint;
-  cursorTo: bigint;
-  openedAt: number;
-  closedAt: number;
-  highlights: AudienceEvent[];
-  clusters: Array<{ topic: string; count: number; examples: string[] }>;
-  priority: number;
-  suggestedInboxMode: "followup" | "steer" | "inject";
+interface TtsProvider {
+  synthesize(req: TtsRequest, signal: AbortSignal): AsyncIterable<AudioChunk>;
+  capabilities(): TtsCapabilities;
 }
 ```
 
-重复弹幕计数本身也是信号，不应只做文本去重后丢弃热度。
+Pipeline 负责：
 
-## 8. 外部记忆系统
+- 文本规范化和安全过滤。
+- 根据标点、语义和长度进行句级切分。
+- 首句优先，后续句可有限并行合成。
+- 控制音频队列上限，避免回复已经过时仍继续朗读。
+- 输出音频块、字词时间、音素/viseme 与情绪元数据。
+- 支持 steer 时取消未播放句并对当前句淡出。
 
-### 8.1 双接口能力模型
+后续句并行合成必须保留播放顺序。并发过高可能占满 Provider 限额并增加取消浪费，默认并行度建议为 2–3。
 
-外部记忆系统通过一个 Provider 同时或分别提供两类能力：
+### 10.2 Subtitle Pipeline
+
+字幕不是 TTS 完成后的附属文本，而是 Scene 的独立 Lane：
+
+- 使用与 TTS 相同的规范化文本和句子 ID。
+- 优先采用 TTS 字词时间；无时间信息时按音频时长估算。
+- 支持主字幕、工具状态、弹幕引用和游戏提示不同样式。
+- 字幕 Cue 可输出到 Web Overlay、OBS 浏览器源或 WebVTT。
+- 取消时按 Scene ID 精确撤回，不清空其他仍有效字幕。
+
+## 11. Live2D 角色表现
+
+### 11.1 Presence Engine
+
+Presence Engine 是长期运行的角色主动表现控制器，与 Decision Loop 解耦。它接收 World State 和当前角色状态，产生低优先级 AvatarIntent：
+
+- 自动眨眼、呼吸和细微身体摆动。
+- 看向游戏关注点、弹幕区域或镜头。
+- 等待工具时进入思考或观察状态。
+- 对礼物、胜负、伤害和加载完成做轻量反应。
+- 在满足冷却、互斥和场景规则时执行随机动作。
+
+主动行为不调用 LLM。需要语言、长期规划或角色价值判断的主动话题，才通过 Decision Trigger 唤醒 LLM。
+
+### 11.2 受约束的随机行为
+
+随机动作由行为调度器选择，而不是随机写 Live2D 参数：
 
 ```ts
-interface MemoryProvider {
+interface ProactiveBehavior {
   id: string;
-  contributeContext?(req: ContextRequest, signal: AbortSignal):
-    Promise<ContextContribution>;
+  weight: number;
+  cooldownMs: number;
+  requiredTags?: string[];
+  forbiddenTags?: string[];
+  channels: AvatarChannel[];
+  maxDurationMs: number;
+}
+```
+
+选择过程考虑：当前情绪、游戏阶段、是否正在说话、最近动作、模型资源、互斥通道和角色精力。随机种子与高层选择被记录，便于重现问题且避免动作重复。
+
+### 11.3 Avatar Mixer
+
+所有 Live2D 控制都进入 Mixer，不允许插件争抢底层参数：
+
+| 层 | 内容 | 默认优先级 |
+| --- | --- | ---: |
+| Safety | Reset、异常恢复 | 100 |
+| LipSync | 嘴形、下颌 | 90 |
+| Directed | LLM/Scene 指定动作与表情 | 80 |
+| Reactive | 礼物、游戏事件反应 | 60 |
+| Proactive | 注视、随机动作、空闲动作 | 20 |
+| Base | 呼吸、眨眼、物理 | 10 |
+
+AvatarIntent 必须声明：
+
+- 影响通道，如头部、眼睛、身体、嘴部或表情。
+- 优先级、持续时间、淡入淡出。
+- 是否可打断、是否独占、互斥标签。
+- 语义动作名，而不是由 LLM 直接生成参数值。
+
+Mixer 负责参数混合、动作抢占和自然恢复。Agent Scene 结束后，角色回到主动行为状态，而不是冻结在最后一个表情。
+
+### 11.4 Live2D 插件边界
+
+模型资源和渲染器由 Live2D 插件提供：
+
+- `resolveEmotion(name)`
+- `resolveMotion(name)`
+- `prepareAvatarCue(intent)`
+- `setLipSyncStream(visemes)`
+- `getAvatarState()`
+
+不同模型缺少某个动作时，插件按语义标签寻找替代或安全忽略。上层不依赖具体 motion group、文件名和 Cubism 参数编号。
+
+## 12. 游戏系统
+
+### 12.1 四层结构
+
+```text
+Game Sensor
+  -> Game World Model
+  -> Skill Planner
+  -> Skill Executor / Safety Controller
+  -> Game Adapter
+```
+
+- Sensor 读取原生 API、Mod、RCON、机器人库或 CV 结果。
+- World Model 把高频观测投影为结构化状态。
+- LLM 选择技能与目标，不生成逐帧输入。
+- Skill Executor 以状态机或行为树在 20–60 Hz 快循环中执行。
+- Safety Controller 处理失焦、卡键、超时、死亡和急停。
+
+### 12.2 Game Capability
+
+```ts
+interface GameProvider {
+  observe(query: ObservationQuery): Promise<GameSnapshot>;
+  listSkills(): Promise<GameSkillDescriptor[]>;
+  prepare(intent: GameIntent, signal: AbortSignal): Promise<PreparedSkill>;
+  start(skill: PreparedSkill, at: MonotonicTime): Promise<SkillHandle>;
+  cancel(handle: SkillHandle, reason: string): Promise<void>;
+}
+```
+
+优先使用结构化接口：游戏 Mod/官方 API > RCON/专用机器人库 > CV + 键鼠回退。通用键鼠插件必须提供窗口焦点校验、输入租约、最大按键时长和独立急停。
+
+### 12.3 与表达并行
+
+游戏技能可以与 TTS 并行执行，但必须声明时间关系：
+
+- `at_scene_start`：说话与游戏同时开始。
+- `at_speech_word`：在某个词出现时启动。
+- `after_speech`：说完再操作。
+- `independent`：持续技能不等待表达。
+
+Scene Director 只负责高层开始、抢占和结束；技能内部的帧级状态转换由 Game Runtime 自己完成。
+
+## 13. 外部记忆系统
+
+### 13.1 三个接入面
+
+外部记忆 Provider 可以提供以下一个或多个接口：
+
+```ts
+interface ExternalMemoryProvider {
+  id: string;
+
+  provideContext?(
+    request: MemoryContextRequest,
+    signal: AbortSignal
+  ): Promise<MemoryContextResult>;
+
   listTools?(): Promise<ToolDescriptor[]>;
-  executeTool?(call: ToolCall, signal: AbortSignal): Promise<ToolResult>;
-  observe?(events: SessionEvent[]): Promise<void>; // 异步写入/学习
-  health(): Promise<ProviderHealth>;
+  executeTool?(
+    call: ToolCall,
+    signal: AbortSignal
+  ): Promise<ToolResult>;
+
+  observe?(
+    records: SessionRecord[],
+    signal: AbortSignal
+  ): Promise<void>;
 }
 ```
 
-- **ContextProvider**：每个 Step 前自动召回可能相关的长期信息。
-- **ToolProvider**：向模型暴露 `memory_search`、`memory_remember`、`memory_forget`、`memory_correct` 等显式工具。
+1. **Context 接口**：在模型请求前自动贡献相关用户关系、历史事实和未完成事项。
+2. **Tool 接口**：允许模型主动搜索、记住、纠正或忘记信息。
+3. **Observe 接口**：异步接收会话记录，用于外部系统抽取和更新记忆。
 
-二者不可互相替代：自动上下文保证关键记忆能被看到，工具接口允许模型在需要时主动深挖、纠错和写入。
+前两个接口是用户要求的核心能力；Observe 用于避免每次记忆写入阻塞当前直播响应。
 
-### 8.2 ContextContribution 协议
+### 13.2 Context Block
 
-外部 Provider 不能直接修改 System Prompt 或历史消息，只能返回带来源和预算元数据的块：
+Provider 不能直接插入或修改模型消息，只返回声明式内容：
 
 ```ts
 interface ContextBlock {
@@ -387,368 +657,414 @@ interface ContextBlock {
   revision: string;
   contentHash: string;
   text: string;
+  category: "viewer" | "relationship" | "fact" | "episode" | "task";
   priority: number;
+  confidence: number;
   tokenEstimate: number;
-  ttlMs?: number;
-  placement: "facts" | "relationships" | "recent_context" | "constraints";
-  privacy: "public" | "stream_private" | "secret";
-  source: { provider: string; recordIds: string[] };
-  confidence?: number;
+  expiresAt?: number;
+  privacyScope: string;
+  sourceRefs: string[];
 }
 ```
 
-Context Assembler 负责：
+Memory Gateway 负责并行查询、身份隔离、Token 预算、去重、冲突检测和排序。最终被采用的 Context Block 必须写入本次 Cycle 记录，确保能够回答“模型当时究竟看到了什么”。
 
-- 并行查询多个 Provider，统一 Deadline 和取消。
-- 身份域、直播域和权限过滤，防止跨主播或跨频道泄漏。
-- 基于 `id/revision/contentHash` 去重和冲突检测。
-- 按优先级、相关性、新鲜度和 Token Budget 排序。
-- 把最终采用的内容具体化为 `ContextPatchMaterialized` 事件。
-- 标明来源；低置信或冲突内容不得当成强约束。
+### 13.3 多 Provider 策略
 
-### 8.3 接入方式
+- 用户画像、关系记忆、游戏知识和项目知识可以来自不同 Provider。
+- 所有 Provider 共用一次前台 Deadline，慢 Provider 不逐个叠加等待。
+- Provider 失败只损失其贡献，不影响其他记忆和模型请求。
+- 同一事实冲突时保留来源、置信度和版本，不静默覆盖。
+- 删除、纠正和隐私变更提升为高优先级失效事件，立即清除相关缓存。
 
-优先提供三种适配器：
+### 13.4 外部协议
 
-1. `memory-native`：进程内 TypeScript 插件，低延迟。
-2. `memory-rpc`：HTTP/gRPC 外部服务，适合自建向量库或现有记忆服务。
-3. `memory-mcp-adapter`：把 MCP Tools/Resources 映射到 ToolProvider/ContextProvider，适合通用外部生态。
+项目提供三种适配方式：
 
-MCP 适合外部能力边界，不用于 TTS、Live2D 参数流或游戏逐帧控制。
+- 进程内插件：最低延迟，适合本地记忆实现。
+- HTTP/gRPC：适合已有服务或独立扩缩容。
+- MCP Adapter：把外部 MCP Tools/Resources 映射为 Memory Tool 与 Context Block。
 
-### 8.4 写入策略
+MCP 只作为外部知识和工具边界，不承担音频流、Live2D 参数流或游戏帧级控制。
 
-- 当前 Step 只同步写入 Session Log。
-- 记忆抽取、摘要、向量化和外部写入进入 Memory Worker。
-- 用户明确要求“记住/纠正/忘记”时，显式工具可等待确认结果。
-- 普通观察采用 at-least-once 投递，Provider 必须支持幂等键。
-- 删除和纠正保留 tombstone/版本，避免缓存让旧记忆复活。
+### 13.5 写入与遗忘
 
-## 9. Live2D 主动行为与动作混合
+- Session Records 是当前直播的即时事实源。
+- 普通记忆抽取、摘要、embedding 和长期写入由后台 Worker 完成。
+- 用户明确说“记住”或“忘记”时使用显式 Tool，并向当前 Cycle 返回确认结果。
+- 外部写入采用幂等键；重试不能产生重复记忆。
+- 遗忘产生 tombstone 与 revision，防止旧缓存或其他 Provider 重新注入已删除内容。
 
-### 9.1 独立 Behavior Engine
+## 14. 上下文与缓存
 
-Live2D 不完全受 Agent Loop 控制。Behavior Engine 在无模型请求时仍运行：
+### 14.1 Context Builder
 
-- 生理层：眨眼、呼吸、细微摇摆。
-- 注意层：看向弹幕、游戏焦点、鼠标或镜头。
-- 情绪层：根据当前 mood 缓慢回落或维持。
-- 空闲层：带冷却和上下文约束的随机动作。
-- 反应层：礼物、胜负、伤害、等待工具等确定性触发动作。
-
-随机行为必须使用可记录的种子、权重、冷却和互斥标签，避免连续重复、剧情冲突和不可重放。
-
-### 9.2 Avatar Mixer
-
-不要让各插件直接写 Live2D 参数。所有意图进入 Mixer：
-
-| 层 | 示例 | 默认优先级 | 混合方式 |
-| --- | --- | ---: | --- |
-| Safety/Reset | 回中、停止异常动作 | 100 | 强制覆盖 |
-| Lip Sync | viseme、嘴形 | 90 | 只占口部参数 |
-| Agent Dramatic | 明确动作、表情 | 80 | 可抢占主动动作 |
-| Reactive | 礼物、受伤、胜利 | 60 | 按标签互斥 |
-| Proactive Idle | 随机动作、注视 | 20 | 仅在资源空闲时 |
-| Physics/Base | 呼吸、头发、物理 | 10 | 加法或 SDK 物理混合 |
-
-每个 Intent 声明 `channels`、`priority`、`blendIn/out`、`ttl`、`interruptible` 和 `exclusiveTags`。Agent 的动作不是硬编码参数，而是 `emotion=happy`、`motion=wave`、`gaze=game_focus` 等语义意图，由模型适配插件映射到具体资源。
-
-### 9.3 主动动作与日志
-
-每次眨眼不写 Session Log。记录：
-
-- Behavior policy/version 与随机种子。
-- 高层主动动作的开始、抢占和结束。
-- Agent 或外部事件导致的可见反应。
-- 低层参数只进入采样遥测，用于调试而非会话重放。
-
-## 10. 游戏控制
-
-统一游戏接口：
-
-```ts
-interface GameCapability {
-  observe(query: ObservationQuery): Promise<GameSnapshot>;
-  listSkills(): Promise<GameSkillDescriptor[]>;
-  prepareSkill(intent: GameIntent, signal: AbortSignal): Promise<PreparedGameSkill>;
-  commitSkill(skill: PreparedGameSkill, at: MonotonicTime): Promise<GameSkillHandle>;
-  cancelSkill(handle: GameSkillHandle, reason: string): Promise<void>;
-}
-```
-
-游戏插件按适配程度分层：
-
-1. **原生协议层**：RCON、游戏 Mod、官方 API，优先级最高。
-2. **结构化机器人层**：例如游戏专用 Bot/客户端库。
-3. **视觉与输入层**：截图/OCR/CV + 键鼠，仅作为通用回退，必须有焦点保护和急停。
-
-LLM 选择“搜索资源、跟随队友、打开背包”这类技能；Skill Runtime 把技能编译为状态机或行为树，在快循环中执行。任意停止、切窗口、失焦和安全事件必须保证释放按键。
-
-## 11. 插件模型
-
-### 11.1 Capability Seam
-
-参考 DeepSeek Harness/Cordis，将每种可替换能力拆成：
-
-- Service Definition：接口、事件和错误语义。
-- Provider：能力实现。
-- Consumer：只依赖接口，不直接 import 具体实现。
-
-核心服务建议：
+模型输入按稳定性排列：
 
 ```text
-ctx.sessions     ctx.events       ctx.control
-ctx.agentLoop    ctx.models       ctx.context
-ctx.tools        ctx.memory       ctx.timeline
-ctx.tts          ctx.avatar       ctx.game
-ctx.overlay      ctx.credentials  ctx.telemetry
+Stable Prefix
+  - 角色设定
+  - 安全与直播规则
+  - 稳定工具 Schema
+  - 输出协议
+
+Append-only Conversation
+  - 已确认的对话与工具结果
+
+Dynamic Tail
+  - 当前 Audience Batch
+  - World Snapshot 摘要
+  - 本 Cycle Memory Context Blocks
+  - 中断或优先指令
 ```
 
-### 11.2 Manifest
+动态记忆放在尾部，不每次改写 System Prompt 或旧历史，以保留模型 Provider 的精确前缀缓存命中。
+
+### 14.2 Prompt Epoch
+
+角色、规则、输出协议或工具 Schema 发生变化时生成新的 `promptEpoch`。同一 Epoch 内保证：
+
+- 字节级稳定的 System 内容。
+- 固定的工具顺序与规范化 JSON Schema。
+- 不插入随机时间、随机 ID 或顺序不稳定的对象。
+- 会话历史只追加，压缩时显式进入新 Epoch。
+
+### 14.3 分层缓存
+
+| 缓存 | Key 核心字段 | 失效条件 |
+| --- | --- | --- |
+| LLM Prefix/KV | provider + model + promptEpoch + exact prefix | Prefix 变化 |
+| Context Assembly | signalWatermark + worldVersion + memory revisions + budget | 新事件或版本变化 |
+| Memory Recall | identity scope + topic hash + provider revision | TTL、纠正、遗忘 |
+| TTS | voice + normalized text + prosody + engine version | 音色或引擎变化 |
+| Subtitle | text hash + locale + segmentation version | 文本或策略变化 |
+| Game Perception | frame/state hash + detector version | 新状态或检测器升级 |
+| Plugin Catalog | plugin lock hash + profile | 插件和配置变化 |
+
+所有缓存都记录命中率、节省的毫秒/Token、陈旧命中和失效原因。身份与隐私域必须进入 Key，不能为了提高命中跨直播间复用私人记忆。
+
+## 15. 插件系统
+
+### 15.1 插件类别
+
+- Signal：直播平台、语音、游戏传感器。
+- Model：LLM、embedding、轻量分类器。
+- Memory：内置或外部长期记忆。
+- Tool：搜索、知识、直播控制和业务能力。
+- Voice：TTS、音色、音频处理。
+- Avatar：Live2D、其他 2D/3D 角色渲染器。
+- Game：具体游戏的观测与技能。
+- Output：字幕、Overlay、OBS、录制。
+- Policy：权限、内容安全、资源仲裁。
+
+### 15.2 插件契约
 
 ```yaml
-id: live2d-cubism-web
+id: avatar-live2d-cubism
 version: 1.0.0
-runtime: browser
-provides: [avatar.renderer, avatar.motion, avatar.lipsync]
-requires: [timeline.clock, assets.store]
-permissions: [assets.read, websocket.connect]
+runtime: browser-worker
+provides:
+  - avatar.renderer
+  - avatar.motion
+  - avatar.lipsync
+requires:
+  - timeline.clock
+permissions:
+  - assets.read
+  - websocket.connect
 isolation: worker
-hotReload: true
 configSchema: ./config.schema.json
 ```
 
-插件必须显式声明依赖、权限、隔离级别、资源和配置 Schema。注册事件监听、定时器、路由和服务覆盖时返回 disposable effect，卸载或热更新时可逆清理。
+插件必须显式声明：
 
-### 11.3 Profile 与 Bundle
+- 能力和依赖。
+- 配置 Schema 与默认值。
+- 所需权限和凭据范围。
+- 并发、超时、取消和健康检查能力。
+- 运行位置：主进程、Worker、浏览器或外部服务。
+- 注册资源的释放函数，确保禁用和热更新时不残留监听器、定时器和路由。
 
-- **Plugin**：单一能力。
-- **Bundle**：一组可复用插件，例如 `live2d-standard`、`bilibili-input`。
-- **Profile**：一次部署选择的完整组合，例如 `local-cubism-qwen-factorio`。
+### 15.3 通信方式
 
-依赖解析在启动时失败得足够早，不应等直播中第一次调用才发现 Provider 缺失。
+系统不使用一个万能 EventBus 处理所有问题：
 
-## 12. 缓存设计
+- 请求/响应能力使用类型化 Service Call。
+- 高频状态使用可合并的 State Stream。
+- 需要留痕的决策使用 Session Records。
+- 对外行动使用 Timeline Cue。
+- 取消、健康和生命周期使用 Control Channel。
 
-### 12.1 模型 Prefix Cache
+明确通信语义可以避免把实时状态写爆日志，也避免关键取消信号和普通弹幕竞争。
 
-缓存命中的关键不是只加一个 Redis，而是保持请求前缀稳定：
+### 15.4 Provider 选择
 
-```text
-[固定 System / Persona / Safety / Tool Schemas]  <- 长期稳定
-[Append-only Session History]                    <- 只追加
-[本 Step ContextPatch / Audience Batch]          <- 动态尾部
-```
+一个能力可以注册多个 Provider。Profile 决定默认 Provider、回退顺序和路由策略。例如：
 
-- Persona、规则和 Tool Schema 使用 `promptEpoch` 版本；没有变化就保持字节级稳定。
-- 工具顺序和 JSON Schema 规范化，禁止每次请求随机排序。
-- 外部记忆不插回旧历史或动态 System Prompt，而在末尾生成 ContextPatch。
-- 相同 ContextBlock 用 `id + revision + contentHash` 表示；没有变化不重复展开。
-- 历史压缩生成新的 Epoch，并明确统计由此造成的冷启动成本。
+- 中文与日文使用不同 TTS。
+- 低延迟模型处理普通弹幕，高能力模型处理复杂规划。
+- 主记忆服务失败时回退到 Session 内短期记忆。
+- 结构化游戏接口不可用时切换为只解说模式，而不是自动启用高风险键鼠回退。
 
-### 12.2 分层缓存
+## 16. Session Records 与状态恢复
 
-| 缓存 | Key | 失效条件 |
-| --- | --- | --- |
-| Provider KV/Prefix | model + promptEpoch + exactPrefix | System、工具 Schema 或历史变化 |
-| Context Assembly | inputCursor + providerRevisions + budgetPolicy | 新事件、记忆版本、权限变化 |
-| Memory Retrieval | actor + queryHash + providerRevision | TTL、纠正、删除、身份域变化 |
-| TTS | voice + normalizedText + prosody + modelVersion | 音色或模型变化 |
-| Subtitle segmentation | textHash + locale + policy | 文本或断句策略变化 |
-| Game perception | frameHash + detectorVersion | 新帧或检测器升级 |
-| Plugin discovery | lockfileHash + profile | 插件或 Profile 变化 |
+项目保留轻量的追加式 Session Records，但它服务于审计、恢复和调试，不要求所有高频数据都事件溯源。
 
-缓存必须记录 hit/miss、节省 Token/毫秒、陈旧命中和失效原因。隐私域是 Key 的组成部分，不能跨主播共享含身份信息的缓存。
+必须记录：
 
-## 13. 背压、取消与失败隔离
+- Audience Batch 与被消费的 Signal 水位。
+- 每次 Cycle 最终采用的 Context Block。
+- 模型请求元数据与 DecisionPacket。
+- Tool 调用、结果、错误与幂等键。
+- Scene Prepare/Commit/Cancel 与高层 Cue。
+- 游戏技能开始、结束和安全中断。
+- 外部记忆明确写入、纠正和遗忘。
 
-### 13.1 背压
+不逐条记录：
 
-- Ingress 有界队列；普通弹幕可聚合或采样，高优先级事件不可静默丢弃。
-- 每个 Provider 有并发限额、超时、熔断和 bulkhead。
-- TTS 采用有界句队列，新的 steer 可取消尚未播放的旧句。
-- Game/Avatar 只保留最新可合并的状态 Intent，不能堆积过期参数。
+- 每帧游戏画面。
+- 每个 Live2D 参数值。
+- 每个音频采样点。
+- 可由高层 Intent、版本和随机种子重建的低层状态。
 
-### 13.2 结构化取消
+恢复时只重放已提交事实。未完成工具通过幂等策略确认状态；未提交 Scene 直接丢弃；游戏输入默认回到安全释放状态。
 
-Turn、Step、ToolBatch、SyncGroup 和 Skill 均拥有父子 `CancellationScope`。父作用域取消时：
+## 17. 背压、取消与故障隔离
 
-1. 停止未完成模型流和工具请求。
-2. 已 prepare 未 commit 的 Cue 直接释放。
-3. 已 commit 的语音淡出、字幕撤回、Avatar 回中、游戏松键。
-4. 写入明确的取消原因，不伪装成正常完成。
+### 17.1 有界队列
 
-### 13.3 降级路径
+- Signal 队列有上限；普通弹幕可聚合，高优先级事件不能静默丢失。
+- TTS 只缓存有限的未来句子，旧回复在 steer 后立即取消。
+- Avatar State Stream 只保留最新可合并意图，不排队播放过期表情。
+- 游戏输入必须有租约和最大持续时间，Executor 崩溃后自动释放。
+- 每个外部 Provider 有独立并发限额、超时、熔断和 bulkhead。
 
-- 外部记忆不可用：使用 Session 内短期记忆，不阻塞说话。
-- TTS 不可用：保留字幕和 Avatar 非口型动作。
-- Live2D 不可用：继续 TTS/字幕/游戏；客户端重连后从当前高层状态恢复。
-- 游戏插件不可用：Agent 进入解说模式，不生成虚假的已执行结果。
-- 模型流中断：取消未提交动作；已播放内容标记 partial，并允许下一 Turn 自然修正。
+### 17.2 结构化取消
 
-## 14. 安全边界
+Turn、Cycle、Tool Batch、Scene 和 Game Skill 形成父子取消域。高层取消会向下传播：
 
-- 凭据只在服务端 Credential Service 中解析，不进入前端配置广播、Session Log 或模型上下文。
-- 游戏控制、OBS、文件、网络和外部记忆分别授权。
-- 所有副作用工具声明幂等键和审计字段；高风险操作支持人工确认。
-- 弹幕和外部记忆都是不可信输入，必须防 Prompt Injection 与工具参数越权。
-- 浏览器 Live2D 客户端只能收到渲染所需的 Cue，不拥有模型或平台密钥。
-- 插件优先运行于 Worker/子进程；崩溃和内存泄漏不能带走整个 Runtime。
+1. 停止模型流和未完成工具。
+2. 释放已 Prepare 但未 Commit 的资源。
+3. 淡出已播放语音并撤回对应字幕。
+4. 中断可抢占 Avatar 动作并自然回到 Presence 状态。
+5. 取消游戏技能并强制释放输入。
+6. 记录真实取消原因，不伪装成正常完成。
 
-## 15. 推荐代码布局
+### 17.3 降级方案
 
-新实现建议在 monorepo 中与 `day0` 兼容层并存：
+| 故障 | 降级行为 |
+| --- | --- |
+| 外部记忆超时 | 使用热缓存和本会话状态继续决策 |
+| TTS 不可用 | 保留字幕、Avatar 和游戏行为 |
+| Live2D 断线 | 继续语音、字幕和游戏；重连后恢复当前语义状态 |
+| 游戏 Provider 失败 | 切换为解说模式，不声称动作已执行 |
+| 模型 Provider 失败 | 快速回退或进入预设维持场景 |
+| 平台断线 | 本地继续表现，按游标恢复事件并去重 |
+
+## 18. 安全设计
+
+- 模型密钥、平台 Token 和外部记忆凭据只存在 Credential Service，不发送到浏览器或 Session 文本。
+- 弹幕、工具结果和外部记忆全部视为不可信输入，进行注入防护和权限过滤。
+- 游戏、OBS、网络、文件和记忆写入分别授权，不能通过一个“万能工具”绕过审计。
+- 高风险 Tool 必须支持确认、幂等键和操作结果校验。
+- Live2D 浏览器端只接收渲染 Cue，不获得模型或平台凭据。
+- 插件优先运行在 Worker 或独立进程；单插件崩溃不能带走主 Runtime。
+- 游戏控制始终提供独立于 LLM 和主进程的急停通道。
+
+## 19. 技术选型与工程布局
+
+### 19.1 建议技术栈
+
+- 主 Runtime：TypeScript/Node.js，负责 Loop、插件、调度、场景和 Web 协议。
+- Studio 与 Overlay：React，包含 Live2D 渲染、配置、监控和直播页面。
+- 本地记录：开发期 SQLite；多实例部署再评估 PostgreSQL。
+- Python Worker：按需承载 CV、OCR、特定游戏生态和已有 AI 库。
+- 跨进程协议：JSON Schema 起步，稳定后对高频链路使用 Protobuf/gRPC。
+- Rust Sidecar：仅在性能数据证明音频时钟或输入抖动不达标时引入。
+
+选择 TypeScript 是为了让 Runtime、插件协议、Live2D Web 客户端和 Overlay 共享类型，而不是为了追随某个参考项目。
+
+### 19.2 目录建议
 
 ```text
 apps/
-  runtime/                 # TypeScript：内核、Agent Loop、插件宿主
-  studio/                  # React：配置、监控、Overlay、Live2D 页面
+  runtime/                 # 主进程与 API
+  studio/                  # 配置、调试、Live2D 与 Overlay
 packages/
-  kernel/                  # capability、effects、events、lifecycle
-  session/                 # append-only log、projection、replay
-  agent-loop/              # Turn/Step/inbox/action protocol
-  context/                 # Context Assembler、预算、缓存
-  scheduler/               # DAG、资源锁、deadline、cancellation
-  timeline/                # CueSheet、时钟、prepare/commit
-  plugin-sdk/              # manifest、测试工具、类型定义
-  protocols/               # 跨进程 schema
+  domain/                  # Signal、Cycle、Action、Scene 类型
+  decision-loop/           # Turn/Cycle、收件箱、模型流解析
+  context/                 # Context Builder、预算、Prompt Epoch
+  scheduler/               # Tool DAG、资源锁、Deadline、取消
+  scene-director/          # Scene、Cue、Timeline、时钟
+  session-records/         # 记录、投影、恢复
+  plugin-sdk/              # Manifest、能力接口、测试套件
+  observability/           # Trace、Metrics、成本
 plugins/
-  input-bilibili/
-  memory-native/
-  memory-mcp/
+  platform-bilibili/
   model-openai-compatible/
+  memory-local/
+  memory-mcp/
   tts-*/
   avatar-live2d/
   game-*/
-  obs-websocket/
+  output-obs/
 workers/
-  python/                  # CV、特定 AI/游戏生态适配
-crates/
-  realtime-sidecar/        # 后期：低抖动输入/音频/时钟，不作为首版前置条件
-compat/
-  bellis-day0/             # 旧事件、Live2D 命令和配置迁移适配
+  python/
 docs/
   architecture-plan.md
   protocols/
   adr/
 ```
 
-主 Runtime 推荐 TypeScript，便于与 Web、Live2D、OBS 和插件生态共享协议；Python 保留为 CV、模型和旧插件 Worker。Rust 只在性能剖析证明 Node 侧时钟或输入抖动不达标后引入，避免首版过早复杂化。
+## 20. 交付计划
 
-## 16. 从 day0 迁移
+项目按能够直接体验的纵向切片推进，而不是先建设完整抽象层。
 
-### Phase 0：冻结与测量
+### Milestone 1：可说、可看、可打断
 
-- `day0` 保持当前 Python 实现，作为行为基线和回归参照。
-- 记录现有事件类型、WebSocket 消息、Live2D 命令和配置样例。
-- 建立端到端延迟、失败率、缓存和队列深度基线。
+- Signal Hub 与一个模拟弹幕输入。
+- 单 Provider LLM Decision Loop。
+- ActionFrame、Scene Director、流式 TTS、字幕和 Live2D 基础动作。
+- Turn/Cycle 取消与可视化 Trace。
 
-验收：能从固定提交启动基线；关键协议有样例和回放数据。
+验收：一条弹幕能够触发同步语音、字幕和表情；新紧急输入能安全打断。
 
-### Phase 1：内核与 Session Log
+### Milestone 2：工具并行与每 Cycle 行动
 
-- 实现 Capability Registry、Plugin Lifecycle、typed events、reversible effects。
-- 建立 Append-only Session Log、projection、replay 与四类通道。
-- 定义跨进程协议和 Plugin Manifest。
+- 结构化 DecisionPacket。
+- 工具前可选短句。
+- Tool DAG、并行只读工具、资源锁和超时。
+- 工具结果驱动下一 Cycle。
 
-验收：插件可装卸；重启后可恢复会话；未知事件版本可安全拒绝或迁移。
+验收：短句、TTS/字幕/Avatar 和工具同时开始；多个安全工具并行；失败工具不终止直播。
 
-### Phase 2：Agent Loop 与 Context/Memory
+### Milestone 3：主动角色与直播平台
 
-- 实现 Turn/Step、Inbox、结构化 StepOutput 和预算/Deadline。
-- 实现 Context Assembler、Tool Gateway、Memory 双接口。
-- 接入一个 OpenAI-compatible Model Provider、一个本地 Memory 和一个外部适配器。
+- Presence Engine、受约束随机行为和 Avatar Mixer。
+- 正式 Bilibili 插件与 Audience Batcher。
+- 礼物、关注、弹幕主题和工具等待状态的主动反应。
 
-验收：多记忆 Provider 并行；超时不阻塞；模型看到的上下文可审计；Prefix Cache 指标可见。
+验收：没有模型请求时角色仍自然；Agent 动作能抢占主动动作并在结束后自然恢复。
 
-### Phase 3：Timeline、TTS、字幕和 Live2D
+### Milestone 4：外部记忆
 
-- 实现 CueSheet、单调时钟、Prepare/Barrier/Commit、取消与补偿。
-- 接入流式 TTS、字幕分句、viseme/音量口型。
-- 实现 Avatar Mixer 与独立 Behavior Engine。
+- Context、Tool、Observe 三个 Memory 接口。
+- 一个本地 Provider、一个 HTTP/gRPC Provider、一个 MCP Adapter。
+- 并行召回、Token 预算、来源审计、写入和遗忘。
+- Prompt Epoch 与缓存指标。
 
-验收：工具执行时可选发言；语音/字幕/口型 P95 偏差 ≤ 50 ms；Agent 动作可抢占随机动作且自然恢复。
+验收：外部 Provider 超时不拖住回答；工具搜索和自动注入均可用；模型可见记忆可追溯。
 
-### Phase 4：弹幕与游戏插件
+### Milestone 5：游戏纵向切片
 
-- 实现 Audience Batcher 和 Bilibili 输入插件。
-- 实现 GameCapability、技能状态机、焦点保护和急停。
-- 先选一个具有结构化接口的游戏完成纵向切片。
+- 选择一个具有结构化接口的游戏。
+- World Model、技能状态机、Scene 时间锚点、安全租约和急停。
+- 游戏行动与语音、字幕、Live2D 同步。
 
-验收：高流量批次可控；LLM 不参与逐帧输入；取消后不会残留按键。
+验收：LLM 只选择技能；快循环独立执行；取消后无残留按键；动作结果真实反馈到下一 Cycle。
 
-### Phase 5：生产化
+### Milestone 6：插件产品化
 
-- 插件隔离、权限、熔断、Profile/Bundle、热更新和 Studio 调试面板。
-- 建立回放测试、故障注入、延迟火焰图和成本仪表盘。
-- 根据剖析结果决定是否引入 Rust Realtime Sidecar。
+- Plugin SDK、Profile、权限、隔离、热重载和健康检查。
+- Studio 中的配置、时间线检查器、缓存与成本面板。
+- 回放测试、故障注入和长时稳定性验证。
 
-验收：单插件崩溃不终止直播；会话可回放；关键 SLO 和成本均有告警。
+验收：替换 TTS/Memory/Game Provider 不修改核心；单插件崩溃可自动隔离和恢复。
 
-## 17. 测试策略
+## 21. 测试与观测
 
-- **协议测试**：Event、StepOutput、Tool、Memory、Cue Schema 的向前/向后兼容。
-- **确定性重放**：固定 Session Log、模型响应桩、随机种子和时钟，比较 ActionFrame/CueSheet。
-- **虚拟时钟测试**：验证字幕、音频、Live2D 抢占、暂停和恢复。
-- **并发性质测试**：资源锁不死锁；取消后无悬挂任务；同幂等键最多一次生效。
-- **故障注入**：记忆超时、模型断流、TTS 半途失败、WebSocket 重连、游戏失焦。
-- **负载测试**：弹幕洪峰、多 Provider、长会话和 TTS 队列背压。
-- **E2E 录制测试**：保存音频波形、字幕 Cue 和 Avatar 高层状态，计算同步偏差。
+### 21.1 测试
 
-## 18. 观测指标
+- Schema 契约测试：Signal、DecisionPacket、Memory、Tool、Scene 和插件 Manifest。
+- 虚拟时钟测试：音频、字幕、Avatar、游戏锚点和取消。
+- 确定性重放：固定 Session Records、模型响应、随机种子和 Provider 桩。
+- 并发性质测试：资源锁无死锁、取消后无悬挂、幂等操作不重复。
+- 故障注入：模型断流、记忆超时、TTS 半途失败、Live2D 重连和游戏失焦。
+- 弹幕洪峰测试：聚类质量、紧急事件延迟、队列上限和内存稳定性。
+- 长时直播测试：缓存增长、资源泄漏、时钟漂移和插件重启。
 
-每个 Turn/Step 统一传播 `traceId/turnId/stepId/actionFrameId/syncGroupId`。至少记录：
+### 21.2 Trace
 
-- 前置上下文各 Provider 延迟、超时和采用 Token。
-- 模型 TTFT、总耗时、输入/输出/缓存命中 Token。
-- Tool DAG 关键路径、并发度、等待资源锁时间。
-- TTS 首块、缓冲深度、取消浪费时长。
-- Cue prepare/commit 偏差、音频/字幕/口型 drift。
-- Audience Batch 大小、去重率、积压和 steer 次数。
-- Memory 召回命中、冲突、陈旧缓存与异步写入积压。
-- Avatar 主动动作频率、抢占次数和重复率。
-- 游戏技能成功率、取消延迟与安全急停次数。
+统一传播：
 
-优化应以“关键路径时间”而非单模块平均耗时为依据。
+```text
+sessionId / turnId / cycleId / toolCallId / sceneId / cueId / skillId
+```
 
-## 19. 关键 ADR
+重点指标：
 
-正式开发前应把以下决定固化为 Architecture Decision Records：
+- Cycle 上下文 fan-out 各 Provider 的耗时与超时。
+- LLM TTFT、总耗时、输入/输出 Token 和 Prefix Cache 命中。
+- Tool DAG 的并行度、关键路径和资源锁等待。
+- TTS 首块、未来句队列和取消浪费音频时长。
+- Scene Prepare 时间、Commit 偏差和各 Lane drift。
+- Audience Batch 大小、积压、聚类压缩率和 interrupt 次数。
+- Memory Block 采用率、冲突、过期和异步写入积压。
+- Presence 动作重复率、抢占次数和 Avatar 通道冲突。
+- Game Skill 成功率、取消延迟、输入租约超时和急停。
 
-1. Session Log 的存储与事件版本策略。
-2. TypeScript Runtime 与 Python Worker 的 IPC 协议。
-3. Timeline 主时钟、浏览器时钟同步与音频托管位置。
-4. StepOutput 的模型约束方式：原生工具调用、JSON Schema 或双通道流。
-5. 外部 Memory Provider 的信任边界与隐私域。
-6. Tool 副作用分类、资源锁和幂等语义。
-7. 首个游戏插件与安全控制边界。
-8. `day0` 兼容期和最终下线条件。
+## 22. 参考来源与采纳边界
 
-## 20. 参考设计
+本项目按自身直播功能设计。`day0` 和 DeepSeek Harness 只用于验证少量已经证明有价值的思想，不决定项目名称、目录、运行时或模块划分。
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)：插件化 Harness、Agent Loop 与 Session 设计参考。
-- [DeepSeek Harness Architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)：Capability Seam、插件树和事件化架构。
-- [DeepSeek Harness Agent Loop](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent-loop/README.zh.md)：Step、并行工具、followup/steer/inject 与缓存约束。
-- [DeepSeek Context Caching](https://api-docs.deepseek.com/guides/kv_cache/)：精确前缀缓存行为。
-- [Model Context Protocol Architecture](https://modelcontextprotocol.io/docs/learn/architecture)：外部工具与上下文适配边界。
-- [Live2D Cubism MotionSync](https://docs.live2d.com/en/cubism-sdk-manual/use-on-scene-motion-sync-web/)：音频与动作同步。
-- [Live2D Cubism Expressions](https://docs.live2d.com/en/cubism-sdk-manual/expression/)：表情混合与参数设计。
-- [Web Audio currentTime](https://developer.mozilla.org/en-US/docs/Web/API/BaseAudioContext/currentTime)：浏览器音频主时钟。
-- [WebVTT API](https://developer.mozilla.org/en-US/docs/Web/API/WebVTT_API)：字幕 Cue 模型。
-- [obs-websocket](https://github.com/obsproject/obs-websocket)：OBS 场景与直播控制适配。
-- [AIRI](https://github.com/SEKAI-OS/AIRI)：Web/桌面虚拟角色与游戏专用适配参考。
-- [MemGPT](https://arxiv.org/abs/2310.08560) 与 [Generative Agents](https://arxiv.org/abs/2304.03442)：分层记忆、反思与长期行为参考。
+### 22.1 从 day0 获取的经验
 
-## 21. 最终设计约束
+可参考：
 
-实现阶段必须持续满足以下不变量：
+- Bilibili 输入、TTS、WebSocket 和 Live2D 已经跑通的功能路径。
+- Live2D 的 emotion、motion、parameter、expression、lip-sync 等实际控制需求。
+- 事件优先级、采样和插件注册在直播场景中的必要性。
+- 现有测试和配置可作为行为样例与回归数据。
 
-1. **模型可见即入日志**：没有不可审计的隐藏 Prompt 注入。
-2. **副作用先准备后提交**：不能为了省几十毫秒破坏动作对齐和可取消性。
-3. **每 Step 一个 ActionFrame**：一句话可选，行动语义不可缺失。
-4. **实时循环不等待 LLM**：Avatar 和游戏具备独立、确定性、可抢占的控制器。
-5. **外部记忆只能贡献能力**：Provider 不能绕过预算、权限和 Session Log 修改会话。
-6. **只让关键路径等待**：非关键工具、记忆写入、遥测和预计算均后台化。
-7. **插件失败局部化**：任何单一 Provider 都不能成为整个直播 Runtime 的隐式单点。
-8. **所有外部动作可取消或补偿**：尤其是语音、Live2D 独占动作和游戏输入。
+不作为约束：
 
+- 当前 Python 模块边界和启动流程。
+- 串行 Agent Graph。
+- 当前 EventBus、全局状态和前后端协议形态。
+- 现有插件是否能够原样迁移。
+
+复用代码必须经过新协议和测试验证；为了保持旧接口而损害本项目设计时，选择重写。
+
+### 22.2 从 DeepSeek Harness 获取的经验
+
+可参考：
+
+- Agent Loop 只负责模型、工具和继续/结束判断，其他行为由能力模块提供。
+- 工具调用在安全条件下并行。
+- 模型可见内容应可审计，会话历史适合追加式记录。
+- 插件通过明确能力接口注册，并能清理自身副作用。
+- 动态上下文放在稳定历史之后有利于 Prefix Cache。
+- 途中输入需要区分立即中断、下一 Cycle 和下一 Turn。
+
+不照搬：
+
+- Harness 的包结构、术语全集和通用 CLI 目标。
+- 面向编码 Agent 的交互假设。
+- 把所有能力都建模为同一种插件或事件分发方式。
+- 与直播媒体时间线、Live2D 主动表现和游戏快循环无关的复杂度。
+
+相关资料：
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+- [DeepSeek Harness Architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)
+- [DeepSeek Harness Agent Loop](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent-loop/README.zh.md)
+- [DeepSeek Context Caching](https://api-docs.deepseek.com/guides/kv_cache/)
+- [Model Context Protocol Architecture](https://modelcontextprotocol.io/docs/learn/architecture)
+- [Live2D Cubism MotionSync](https://docs.live2d.com/en/cubism-sdk-manual/use-on-scene-motion-sync-web/)
+- [Live2D Cubism Expressions](https://docs.live2d.com/en/cubism-sdk-manual/expression/)
+- [Web Audio currentTime](https://developer.mozilla.org/en-US/docs/Web/API/BaseAudioContext/currentTime)
+- [WebVTT API](https://developer.mozilla.org/en-US/docs/Web/API/WebVTT_API)
+- [obs-websocket](https://github.com/obsproject/obs-websocket)
+
+## 23. 不可破坏的设计约束
+
+1. 每次 LLM 请求恰好产生一个 ActionFrame，发言可选。
+2. 工具与行动可以并行准备，但冲突副作用必须经过资源仲裁。
+3. 对观众可感知的同步行为由 Scene Director 统一 Commit。
+4. Live2D 主动行为不依赖 LLM，且永远不能覆盖更高优先级的口型、安全和明确动作。
+5. 游戏快循环不等待 LLM；任何控制路径都能独立松键和急停。
+6. 外部记忆通过 Context、Tool 和可选 Observe 接口接入，不能直接篡改模型消息。
+7. 未被采用的外部上下文不能伪装成模型已知事实；被采用内容必须可追溯。
+8. 只让决策关键路径等待；记忆写入、遥测、预计算和非关键媒体全部后台化。
+9. 缓存不能跨身份或隐私域复用，也不能让已删除记忆重新出现。
+10. 插件故障必须局部化，不能成为整场直播的隐式单点。
