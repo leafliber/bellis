@@ -128,6 +128,21 @@ describe("MediaFrameParser", () => {
     expect(parser.failed).toBe(true);
   });
 
+  it("大 Header 上限配置下的超限分片：先补前缀取精确上限，零复制拒绝", () => {
+    // 评审配置：maxHeaderBytes=1,000,000 使预检查上限很大，但帧实际
+    // Header 很小；携带超限 Payload 的完整分片不得被整体复制后再拒绝。
+    const header = testHeader();
+    const headerJson = Buffer.from(JSON.stringify(header), "utf8");
+    const frame = Buffer.alloc(12 + headerJson.byteLength);
+    frame.set([0x42, 0x45, 0x4c, 0x4c, 1, 3, 0, 0], 0);
+    frame.writeUInt32LE(headerJson.byteLength, 8);
+    frame.set(headerJson, 12);
+    const oversized = Buffer.concat([frame, Buffer.alloc(500_000)]);
+    const parser = new MediaFrameParser({ maxHeaderBytes: 1_000_000, maxPayloadBytes: 1 });
+    expect(() => parser.push(oversized)).toThrowError(/payload_too_large/);
+    expect(parser.failed).toBe(true);
+  });
+
   it("Header 超限的单个超限分片：错误分类仍以长度字段为准", () => {
     const bytes = validFrameBytes();
     // 前缀声明 16 KiB 级 Header（默认上限内）+ 超限 Payload。

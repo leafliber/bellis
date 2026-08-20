@@ -791,4 +791,69 @@ describe("ControlSession 评审回归：恢复与水位", () => {
     // 即便 P4 不持久化瞬时消息的 Replay 内容，导出水位也必须覆盖它。
     expect(session.exportLogicalState().nextSeq).toBe(4n);
   });
+
+  it("跨重启过滤 transient 恢复：lastAck 请求区间碰到缺口 → snapshot_required", () => {
+    const first = createSession();
+    handshake(first.session, first.clock); // seq 1,2 persistable
+    first.session.acceptClientMessage(clientText({ type: "clock.ping" }), first.clock.nowUs());
+    first.session.tick(first.clock.nowUs()); // clock.pong seq 3（transient）
+    first.session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] },
+    });
+    first.session.tick(first.clock.nowUs()); // seq 4 persistable
+
+    // 模拟 P4 持久化策略：只存 persistable 条目，但保留完整水位。
+    const logical = first.session.exportLogicalState();
+    const persisted = {
+      ...logical,
+      replay: logical.replay.filter((message) => message.persistable),
+    };
+    expect(persisted.replay.map((message) => message.seq)).toEqual([1n, 2n, 4n]);
+
+    const second = createSession({ resume: persisted });
+    second.session.enqueueServerMessage({
+      type: "server.hello",
+      payload: second.session.helloPayload(),
+    });
+    // 客户端确认到 2（pong=3 在飞）：请求区间 (2,4] 含缺口 3。
+    const accepted = second.session.acceptClientMessage(helloText("2"), second.clock.nowUs());
+    expect(accepted.status).toBe("accepted");
+    const effects = second.session.tick(second.clock.nowUs());
+    const snapshot = effects.find(
+      (effect): effect is Extract<ControlEffect, { kind: "snapshot_required" }> =>
+        effect.kind === "snapshot_required",
+    );
+    expect(snapshot).toEqual({ kind: "snapshot_required", lastAck: 2n });
+  });
+
+  it("队列字节估算覆盖 30 位合法最大 Seq：估算即最终编码长度的精确上界", () => {
+    // 水位 10^29 起步：真实 Seq 恰为契约允许的最大位数（30 位）。
+    const resumeBase = {
+      nextSeq: 10n ** 29n,
+      confirmedAck: 0n,
+      replay: [],
+    };
+    const reference = createSession({ resume: resumeBase });
+    reference.session.acceptClientMessage(helloText(), reference.clock.nowUs());
+    reference.session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] },
+    });
+    const sends = sendTexts(reference.session.tick(reference.clock.nowUs()));
+    expect(sends.length).toBe(1);
+    const encodedBytes = Buffer.byteLength(sends[0] ?? "", "utf8");
+    expect((JSON.parse(sends[0] ?? "") as { seq: string }).seq.length).toBe(30);
+
+    // maxBytes 收紧到实际编码字节数：估算若低估（例如按 1 位占位 Seq 加
+    // 固定余量），此处会误判超限而 dropped。
+    const tight = createSession({ resume: resumeBase, sendQueue: { maxBytes: encodedBytes } });
+    tight.session.acceptClientMessage(helloText(), tight.clock.nowUs());
+    const outcome = tight.session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] },
+    });
+    expect(outcome.status).toBe("queued");
+    expect(sendTexts(tight.session.tick(tight.clock.nowUs())).length).toBe(1);
+  });
 });

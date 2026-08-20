@@ -19,9 +19,12 @@ import type { MediaFrame, MediaFrameLimits } from "./frame-codec.js";
  *   依次 push，消息结束时调用 endMessage() 取得完整帧并复位累积器。
  *   布局没有 Payload 长度字段，因此分片本身无法自判帧结束。
  * - 累积器是预分配的有界缓冲（容量硬上限 = 12 + maxHeaderBytes +
- *   maxPayloadBytes，跨消息复用）：push 只做一次写入，没有逐分片 concat；
- *   累计长度越过当前上限时**先拒绝、后复制**——超限分片最多只补齐前缀
- *   （≤12 字节）用于精确分类错误码，绝不保留超限输入的完整副本。
+ *   maxPayloadBytes，跨消息复用）：push 只做一次写入，没有逐分片 concat。
+ * - **上限检查先于复制（分阶段）**：前缀未完整时只复制补齐前缀所需的
+ *   ≤12 字节并解析真实 Header 长度；此后按精确上限
+ *   （12 + headerLen + maxPayloadBytes）判定，越界分片零复制立即拒绝。
+ *   即使配置了很大的 Header 上限，携带超限 Payload 的完整分片也不会
+ *   被整体复制后再拒绝。
  * - Header 超限在读到长度字段时立即拒绝；Payload 超限在越界字节到达时
  *   立即拒绝；非法 Magic/版本/kind/Flags/UTF-8/JSON/Schema 稳定拒绝；
  *   消息在帧完成前结束（截断）同样拒绝。
@@ -74,17 +77,27 @@ export class MediaFrameParser {
     if (chunk.byteLength === 0) {
       return [];
     }
+    // 前缀未完整时只复制补齐前缀所需的字节（≤12）：在得知真实 Header
+    // 长度与精确上限之前，绝不复制分片的其余部分（配置很大的 Header
+    // 上限时，一个携带超限 Payload 的完整分片也不做整体复制）。
+    if (this.#length < MEDIA_FRAME_PREFIX_BYTES) {
+      const need = Math.min(chunk.byteLength, MEDIA_FRAME_PREFIX_BYTES - this.#length);
+      this.#ensureCapacity(this.#length + need);
+      this.#buffer.set(chunk.subarray(0, need), this.#length);
+      this.#length += need;
+      this.#validateIncrementally();
+      return this.#append(chunk.subarray(need));
+    }
+    return this.#append(chunk);
+  }
+
+  /** 前缀已完整（精确上限已知）：越界分片零复制直接拒绝。 */
+  #append(chunk: Uint8Array): readonly MediaFrame[] {
+    if (chunk.byteLength === 0) {
+      return [];
+    }
     const newLength = this.#length + chunk.byteLength;
     if (newLength > this.#currentCap()) {
-      // 超限输入不整段复制：只补齐前缀（≤12 字节）以区分离败原因
-      // （header 超限在长度字段处、其余即 Payload 超限）。
-      const need = Math.min(chunk.byteLength, MEDIA_FRAME_PREFIX_BYTES - this.#length);
-      if (need > 0) {
-        this.#ensureCapacity(this.#length + need);
-        this.#buffer.set(chunk.subarray(0, need), this.#length);
-        this.#length += need;
-      }
-      this.#validateIncrementally();
       this.#fail("payload_too_large", "payload exceeds the configured limit");
     }
     this.#ensureCapacity(newLength);

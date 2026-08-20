@@ -86,4 +86,54 @@ describe("ReplayWindow", () => {
     }
     expect(window.replayAfter("1").status).toBe("replay");
   });
+
+  it("恢复时内部缺口（transient 被过滤）→ 请求区间碰缺口即 snapshot_required", () => {
+    // P4 只持久化 persistable 条目：Seq 2（瞬时）缺失，水位仍是 3。
+    const window = new ReplayWindow({ capacity: 8, initialLatestSeq: 3n });
+    window.restore([entry(1n), entry(3n)]);
+    // lastAck=1 请求 (1,3]：缺 2 → 不能只回放 3，否则累计 ACK 无法推进。
+    expect(window.replayAfter(1n).status).toBe("snapshot_required");
+    expect(window.replayAfter(0n).status).toBe("snapshot_required");
+    // lastAck=3 无需回放；lastAck=2 表示客户端重启前已收到瞬时 2。
+    expect(window.replayAfter(3n).status).toBe("up_to_date");
+    window.pruneThrough(2n);
+    expect(window.replayAfter(2n).status).toBe("replay");
+  });
+
+  it("恢复时尾部缺口（水位高于最后条目）→ snapshot_required 而非空重放", () => {
+    const window = new ReplayWindow({ capacity: 8, initialLatestSeq: 2n });
+    window.restore([entry(1n)]);
+    // 旧实现返回空 replay 列表；正确语义是缺口 → snapshot。
+    expect(window.replayAfter(1n).status).toBe("snapshot_required");
+    expect(window.replayAfter(2n).status).toBe("up_to_date");
+    expect(window.replayAfter(3n).status).toBe("invalid_ahead");
+  });
+
+  it("pruneThrough 截断缺口：客户端确认覆盖缺口后可继续重放", () => {
+    const window = new ReplayWindow({ capacity: 8, initialLatestSeq: 4n });
+    window.restore([entry(1n), entry(2n), entry(4n)]);
+    expect(window.replayAfter(2n).status).toBe("snapshot_required");
+    // 确认到 3 = 重启前已完整收到 3（含瞬时消息），缺口不再是缺口。
+    window.pruneThrough(3n);
+    const outcome = window.replayAfter(3n);
+    expect(outcome.status).toBe("replay");
+    if (outcome.status === "replay") {
+      expect(outcome.messages.map((message) => message.seq)).toEqual([4n]);
+    }
+  });
+
+  it("append 跳号防御性记录缺口（正常路径不会发生）", () => {
+    const window = new ReplayWindow({ capacity: 8 });
+    window.append(entry(1n));
+    window.append(entry(3n));
+    expect(window.replayAfter(1n).status).toBe("snapshot_required");
+    expect(window.replayAfter(2n).status).toBe("replay");
+  });
+
+  it("空恢复 + 水位：全部确认过的会话不误报", () => {
+    const window = new ReplayWindow({ capacity: 8, initialLatestSeq: 5n });
+    window.restore([]);
+    expect(window.replayAfter(5n).status).toBe("up_to_date");
+    expect(window.replayAfter(4n).status).toBe("snapshot_required");
+  });
 });

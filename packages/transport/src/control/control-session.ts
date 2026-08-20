@@ -1,6 +1,7 @@
 import {
   CONTROL_PROTOCOL_VERSION,
   ControlPayloadSchema,
+  MAX_DECIMAL_STRING_LENGTH,
   formatDecimalString,
   parseDecimalString,
 } from "@bellis/contracts";
@@ -74,6 +75,13 @@ const DEFAULT_STATE_CHANGING_CLIENT_TYPES: readonly string[] = [
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_HELLO_TIMEOUT_US = 10_000_000n;
+
+/**
+ * 契约允许的最大十进制字符串位数对应的极端 Seq（10^30 - 1）。
+ * 用于出站探针编码：任何真实 Seq 的位数都不会更长，探针文本长度
+ * 即最终编码长度的精确上界（字节门槛不低估）。
+ */
+const WORST_CASE_SEQ = 10n ** BigInt(MAX_DECIMAL_STRING_LENGTH) - 1n;
 
 /** 各错误码的 retryable 语义（ErrorEnvelope 契约）。 */
 const RETRYABLE_CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>(["backpressure", "not_ready"]);
@@ -612,8 +620,9 @@ export class ControlSession {
           ? { traceId: input.trace.traceId }
           : { traceId: input.trace.traceId, spanId: input.trace.spanId };
     const deadlineUs = input.deadlineUs ?? null;
-    // Seq 未知，用占位 Seq 做一次完整编码校验（messageId/trace/时间格式），
-    // 失败在入队前归类为 invalid；字节估算也基于该探针文本。
+    // Seq 未知，用**最坏情形 Seq**（契约允许的最大位数）做一次完整编码校验
+    // （messageId/trace/时间格式），失败在入队前归类为 invalid；真实 Seq 的
+    // 位数不会更长，因此探针字节数就是最终编码字节数的精确上界。
     let probeText: string;
     try {
       probeText = encodeControlMessage(
@@ -631,7 +640,7 @@ export class ControlSession {
             trace,
             sentAtUs,
           },
-          0n,
+          WORST_CASE_SEQ,
         ),
       );
     } catch {
@@ -645,8 +654,7 @@ export class ControlSession {
     }
     const staged: StagedSend = {
       priority,
-      // +16 覆盖真实 Seq 相对占位 "0" 的位数增长。
-      byteSize: Buffer.byteLength(probeText, "utf8") + 16,
+      byteSize: Buffer.byteLength(probeText, "utf8"),
       category: input.type,
       deadlineUs,
       mergeKey: input.mergeKey ?? null,

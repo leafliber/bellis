@@ -209,6 +209,12 @@ HTTP Upgrade + Session 校验（P4）
     否则进程重启后会复用 Seq（客户端去重误判、ACK 超前甚至 4003 关闭）；
   - `persistable=false` 仅表示不持久化该消息的 **Replay 内容**（瞬时消息
     重放无意义）。
+- **持久化过滤造成的缺口**：跨重启只恢复 `persistable=true` 条目时，被过滤
+  的瞬时 Seq 会在恢复后的窗口中留下内部或尾部缺口。恢复时由（条目集合，
+  水位）推导缺口区间；`replayAfter` 的请求区间 `(lastAck, latest]` 只要碰到
+  缺口即返回 `snapshot_required`——累计 ACK 语义下客户端无法越过缺口推进
+  确认，只能走完整快照。客户端 ACK 覆盖缺口（重启前已完整收到瞬时消息）
+  后，缺口不再阻塞后续重放。
 
 ## 6. 客户端幂等（client → server）
 
