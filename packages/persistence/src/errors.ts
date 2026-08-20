@@ -44,6 +44,8 @@ export const PERSISTENCE_ERROR_CODES = [
   "database_busy",
   /** Migration 注册表非法（版本缺口/重复/降级）。 */
   "migration_invalid",
+  /** 受控检查点观察器主动中止（仅测试装配会触发）。 */
+  "checkpoint_aborted",
   /** 已应用 Migration 的 checksum 与当前定义不一致。 */
   "migration_checksum_mismatch",
   /** Worker 内部未分类错误（细节只进 stderr，不跨边界）。 */

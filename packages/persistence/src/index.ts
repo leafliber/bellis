@@ -35,6 +35,7 @@ export type {
   CompleteOutboxInput,
   EnsureSessionInput,
   ListRecordsInput,
+  OutboxRetryDisposition,
   OutboxRetryPolicyConfig,
   OutboxStats,
   PersistenceClient,
@@ -45,9 +46,11 @@ export type {
   RecoveryState,
   RetryOutboxInput,
 } from "./client/persistence-client.js";
+export { createPersistenceClient } from "./client/persistence-client.js";
 
 export type { MigrationDefinition } from "./migrations/definition.js";
 
+export { createOutboxDispatcher } from "./outbox/dispatcher.js";
 export type {
   OutboxDispatchRunSummary,
   OutboxDispatcher,

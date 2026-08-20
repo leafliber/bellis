@@ -76,6 +76,9 @@ importers:
       '@bellis/observability':
         specifier: workspace:*
         version: link:../observability
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@bellis/testkit':
         specifier: workspace:*

@@ -1,8 +1,17 @@
+import { isAbsolute } from "node:path";
+import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 import type { OutboxMessage, Scene, SessionRecord, TraceContext } from "@bellis/contracts";
+import { createNoopLogger } from "@bellis/observability";
 import type { LoggerPort } from "@bellis/observability";
-import type { PersistenceCheckpointObserver } from "../checkpoints/observer.js";
+import type {
+  PersistenceCheckpoint,
+  PersistenceCheckpointObserver,
+} from "../checkpoints/observer.js";
 import type { MigrationDefinition } from "../migrations/definition.js";
+import { PersistenceError } from "../errors.js";
 import type { PersistenceErrorCode, SafePersistenceError } from "../errors.js";
+import { PersistenceRpcChannel } from "./rpc-channel.js";
 
 /**
  * Persistence 公开装配接口（phase-1-build-guide.md §9.1）。
@@ -100,6 +109,11 @@ export interface OutboxStats {
   readonly dead: number;
 }
 
+/** retryOutbox 的落库结果：退避重试或进入 Dead Letter。 */
+export interface OutboxRetryDisposition {
+  readonly disposition: "retry" | "dead";
+}
+
 export interface PersistenceClient {
   migrate(signal?: AbortSignal): Promise<void>;
   ensureSession(input: EnsureSessionInput): Promise<void>;
@@ -110,7 +124,7 @@ export interface PersistenceClient {
   listRecords(input: ListRecordsInput): Promise<SessionRecord[]>;
   claimOutbox(input: ClaimOutboxInput): Promise<OutboxMessage[]>;
   completeOutbox(input: CompleteOutboxInput): Promise<void>;
-  retryOutbox(input: RetryOutboxInput): Promise<void>;
+  retryOutbox(input: RetryOutboxInput): Promise<OutboxRetryDisposition>;
   readOutboxStats(): Promise<OutboxStats>;
   close(): Promise<void>;
 }
@@ -163,4 +177,199 @@ export interface PersistenceRpcDiagnostic {
   readonly requestId: string;
   readonly code: PersistenceErrorCode;
   readonly safe: SafePersistenceError;
+}
+
+const DEFAULT_DEADLINE_MS = 10_000;
+
+function internalTrace(): TraceContext {
+  return { traceId: randomUUID().replaceAll("-", "") };
+}
+
+function resolveWorkerUrl(url: URL | string): URL {
+  if (url instanceof URL) {
+    return url;
+  }
+  if (url.startsWith("file:")) {
+    return new URL(url);
+  }
+  if (!isAbsolute(url)) {
+    throw new PersistenceError("invalid_request", "worker url must be absolute or a file URL");
+  }
+  return pathToFileURL(url);
+}
+
+/** 公开装配工厂：创建绑定 DB Worker 的 PersistenceClient。 */
+export function createPersistenceClient(options: PersistenceClientOptions): PersistenceClient {
+  if (!isAbsolute(options.dataDirectory)) {
+    throw new PersistenceError(
+      "invalid_request",
+      "dataDirectory must be an absolute path; there is no repository-local default",
+    );
+  }
+  const logger = options.logger ?? createNoopLogger();
+  const defaultDeadlineMs = options.defaultDeadlineMs ?? DEFAULT_DEADLINE_MS;
+  const workerUrl = resolveWorkerUrl(
+    options.worker?.url ?? new URL("../worker/entry.js", import.meta.url),
+  );
+  const observer = options.checkpointObserver;
+  const channel = new PersistenceRpcChannel({
+    workerUrl,
+    execArgv: options.worker?.execArgv,
+    workerData: {
+      dataDirectory: options.dataDirectory,
+      checkpointsEnabled: observer !== undefined,
+      stateMigrations: options.migrations?.state,
+      telemetryMigrations: options.migrations?.telemetry,
+      retryPolicy: options.retryPolicy,
+    },
+    defaultDeadlineMs,
+    logger,
+    onCheckpointNotice: observer
+      ? (notice) =>
+          observer.reached(
+            notice.checkpoint as PersistenceCheckpoint,
+            {
+              traceId: notice.context.traceId,
+              ...(notice.context.sceneId === undefined ? {} : { sceneId: notice.context.sceneId }),
+              ...(notice.context.outboxId === undefined
+                ? {}
+                : { outboxId: notice.context.outboxId }),
+            },
+            notice.signal,
+          )
+      : undefined,
+  });
+  let migrated = false;
+
+  const requireMigrated = (): void => {
+    if (!migrated) {
+      throw new PersistenceError("not_migrated", "migrate() must run before business operations");
+    }
+  };
+
+  return {
+    async migrate(signal?: AbortSignal): Promise<void> {
+      await channel.call<"migrate">({ operation: "migrate", input: undefined }, internalTrace(), {
+        signal,
+      });
+      migrated = true;
+    },
+    async ensureSession(input: EnsureSessionInput): Promise<void> {
+      requireMigrated();
+      await channel.call<"ensure_session">(
+        {
+          operation: "ensure_session",
+          input: { sessionId: input.sessionId, createdAtMs: input.createdAtMs },
+        },
+        input.trace,
+      );
+    },
+    async appendRecord(input: AppendRecordInput): Promise<SessionRecord> {
+      requireMigrated();
+      const result = await channel.call<"append_record">(
+        { operation: "append_record", input: { record: input.record } },
+        input.trace,
+      );
+      return result.record as SessionRecord;
+    },
+    async commitScene(input: CommitSceneInput): Promise<CommitSceneResult> {
+      requireMigrated();
+      const { trace: _trace, ...payload } = input;
+      const result = await channel.call<"commit_scene">(
+        { operation: "commit_scene", input: payload },
+        input.trace,
+      );
+      return result;
+    },
+    async advanceServerSeq(input: AdvanceServerSeqInput): Promise<bigint> {
+      requireMigrated();
+      const result = await channel.call<"advance_server_seq">(
+        {
+          operation: "advance_server_seq",
+          input: { sessionId: input.sessionId, latestServerSeq: input.latestServerSeq },
+        },
+        input.trace,
+      );
+      return result.latestServerSeq;
+    },
+    async readRecoveryState(sessionId: string): Promise<RecoveryState> {
+      requireMigrated();
+      const result = await channel.call<"read_recovery_state">(
+        { operation: "read_recovery_state", input: { sessionId } },
+        internalTrace(),
+      );
+      return result;
+    },
+    async listRecords(input: ListRecordsInput): Promise<SessionRecord[]> {
+      requireMigrated();
+      const result = await channel.call<"list_records">(
+        {
+          operation: "list_records",
+          input: {
+            ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+            ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
+            ...(input.aggregateId === undefined ? {} : { aggregateId: input.aggregateId }),
+            ...(input.limit === undefined ? {} : { limit: input.limit }),
+          },
+        },
+        internalTrace(),
+      );
+      return result.records as SessionRecord[];
+    },
+    async claimOutbox(input: ClaimOutboxInput): Promise<OutboxMessage[]> {
+      requireMigrated();
+      const result = await channel.call<"claim_outbox">(
+        {
+          operation: "claim_outbox",
+          input: {
+            limit: input.limit,
+            leaseMs: input.leaseMs,
+            ownerInstanceId: input.ownerInstanceId,
+          },
+        },
+        internalTrace(),
+      );
+      return result.messages as OutboxMessage[];
+    },
+    async completeOutbox(input: CompleteOutboxInput): Promise<void> {
+      requireMigrated();
+      await channel.call<"complete_outbox">(
+        {
+          operation: "complete_outbox",
+          input: {
+            outboxId: input.outboxId,
+            ownerInstanceId: input.ownerInstanceId,
+          },
+        },
+        internalTrace(),
+      );
+    },
+    async retryOutbox(input: RetryOutboxInput): Promise<OutboxRetryDisposition> {
+      requireMigrated();
+      const result = await channel.call<"retry_outbox">(
+        {
+          operation: "retry_outbox",
+          input: {
+            outboxId: input.outboxId,
+            ownerInstanceId: input.ownerInstanceId,
+            errorCode: input.errorCode,
+            retryable: input.retryable,
+          },
+        },
+        internalTrace(),
+      );
+      return result;
+    },
+    async readOutboxStats(): Promise<OutboxStats> {
+      requireMigrated();
+      const result = await channel.call<"read_outbox_stats">(
+        { operation: "read_outbox_stats", input: undefined },
+        internalTrace(),
+      );
+      return result;
+    },
+    async close(): Promise<void> {
+      await channel.close(defaultDeadlineMs);
+    },
+  };
 }

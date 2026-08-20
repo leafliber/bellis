@@ -72,7 +72,7 @@ interface PersistenceRpcResponse {
 | operation | Payload 摘要 | 结果 | 说明 |
 | --- | --- | --- | --- |
 | `ping` | `{}` | `{pongMs}` | 健康探测。 |
-| `migrate` | `{}` | `{}` | 两个数据库跑 Migration（幂等）。 |
+| `migrate` | `{}` | `{requeuedInFlight}` | 两个数据库跑 Migration（幂等）；首次 migrate 顺带完成 Worker 启动恢复（§8.1）。 |
 | `ensure_session` | `{sessionId, createdAtMs}` | `{}` | 幂等创建/确认。 |
 | `append_record` | `{record}` | `{record}` | 追加 Session Record（Schema 校验 + 聚合序号唯一）。 |
 | `commit_scene` | `{sceneId, cycleId, sessionId, scene, idempotencyKey, requestFingerprint, watermarks, outbox}` | `{sceneId, committedAtMs, duplicate}` | §7 原子事务。 |
@@ -81,7 +81,7 @@ interface PersistenceRpcResponse {
 | `list_records` | `{sessionId?, traceId?, aggregateId?, limit?}` | `{records[]}` | 索引查询；读到未知 `schemaVersion` → `record_version_unknown`。 |
 | `claim_outbox` | `{limit, leaseMs, ownerInstanceId}` | `{messages[]}` | 原子选择到期项并写 Lease。 |
 | `complete_outbox` | `{outboxId, ownerInstanceId}` | `{}` | 条件更新 → delivered。 |
-| `retry_outbox` | `{outboxId, ownerInstanceId, errorCode, retryable}` | `{}` | 条件更新 → pending（退避）或 dead。 |
+| `retry_outbox` | `{outboxId, ownerInstanceId, errorCode, retryable}` | `{disposition}` | 条件更新 → pending（退避）或 dead。 |
 | `read_outbox_stats` | `{}` | `{pending, inFlight, delivered, dead}` | 计数。 |
 
 ### 3.3 安全错误表
