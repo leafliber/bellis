@@ -106,7 +106,11 @@ export class WorkerOperationRuntime {
         this.#migrated = true;
         const requeuedInFlight = this.#bootRequeueDone
           ? 0
-          : requeueInFlightRows(this.databases.state, nowMs);
+          : requeueInFlightRows(
+              this.databases.state,
+              nowMs,
+              this.databases.leaseClock.leaseNowMs(),
+            );
         this.#bootRequeueDone = true;
         return { operation, result: { requeuedInFlight } };
       }

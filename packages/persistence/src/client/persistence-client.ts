@@ -207,12 +207,16 @@ function resolveWorkerUrl(url: URL | string): URL {
 
 /** 公开装配工厂：创建绑定 DB Worker 的 PersistenceClient。 */
 export function createPersistenceClient(options: PersistenceClientOptions): PersistenceClient {
-  return createPersistenceClientForTesting(options);
+  // overrides 恒为空对象：实现只从第二个参数读取 migrations，
+  // 调用方即使通过 JS 附加属性或 TS 强转向 options 塞入 migrations
+  // 也会被忽略——公开入口不存在任何 SQL 通道（评审残留 1）。
+  return createPersistenceClientForTesting(options, {});
 }
 
 /** @internal 测试装配入口：额外允许注入 Migration 注册表（不从包根导出）。 */
 export function createPersistenceClientForTesting(
-  options: PersistenceClientOptions & InternalPersistenceTestOverrides,
+  options: PersistenceClientOptions,
+  overrides: InternalPersistenceTestOverrides = {},
 ): PersistenceClient {
   if (!isAbsolute(options.dataDirectory)) {
     throw new PersistenceError(
@@ -232,11 +236,11 @@ export function createPersistenceClientForTesting(
     workerData: {
       dataDirectory: options.dataDirectory,
       checkpointsEnabled: observer !== undefined,
-      stateMigrations: options.migrations?.state,
-      telemetryMigrations: options.migrations?.telemetry,
+      // migrations 只来自 overrides（包内测试装配第二参数）；
+      // options 上的任何未知属性都不会进入 workerData。
+      stateMigrations: overrides.migrations?.state,
+      telemetryMigrations: overrides.migrations?.telemetry,
       retryPolicy: options.retryPolicy,
-      // migrations 注入仅存在于包内测试装配路径（InternalPersistenceTestOverrides），
-      // 公开 PersistenceClientOptions 无此字段，Runtime 无法传入任意 SQL。
       wallClockMs: options.wallClockMs,
       recordIds: options.recordIds,
     },

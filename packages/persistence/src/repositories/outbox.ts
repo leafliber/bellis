@@ -226,18 +226,21 @@ export function retryOutboxRow(
 
 /**
  * Worker 启动恢复：in_flight 项立即回到可领取状态。
+ * available_at_ms 一并重置为新 Worker 的 leaseNowMs——旧 Worker 的时钟域
+ * 可能领先（或重启后墙钟回拨），保留旧值会让 pending 项在新时钟域里
+ * “在未来”而无法立即领取（评审残留 2）。
  * 前置条件：worker-lock 单 Worker 独占（见 worker/database.ts）——
  * 同一数据目录不存在仍存活的其它 Worker，清空不会抢走活跃 Lease。
  */
-export function requeueInFlightRows(db: SqliteDatabase, nowMs: number): number {
+export function requeueInFlightRows(db: SqliteDatabase, nowMs: number, leaseNowMs: number): number {
   const changed = db
     .prepare(
       `UPDATE outbox
-          SET status = 'pending', lease_until_ms = NULL, lease_owner_instance_id = NULL,
-              updated_at_ms = ?
+          SET status = 'pending', available_at_ms = ?, lease_until_ms = NULL,
+              lease_owner_instance_id = NULL, updated_at_ms = ?
         WHERE status = 'in_flight'`,
     )
-    .run(nowMs);
+    .run(leaseNowMs, nowMs);
   return Number(changed.changes);
 }
 

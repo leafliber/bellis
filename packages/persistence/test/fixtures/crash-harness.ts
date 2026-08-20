@@ -50,12 +50,14 @@ function buildClient(
   observer?: PersistenceCheckpointObserver,
   migrations?: { state?: MigrationDefinition[] },
 ): PersistenceClient {
-  return createPersistenceClientForTesting({
-    dataDirectory,
-    worker: WORKER_FIXTURE,
-    ...(observer === undefined ? {} : { checkpointObserver: observer }),
-    ...(migrations === undefined ? {} : { migrations }),
-  });
+  return createPersistenceClientForTesting(
+    {
+      dataDirectory,
+      worker: WORKER_FIXTURE,
+      ...(observer === undefined ? {} : { checkpointObserver: observer }),
+    },
+    migrations === undefined ? {} : { migrations },
+  );
 }
 
 const SCENE_N = 1;

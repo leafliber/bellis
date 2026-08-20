@@ -26,14 +26,13 @@ function openState(): DatabaseSync {
 }
 
 async function withClient(
-  options?: { migrations?: { state?: MigrationDefinition[] } },
+  migrations?: { state?: MigrationDefinition[] },
   run: (client: PersistenceClient) => Promise<void> = async () => {},
 ): Promise<void> {
-  const client = createPersistenceClientForTesting({
-    dataDirectory,
-    worker: WORKER_FIXTURE,
-    ...options,
-  });
+  const client = createPersistenceClientForTesting(
+    { dataDirectory, worker: WORKER_FIXTURE },
+    migrations === undefined ? {} : { migrations },
+  );
   try {
     await run(client);
   } finally {
@@ -121,7 +120,7 @@ describe("Migration 集成", () => {
       STATE_MIGRATIONS[0] as MigrationDefinition,
       { version: 2, name: "broken", sql: "CREATE TABLE broken (this is not sql" },
     ];
-    await withClient({ migrations: { state: broken } }, async (client) => {
+    await withClient({ state: broken }, async (client) => {
       await expect(client.migrate()).rejects.toBeInstanceOf(Error);
     });
     // 断点续跑：版本 1 已应用且 checksum 未变，内建注册表直接就绪。

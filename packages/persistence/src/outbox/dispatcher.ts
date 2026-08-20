@@ -92,9 +92,8 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   let running = false;
   let loop: Promise<void> | null = null;
   let sleepController: AbortController | null = null;
-  const publishAbort = new AbortController();
-  /** 全部在途批次（含 start() 循环与外部直调的 runOnce）。 */
-  const activeRuns = new Set<Promise<unknown>>();
+  /** 在途批次（含 start() 循环与外部直调的 runOnce）及其发布中止信号。 */
+  const activeBatches = new Map<Promise<unknown>, AbortController>();
 
   async function reachCheckpoint(
     checkpoint: "after_scene_transaction_commit_before_outbox_dispatch",
@@ -122,10 +121,13 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
     );
   }
 
-  async function process(message: OutboxMessage): Promise<OutboxDispatchRunSummary> {
+  async function process(
+    message: OutboxMessage,
+    publishSignal: AbortSignal,
+  ): Promise<OutboxDispatchRunSummary> {
     let outcome: OutboxPublishResult;
     try {
-      outcome = await options.publish(message, publishAbort.signal);
+      outcome = await options.publish(message, publishSignal);
     } catch (error) {
       logger.log("warn", "bellis_outbox_publish_threw", {
         outboxId: message.outboxId,
@@ -154,7 +156,7 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
     return { claimed: 0, delivered: 1, retried: 0, dead: 0 };
   }
 
-  async function runOnceInternal(): Promise<OutboxDispatchRunSummary> {
+  async function runOnceInternal(publishSignal: AbortSignal): Promise<OutboxDispatchRunSummary> {
     await reachCheckpoint("after_scene_transaction_commit_before_outbox_dispatch");
     const claimed = await options.client.claimOutbox({
       limit: claimLimit,
@@ -173,7 +175,7 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
       dead: 0,
     };
     for (const message of claimed) {
-      const delta = await process(message);
+      const delta = await process(message, publishSignal);
       summary.delivered += delta.delivered;
       summary.retried += delta.retried;
       summary.dead += delta.dead;
@@ -216,12 +218,13 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   }
 
   async function runOnce(): Promise<OutboxDispatchRunSummary> {
-    const run = runOnceInternal();
-    activeRuns.add(run);
+    const publishController = new AbortController();
+    const run = runOnceInternal(publishController.signal);
+    activeBatches.set(run, publishController);
     try {
       return await run;
     } finally {
-      activeRuns.delete(run);
+      activeBatches.delete(run);
     }
   }
 
@@ -237,17 +240,28 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
     async stop(): Promise<void> {
       running = false;
       sleepController?.abort();
-      const active = [...activeRuns, ...(loop === null ? [] : [loop])];
+      const active = [...activeBatches.keys(), ...(loop === null ? [] : [loop])];
       if (active.length > 0) {
-        await Promise.race([
-          Promise.allSettled(active),
-          new Promise<void>((resolve) => {
-            setTimeout(() => {
-              publishAbort.abort();
-              resolve();
-            }, stopGraceMs);
-          }),
-        ]);
+        let graceTimer: NodeJS.Timeout | undefined;
+        try {
+          await Promise.race([
+            Promise.allSettled(active),
+            new Promise<void>((resolve) => {
+              // 有界等待：批次提前完成时 clearTimeout 兜底，不残留
+              // 活动定时器，也不误中止批次信号（评审残留 3）。
+              graceTimer = setTimeout(() => {
+                for (const controller of activeBatches.values()) {
+                  controller.abort();
+                }
+                resolve();
+              }, stopGraceMs);
+            }),
+          ]);
+        } finally {
+          if (graceTimer !== undefined) {
+            clearTimeout(graceTimer);
+          }
+        }
       }
       loop = null;
     },

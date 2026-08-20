@@ -298,13 +298,10 @@ describe("Crash Window 恢复（真实 SIGKILL）", () => {
       name: "extra",
       sql: "CREATE TABLE test_extra (id INTEGER PRIMARY KEY) STRICT;",
     };
-    const client = createPersistenceClientForTesting({
-      dataDirectory: dir,
-      worker: WORKER_FIXTURE,
-      migrations: {
-        state: [...(STATE_MIGRATIONS as MigrationDefinition[]), extra],
-      },
-    });
+    const client = createPersistenceClientForTesting(
+      { dataDirectory: dir, worker: WORKER_FIXTURE },
+      { migrations: { state: [...(STATE_MIGRATIONS as MigrationDefinition[]), extra] } },
+    );
     try {
       await client.migrate();
       const db = openState(dir);

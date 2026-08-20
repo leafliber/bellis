@@ -30,7 +30,7 @@
 | `CompleteOutboxInput.ownerInstanceId` / `RetryOutboxInput.ownerInstanceId` | Outbox 状态转换改为条件更新，只有当前 Lease 持有者能完成/重试。 |
 | `listRecords(input)` | 按 Session/Trace/Aggregate 的索引查询（`session_records` 三索引）。 |
 | `readOutboxStats()` | 按 status 计数，供 Dispatcher/监控使用；不暴露单条内容。 |
-| `createPersistenceClient(options)` | 公开装配工厂（数据目录、Worker 注入、检查点观察器、重试策略、可注入 ID/墙钟）。公开 Options 不含任何 SQL 通道；Migration 注册表注入只存在于不从包根导出的包内测试装配（`createPersistenceClientForTesting`，package.json exports 仅暴露 "."）。 |
+| `createPersistenceClient(options)` | 公开装配工厂（数据目录、Worker 注入、检查点观察器、重试策略、可注入 ID/墙钟）。公开 Options 不含任何 SQL 通道；实现只从**内部第二参数**读取 Migration 注入（`createPersistenceClientForTesting(options, overrides)`，不从包根导出且 package.json exports 仅暴露 "."），向公开 options 附加 `migrations` 属性（JS 绕过类型）会被忽略。 |
 | `createOutboxDispatcher(options)` | Outbox 消费侧编排（Claim→Publish→Complete/Retry + 指标 + 优雅关闭）。 |
 | `PersistenceCheckpointObserver` | 见 §9；生产默认 No-op。 |
 
@@ -282,7 +282,9 @@ pending → in_flight → delivered
   bootMonotonicUs)/1000`，同一 Worker 生命周期不直接反复读取
   `Date.now()`，NTP 跳变不影响 Lease 判断。
 - **重启恢复**：Worker 启动时（首次 migrate 后）把所有 `in_flight` 项
-  一次性恢复为 `pending`（旧实例 Lease 立即失效，不等待旧墙钟截止）。
+  一次性恢复为 `pending`，**并把 `available_at_ms` 重置为新 Worker 的
+  leaseNowMs**——旧 Worker 的时钟域可能领先（或重启后墙钟回拨），
+  保留旧 available_at 会让重排队项在新时钟域里“在未来”而无法立即领取。
   前置条件是 §4.1 的 worker-lock 单 Worker 独占——同目录不存在仍存活
   的其它 Worker，重排队不可能抢走活跃 Lease。这是“可能重复、幂等去重”
   的有意识选择。
@@ -306,8 +308,10 @@ pending → in_flight → delivered
   `bellis_outbox_retry_total`、`bellis_outbox_dead_total`（Counter）；
   不以 Outbox ID 作为 Label。
 - Dispatcher 关闭：停止新 Claim，在 `stopGraceMs`（默认 5s）内等待当前
-  小批次完成；超时后向发布器广播 AbortSignal 并立即返回，挂起项由
-  Lease 到期回收兜底（发布器签名携带 `signal`，应当监听并尽快退出）。
+  小批次完成；批次提前完成时清理 Grace 定时器、不中止任何信号（干净
+  停止零残留）；超时后仅向**在途批次**的发布器广播 AbortSignal（每批次
+  独立信号）并立即返回，挂起项由 Lease 到期回收兜底（发布器签名携带
+  `signal`，应当监听并尽快退出）。
 
 ## 9. 受控检查点（仅测试可用）
 

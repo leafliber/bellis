@@ -47,8 +47,6 @@ export type {
 } from "./client/persistence-client.js";
 export { createPersistenceClient } from "./client/persistence-client.js";
 
-export type { MigrationDefinition } from "./migrations/definition.js";
-
 export { createOutboxDispatcher } from "./outbox/dispatcher.js";
 export type {
   OutboxDispatchRunSummary,

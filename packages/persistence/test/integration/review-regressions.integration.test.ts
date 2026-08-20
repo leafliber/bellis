@@ -1,3 +1,5 @@
+import { DatabaseSync } from "node:sqlite";
+import { join } from "node:path";
 import { getEventListeners } from "node:events";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { VirtualClock } from "@bellis/testkit";
@@ -324,5 +326,125 @@ describe("评审回归 8：Abort 监听器不残留", () => {
       await client.migrate(controller.signal);
     }
     expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+  });
+});
+
+describe("评审回归 9：公开入口无 SQL 通道（运行时）", () => {
+  it("向公开工厂附加 migrations 属性（JS 绕过类型）不生效", async () => {
+    const dir = createTempDataDirectory("bellis-p2-nosql-");
+    try {
+      const malicious = {
+        dataDirectory: dir,
+        worker: WORKER_FIXTURE,
+        // 故意附加未知属性（JS 运行时绕过类型）：实现只从内部第二参数
+        // 读取 migrations，options 上的注入必须被忽略。
+        migrations: {
+          state: [{ version: 1, name: "evil", sql: "CREATE TABLE evil (id INTEGER) STRICT" }],
+        },
+      };
+      const intruder = createPersistenceClient(malicious as never);
+      try {
+        await intruder.migrate();
+        // 内建注册表生效：evil 表不存在，sessions 等内建表存在。
+        const db = new DatabaseSync(join(dir, "state.db"));
+        try {
+          expect(
+            db.prepare("SELECT name FROM sqlite_master WHERE name = 'evil'").get(),
+          ).toBeUndefined();
+          expect(
+            db.prepare("SELECT name FROM sqlite_master WHERE name = 'sessions'").get(),
+          ).toBeDefined();
+        } finally {
+          db.close();
+        }
+      } finally {
+        await intruder.close();
+      }
+    } finally {
+      cleanupTempDataDirectory(dir);
+    }
+  });
+});
+
+describe("评审回归 10：重启恢复不受旧时钟域影响", () => {
+  it("旧时钟域超前的 available_at 在重排队后立即可领取", async () => {
+    const dir = createTempDataDirectory("bellis-p2-rewind-");
+    const T = TRACE;
+    try {
+      const first = createPersistenceClient({ dataDirectory: dir, worker: WORKER_FIXTURE });
+      await first.migrate();
+      await first.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace: T });
+      await first.commitScene({
+        sceneId: sceneId(1),
+        cycleId: cycleId(1),
+        sessionId: SESSION_ID,
+        scene: makeScene({ sceneId: sceneId(1), cycleId: cycleId(1) }),
+        idempotencyKey: "rewind-1",
+        requestFingerprint: "rewind-fp-1",
+        watermarks: [],
+        outbox: [makeOutboxMessage({ outboxId: outboxId(1) })],
+        trace: T,
+      });
+      const claimed = await first.claimOutbox({
+        limit: 5,
+        leaseMs: 600_000,
+        ownerInstanceId: "old-owner",
+      });
+      expect(claimed).toHaveLength(1);
+      await first.close();
+      // 模拟旧 Worker 时钟域领先：available_at 被推到 1 小时后。
+      const db = new DatabaseSync(join(dir, "state.db"));
+      try {
+        db.prepare("UPDATE outbox SET available_at_ms = ? WHERE status = 'in_flight'").run(
+          Date.now() + 3_600_000,
+        );
+      } finally {
+        db.close();
+      }
+      // 重启：重排队必须把 available_at 重置到新 Worker 的 leaseNowMs。
+      const reborn = createPersistenceClient({ dataDirectory: dir, worker: WORKER_FIXTURE });
+      try {
+        await reborn.migrate();
+        const reclaimed = await reborn.claimOutbox({
+          limit: 5,
+          leaseMs: 60_000,
+          ownerInstanceId: "new-owner",
+        });
+        expect(reclaimed.map((m) => m.outboxId)).toEqual([outboxId(1)]);
+      } finally {
+        await reborn.close();
+      }
+    } finally {
+      cleanupTempDataDirectory(dir);
+    }
+  });
+});
+
+describe("评审回归 11：干净 stop 不残留定时器、不中止信号", () => {
+  it("批次正常完成后 stop() 返回：无活动 Timeout、发布信号未中止", async () => {
+    await drainOutbox();
+    await commitWithOutbox(50);
+    const signals: AbortSignal[] = [];
+    const dispatcher = createOutboxDispatcher({
+      client,
+      ownerInstanceId: "clean-stop",
+      clock: new VirtualClock(),
+      stopGraceMs: 5_000,
+      publish: async (message, signal) => {
+        signals.push(signal);
+        void message;
+        return { ok: true };
+      },
+    });
+    const summary = await dispatcher.runOnce();
+    expect(summary.delivered).toBe(1);
+    const timersBefore = process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+    await dispatcher.stop();
+    // 批次已结束：stop 不应留下 5s Grace 定时器。
+    expect(process.getActiveResourcesInfo().filter((r) => r === "Timeout").length).toBe(
+      timersBefore,
+    );
+    // 干净停止不中止发布信号（挂起场景才中止，见回归 5）。
+    expect(signals[0]?.aborted).toBe(false);
   });
 });
