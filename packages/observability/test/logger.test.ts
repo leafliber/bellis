@@ -1,0 +1,170 @@
+import { describe, expect, it } from "vitest";
+import { createPinoLogger } from "../src/index.js";
+import type { LoggerDestination } from "../src/index.js";
+
+function createMemoryDestination(): { destination: LoggerDestination; lines: string[] } {
+  const lines: string[] = [];
+  return {
+    lines,
+    destination: {
+      write: (line) => {
+        lines.push(line);
+      },
+    },
+  };
+}
+
+function parseLine(line: string): Record<string, unknown> {
+  return JSON.parse(line) as Record<string, unknown>;
+}
+
+describe("createPinoLogger", () => {
+  it("emits time, level, service, version and event on every line", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0",
+      level: "trace",
+      destination,
+    });
+    logger.log("info", "runtime.started", { port: 17890 });
+    expect(lines).toHaveLength(1);
+    const line = parseLine(lines[0] ?? "");
+    expect(line.event).toBe("runtime.started");
+    expect(line.level).toBe("info");
+    expect(line.service).toBe("bellis-runtime");
+    expect(line.version).toBe("0.1.0");
+    expect(typeof line.time).toBe("number");
+    expect(line.port).toBe(17890);
+  });
+
+  it("supports all five levels and filters below the configured level", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "svc",
+      version: "1",
+      level: "warn",
+      destination,
+    });
+    for (const level of ["trace", "debug", "info", "warn", "error"] as const) {
+      logger.log(level, `event.${level}`);
+    }
+    const levels = lines.map((line) => parseLine(line).level);
+    expect(levels).toEqual(["warn", "error"]);
+  });
+
+  it("merges child fields and lets child() nest", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "svc",
+      version: "1",
+      level: "info",
+      destination,
+    });
+    const session = logger.child({ sessionId: "11111111-1111-4111-8111-111111111111" });
+    const cycle = session.child({ cycleId: "33333333-3333-4333-8333-333333333333" });
+    cycle.log("info", "scene.commit.ok", { sceneId: "22222222-2222-4222-8222-222222222222" });
+    const line = parseLine(lines[0] ?? "");
+    expect(line.sessionId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(line.cycleId).toBe("33333333-3333-4333-8333-333333333333");
+    expect(line.sceneId).toBe("22222222-2222-4222-8222-222222222222");
+    expect(line.event).toBe("scene.commit.ok");
+    // 父 Logger 不受子字段污染。
+    logger.log("info", "after.child");
+    expect(parseLine(lines[1] ?? "").sessionId).toBeUndefined();
+  });
+
+  it("protects service/version/event from caller and child overrides", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "svc",
+      version: "1",
+      level: "info",
+      destination,
+    });
+    logger.log("info", "real.event", { event: "fake.event", service: "evil", version: "9" });
+    const child = logger.child({ service: "child-evil", requestId: "req-1" });
+    child.log("warn", "child.event");
+    const first = parseLine(lines[0] ?? "");
+    const second = parseLine(lines[1] ?? "");
+    expect(first.event).toBe("real.event");
+    expect(first.service).toBe("svc");
+    expect(first.version).toBe("1");
+    expect(second.service).toBe("svc");
+    expect(second.requestId).toBe("req-1");
+  });
+
+  it("serializes errors with cause chain through redaction", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "svc",
+      version: "1",
+      level: "info",
+      destination,
+    });
+    const root = Object.assign(new Error("root failed"), { code: "SQLITE_BUSY" });
+    const wrapped = new Error("wrapped", { cause: root });
+    logger.log("error", "db.operation.failed", {
+      err: wrapped,
+      token: "super-secret-token",
+    });
+    const line = parseLine(lines[0] ?? "");
+    const err = line.err as Record<string, unknown>;
+    expect(err.message).toBe("wrapped");
+    const cause = err.cause as Record<string, unknown>;
+    expect(cause.code).toBe("SQLITE_BUSY");
+    expect(line.token).toBe("[redacted]");
+    expect(lines[0]).not.toContain("super-secret-token");
+  });
+
+  it("degrades silently when the destination fails, never throws to callers", () => {
+    let writes = 0;
+    const destination: LoggerDestination = {
+      write: () => {
+        writes += 1;
+        throw new Error("EPIPE");
+      },
+    };
+    const logger = createPinoLogger({ service: "svc", version: "1", level: "info", destination });
+    expect(() => logger.log("info", "first")).not.toThrow();
+    expect(() => logger.log("error", "second")).not.toThrow();
+    expect(() => logger.child({ a: 1 }).log("warn", "third")).not.toThrow();
+    // 第一次写入失败后进入降级：不再尝试写入。
+    expect(writes).toBe(1);
+  });
+
+  it("rejects invalid factory options at assembly time", () => {
+    expect(() =>
+      createPinoLogger({
+        service: "",
+        version: "1",
+        level: "info",
+        destination: createMemoryDestination().destination,
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      createPinoLogger({
+        service: "svc",
+        version: "",
+        level: "info",
+        destination: createMemoryDestination().destination,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it("serializes every line as JSON without throwing on hostile fields", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({ service: "svc", version: "1", level: "trace", destination });
+    const cyclic: Record<string, unknown> = { name: "c" };
+    cyclic.self = cyclic;
+    expect(() =>
+      logger.log("info", "hostile.fields", {
+        cyclic,
+        big: 9_007_199_254_740_993n,
+        deep: { a: { b: { c: { d: { e: { f: { g: { h: { i: { j: 1 } } } } } } } } } },
+      }),
+    ).not.toThrow();
+    expect(lines).toHaveLength(1);
+    expect(() => JSON.parse(lines[0] ?? "")).not.toThrow();
+  });
+});

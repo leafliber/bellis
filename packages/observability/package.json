@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Trace、日志与指标基线：Gate 1 交付最小 Port 与 No-op 实现，P3 补充完整能力",
+  "description": "Trace、日志与指标：Gate 1 最小 Port 与 No-op，P3 交付 Pino Logger、字段级 Redaction、内存 Metrics 与 W3C Trace 上下文",
   "engines": {
     "node": ">=26.5 <27"
   },
@@ -25,7 +25,12 @@
     "lint": "oxlint src test",
     "format:check": "oxfmt --check src test"
   },
+  "dependencies": {
+    "@bellis/contracts": "workspace:*",
+    "pino": "10.3.1"
+  },
   "devDependencies": {
+    "fast-check": "4.9.0",
     "vitest": "4.1.11"
   }
 }
