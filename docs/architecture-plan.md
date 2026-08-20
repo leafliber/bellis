@@ -193,6 +193,8 @@ interface DecisionPacket {
 }
 
 interface ActionFrame {
+  schemaVersion: 1;
+  noOp?: true;
   speech?: SpeechIntent;
   avatar?: AvatarIntent[];
   game?: GameIntent[];
@@ -202,6 +204,8 @@ interface ActionFrame {
 ```
 
 `DecisionPacket` 不再保留顶层 `message` 或 `speech`。发言只有一个来源：`DecisionPacket.action.speech`。模型 Provider 的原始输出可以不同，但进入核心前必须规范化为上述形态，避免文本、TTS、字幕和动作读取到互相冲突的内容。收敛记录见 [ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md)。
+
+`ActionFrame` 是闭合的版本化形态：必须携带 `schemaVersion: 1`；至少包含一个行动或显式 `noOp: true`，不允许空帧；`avatar`/`game`/`overlay` 数组必须非空（1–32 个意图）；`noOp` 与任何实际行动互斥。
 
 - `Signal`：尚未被决策消费的输入事实。
 - `WorldSnapshot`：某一水位上的只读直播世界状态。

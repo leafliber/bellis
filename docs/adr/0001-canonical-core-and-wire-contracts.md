@@ -37,6 +37,8 @@ interface DecisionPacket {
 }
 
 interface ActionFrame {
+  schemaVersion: 1;
+  noOp?: true;
   speech?: SpeechIntent;
   avatar?: AvatarIntent[];
   game?: GameIntent[];
@@ -48,6 +50,7 @@ interface ActionFrame {
 - 发言只存在于 `DecisionPacket.action.speech`。
 - 不设置顶层 `message` 或顶层 `speech`。
 - 每个有效 DecisionPacket 恰好包含一个 ActionFrame。
+- ActionFrame 携带 `schemaVersion: 1`；至少包含一个行动（`speech`，或非空的 `avatar`/`game`/`overlay` 数组，1–32 个意图）或显式 `noOp: true`，不允许空帧；`noOp` 与任何实际行动互斥。
 - 没有发言时允许静默行动或明确 No-op，不生成填充文本。
 - Model Provider 的原始输出可以不同，但进入核心前必须规范化并通过 Schema 校验。
 
