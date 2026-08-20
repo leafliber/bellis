@@ -45,7 +45,10 @@ export function isSensitiveFieldName(key: string): boolean {
 
 /** 绝对路径（含堆栈中的文件位置）替换为 `<path>`，本地日志保留脱敏 Stack。 */
 function scrubPaths(text: string): string {
-  return text.replace(/(?:\/|\\)[^\s'"<>]*[/\\][^\s'"<>)]*/g, "<path>");
+  // 匹配绝对路径形态：Unix `/…`、Windows 盘符 `C:\…` 或 UNC `\\…`。
+  // 路径内部允许空格；引号/尖括号/换行终止，`)` 之前结束以保留堆栈帧结构。
+  // 同一行多个路径可能被并成一个匹配——过度替换只损失可读性，不泄露路径。
+  return text.replace(/(?:[A-Za-z]:)?(?:\/|\\)[^\n'"<>]*[\\/][^\n'"<>)]*/g, "<path>");
 }
 
 function truncateString(value: string): string {
@@ -55,7 +58,7 @@ function truncateString(value: string): string {
   return `${value.slice(0, MAX_STRING_LENGTH)}…[truncated ${value.length - MAX_STRING_LENGTH} chars]`;
 }
 
-function defineField(target: Record<string, unknown>, key: string, value: unknown): void {
+export function defineField(target: Record<string, unknown>, key: string, value: unknown): void {
   // defineProperty 而非赋值：`__proto__` 等危险键作为自有数据属性写入，
   // 不会触发原型 setter（与 contracts 的键转义策略同源）。
   Object.defineProperty(target, key, {
@@ -108,13 +111,25 @@ function redactNode(value: unknown, ancestors: WeakSet<object>, depth: number): 
     return redactArray(node, ancestors, depth);
   }
   if (node instanceof Date) {
-    return node.toISOString();
+    try {
+      return node.toISOString();
+    } catch {
+      return "[invalid-date]";
+    }
   }
   if (node instanceof RegExp) {
-    return truncateString(node.toString());
+    try {
+      return truncateString(node.toString());
+    } catch {
+      return "[regexp]";
+    }
   }
   if (node instanceof Map || node instanceof Set) {
-    return `${node.constructor.name}(${node.size})`;
+    try {
+      return `${node.constructor.name}(${node.size})`;
+    } catch {
+      return node instanceof Map ? `[Map(${node.size})]` : `[Set(${node.size})]`;
+    }
   }
   if (ArrayBuffer.isView(node)) {
     const view = node as { length?: number; byteLength?: number };
@@ -148,7 +163,14 @@ function redactRecord(
 ): Record<string, unknown> {
   ancestors.add(source);
   const out: Record<string, unknown> = {};
-  const keys = Object.keys(source);
+  // Proxy 的 ownKeys 陷阱可以抛错；键枚举失败时整体降级，不向调用方传播。
+  let keys: string[];
+  try {
+    keys = Object.keys(source);
+  } catch {
+    ancestors.delete(source);
+    return { "[unenumerable]": true };
+  }
   let written = 0;
   for (const key of keys) {
     if (written >= MAX_OBJECT_KEYS) {
@@ -175,7 +197,8 @@ function redactRecord(
 
 /**
  * Error 的安全序列化：保留 name/message/stack（脱敏路径）、cause 链与
- * 自有可枚举属性（如 code），供本地诊断使用。
+ * 自有可枚举属性（如 code），供本地诊断使用。name/message/stack/cause
+ * 都可能是抛错的 Getter，全部逐项保护。
  */
 export function serializeErrorForLog(
   error: Error,
@@ -185,12 +208,27 @@ export function serializeErrorForLog(
   const seen = ancestors ?? new WeakSet<object>();
   seen.add(error);
   const out: Record<string, unknown> = {};
-  defineField(out, "name", truncateString(error.name));
-  defineField(out, "message", truncateString(error.message));
-  if (typeof error.stack === "string") {
-    defineField(out, "stack", scrubPaths(truncateString(error.stack)));
+  defineField(
+    out,
+    "name",
+    safeReadString(() => error.name, "[getter-error]", "Error"),
+  );
+  defineField(
+    out,
+    "message",
+    safeReadString(() => error.message, "[getter-error]", ""),
+  );
+  const stack = safeReadString(() => error.stack, "[getter-error]", "");
+  if (stack !== "") {
+    defineField(out, "stack", stack === "[getter-error]" ? stack : scrubPaths(stack));
   }
-  for (const key of Object.keys(error)) {
+  let keys: string[];
+  try {
+    keys = Object.keys(error);
+  } catch {
+    keys = [];
+  }
+  for (const key of keys) {
     if (key === "name" || key === "message" || key === "stack") {
       continue;
     }
@@ -207,9 +245,39 @@ export function serializeErrorForLog(
     }
     defineField(out, key, redactNode(propertyValue, seen, depth + 1));
   }
-  const cause = (error as { cause?: unknown }).cause;
+  let cause: unknown;
+  try {
+    cause = (error as { cause?: unknown }).cause;
+  } catch {
+    cause = undefined;
+  }
   if (cause !== undefined && cause !== null && depth < MAX_ERROR_CAUSE_DEPTH) {
     defineField(out, "cause", redactNode(cause, seen, depth + 1));
   }
   return out;
+}
+
+/**
+ * 读取可能抛错的字符串属性：Getter 抛错返回 getterFallback，
+ * String() 转换抛错（如 toString 抛错的对象值）返回 stringFallback。
+ */
+function safeReadString(
+  read: () => unknown,
+  getterFallback: string,
+  stringFallback: string,
+): string {
+  let raw: unknown;
+  try {
+    raw = read();
+  } catch {
+    return getterFallback;
+  }
+  if (typeof raw === "string") {
+    return truncateString(raw);
+  }
+  try {
+    return truncateString(String(raw));
+  } catch {
+    return stringFallback;
+  }
 }

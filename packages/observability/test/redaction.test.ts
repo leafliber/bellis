@@ -191,6 +191,88 @@ describe("serializeErrorForLog", () => {
     const output = serializeErrorForLog(err) as Record<string, unknown>;
     expect(output.cause).toBe("[circular]");
   });
+
+  it("survives throwing name/message/stack/cause getters on errors (评审 P1-2)", () => {
+    const hostile = new Error("real message");
+    Object.defineProperty(hostile, "name", {
+      get() {
+        throw new Error("name getter");
+      },
+      configurable: true,
+    });
+    Object.defineProperty(hostile, "stack", {
+      get() {
+        throw new Error("stack getter");
+      },
+      configurable: true,
+    });
+    Object.defineProperty(hostile, "cause", {
+      get() {
+        throw new Error("cause getter");
+      },
+      configurable: true,
+    });
+    const output = serializeErrorForLog(hostile) as Record<string, unknown>;
+    expect(output.name).toBe("[getter-error]");
+    expect(output.message).toBe("real message");
+    expect(output.stack).toBe("[getter-error]");
+    expect(output.cause).toBeUndefined();
+
+    const hostileMessage = new Error("x");
+    Object.defineProperty(hostileMessage, "message", {
+      get() {
+        throw new Error("message getter");
+      },
+      configurable: true,
+    });
+    const output2 = serializeErrorForLog(hostileMessage) as Record<string, unknown>;
+    expect(output2.message).toBe("[getter-error]");
+  });
+
+  it("scrubs absolute paths containing spaces and Windows drive letters (评审 P2-6)", () => {
+    const stack = [
+      "Error: boom",
+      "    at run (/Users/cassia/My Project/secret file.ts:12:34)",
+      "    at load (C:\\Users\\me\\App Data\\roaming\\cfg.json:1:2)",
+      "    at unc (\\\\server\\share\\mod.js:3:4)",
+      "    at relative (src/plain.ts:5:6)",
+    ].join("\n");
+    const output = serializeErrorForLog(Object.assign(new Error("boom"), { stack }));
+    const scrubbed = output.stack as string;
+    expect(scrubbed).toContain("at run");
+    expect(scrubbed).toContain("<path>");
+    // 空格路径、盘符路径、UNC 路径的任何片段都不再泄露。
+    for (const leaked of [
+      "/Users/",
+      "My Project",
+      "secret file.ts",
+      "C:\\",
+      "App Data",
+      "roaming",
+      "\\\\server",
+      "share",
+    ]) {
+      expect(scrubbed).not.toContain(leaked);
+    }
+  });
+
+  it("degrades unenumerable (proxy-trapped) objects and invalid dates stably", () => {
+    const proxied = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error("ownKeys trap");
+        },
+      },
+    );
+    const output = redactValue({ proxied, ok: 1 }) as Record<string, unknown>;
+    expect(output.proxied).toEqual({ "[unenumerable]": true });
+    expect(output.ok).toBe(1);
+
+    const invalidDate = new Date("not-a-date");
+    const withDate = redactValue({ invalidDate }) as Record<string, unknown>;
+    expect(withDate.invalidDate).toBe("[invalid-date]");
+  });
 });
 
 describe("redaction property: arbitrary JSON payloads", () => {

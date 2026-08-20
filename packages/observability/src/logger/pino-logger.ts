@@ -1,6 +1,6 @@
 import pino from "pino";
 import type { LogFields, LogLevel, LoggerPort } from "../logger.js";
-import { isSensitiveFieldName, redactValue } from "./redaction.js";
+import { defineField, isSensitiveFieldName, redactValue } from "./redaction.js";
 
 /**
  * Pino Logger Factory：实现 Gate 1 的 LoggerPort（p3-observability-testkit.md §7.1）。
@@ -9,8 +9,8 @@ import { isSensitiveFieldName, redactValue } from "./redaction.js";
  * - 所有字段（含子 Logger 固定字段）先经过字段级 Redaction 再交给 Pino，
  *   `service/version/event` 等受保护键无法被调用方覆盖；
  * - Error（含 cause 链）安全序列化并脱敏；
- * - 写入失败时进入降级模式：静默丢弃后续日志，绝不递归写日志或把异常
- *   抛回 Runtime 关键路径；
+ * - 任何路径（含抛错的 Getter、Proxy 陷阱、序列化失败）都不会把异常抛回
+ *   业务调用方；写入失败时进入降级模式，静默丢弃后续日志，绝不递归写日志；
  * - 通过注入 Destination 测试，不依赖读取控制台文本。
  */
 
@@ -89,18 +89,29 @@ export function createPinoLogger(options: LoggerOptions): LoggerPort {
     if (fields === undefined) {
       return out;
     }
-    for (const [key, value] of Object.entries(fields)) {
+    // 用 Object.keys 而不是 Object.entries：entries 会立即执行全部 Getter，
+    // 任何一个抛错都会把异常传播回业务路径。
+    let keys: string[];
+    try {
+      keys = Object.keys(fields);
+    } catch {
+      defineField(out, "[fields]", "[unenumerable]");
+      return out;
+    }
+    for (const key of keys) {
       if (PROTECTED_FIELD_KEYS.has(key)) {
         continue;
       }
-      Object.defineProperty(out, key, {
-        // 顶层字段同样要做键级敏感匹配：redactValue 只处理值，
-        // 顶层键不会经过 redactRecord 的键检查。
-        value: isSensitiveFieldName(key) ? REDACTED : redactValue(value),
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      let value: unknown;
+      try {
+        value = (fields as Record<string, unknown>)[key];
+      } catch {
+        defineField(out, key, "[getter-error]");
+        continue;
+      }
+      // 顶层字段同样要做键级敏感匹配：redactValue 只处理值，
+      // 顶层键不会经过 redactRecord 的键检查。
+      defineField(out, key, isSensitiveFieldName(key) ? REDACTED : redactValue(value));
     }
     return out;
   }
@@ -111,17 +122,28 @@ export function createPinoLogger(options: LoggerOptions): LoggerPort {
         if (degraded) {
           return;
         }
-        const safeUserFields = sanitizeFields(fields);
-        const merged = { ...baseFields, ...safeUserFields };
+        let safeUserFields: Record<string, unknown>;
+        try {
+          safeUserFields = sanitizeFields(fields);
+        } catch {
+          safeUserFields = { "[fields]": "[sanitization-failed]" };
+        }
         try {
           const log = pinoLogger[level] as EmitFn;
           // pino 方法依赖实例 this，必须显式绑定调用。
-          log.call(pinoLogger, merged, event);
+          log.call(pinoLogger, { ...baseFields, ...safeUserFields }, event);
         } catch {
           degraded = true;
         }
       },
-      child: (fields: LogFields) => bindLogger({ ...baseFields, ...sanitizeFields(fields) }),
+      child: (fields: LogFields) => {
+        try {
+          return bindLogger({ ...baseFields, ...sanitizeFields(fields) });
+        } catch {
+          // 子字段净化失败时降级为不携带新字段的子 Logger，绝不抛回调用方。
+          return bindLogger({ ...baseFields });
+        }
+      },
     };
   }
 

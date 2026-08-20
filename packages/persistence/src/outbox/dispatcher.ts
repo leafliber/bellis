@@ -86,9 +86,14 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   const metrics = options.metrics ?? createNoopMetrics();
   const checkpointObserver = options.checkpointObserver;
   const pendingGauge = metrics.gauge("bellis_outbox_pending");
-  const deliveredCounter = metrics.counter("bellis_outbox_delivered_total");
-  const retryCounter = metrics.counter("bellis_outbox_retry_total");
-  const deadCounter = metrics.counter("bellis_outbox_dead_total");
+  // Phase 1 规范指标：统一 bellis_outbox_delivery_total{result=delivered|retry|dead}，
+  // 与 @bellis/observability 的 PHASE_1_METRIC_DEFINITIONS 对齐
+  // （phase-1-build-guide.md §10.3）；独立三指标名会被 Registry 拒绝成 No-op。
+  const deliveredCounter = metrics.counter("bellis_outbox_delivery_total", {
+    result: "delivered",
+  });
+  const retryCounter = metrics.counter("bellis_outbox_delivery_total", { result: "retry" });
+  const deadCounter = metrics.counter("bellis_outbox_delivery_total", { result: "dead" });
   let running = false;
   let loop: Promise<void> | null = null;
   let sleepController: AbortController | null = null;

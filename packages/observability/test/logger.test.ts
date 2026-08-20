@@ -167,4 +167,70 @@ describe("createPinoLogger", () => {
     expect(lines).toHaveLength(1);
     expect(() => JSON.parse(lines[0] ?? "")).not.toThrow();
   });
+
+  it("never throws on throwing getters in top-level fields (评审 P1-2)", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({ service: "svc", version: "1", level: "info", destination });
+    const fields: Record<string, unknown> = {
+      safe: 7,
+      get boom(): number {
+        throw new Error("getter escaped");
+      },
+    };
+    expect(() => logger.log("info", "getter.field", fields)).not.toThrow();
+    const line = parseLine(lines[0] ?? "");
+    expect(line.event).toBe("getter.field");
+    expect(line.safe).toBe(7);
+    expect(line.boom).toBe("[getter-error]");
+    // 后续日志不受单次坏字段影响。
+    expect(() => logger.log("info", "next.event", { ok: true })).not.toThrow();
+    expect(parseLine(lines[1] ?? "").ok).toBe(true);
+  });
+
+  it("never throws on child() with throwing getters, dropping only the hostile field", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({ service: "svc", version: "1", level: "info", destination });
+    const hostile: Record<string, unknown> = {
+      requestId: "req-9",
+      get evil(): string {
+        throw new Error("child getter");
+      },
+    };
+    let child: ReturnType<typeof logger.child> | undefined;
+    expect(() => {
+      child = logger.child(hostile);
+    }).not.toThrow();
+    expect(() => child?.log("warn", "child.event")).not.toThrow();
+    const line = parseLine(lines[0] ?? "");
+    expect(line.event).toBe("child.event");
+    expect(line.requestId).toBe("req-9");
+    expect(line.evil).toBe("[getter-error]");
+  });
+
+  it("never throws on proxy-trapped fields objects or hostile error accessors", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({ service: "svc", version: "1", level: "info", destination });
+    const trapped = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error("ownKeys trap");
+        },
+      },
+    );
+    expect(() => logger.log("info", "proxy.fields", trapped)).not.toThrow();
+    expect(parseLine(lines[0] ?? "").event).toBe("proxy.fields");
+
+    const hostileError = new Error("real");
+    Object.defineProperty(hostileError, "stack", {
+      get() {
+        throw new Error("stack getter");
+      },
+      configurable: true,
+    });
+    expect(() => logger.log("error", "hostile.error", { err: hostileError })).not.toThrow();
+    const err = parseLine(lines[1] ?? "").err as Record<string, unknown>;
+    expect(err.message).toBe("real");
+    expect(err.stack).toBe("[getter-error]");
+  });
 });

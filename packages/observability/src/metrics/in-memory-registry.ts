@@ -106,6 +106,10 @@ interface HistogramSeries {
 
 interface MetricState {
   definition: MetricDefinition;
+  /** 创建时快照的 Label Allowlist：不受外部对定义数组的运行期改写影响。 */
+  allowlist: ReadonlySet<string>;
+  /** 创建时快照的 Histogram 桶边界。 */
+  buckets: readonly number[];
   counters: Map<string, CounterSeries>;
   gauges: Map<string, GaugeSeries>;
   histograms: Map<string, HistogramSeries>;
@@ -173,6 +177,8 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
     }
     states.set(definition.name, {
       definition,
+      allowlist: new Set(definition.labels),
+      buckets: [...(definition.buckets ?? [])],
       counters: new Map(),
       gauges: new Map(),
       histograms: new Map(),
@@ -192,11 +198,17 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
   }
 
   function seriesLimitAlarm(metric: string, message: string): void {
+    // 每次拒绝都计入 rejectedOperations；onError 告警每指标只发一次。
+    rejectedOperations += 1;
     if (alarmedSeriesLimit.has(metric)) {
       return;
     }
     alarmedSeriesLimit.add(metric);
-    reject({ reason: "series-limit", metric, message });
+    try {
+      options?.onError?.({ reason: "series-limit", metric, message });
+    } catch {
+      // 回调失败不影响业务路径。
+    }
   }
 
   function totalSeriesCount(): number {
@@ -225,10 +237,9 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
       });
       return null;
     }
-    const allowlist = new Set(state.definition.labels);
     const normalized: Record<string, string> = {};
     for (const [key, value] of Object.entries(labels ?? {})) {
-      if (!allowlist.has(key)) {
+      if (!state.allowlist.has(key)) {
         reject({
           reason: "label-not-allowed",
           metric: name,
@@ -300,7 +311,18 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
               value: 0,
             }));
             if (series !== null) {
-              series.value += value;
+              // 两个有限数相加仍可能溢出为 Infinity；聚合结果必须保持有限，
+              // 否则快照经 JSON 序列化会变成 null（评审 P2-5）。
+              const next = series.value + value;
+              if (!Number.isFinite(next)) {
+                reject({
+                  reason: "invalid-value",
+                  metric: name,
+                  message: `counter aggregate overflow: ${series.value} + ${value}`,
+                });
+                return;
+              }
+              series.value = next;
             }
           } catch {
             rejectedOperations += 1;
@@ -363,21 +385,27 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
               sum: 0,
               min: Number.POSITIVE_INFINITY,
               max: Number.NEGATIVE_INFINITY,
-              bucketCounts: Array.from<number, number>(
-                { length: (state.definition.buckets ?? []).length },
-                () => 0,
-              ),
+              bucketCounts: Array.from<number, number>({ length: state.buckets.length }, () => 0),
             }));
             if (series === null) {
               return;
             }
+            // 与 Counter 相同：sum 聚合必须保持有限，溢出则拒绝本次观测。
+            const nextSum = series.sum + value;
+            if (!Number.isFinite(nextSum)) {
+              reject({
+                reason: "invalid-value",
+                metric: name,
+                message: `histogram sum overflow: ${series.sum} + ${value}`,
+              });
+              return;
+            }
             series.count += 1;
-            series.sum += value;
+            series.sum = nextSum;
             series.min = Math.min(series.min, value);
             series.max = Math.max(series.max, value);
-            const buckets = state.definition.buckets ?? [];
-            for (let i = 0; i < buckets.length; i += 1) {
-              const bound = buckets[i];
+            for (let i = 0; i < state.buckets.length; i += 1) {
+              const bound = state.buckets[i];
               if (bound !== undefined && value <= bound) {
                 series.bucketCounts[i] = (series.bucketCounts[i] ?? 0) + 1;
                 break;
@@ -405,7 +433,7 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
           gauges.push({ name: state.definition.name, labels: series.labels, value: series.value });
         }
         for (const series of state.histograms.values()) {
-          const buckets = (state.definition.buckets ?? []).map((upperBound, i) => ({
+          const buckets = state.buckets.map((upperBound, i) => ({
             upperBound,
             count: series.bucketCounts[i] ?? 0,
           }));

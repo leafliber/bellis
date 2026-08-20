@@ -37,12 +37,47 @@ function withOverrides<T extends object>(base: T, overrides?: Partial<T>): T {
     return base;
   }
   const merged = { ...base } as unknown as Record<string, unknown>;
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value !== undefined) {
-      merged[key] = value;
+  for (const key of Object.keys(overrides)) {
+    let value: unknown;
+    try {
+      value = (overrides as Record<string, unknown>)[key];
+    } catch {
+      continue;
     }
+    if (value === undefined) {
+      continue;
+    }
+    // defineProperty 保留 JSON.parse 产生的自有 __proto__ 扩展键
+    // （赋值会触发原型 setter 导致键丢失）；覆盖值深拷贝，避免两个
+    // Fixture 共享同一可变 payload/groups 引用（评审 P2-4）。
+    Object.defineProperty(merged, key, {
+      value: cloneJsonValue(value),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   return merged as T;
+}
+
+/** JSON 形态值的深拷贝：普通对象/数组递归复制，原始值原样返回。 */
+function cloneJsonValue(value: unknown): unknown {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(cloneJsonValue);
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    Object.defineProperty(out, key, {
+      value: cloneJsonValue((value as Record<string, unknown>)[key]),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return out;
 }
 
 export function makeTraceContext(overrides?: Partial<TraceContext>): TraceContext {

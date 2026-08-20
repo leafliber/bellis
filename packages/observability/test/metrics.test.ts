@@ -233,4 +233,72 @@ describe("InMemoryMetrics semantics", () => {
     expect(() => createInMemoryMetrics({ maxSeriesPerMetric: 0 })).toThrow(RangeError);
     expect(() => createInMemoryMetrics({ maxTotalSeries: 1.5 })).toThrow(RangeError);
   });
+
+  it("definitions are deeply frozen: runtime label injection is impossible (评审 P1-3)", () => {
+    expect(Object.isFrozen(PHASE_1_METRIC_DEFINITIONS)).toBe(true);
+    for (const definition of PHASE_1_METRIC_DEFINITIONS) {
+      expect(Object.isFrozen(definition)).toBe(true);
+      expect(Object.isFrozen(definition.labels)).toBe(true);
+      if (definition.buckets !== undefined) {
+        expect(Object.isFrozen(definition.buckets)).toBe(true);
+      }
+    }
+    expect(Object.isFrozen(BLOCKED_METRIC_LABEL_NAMES)).toBe(true);
+    const dropped = PHASE_1_METRIC_DEFINITIONS.find(
+      (d) => d.name === "bellis_ws_dropped_messages_total",
+    );
+    expect(dropped).toBeDefined();
+    // ESM 严格模式下对冻结数组的写入直接抛 TypeError，注入不可能成功。
+    const droppedLabels = dropped?.labels as string[];
+    expect(() => droppedLabels.push("sessionId")).toThrow(TypeError);
+    expect(() => (PHASE_1_METRIC_DEFINITIONS as unknown as unknown[]).push({ name: "x" })).toThrow(
+      TypeError,
+    );
+    // 即便假设注入发生，Registry 也使用创建时快照的 Allowlist。
+    const metrics = createInMemoryMetrics();
+    metrics
+      .counter("bellis_ws_dropped_messages_total", { channel: "control", sessionId: "s1" })
+      .inc();
+    const snapshot = metrics.snapshot();
+    expect(snapshot.counters).toHaveLength(0);
+    expect(snapshot.rejectedOperations).toBe(1);
+  });
+
+  it("rejects aggregates that overflow to non-finite values (评审 P2-5)", () => {
+    const metrics = createInMemoryMetrics();
+    const commit = metrics.counter("bellis_scene_commit_total", { result: "committed" });
+    commit.inc(Number.MAX_VALUE);
+    commit.inc(Number.MAX_VALUE);
+    const snapshot = metrics.snapshot();
+    expect(snapshot.counters[0]?.value).toBe(Number.MAX_VALUE);
+    expect(snapshot.rejectedOperations).toBe(1);
+    expect(JSON.stringify(snapshot)).not.toContain(":null");
+
+    const rtt = metrics.histogram("bellis_clock_rtt_us");
+    rtt.observe(Number.MAX_VALUE);
+    rtt.observe(Number.MAX_VALUE);
+    const histogram = metrics.snapshot().histograms.find((h) => h.name === "bellis_clock_rtt_us");
+    expect(histogram?.count).toBe(1);
+    expect(histogram?.sum).toBe(Number.MAX_VALUE);
+    expect(metrics.snapshot().rejectedOperations).toBe(2);
+    expect(JSON.stringify(metrics.snapshot())).not.toContain(":null");
+  });
+
+  it("counts every series-limit rejection while alarming only once (评审 P2-7)", () => {
+    const rejections: MetricsRejection[] = [];
+    const metrics = createInMemoryMetrics({
+      maxSeriesPerMetric: 1,
+      onError: (r) => rejections.push(r),
+    });
+    const dropped = "bellis_ws_dropped_messages_total";
+    metrics.counter(dropped, { channel: "control", reason: "overflow" }).inc();
+    metrics.counter(dropped, { channel: "control", reason: "closed" }).inc();
+    metrics.counter(dropped, { channel: "control", reason: "invalid" }).inc();
+    const snapshot = metrics.snapshot();
+    // 三次新 Series 拒绝逐次计数；告警回调只发一次。
+    expect(snapshot.rejectedOperations).toBe(2);
+    expect(rejections.filter((r) => r.reason === "series-limit")).toHaveLength(1);
+    expect(snapshot.seriesCount).toBe(1);
+    expect(snapshot.counters[0]?.value).toBe(1);
+  });
 });

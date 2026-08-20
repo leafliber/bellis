@@ -20,7 +20,7 @@ export interface MetricDefinition {
 }
 
 /** 禁止作为 Metric Label 的高基数标识名。 */
-export const BLOCKED_METRIC_LABEL_NAMES: readonly string[] = [
+const BLOCKED_LABEL_NAMES = [
   "traceId",
   "sessionId",
   "turnId",
@@ -32,11 +32,20 @@ export const BLOCKED_METRIC_LABEL_NAMES: readonly string[] = [
   "recordId",
   "outboxId",
   "userId",
-];
+] as const;
+
+export const BLOCKED_METRIC_LABEL_NAMES: readonly string[] = Object.freeze([
+  ...BLOCKED_LABEL_NAMES,
+]);
 
 export const METRIC_NAME_PATTERN = /^bellis_[a-z][a-z0-9_]*$/;
 
-export const PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
+/**
+ * 原始定义（模块私有）：公开导出的是逐层 Object.freeze 的副本。
+ * readonly 只在编译期生效，公开可变数组会在运行时绕过高基数禁令
+ * （labels.push("sessionId") 即可注入），因此必须运行期冻结。
+ */
+const RAW_PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   {
     name: "bellis_ws_connections",
     kind: "gauge",
@@ -96,7 +105,7 @@ export const PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   {
     name: "bellis_outbox_delivery_total",
     kind: "counter",
-    help: "Outbox 交付结果计数（result=delivered|dead-letter）。",
+    help: "Outbox 交付结果计数（result=delivered|retry|dead）。",
     labels: ["result"],
   },
   {
@@ -113,3 +122,19 @@ export const PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
     buckets: [1, 2.5, 5, 10, 25, 50, 100, 250, 500],
   },
 ];
+
+function freezeDefinition(definition: MetricDefinition): MetricDefinition {
+  const frozen: MetricDefinition = Object.freeze({
+    ...definition,
+    labels: Object.freeze([...definition.labels]),
+    ...(definition.buckets === undefined
+      ? {}
+      : { buckets: Object.freeze([...definition.buckets]) }),
+  });
+  return frozen;
+}
+
+/** Phase 1 指标定义：对象、labels、buckets 与外层数组全部运行期冻结。 */
+export const PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = Object.freeze(
+  RAW_PHASE_1_METRIC_DEFINITIONS.map(freezeDefinition),
+);

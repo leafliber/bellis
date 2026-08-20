@@ -99,4 +99,43 @@ describe("fixture independence and overrides", () => {
     const invalidRecord = makeSessionRecord({ occurredAtMs: -5 });
     expect(SessionRecordSchema.safeParse(invalidRecord).success).toBe(false);
   });
+
+  it("deep-copies override values: shared payloads never alias across fixtures (评审 P2-4)", () => {
+    const sharedPayload = { sceneId: "22222222-2222-4222-8222-222222222222", nested: { hop: 1 } };
+    const first = makeOutboxMessage({ payload: sharedPayload });
+    const second = makeOutboxMessage({ payload: sharedPayload });
+    expect(first.payload).not.toBe(sharedPayload);
+    expect(first.payload).not.toBe(second.payload);
+    (first.payload as Record<string, unknown>).sceneId = "mutated";
+    ((first.payload as Record<string, unknown>).nested as Record<string, unknown>).hop = 99;
+    expect((second.payload as Record<string, unknown>).sceneId).toBe(
+      "22222222-2222-4222-8222-222222222222",
+    );
+    expect(
+      ((second.payload as Record<string, unknown>).nested as Record<string, unknown>).hop,
+    ).toBe(1);
+    // 覆盖传入的原对象也不受影响。
+    sharedPayload.sceneId = "mutated-source";
+    expect((second.payload as Record<string, unknown>).sceneId).toBe(
+      "22222222-2222-4222-8222-222222222222",
+    );
+
+    const sharedGroups = makeScene().groups;
+    const sceneA = makeScene({ groups: sharedGroups });
+    const sceneB = makeScene({ groups: sharedGroups });
+    sceneA.groups[0]?.lanes.push("subtitle");
+    expect(sceneB.groups[0]?.lanes).toEqual(["audio"]);
+    expect(SceneSchema.safeParse(sceneB).success).toBe(true);
+  });
+
+  it("preserves legal __proto__ extension keys passed as overrides (评审 P2-4)", () => {
+    const overrides = JSON.parse(
+      '{"payload":{"a":1},"__proto__":{"ext":true}}',
+    ) as unknown as Partial<ReturnType<typeof makeSessionRecord>>;
+    const record = makeSessionRecord(overrides);
+    expect(Object.hasOwn(record, "__proto__")).toBe(true);
+    expect((record as Record<string, unknown>).__proto__).toEqual({ ext: true });
+    expect((record.payload as Record<string, unknown>).a).toBe(1);
+    expect(SessionRecordSchema.safeParse(record).success).toBe(true);
+  });
 });
