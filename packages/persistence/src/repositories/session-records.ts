@@ -25,13 +25,17 @@ function rowToRecord(row: SqliteRow): SessionRecord {
       `session record schema version ${schemaVersion} is not supported by this build`,
     );
   }
+  const aggregateId = readNullableText(row, "aggregate_id");
+  const aggregateSeq = readNullableText(row, "aggregate_seq");
+  // NULL 列不产生显式 undefined 键：响应要跨 postMessage/JSON 边界，
+  // undefined 不是 JsonValue，会把整条响应判为非法（集成测试实测捕获）。
   const parsed = SessionRecordSchema.safeParse({
     schemaVersion,
     recordId: readText(row, "record_id"),
     sessionId: readText(row, "session_id"),
     recordType: readText(row, "record_type"),
-    aggregateId: readNullableText(row, "aggregate_id") ?? undefined,
-    aggregateSeq: readNullableText(row, "aggregate_seq") ?? undefined,
+    ...(aggregateId === null ? {} : { aggregateId }),
+    ...(aggregateSeq === null ? {} : { aggregateSeq }),
     traceId: readText(row, "trace_id"),
     occurredAtMs: readInt(row, "occurred_at_ms"),
     payload: JSON.parse(readText(row, "payload_json")) as unknown,

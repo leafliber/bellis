@@ -164,10 +164,10 @@ export interface PersistenceClientOptions {
   readonly retryPolicy?: OutboxRetryPolicyConfig;
   /** Migration 注册表注入（测试/嵌入装配用；生产用包内置注册表）。 */
   readonly migrations?: PersistenceMigrationsOverride;
-  /** scene_committed Record 的 recordId 生成器（测试注入）。 */
-  readonly recordIdGenerator?: () => string;
-  /** 审计墙钟（epoch ms）注入（测试注入；不参与恢复排序）。 */
-  readonly wallClockMs?: () => number;
+  /** 预置 recordId 序列（测试注入，按序消耗，耗尽后回退 randomUUID）。 */
+  readonly recordIds?: readonly string[];
+  /** 固定审计墙钟（epoch ms，测试注入；不参与恢复排序与 Lease 判断）。 */
+  readonly wallClockMs?: number;
   readonly logger?: LoggerPort;
 }
 
@@ -221,6 +221,8 @@ export function createPersistenceClient(options: PersistenceClientOptions): Pers
       stateMigrations: options.migrations?.state,
       telemetryMigrations: options.migrations?.telemetry,
       retryPolicy: options.retryPolicy,
+      wallClockMs: options.wallClockMs,
+      recordIds: options.recordIds,
     },
     defaultDeadlineMs,
     logger,

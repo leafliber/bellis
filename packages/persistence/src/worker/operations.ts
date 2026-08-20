@@ -281,7 +281,6 @@ export class WorkerOperationRuntime {
           sceneId: input.sceneId,
         });
       }
-
       state.exec("COMMIT");
       return {
         operation: "commit_scene",

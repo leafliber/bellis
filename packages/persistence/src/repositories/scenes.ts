@@ -1,5 +1,6 @@
 import { readInt, readText } from "./sqlite-port.js";
 import type { SqliteDatabase } from "./sqlite-port.js";
+import { PersistenceError } from "../errors.js";
 
 /**
  * scenes 表：提交事实与版本化 Payload（P2 文档 §3.2、§7）。
@@ -34,21 +35,31 @@ export function insertSceneRow(
     readonly idempotencyKey: string;
   },
 ): void {
-  db.prepare(
-    `INSERT INTO scenes
-       (scene_id, cycle_id, session_id, status, commit_ordinal, committed_at_ms,
-        schema_version, payload_json, idempotency_key)
-     VALUES (?, ?, ?, 'committed', ?, ?, ?, ?, ?)`,
-  ).run(
-    input.sceneId,
-    input.cycleId,
-    input.sessionId,
-    input.commitOrdinal,
-    input.committedAtMs,
-    input.schemaVersion,
-    input.payloadJson,
-    input.idempotencyKey,
-  );
+  try {
+    db.prepare(
+      `INSERT INTO scenes
+         (scene_id, cycle_id, session_id, status, commit_ordinal, committed_at_ms,
+          schema_version, payload_json, idempotency_key)
+       VALUES (?, ?, ?, 'committed', ?, ?, ?, ?, ?)`,
+    ).run(
+      input.sceneId,
+      input.cycleId,
+      input.sessionId,
+      input.commitOrdinal,
+      input.committedAtMs,
+      input.schemaVersion,
+      input.payloadJson,
+      input.idempotencyKey,
+    );
+  } catch (error) {
+    const detail = String(error);
+    if (detail.includes("UNIQUE")) {
+      throw new PersistenceError("scene_conflict", "scene id or cycle already committed", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
 }
 
 export function lastCommittedScene(
