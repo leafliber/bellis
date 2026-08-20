@@ -105,6 +105,14 @@ interface PersistenceRpcResponse {
 数据目录由调用方显式传入绝对路径；包内没有“仓库内默认位置”。测试一律
 使用临时目录并在成功/失败后清理。
 
+已知性能特征：`state.db` 的 `synchronous=FULL` 使每条 `appendRecord`
+（独立 autocommit INSERT）伴随一次 fsync 级持久化——这是逐条审计记录
+的刻意取舍；批量装载基准约 500 条 / 数百毫秒（本地 SSD 实测），P4 若
+需要高频写入应评估批量化接口的兼容新增。另：本仓库 Node 基线下，高频
+`setInterval` 与大并发 worker_threads `postMessage` 洪泛同时存在会
+偶发饿死 MessagePort 投递（集成测试实测），生产代码只用 Promise/
+`clock.sleepUntil` 定时器，不受影响。
+
 ### 4.2 Migration 规则
 
 - Migration 是有序只前进的版本化 SQL；SQL 文本内嵌于版本化 TS 模块
