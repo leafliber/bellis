@@ -1,74 +1,57 @@
-import type { OutboxMessage, SessionRecord, TraceContext } from "@bellis/contracts";
-
 /**
- * @bellis/persistence — Gate 1 空壳。
+ * @bellis/persistence — SQLite DB Worker、Migration、Session Records、
+ * 原子提交与 Outbox（P2 交付）。
  *
- * P2 将在此实现（phase-1-build-guide.md §13.3）：DB Worker 与类型化 RPC、
- * state.db/telemetry.db 与 Migration、原子 commitScene、Outbox 状态机、
- * PersistenceCheckpointObserver。`node:sqlite` 只能在 src/worker 内导入，
- * 主线程通过版本化 RPC 操作，不允许任意 SQL 穿过 Worker 边界。
- *
- * 空壳阶段只冻结公开 Port 形态（§9.1），不包含任何半成品实现。
+ * `node:sqlite` 只能在 src/worker/database.ts 导入；主线程通过版本化
+ * 类型化 RPC 操作（phase-1-build-guide.md §9.1），不允许任意 SQL 穿过
+ * Worker 边界。公开装配：createPersistenceClient / createOutboxDispatcher。
  */
 
-export interface AppendRecordInput {
-  readonly record: SessionRecord;
-  readonly trace: TraceContext;
-}
+export {
+  PERSISTENCE_ERROR_CODES,
+  PersistenceError,
+  isRetryableCode,
+  toSafePersistenceError,
+} from "./errors.js";
+export type {
+  PersistenceErrorCode,
+  PersistenceErrorOptions,
+  SafePersistenceError,
+} from "./errors.js";
 
-export interface CommitSceneInput {
-  readonly sceneId: string;
-  readonly cycleId: string;
-  readonly sessionId: string;
-  readonly idempotencyKey: string;
-  /** 请求摘要：同一幂等键携带不同摘要时返回冲突错误。 */
-  readonly requestFingerprint: string;
-  readonly watermarks: ReadonlyArray<{ source: string; watermark: bigint }>;
-  readonly outbox: readonly OutboxMessage[];
-  readonly trace: TraceContext;
-}
+export { PERSISTENCE_CHECKPOINTS, createNoopCheckpointObserver } from "./checkpoints/observer.js";
+export type {
+  PersistenceCheckpoint,
+  PersistenceCheckpointContext,
+  PersistenceCheckpointObserver,
+} from "./checkpoints/observer.js";
 
-export interface CommitSceneResult {
-  readonly sceneId: string;
-  readonly committedAtMs: number;
-  readonly duplicate: boolean;
-}
+export type {
+  AdvanceServerSeqInput,
+  AppendRecordInput,
+  ClaimOutboxInput,
+  CommitSceneInput,
+  CommitSceneResult,
+  CompleteOutboxInput,
+  EnsureSessionInput,
+  ListRecordsInput,
+  OutboxRetryPolicyConfig,
+  OutboxStats,
+  PersistenceClient,
+  PersistenceClientOptions,
+  PersistenceMigrationsOverride,
+  PersistenceRpcDiagnostic,
+  PersistenceWorkerOptions,
+  RecoveryState,
+  RetryOutboxInput,
+} from "./client/persistence-client.js";
 
-export interface RecoveryState {
-  readonly sessionId: string;
-  readonly latestServerSeq: bigint;
-  readonly signalWatermarks: ReadonlyArray<{ source: string; watermark: bigint }>;
-  readonly lastCommittedScene: {
-    readonly sceneId: string;
-    readonly cycleId: string;
-    readonly committedAtMs: number;
-  } | null;
-}
+export type { MigrationDefinition } from "./migrations/definition.js";
 
-export interface ClaimOutboxInput {
-  readonly limit: number;
-  readonly leaseMs: number;
-  readonly ownerInstanceId: string;
-}
-
-export interface CompleteOutboxInput {
-  readonly outboxId: string;
-}
-
-export interface RetryOutboxInput {
-  readonly outboxId: string;
-  readonly errorCode: string;
-  readonly retryable: boolean;
-}
-
-/** Persistence 公开装配接口（phase-1-build-guide.md §9.1）。P2 提供实现。 */
-export interface PersistenceClient {
-  migrate(signal?: AbortSignal): Promise<void>;
-  appendRecord(input: AppendRecordInput): Promise<SessionRecord>;
-  commitScene(input: CommitSceneInput): Promise<CommitSceneResult>;
-  readRecoveryState(sessionId: string): Promise<RecoveryState>;
-  claimOutbox(input: ClaimOutboxInput): Promise<OutboxMessage[]>;
-  completeOutbox(input: CompleteOutboxInput): Promise<void>;
-  retryOutbox(input: RetryOutboxInput): Promise<void>;
-  close(): Promise<void>;
-}
+export type {
+  OutboxDispatchRunSummary,
+  OutboxDispatcher,
+  OutboxDispatcherOptions,
+  OutboxPublishResult,
+  OutboxPublisher,
+} from "./outbox/dispatcher.js";

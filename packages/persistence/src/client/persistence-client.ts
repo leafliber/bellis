@@ -1,0 +1,166 @@
+import type { OutboxMessage, Scene, SessionRecord, TraceContext } from "@bellis/contracts";
+import type { LoggerPort } from "@bellis/observability";
+import type { PersistenceCheckpointObserver } from "../checkpoints/observer.js";
+import type { MigrationDefinition } from "../migrations/definition.js";
+import type { PersistenceErrorCode, SafePersistenceError } from "../errors.js";
+
+/**
+ * Persistence 公开装配接口（phase-1-build-guide.md §9.1）。
+ *
+ * Gate 1.1 审查结论（docs/phase-1/p2-persistence.md §3）：
+ * - 新增 `ensureSession`：commitScene 依赖 Session 存在，此前无创建入口。
+ * - `CommitSceneInput` 新增 `scene`：scenes.payload_json 必须写入经
+ *   SceneSchema 验证的完整版本化 Payload，不再只有 ID。
+ * - 新增 `advanceServerSeq`：RecoveryState.latestServerSeq 的单调推进方法。
+ * - `CompleteOutboxInput`/`RetryOutboxInput` 新增 `ownerInstanceId`：
+ *   Outbox 状态转换必须是条件更新，避免两个 Dispatcher 抢同一项。
+ * - 新增 `listRecords`：按 Session/Trace/Aggregate 的索引查询。
+ * 以上均为兼容新增，无破坏性修改，不触碰 @bellis/contracts。
+ */
+
+export interface EnsureSessionInput {
+  readonly sessionId: string;
+  readonly createdAtMs: number;
+  readonly trace: TraceContext;
+}
+
+export interface AppendRecordInput {
+  readonly record: SessionRecord;
+  readonly trace: TraceContext;
+}
+
+export interface CommitSceneInput {
+  readonly sceneId: string;
+  readonly cycleId: string;
+  readonly sessionId: string;
+  /** 完整版本化 Scene Payload；Worker 验证 sceneId/cycleId 一致后写入 scenes.payload_json。 */
+  readonly scene: Scene;
+  readonly idempotencyKey: string;
+  /** 请求摘要：同一幂等键携带不同摘要时返回冲突错误。 */
+  readonly requestFingerprint: string;
+  readonly watermarks: ReadonlyArray<{ source: string; watermark: bigint }>;
+  readonly outbox: readonly OutboxMessage[];
+  readonly trace: TraceContext;
+}
+
+export interface CommitSceneResult {
+  readonly sceneId: string;
+  readonly committedAtMs: number;
+  readonly duplicate: boolean;
+}
+
+export interface RecoveryState {
+  readonly sessionId: string;
+  readonly latestServerSeq: bigint;
+  readonly signalWatermarks: ReadonlyArray<{ source: string; watermark: bigint }>;
+  readonly lastCommittedScene: {
+    readonly sceneId: string;
+    readonly cycleId: string;
+    readonly committedAtMs: number;
+  } | null;
+}
+
+export interface AdvanceServerSeqInput {
+  readonly sessionId: string;
+  readonly latestServerSeq: bigint;
+  readonly trace: TraceContext;
+}
+
+export interface ListRecordsInput {
+  readonly sessionId?: string;
+  readonly traceId?: string;
+  readonly aggregateId?: string;
+  readonly limit?: number;
+}
+
+export interface ClaimOutboxInput {
+  readonly limit: number;
+  readonly leaseMs: number;
+  readonly ownerInstanceId: string;
+}
+
+export interface CompleteOutboxInput {
+  readonly outboxId: string;
+  /** 条件更新：只有当前 Lease 持有者才能标记 delivered。 */
+  readonly ownerInstanceId: string;
+}
+
+export interface RetryOutboxInput {
+  readonly outboxId: string;
+  /** 条件更新：只有当前 Lease 持有者才能触发重试或 Dead Letter。 */
+  readonly ownerInstanceId: string;
+  readonly errorCode: string;
+  readonly retryable: boolean;
+}
+
+export interface OutboxStats {
+  readonly pending: number;
+  readonly inFlight: number;
+  readonly delivered: number;
+  readonly dead: number;
+}
+
+export interface PersistenceClient {
+  migrate(signal?: AbortSignal): Promise<void>;
+  ensureSession(input: EnsureSessionInput): Promise<void>;
+  appendRecord(input: AppendRecordInput): Promise<SessionRecord>;
+  commitScene(input: CommitSceneInput): Promise<CommitSceneResult>;
+  advanceServerSeq(input: AdvanceServerSeqInput): Promise<bigint>;
+  readRecoveryState(sessionId: string): Promise<RecoveryState>;
+  listRecords(input: ListRecordsInput): Promise<SessionRecord[]>;
+  claimOutbox(input: ClaimOutboxInput): Promise<OutboxMessage[]>;
+  completeOutbox(input: CompleteOutboxInput): Promise<void>;
+  retryOutbox(input: RetryOutboxInput): Promise<void>;
+  readOutboxStats(): Promise<OutboxStats>;
+  close(): Promise<void>;
+}
+
+/** Worker 入口注入：默认指向包产物；测试指向 TS 源码并注入解析 hook。 */
+export interface PersistenceWorkerOptions {
+  readonly url?: URL | string;
+  readonly execArgv?: readonly string[];
+}
+
+/** Outbox 重试策略（Worker 内执行退避；抖动由种子确定性导出）。 */
+export interface OutboxRetryPolicyConfig {
+  /** 首次重试基准延迟（毫秒）。 */
+  readonly baseMs: number;
+  /** 退避上限（毫秒）。 */
+  readonly maxMs: number;
+  /** 超过该尝试次数进入 dead。 */
+  readonly maxAttempts: number;
+  /** 抖动种子；相同种子 + 尝试次数得到相同抖动（可重放测试）。 */
+  readonly jitterSeed?: number;
+}
+
+export interface PersistenceMigrationsOverride {
+  readonly state?: readonly MigrationDefinition[];
+  readonly telemetry?: readonly MigrationDefinition[];
+}
+
+export interface PersistenceClientOptions {
+  /** 数据目录绝对路径；由调用方显式传入，没有仓库内默认值。 */
+  readonly dataDirectory: string;
+  /** 单请求默认 Deadline（毫秒），默认 10_000。 */
+  readonly defaultDeadlineMs?: number;
+  readonly worker?: PersistenceWorkerOptions;
+  /** 受控检查点观察器；生产留空（No-op）。 */
+  readonly checkpointObserver?: PersistenceCheckpointObserver;
+  /** Outbox 重试策略；缺省 baseMs=100、maxMs=30_000、maxAttempts=8。 */
+  readonly retryPolicy?: OutboxRetryPolicyConfig;
+  /** Migration 注册表注入（测试/嵌入装配用；生产用包内置注册表）。 */
+  readonly migrations?: PersistenceMigrationsOverride;
+  /** scene_committed Record 的 recordId 生成器（测试注入）。 */
+  readonly recordIdGenerator?: () => string;
+  /** 审计墙钟（epoch ms）注入（测试注入；不参与恢复排序）。 */
+  readonly wallClockMs?: () => number;
+  readonly logger?: LoggerPort;
+}
+
+/** RPC 通道诊断事件（测试用；不进入生产日志必选字段）。 */
+export interface PersistenceRpcDiagnostic {
+  readonly kind: "late_response_dropped" | "unknown_response_dropped";
+  readonly requestId: string;
+  readonly code: PersistenceErrorCode;
+  readonly safe: SafePersistenceError;
+}
