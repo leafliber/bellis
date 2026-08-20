@@ -10,6 +10,8 @@
 >
 > 本阶段结束条件：基础协议、时间、传输、持久化和恢复底座全部可运行，并通过本文定义的验收门槛。
 
+P0 / Gate 1 之后的独立 Agent 执行文档见 [Phase 1 剩余开发任务索引](./phase-1/README.md)。
+
 ## 0. 如何使用本文
 
 本文不是新的架构设计，而是把已冻结的架构和技术选型转换成可直接执行的工程任务。
@@ -1039,6 +1041,8 @@ pnpm format:check
 
 ### 13.2 P1：Clock、Control WS 与 Binary Media WS
 
+独立执行文档：[P1 Transport](./phase-1/p1-transport.md)。
+
 **前置条件**：Gate 1 已冻结并合入。
 
 **交付内容**：
@@ -1074,6 +1078,8 @@ pnpm --filter @bellis/transport test:integration
 ```
 
 ### 13.3 P2：SQLite Worker、Session Records、事务与恢复
+
+独立执行文档：[P2 Persistence](./phase-1/p2-persistence.md)。
 
 **前置条件**：Gate 1 已冻结并合入。
 
@@ -1113,6 +1119,8 @@ pnpm --filter @bellis/persistence test:integration
 
 ### 13.4 P3：Observability 与 Testkit
 
+独立执行文档：[P3 Observability/Testkit](./phase-1/p3-observability-testkit.md)。
+
 **前置条件**：Gate 1 已冻结并合入。
 
 **交付内容**：
@@ -1148,6 +1156,8 @@ pnpm --filter @bellis/testkit test
 ```
 
 ### 13.5 P4：Runtime 集成、故障验证与 Demo
+
+独立执行文档：[P4 Runtime Integration](./phase-1/p4-runtime-integration.md)。
 
 **前置条件**：P1、P2、P3 通过 Gate 2 并已合入。
 

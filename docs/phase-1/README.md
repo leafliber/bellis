@@ -1,0 +1,214 @@
+# Bellis Phase 1 剩余开发任务索引
+
+> 文档状态：可执行任务索引 v1
+> 基线：`origin/main@daa07e09560d2a4ac8100e0f9142b3e7777a97c9`
+> 适用范围：Phase 1 的 P1、P2、P3、P4
+> 上位规范：[Phase 1 构建指导](../phase-1-build-guide.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md) · [ADR 0002](../adr/0002-node-26-baseline.md)
+
+## 1. 当前状态
+
+Phase 1 的 P0 / Gate 1 已合入，当前仓库已经具备：
+
+- pnpm Monorepo、Node.js 26.5、TypeScript 7、ESM 与双平台 CI 基线。
+- `@bellis/contracts`、双 dialect JSON Schema、ADR 0001。
+- `MonotonicClock`、可用的 `VirtualClock`。
+- Observability 的最小 Port 与 No-op 实现。
+- Transport、Persistence、Runtime 的可编译包边界和待实现空壳。
+
+以下内容尚未完成：
+
+| 任务 | 内容 | 当前入口 | 详细文档 |
+| --- | --- | --- | --- |
+| P1 | Clock、Control WS、Binary Media WS | `packages/transport` 空壳 | [P1 Transport](./p1-transport.md) |
+| P2 | SQLite Worker、事务、Outbox、恢复 | `packages/persistence` 只有 Port | [P2 Persistence](./p2-persistence.md) |
+| P3 | Trace、Pino、Metrics、Testkit | Observability 只有 No-op | [P3 Observability/Testkit](./p3-observability-testkit.md) |
+| P4 | Runtime 集成、故障验证、Demo | `apps/runtime` 空壳，Demo 显式失败 | [P4 Runtime Integration](./p4-runtime-integration.md) |
+
+当前 `scripts/phase-1-demo.mjs` 的失败是有意设计：在 P4 真正交付恢复演示前，不允许占位输出伪装为验收成功。
+
+## 2. 执行顺序
+
+```mermaid
+flowchart LR
+    G1["Gate 1 已完成：Contracts / Ports / VirtualClock"]
+    P1["P1 Transport"]
+    P2["P2 Persistence"]
+    P3["P3 Observability / Testkit"]
+    G2["Gate 2：组件验收与公开接口冻结"]
+    P4["P4 Runtime 集成 / 恢复 / Demo"]
+    G3["Gate 3：Phase 1 完成"]
+
+    G1 --> P1
+    G1 --> P2
+    G1 --> P3
+    P1 --> G2
+    P2 --> G2
+    P3 --> G2
+    G2 --> P4
+    P4 --> G3
+```
+
+P1、P2、P3 应从同一个 Gate 1 Commit 并行开发。P4 不得提前在 Runtime 内复制临时 Transport、Persistence 或 Observability 实现来“先跑起来”。
+
+## 3. 分支与工作区
+
+推荐分支：
+
+```text
+codex/phase1-transport
+codex/phase1-persistence
+codex/phase1-observability
+codex/phase1-runtime-integration
+```
+
+推荐规则：
+
+1. P1、P2、P3 都从 Gate 1 基线创建独立 worktree。
+2. 三个任务只修改各自文档中的文件所有权范围。
+3. 三个组件通过包级验收后，由集成负责人合入同一集成分支。
+4. 合入后先完成 Gate 2 接口审查，再创建 P4 分支。
+5. 多个 Agent 如果共享一个工作树，不得并发执行 Git 操作；提交、合并和依赖安装由集成负责人统一执行。
+
+## 4. 开工前共同检查
+
+每个 Agent 开工前必须执行：
+
+```bash
+git status --short --branch
+git rev-parse HEAD
+pnpm install --frozen-lockfile
+pnpm contracts:check
+pnpm typecheck
+pnpm lint
+pnpm format:check
+```
+
+预期：上述命令通过；`pnpm demo:phase1` 在 P4 合入前仍应失败。若基础检查失败，先报告基线问题，不得在任务包内顺手修改 Contracts 或根工具链。
+
+版本口径以 ADR 0002 为准：Node.js `26.5.0`，`engines.node` 为 `>=26.5 <27`。旧提示中出现的 Node 24 已被 ADR 0002 替代。
+
+## 5. Gate 1.1：公开接口充分性检查
+
+P0 冻结的是最小 Port，不保证已经覆盖所有实现细节。P1、P2、P3 在写主体代码前，必须先提交一份公开 API 清单给集成负责人审查。
+
+当前已知需要重点核对的缺口：
+
+- `PersistenceClient` 需要支持创建或确认 Session，否则 `commitScene` 无法可靠校验 Session。
+- `CommitSceneInput` 目前只有 Scene/Cycle ID，没有完整 Scene Payload；P2 必须明确持久化 Payload 的来源和 Schema。
+- `RecoveryState.latestServerSeq` 已存在，但 Port 尚未定义服务端序号的持久化推进方法。
+- P4 需要 Transport 暴露与 Fastify 无关的连接、Replay、队列和 Media 适配接口，不能导入 Transport 私有文件。
+- P4 需要 P3 提供稳定的 Trace、Logger 和 Metrics 工厂，不能在 Runtime 内复制实现。
+
+处理规则：
+
+1. 包内新增公开方法允许由包负责人提出，但必须说明 P4 用例、输入输出、错误和关闭语义。
+2. 对已有方法的破坏性修改必须先写接口变更说明并经集成负责人接受。
+3. 修改 `@bellis/contracts` 必须同时修改 Zod、双 dialect 生成物、Fixture、ADR/协议文档，并通知全部并行任务同步同一 Commit。
+4. 不允许用 `any`、任意 SQL、通用事件总线或暴露内部状态来绕过接口设计。
+
+Gate 1.1 只冻结公开边界，不要求三个任务串行等待彼此的内部实现。
+
+## 6. 文件所有权
+
+| 任务 | 可修改 | 只读 |
+| --- | --- | --- |
+| P1 | `packages/transport/**`、`docs/protocols/control-websocket.md`、`docs/protocols/binary-media-websocket.md` | contracts、observability、testkit |
+| P2 | `packages/persistence/**`、`docs/protocols/persistence-and-recovery.md` | contracts、observability、testkit |
+| P3 | `packages/observability/**`、`packages/testkit/**`，但不得改变 `VirtualClock` 的既有行为 | contracts、transport/persistence 的公开入口 |
+| P4 | `apps/runtime/**`、`scripts/phase-1-demo.mjs`、跨包 E2E/故障 Harness、必要的根脚本与 CI 集成 | 所有包公开入口 |
+
+跨范围修改必须先报告：当前接口、阻塞原因、最小变更、兼容影响和验证方式。
+
+## 7. Gate 2 组件验收
+
+P1、P2、P3 合入前分别通过自身文档的验收命令。全部合入后，集成负责人检查：
+
+- 生产依赖中没有 `@bellis/testkit`。
+- `contracts` 没有新增内部项目依赖，也没有复制 Schema。
+- 所有后台任务、Worker、连接和 Dispatcher 都有关闭方法并支持 Abort/Deadline。
+- Transport 与 Persistence 使用相同的 `MonotonicClock`、TraceContext 和错误传播约定。
+- 没有无界队列、真实业务时长 sleep、任意 SQL、生产 Fault Route 或敏感日志。
+- P2 的受控检查点只能通过测试装配和私有 IPC 使用。
+- P4 能只依赖包根公开导出完成装配。
+
+建议 Gate 2 命令：
+
+```bash
+pnpm --filter @bellis/transport typecheck
+pnpm --filter @bellis/transport test
+pnpm --filter @bellis/transport test:integration
+pnpm --filter @bellis/persistence typecheck
+pnpm --filter @bellis/persistence test
+pnpm --filter @bellis/persistence test:integration
+pnpm --filter @bellis/observability typecheck
+pnpm --filter @bellis/observability test
+pnpm --filter @bellis/testkit typecheck
+pnpm --filter @bellis/testkit test
+pnpm check
+pnpm build
+```
+
+## 8. Gate 3 Phase 1 验收
+
+P4 合入后，从全新依赖状态运行：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm check
+pnpm build
+pnpm demo:phase1
+```
+
+`demo:phase1` 必须打印：
+
+```text
+protocolVersion=1
+controlHandshake=ok
+clockSync=ok
+mediaFrame=accepted
+sceneCommit=durable
+watermark=restored
+outboxRecovery=ok
+idempotency=ok
+traceContinuity=ok
+```
+
+同时人工确认 Runtime 只绑定 loopback、OpenAPI 与实现一致、数据库只出现在临时目录、崩溃恢复证据真实、工作树没有数据库/日志/密钥/生成漂移。
+
+## 9. Agent 统一交付格式
+
+每个 Agent 必须按以下格式交付：
+
+```text
+任务：P1 / P2 / P3 / P4
+状态：完成 / 部分完成 / 阻塞
+
+基线：
+- 起始 Commit
+- 是否通过开工前检查
+
+实现：
+- 已完成能力
+
+公开接口：
+- 新增/变更导出
+- 兼容性说明
+
+验证：
+- 命令和结果
+- 关键失败、恢复或性质测试证据
+
+设计偏差：
+- 无；或 ADR/变更说明
+
+风险与后续：
+- 已知限制
+- P4/下一任务的集成事项
+
+Git：
+- 分支
+- Commit
+- 修改范围
+```
+
+部分完成时必须列出剩余项和可复现阻塞条件。占位实现、跳过测试或只报告“已完成”不算交付。
