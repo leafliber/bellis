@@ -1,0 +1,190 @@
+import { MediaFrameError } from "../errors.js";
+import type { MediaErrorCode } from "../errors.js";
+import type { MediaFrameHeader } from "@bellis/contracts";
+import {
+  MEDIA_FRAME_PREFIX_BYTES,
+  MEDIA_FRAME_PROTOCOL_VERSION,
+  MEDIA_MAGIC,
+  DEFAULT_MAX_MEDIA_HEADER_BYTES,
+  DEFAULT_MAX_MEDIA_PAYLOAD_BYTES,
+  mediaKindFromCode,
+  validateMediaFrameHeader,
+} from "./frame-codec.js";
+import type { MediaFrame, MediaFrameLimits } from "./frame-codec.js";
+
+/**
+ * 增量 Media 帧解析器（phase-1-build-guide.md §8.4；P1 文档 §9.2）。
+ *
+ * - 帧边界 = WebSocket 消息边界：适配器把一条 WS 二进制消息的任意分片
+ *   依次 push，消息结束时调用 endMessage() 取得完整帧并复位累积器。
+ *   布局没有 Payload 长度字段，因此分片本身无法自判帧结束。
+ * - 读取长度后先检查上限，再继续累积：Header 超限在读到长度字段时立即
+ *   拒绝，Payload 超限在累积越界字节时立即拒绝，不保留超限输入副本。
+ * - 非法 Magic/版本/kind/Flags/Header 长度/UTF-8/JSON/Schema 稳定拒绝；
+ *   消息在帧完成前结束（截断）同样拒绝。
+ * - 失败后进入 failed 状态：后续 push/endMessage 一律拒绝，直到 reset()，
+ *   绝不继续误读后续字节。
+ * - push() 只做增量校验，返回值恒为空数组；帧在 endMessage() 产出。
+ */
+
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+
+export interface MediaFrameParserOptions extends MediaFrameLimits {}
+
+interface PrefixFields {
+  readonly mediaKindCode: number;
+  readonly headerLength: number;
+}
+
+export class MediaFrameParser {
+  readonly #maxHeaderBytes: number;
+  readonly #maxPayloadBytes: number;
+  #buffer: Buffer = Buffer.alloc(0);
+  #prefix: PrefixFields | null = null;
+  #headerValidated = false;
+  #failed = false;
+
+  constructor(options: MediaFrameParserOptions = {}) {
+    const maxHeaderBytes = options.maxHeaderBytes ?? DEFAULT_MAX_MEDIA_HEADER_BYTES;
+    const maxPayloadBytes = options.maxPayloadBytes ?? DEFAULT_MAX_MEDIA_PAYLOAD_BYTES;
+    if (!Number.isInteger(maxHeaderBytes) || maxHeaderBytes < 1) {
+      throw new RangeError("maxHeaderBytes must be a positive integer");
+    }
+    if (!Number.isInteger(maxPayloadBytes) || maxPayloadBytes < 1) {
+      throw new RangeError("maxPayloadBytes must be a positive integer");
+    }
+    this.#maxHeaderBytes = maxHeaderBytes;
+    this.#maxPayloadBytes = maxPayloadBytes;
+  }
+
+  get failed(): boolean {
+    return this.#failed;
+  }
+
+  /** 追加当前 WS 消息的一个分片；只做增量校验，恒返回空数组。 */
+  push(chunk: Uint8Array): readonly MediaFrame[] {
+    this.#guard();
+    if (chunk.byteLength === 0) {
+      return [];
+    }
+    this.#buffer =
+      this.#buffer.byteLength === 0 ? Buffer.from(chunk) : Buffer.concat([this.#buffer, chunk]);
+    this.#validateIncrementally();
+    return [];
+  }
+
+  /** 当前 WS 消息结束：产出完整帧并复位；消息在帧完成前结束视为非法。 */
+  endMessage(): readonly MediaFrame[] {
+    this.#guard();
+    if (this.#buffer.byteLength < MEDIA_FRAME_PREFIX_BYTES) {
+      this.#fail("truncated", "message ended before the frame prefix was complete");
+    }
+    this.#validateIncrementally();
+    if (this.#prefix === null || !this.#headerValidated) {
+      this.#fail("truncated", "message ended before the header was complete");
+    }
+    const prefix = this.#prefix;
+    const payload = this.#buffer.subarray(MEDIA_FRAME_PREFIX_BYTES + prefix.headerLength);
+    const mediaKind = mediaKindFromCode(prefix.mediaKindCode);
+    if (mediaKind === null) {
+      this.#fail("invalid_media_kind", "unknown media kind byte");
+    }
+    const frame: MediaFrame = {
+      header: this.#parseHeader(
+        this.#buffer.subarray(
+          MEDIA_FRAME_PREFIX_BYTES,
+          MEDIA_FRAME_PREFIX_BYTES + prefix.headerLength,
+        ),
+      ),
+      payload: Uint8Array.from(payload),
+      mediaKind,
+    };
+    this.reset();
+    return [frame];
+  }
+
+  /** 复位累积器与失败状态（适配器在新 WS 消息开始或出错恢复时调用）。 */
+  reset(): void {
+    this.#buffer = Buffer.alloc(0);
+    this.#prefix = null;
+    this.#headerValidated = false;
+    this.#failed = false;
+  }
+
+  #guard(): void {
+    if (this.#failed) {
+      throw new MediaFrameError("parser_failed", "parser is in failed state; call reset() first");
+    }
+  }
+
+  #fail(code: MediaErrorCode, message: string): never {
+    this.#failed = true;
+    this.#buffer = Buffer.alloc(0);
+    this.#prefix = null;
+    this.#headerValidated = false;
+    throw new MediaFrameError(code, message);
+  }
+
+  /** 尽可能早地校验前缀与 Header；Payload 越界在累积时立即拒绝。 */
+  #validateIncrementally(): void {
+    const buffer = this.#buffer;
+    for (let index = 0; index < 4 && index < buffer.byteLength; index += 1) {
+      if (buffer[index] !== MEDIA_MAGIC[index]) {
+        this.#fail("bad_magic", "frame does not start with the BELL magic");
+      }
+    }
+    if (buffer.byteLength >= 5 && buffer[4] !== MEDIA_FRAME_PROTOCOL_VERSION) {
+      this.#fail("unsupported_version", "unsupported media frame protocol version");
+    }
+    if (buffer.byteLength >= 6 && mediaKindFromCode(buffer[5] ?? 0) === null) {
+      this.#fail("invalid_media_kind", "unknown media kind byte");
+    }
+    if (buffer.byteLength >= 8) {
+      const flags = (buffer[6] ?? 0) | ((buffer[7] ?? 0) << 8);
+      if (flags !== 0) {
+        this.#fail("bad_flags", "flags must be zero in protocol version 1");
+      }
+    }
+    if (this.#prefix === null && buffer.byteLength >= MEDIA_FRAME_PREFIX_BYTES) {
+      const headerLength = buffer.readUInt32LE(8);
+      if (headerLength > this.#maxHeaderBytes) {
+        this.#fail("header_too_large", "header length exceeds the configured limit");
+      }
+      this.#prefix = { mediaKindCode: buffer[5] ?? 0, headerLength };
+    }
+    if (this.#prefix !== null && !this.#headerValidated) {
+      const headerEnd = MEDIA_FRAME_PREFIX_BYTES + this.#prefix.headerLength;
+      if (buffer.byteLength >= headerEnd) {
+        this.#parseHeader(buffer.subarray(MEDIA_FRAME_PREFIX_BYTES, headerEnd));
+        this.#headerValidated = true;
+      }
+    }
+    if (this.#prefix !== null && this.#headerValidated) {
+      const payloadBytes = buffer.byteLength - MEDIA_FRAME_PREFIX_BYTES - this.#prefix.headerLength;
+      if (payloadBytes > this.#maxPayloadBytes) {
+        this.#fail("payload_too_large", "payload exceeds the configured limit");
+      }
+    }
+  }
+
+  /** 严格 UTF-8 → JSON → Header Schema；任何失败进入 failed 状态。 */
+  #parseHeader(headerBytes: Uint8Array): MediaFrameHeader {
+    let text: string;
+    try {
+      text = UTF8_DECODER.decode(headerBytes);
+    } catch {
+      this.#fail("invalid_utf8", "header is not valid UTF-8");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      this.#fail("invalid_json", "header is not valid JSON");
+    }
+    try {
+      return validateMediaFrameHeader(parsed);
+    } catch {
+      this.#fail("invalid_header", "header does not match the media frame header schema");
+    }
+  }
+}

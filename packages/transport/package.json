@@ -21,8 +21,10 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "lint": "oxlint src",
-    "format:check": "oxfmt --check src"
+    "test": "vitest run",
+    "test:integration": "vitest run -c vitest.config.integration.ts",
+    "lint": "oxlint src test",
+    "format:check": "oxfmt --check src test"
   },
   "dependencies": {
     "@bellis/contracts": "workspace:*",
