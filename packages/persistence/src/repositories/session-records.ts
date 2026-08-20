@@ -46,21 +46,40 @@ function rowToRecord(row: SqliteRow): SessionRecord {
   return parsed.data;
 }
 
+/**
+ * 读取聚合当前最大序号。
+ * aggregate_seq 是十进制 TEXT，SQLite MAX()/ORDER BY 按字典序比较
+ * （"9" > "10"）；规范十进制串的数值序 = (长度, 字典序)，必须显式
+ * 按 LENGTH 再按值排序（评审阻断项：第 11 次 Scene Commit 因 MAX(TEXT)
+ * 字典序误判而 record_conflict）。
+ */
+export function readMaxAggregateSeq(
+  db: SqliteDatabase,
+  sessionId: string,
+  aggregateId: string,
+): bigint | null {
+  const row = db
+    .prepare(
+      `SELECT aggregate_seq FROM session_records
+        WHERE session_id = ? AND aggregate_id = ?
+        ORDER BY LENGTH(aggregate_seq) DESC, aggregate_seq DESC
+        LIMIT 1`,
+    )
+    .get(sessionId, aggregateId);
+  const maxSeq = readNullableText(row ?? {}, "aggregate_seq");
+  return maxSeq === null ? null : parseDecimalString(maxSeq);
+}
+
 export function appendSessionRecord(db: SqliteDatabase, record: SessionRecord): SessionRecord {
   const parsed = SessionRecordSchema.safeParse(record);
   if (!parsed.success) {
     throw new PersistenceError("record_invalid", "session record failed schema validation");
   }
   if (parsed.data.aggregateId !== undefined && parsed.data.aggregateSeq !== undefined) {
-    const current = db
-      .prepare(
-        "SELECT MAX(aggregate_seq) AS max_seq FROM session_records WHERE session_id = ? AND aggregate_id = ?",
-      )
-      .get(parsed.data.sessionId, parsed.data.aggregateId);
-    const maxSeq = readNullableText(current ?? {}, "max_seq");
+    const maxSeq = readMaxAggregateSeq(db, parsed.data.sessionId, parsed.data.aggregateId);
     if (maxSeq !== null) {
       const next = parseDecimalString(parsed.data.aggregateSeq);
-      if (next <= parseDecimalString(maxSeq)) {
+      if (next <= maxSeq) {
         throw new PersistenceError("record_conflict", "aggregate seq must be strictly increasing");
       }
     }
@@ -133,19 +152,14 @@ export function listSessionRecords(db: SqliteDatabase, query: ListRecordsQuery):
     .map(rowToRecord);
 }
 
-/** commitScene 事务内读取指定聚合的下一个序号。 */
+/** commitScene 事务内读取指定聚合的下一个序号（长度+字典序，见 readMaxAggregateSeq）。 */
 export function nextAggregateSeq(
   db: SqliteDatabase,
   sessionId: string,
   aggregateId: string,
 ): bigint {
-  const row = db
-    .prepare(
-      "SELECT MAX(aggregate_seq) AS max_seq FROM session_records WHERE session_id = ? AND aggregate_id = ?",
-    )
-    .get(sessionId, aggregateId);
-  const maxSeq = readNullableText(row ?? {}, "max_seq");
-  return maxSeq === null ? 1n : parseDecimalString(maxSeq) + 1n;
+  const maxSeq = readMaxAggregateSeq(db, sessionId, aggregateId);
+  return maxSeq === null ? 1n : maxSeq + 1n;
 }
 
 export { rowToRecord };

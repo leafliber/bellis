@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { join } from "node:path";
 import { PersistenceError, createPersistenceClient } from "../../src/index.js";
-import type { PersistenceClient, PersistenceCheckpoint } from "../../src/index.js";
+import type { PersistenceClient } from "../../src/index.js";
 import {
   SESSION_ID,
   TRACE,
@@ -15,16 +17,14 @@ import {
 /**
  * SQLite Busy/Locked 集成测试（P2 文档 §12.3-2）。
  *
- * 用真实双 Worker 制造锁竞争：Client A 的 commitScene 在检查点
- * before_scene_transaction_commit 处持有 BEGIN IMMEDIATE 写锁；
- * Client B（独立 Worker/连接）提交时只能等待 busy_timeout=3000，
- * 超时后必须收到可重试的 database_busy，而不是崩溃或数据损坏。
+ * 同目录只允许一个 DB Worker（worker-lock 独占，见 worker-lock 测试），
+ * 锁竞争改由外部连接制造：测试进程持有 state.db 的 EXCLUSIVE 锁，
+ * Worker 的写事务等待 busy_timeout=3000 后必须收到可重试的
+ * database_busy，而不是崩溃或数据损坏。
  */
 
 let dataDirectory: string;
-let clientA: PersistenceClient;
-let clientB: PersistenceClient;
-let releaseA: (() => void) | null = null;
+let client: PersistenceClient;
 
 function commitInput(n: number) {
   return {
@@ -42,55 +42,39 @@ function commitInput(n: number) {
 
 beforeAll(async () => {
   dataDirectory = createTempDataDirectory("bellis-p2-busy-");
-  const holdObserver = {
-    reached: (_checkpoint: PersistenceCheckpoint) =>
-      new Promise<void>((resolve) => {
-        releaseA = resolve;
-      }),
-  };
-  clientA = createPersistenceClient({
-    dataDirectory,
-    worker: WORKER_FIXTURE,
-    checkpointObserver: holdObserver,
-  });
-  clientB = createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
-  await clientA.migrate();
-  await clientB.migrate();
-  await clientA.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE });
+  client = createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
+  await client.migrate();
+  await client.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE });
 });
 
 afterAll(async () => {
-  await clientA.close();
-  await clientB.close();
+  await client.close();
   cleanupTempDataDirectory(dataDirectory);
 });
 
 describe("SQLite Busy/Locked", () => {
-  it("写锁被持有时，另一 Worker 超时收到可重试 database_busy", async () => {
-    const held = clientA.commitScene(commitInput(1));
-    // 等待 A 到达检查点（已持有写锁）。
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(releaseA).not.toBeNull();
-
-    await expect(clientB.commitScene(commitInput(2))).rejects.toMatchObject({
-      code: "database_busy",
-      retryable: true,
-    });
-
-    // 释放 A 的检查点：A 正常提交，B 的请求没有留下部分事实。
-    releaseA?.();
-    const result = await held;
-    expect(result.duplicate).toBe(false);
-    const records = await clientB.listRecords({
-      aggregateId: `scene-commit:${SESSION_ID}`,
-    });
-    expect(records).toHaveLength(1);
+  it("外部连接持有写锁时，Worker 超时收到可重试 database_busy", async () => {
+    const holder = new DatabaseSync(join(dataDirectory, "state.db"));
+    holder.exec("PRAGMA busy_timeout = 100;");
+    holder.exec("BEGIN EXCLUSIVE");
+    try {
+      await expect(client.commitScene(commitInput(1))).rejects.toMatchObject({
+        code: "database_busy",
+        retryable: true,
+      });
+    } finally {
+      holder.exec("ROLLBACK");
+      holder.close();
+    }
+    // 竞争请求没有留下部分事实。
+    const stats = await client.readOutboxStats();
+    expect(stats).toEqual({ pending: 0, inFlight: 0, delivered: 0, dead: 0 });
   });
 
   it("锁释放后同一请求可成功重试", async () => {
-    const retried = await clientB.commitScene(commitInput(2));
+    const retried = await client.commitScene(commitInput(1));
     expect(retried.duplicate).toBe(false);
-    expect(retried.sceneId).toBe(sceneId(2));
+    expect(retried.sceneId).toBe(sceneId(1));
   });
 
   it("database_busy 是唯一可从锁竞争观察到的错误形态", async () => {

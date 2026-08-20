@@ -40,7 +40,6 @@ export type {
   OutboxStats,
   PersistenceClient,
   PersistenceClientOptions,
-  PersistenceMigrationsOverride,
   PersistenceRpcDiagnostic,
   PersistenceWorkerOptions,
   RecoveryState,

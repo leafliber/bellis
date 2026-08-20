@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { createPersistenceClient } from "../../src/index.js";
+import { createPersistenceClientForTesting } from "../../src/client/persistence-client.js";
 import type { PersistenceClient } from "../../src/index.js";
 import { STATE_MIGRATIONS, TELEMETRY_MIGRATIONS } from "../../src/migrations/registry.js";
 import type { MigrationDefinition } from "../../src/migrations/definition.js";
@@ -29,7 +29,7 @@ async function withClient(
   options?: { migrations?: { state?: MigrationDefinition[] } },
   run: (client: PersistenceClient) => Promise<void> = async () => {},
 ): Promise<void> {
-  const client = createPersistenceClient({
+  const client = createPersistenceClientForTesting({
     dataDirectory,
     worker: WORKER_FIXTURE,
     ...options,

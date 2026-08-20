@@ -173,31 +173,47 @@ describe("重试与 Dead Letter", () => {
 
 describe("Lease 重启恢复", () => {
   it("旧实例 in_flight 项在新 Worker 启动后立即可领取", async () => {
-    await drainOutbox();
-    await commitWithOutbox(3, 1);
-    // 独立 Client 模拟旧实例：领取后直接销毁（普通 close 模拟进程消失）。
-    const holder = createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
-    await holder.migrate();
-    const claimed = await holder.claimOutbox({
-      limit: 5,
-      leaseMs: 600_000,
-      ownerInstanceId: OWNER_A,
-    });
-    expect(claimed.map((m) => m.outboxId)).toEqual([outboxId(300)]);
-    await holder.close();
-    // 旧 Lease 截止在 10 分钟后；重启后不允许等待旧墙钟截止时间。
-    const reborn = createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
+    // 独立数据目录：worker-lock 保证同目录单 Worker，旧实例必须先退出。
+    const dir = createTempDataDirectory("bellis-p2-lease-");
+    const trace = TRACE;
     try {
-      await reborn.migrate();
-      const requeued = await reborn.claimOutbox({
+      const holder = createPersistenceClient({ dataDirectory: dir, worker: WORKER_FIXTURE });
+      await holder.migrate();
+      await holder.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace });
+      await holder.commitScene({
+        sceneId: sceneId(3),
+        cycleId: cycleId(3),
+        sessionId: SESSION_ID,
+        scene: makeScene({ sceneId: sceneId(3), cycleId: cycleId(3) }),
+        idempotencyKey: "lease-3",
+        requestFingerprint: "lease-fp-3",
+        watermarks: [{ source: "asr", watermark: 1n }],
+        outbox: [makeOutboxMessage({ outboxId: outboxId(300) })],
+        trace,
+      });
+      const claimed = await holder.claimOutbox({
         limit: 5,
         leaseMs: 600_000,
-        ownerInstanceId: OWNER_B,
+        ownerInstanceId: OWNER_A,
       });
-      expect(requeued.map((m) => m.outboxId)).toEqual([outboxId(300)]);
-      await reborn.completeOutbox({ outboxId: outboxId(300), ownerInstanceId: OWNER_B });
+      expect(claimed.map((m) => m.outboxId)).toEqual([outboxId(300)]);
+      await holder.close();
+      // 旧 Lease 截止在 10 分钟后；重启后不允许等待旧墙钟截止时间。
+      const reborn = createPersistenceClient({ dataDirectory: dir, worker: WORKER_FIXTURE });
+      try {
+        await reborn.migrate();
+        const requeued = await reborn.claimOutbox({
+          limit: 5,
+          leaseMs: 600_000,
+          ownerInstanceId: OWNER_B,
+        });
+        expect(requeued.map((m) => m.outboxId)).toEqual([outboxId(300)]);
+        await reborn.completeOutbox({ outboxId: outboxId(300), ownerInstanceId: OWNER_B });
+      } finally {
+        await reborn.close();
+      }
     } finally {
-      await reborn.close();
+      cleanupTempDataDirectory(dir);
     }
   });
 });
@@ -288,40 +304,35 @@ describe("Dispatcher 编排", () => {
   });
 });
 
-describe("并发幂等（双客户端同请求）", () => {
-  it("两个 Client 并发提交相同幂等键 → 只有一个逻辑 Commit", async () => {
+describe("并发幂等（同请求并发提交）", () => {
+  it("并发提交相同幂等键 → 只有一个逻辑 Commit（其余 duplicate）", async () => {
     await drainOutbox();
-    const other = createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
-    try {
-      await other.migrate();
-      const input = {
-        sceneId: sceneId(7),
-        cycleId: cycleId(7),
-        sessionId: SESSION_ID,
-        scene: makeScene({ sceneId: sceneId(7), cycleId: cycleId(7) }),
-        idempotencyKey: "ob-key-7",
-        requestFingerprint: "ob-fp-7",
-        watermarks: [{ source: "asr", watermark: 7n }],
-        outbox: [makeOutboxMessage({ outboxId: outboxId(700) })],
-        trace: TRACE,
-      } as const;
-      const [r1, r2] = await Promise.all([
-        client.commitScene({ ...input }),
-        other.commitScene({ ...input }),
-      ]);
-      const originals = [r1, r2].filter((r) => !r.duplicate);
-      expect(originals).toHaveLength(1);
-      expect(originals[0]?.committedAtMs).toBe([r1, r2].find((r) => r.duplicate)?.committedAtMs);
-      // 只有一份 Outbox 事实。
-      const stats = await client.readOutboxStats();
-      const records = await client.listRecords({ aggregateId: `scene-commit:${SESSION_ID}` });
-      const scene7Records = records.filter(
-        (record) => (record.payload as { sceneId?: string }).sceneId === sceneId(7),
-      );
-      expect(scene7Records).toHaveLength(1);
-      void stats;
-    } finally {
-      await other.close();
-    }
+    // worker-lock 单 Worker 独占：并发请求经同一 Client 串行入 Worker，
+    // 幂等键约束保证只有一个逻辑 Commit（跨 Worker 场景由独占守卫排除）。
+    const input = {
+      sceneId: sceneId(7),
+      cycleId: cycleId(7),
+      sessionId: SESSION_ID,
+      scene: makeScene({ sceneId: sceneId(7), cycleId: cycleId(7) }),
+      idempotencyKey: "ob-key-7",
+      requestFingerprint: "ob-fp-7",
+      watermarks: [{ source: "asr", watermark: 7n }],
+      outbox: [makeOutboxMessage({ outboxId: outboxId(700) })],
+      trace: TRACE,
+    } as const;
+    const results = await Promise.all([
+      client.commitScene({ ...input }),
+      client.commitScene({ ...input }),
+      client.commitScene({ ...input }),
+    ]);
+    expect(results.filter((r) => !r.duplicate)).toHaveLength(1);
+    expect(new Set(results.map((r) => r.committedAtMs)).size).toBe(1);
+    const records = await client.listRecords({
+      aggregateId: `scene-commit:${SESSION_ID}`,
+    });
+    const scene7Records = records.filter(
+      (record) => (record.payload as { sceneId?: string }).sceneId === sceneId(7),
+    );
+    expect(scene7Records).toHaveLength(1);
   });
 });

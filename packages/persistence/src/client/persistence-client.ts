@@ -162,13 +162,20 @@ export interface PersistenceClientOptions {
   readonly checkpointObserver?: PersistenceCheckpointObserver;
   /** Outbox 重试策略；缺省 baseMs=100、maxMs=30_000、maxAttempts=8。 */
   readonly retryPolicy?: OutboxRetryPolicyConfig;
-  /** Migration 注册表注入（测试/嵌入装配用；生产用包内置注册表）。 */
-  readonly migrations?: PersistenceMigrationsOverride;
   /** 预置 recordId 序列（测试注入，按序消耗，耗尽后回退 randomUUID）。 */
   readonly recordIds?: readonly string[];
   /** 固定审计墙钟（epoch ms，测试注入；不参与恢复排序与 Lease 判断）。 */
   readonly wallClockMs?: number;
   readonly logger?: LoggerPort;
+}
+
+/**
+ * @internal 仅供包内测试装配：注入 Migration 注册表（含任意 SQL 文本）。
+ * 不从包根导出（package.json exports 只暴露 "."），外部消费者无法触达，
+ * 公开 PersistenceClientOptions 不存在任何 SQL 通道（评审项 5）。
+ */
+export interface InternalPersistenceTestOverrides {
+  readonly migrations?: PersistenceMigrationsOverride;
 }
 
 /** RPC 通道诊断事件（测试用；不进入生产日志必选字段）。 */
@@ -200,6 +207,13 @@ function resolveWorkerUrl(url: URL | string): URL {
 
 /** 公开装配工厂：创建绑定 DB Worker 的 PersistenceClient。 */
 export function createPersistenceClient(options: PersistenceClientOptions): PersistenceClient {
+  return createPersistenceClientForTesting(options);
+}
+
+/** @internal 测试装配入口：额外允许注入 Migration 注册表（不从包根导出）。 */
+export function createPersistenceClientForTesting(
+  options: PersistenceClientOptions & InternalPersistenceTestOverrides,
+): PersistenceClient {
   if (!isAbsolute(options.dataDirectory)) {
     throw new PersistenceError(
       "invalid_request",
@@ -221,6 +235,8 @@ export function createPersistenceClient(options: PersistenceClientOptions): Pers
       stateMigrations: options.migrations?.state,
       telemetryMigrations: options.migrations?.telemetry,
       retryPolicy: options.retryPolicy,
+      // migrations 注入仅存在于包内测试装配路径（InternalPersistenceTestOverrides），
+      // 公开 PersistenceClientOptions 无此字段，Runtime 无法传入任意 SQL。
       wallClockMs: options.wallClockMs,
       recordIds: options.recordIds,
     },

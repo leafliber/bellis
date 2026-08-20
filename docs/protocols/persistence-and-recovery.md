@@ -30,7 +30,7 @@
 | `CompleteOutboxInput.ownerInstanceId` / `RetryOutboxInput.ownerInstanceId` | Outbox 状态转换改为条件更新，只有当前 Lease 持有者能完成/重试。 |
 | `listRecords(input)` | 按 Session/Trace/Aggregate 的索引查询（`session_records` 三索引）。 |
 | `readOutboxStats()` | 按 status 计数，供 Dispatcher/监控使用；不暴露单条内容。 |
-| `createPersistenceClient(options)` | 公开装配工厂（数据目录、Worker 注入、检查点观察器、重试策略、可注入 ID/墙钟）。 |
+| `createPersistenceClient(options)` | 公开装配工厂（数据目录、Worker 注入、检查点观察器、重试策略、可注入 ID/墙钟）。公开 Options 不含任何 SQL 通道；Migration 注册表注入只存在于不从包根导出的包内测试装配（`createPersistenceClientForTesting`，package.json exports 仅暴露 "."）。 |
 | `createOutboxDispatcher(options)` | Outbox 消费侧编排（Claim→Publish→Complete/Retry + 指标 + 优雅关闭）。 |
 | `PersistenceCheckpointObserver` | 见 §9；生产默认 No-op。 |
 
@@ -104,6 +104,14 @@ interface PersistenceRpcResponse {
 
 数据目录由调用方显式传入绝对路径；包内没有“仓库内默认位置”。测试一律
 使用临时目录并在成功/失败后清理。
+
+**单 Worker 独占（worker-lock.db）**：每个数据目录只允许一个 DB
+Worker。Worker 启动先对 `<dir>/worker-lock.db` 以
+`locking_mode=EXCLUSIVE` 完成一次写并持久持有文件锁；第二个 Worker
+的任何访问得到 SQLITE_BUSY → 安全错误 `unavailable`（“another
+persistence worker already owns this data directory”）。进程死亡
+（含 SIGKILL）由 OS 释放文件锁，重启即可接管——因此 §8.1 的启动恢复
+（in_flight 全量重排队）不可能抢走仍存活 Worker 的活跃 Lease。
 
 已知性能特征：`state.db` 的 `synchronous=FULL` 使每条 `appendRecord`
 （独立 autocommit INSERT）伴随一次 fsync 级持久化——这是逐条审计记录
@@ -261,18 +269,23 @@ pending → in_flight → delivered
 
 ### 8.1 Claim 与 Lease
 
-- `claim_outbox` 在单个 `BEGIN IMMEDIATE` 事务内：选择
-  `status='pending' AND available_at_ms <= leaseNowMs` 的到期项
-  （`ORDER BY available_at_ms, outbox_id LIMIT :limit`，有 Batch 上限），
+- `claim_outbox` 在单个 `BEGIN IMMEDIATE` 事务内选择可领取项
+  （`ORDER BY available_at_ms, outbox_id LIMIT :limit`，有 Batch 上限）：
+  - 到期的 `pending`：`available_at_ms <= leaseNowMs`；
+  - **Lease 已到期的 `in_flight`**：`lease_until_ms <= leaseNowMs`——
+    Dispatcher/Publisher 卡死但 Worker 存活时，同一 Worker 生命周期内
+    即可回收重领，不必等待 Worker 重启。
   逐条条件更新为 `in_flight` 并写 `lease_owner_instance_id` /
-  `lease_until_ms`。
+  `lease_until_ms`（条件与选择谓词一致，两个 Dispatcher 不可能领取同一项）。
 - **Lease 时钟投影**：Worker 启动时记录 `bootEpochMs + bootMonotonicUs`
   锚点，运行期 `leaseNowMs = bootEpochMs + (nowMonotonicUs -
   bootMonotonicUs)/1000`，同一 Worker 生命周期不直接反复读取
   `Date.now()`，NTP 跳变不影响 Lease 判断。
-- **重启恢复**：Worker 启动时（migrate 后）把所有 `in_flight` 项一次性
-  恢复为 `pending`（旧实例 Lease 立即失效，不等待旧墙钟截止）——这是
-  “可能重复、幂等去重”的有意识选择。
+- **重启恢复**：Worker 启动时（首次 migrate 后）把所有 `in_flight` 项
+  一次性恢复为 `pending`（旧实例 Lease 立即失效，不等待旧墙钟截止）。
+  前置条件是 §4.1 的 worker-lock 单 Worker 独占——同目录不存在仍存活
+  的其它 Worker，重排队不可能抢走活跃 Lease。这是“可能重复、幂等去重”
+  的有意识选择。
 - `complete_outbox` / `retry_outbox` 都是条件更新：
   `WHERE outbox_id=? AND status='in_flight' AND
   lease_owner_instance_id=?`；未命中 → `not_claimed`（已被他人领取或
@@ -282,14 +295,19 @@ pending → in_flight → delivered
 
 - 可重试失败：`attempts+1`，`available_at_ms = leaseNowMs + delay`，
   `delay = min(maxMs, baseMs · 2^attempts) · (1 + jitter(seed, attempts))`，
-  抖动由种子确定性导出（可注入、可重放）。
+  抖动由种子确定性导出（可注入、可重试）。
+- **时钟域分离**：调度相关字段（`available_at_ms`、`lease_until_ms`、
+  退避基准）全部使用 Lease 单调投影 `leaseNowMs`；审计墙钟只进
+  `created_at_ms` / `updated_at_ms` / `committed_at_ms` 等审计列。
+  注入的固定审计墙钟（测试）不影响可领取性。
 - 不可重试或 `attempts >= maxAttempts` → `dead`，记录
   `last_error_code`（稳定安全码，不是异常文本）。
 - 指标：`bellis_outbox_pending`（Gauge）、`bellis_outbox_delivered_total`、
   `bellis_outbox_retry_total`、`bellis_outbox_dead_total`（Counter）；
   不以 Outbox ID 作为 Label。
-- Dispatcher 关闭：停止新 Claim，等待当前小批次完成（`stop()` 的
-  Grace 语义）。
+- Dispatcher 关闭：停止新 Claim，在 `stopGraceMs`（默认 5s）内等待当前
+  小批次完成；超时后向发布器广播 AbortSignal 并立即返回，挂起项由
+  Lease 到期回收兜底（发布器签名携带 `signal`，应当监听并尽快退出）。
 
 ## 9. 受控检查点（仅测试可用）
 
@@ -328,8 +346,9 @@ W3 发布后、标记 delivered 前（after_outbox_publish_... 后被杀）
      重新发布后标记 delivered。
 
 W4 Lease 期间（in_flight 时被杀）
-   → 新 Worker 启动恢复把 in_flight → pending，立即可再领取，
-     不等待旧 lease_until_ms。
+   → 进程死亡释放 worker-lock 文件锁；新 Worker 启动恢复把
+     in_flight → pending，立即可再领取，不等待旧 lease_until_ms。
+     Dispatcher 卡死但 Worker 存活时，Lease 到期即可重领（§8.1）。
 ```
 
 恢复测试使用真实 Worker、真实临时 SQLite 文件与父子进程强制终止

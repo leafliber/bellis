@@ -3,8 +3,16 @@ import { Worker } from "node:worker_threads";
 import type { TraceContext } from "@bellis/contracts";
 import type { LoggerPort } from "@bellis/observability";
 import { PersistenceError } from "../errors.js";
-import { PersistenceRpcResponseSchema, isCheckpointNotice } from "../rpc/envelope.js";
-import { decodeOperationResult, encodeOperationPayload } from "../rpc/operations.js";
+import {
+  PersistenceRpcRequestSchema,
+  PersistenceRpcResponseSchema,
+  isCheckpointNotice,
+} from "../rpc/envelope.js";
+import {
+  decodeOperationPayload,
+  decodeOperationResult,
+  encodeOperationPayload,
+} from "../rpc/operations.js";
 import type {
   OperationRequest,
   OperationResults,
@@ -107,14 +115,34 @@ export class PersistenceRpcChannel {
     const requestId = randomUUID();
     const deadlineMs = options?.deadlineMs ?? this.#defaultDeadlineMs;
     const deadlineUs = BigInt(Date.now()) * 1000n + BigInt(deadlineMs) * 1000n;
+    const payload = encodeOperationPayload(message as OperationRequest);
     const request = {
       version: 1 as const,
       requestId,
       operation: message.operation,
       deadlineUs: deadlineUs.toString(10),
       trace,
-      payload: encodeOperationPayload(message as OperationRequest),
+      payload,
     };
+    // 请求侧校验（评审项 8）：Envelope 与具体 Operation Payload 在
+    // 发送前用与 Worker 相同的 Schema 校验，非法输入不出主线程。
+    if (!PersistenceRpcRequestSchema.safeParse(request).success) {
+      throw new PersistenceError(
+        "invalid_request",
+        "rpc request failed client-side envelope validation",
+      );
+    }
+    try {
+      decodeOperationPayload(message.operation, payload);
+    } catch (error) {
+      if (error instanceof PersistenceError) {
+        throw error;
+      }
+      throw new PersistenceError(
+        "invalid_request",
+        "rpc request failed client-side payload validation",
+      );
+    }
     return this.#exchange(request, message, deadlineMs, options?.signal);
   }
 
@@ -126,37 +154,44 @@ export class PersistenceRpcChannel {
   ): Promise<OperationResults[K]> {
     return new Promise<OperationResults[K]>((resolve, reject) => {
       const controller = new AbortController();
-      const timer = setTimeout(() => {
+      let removeAbortListener: (() => void) | null = null;
+      const finish = () => {
+        clearTimeout(timer);
         this.#pending.delete(request.requestId);
+        removeAbortListener?.();
+      };
+      const timer = setTimeout(() => {
         controller.abort();
+        finish();
         reject(new PersistenceError("deadline_exceeded", "request timed out"));
       }, deadlineMs);
-      const settle = (cleanup: () => void) => {
-        clearTimeout(timer);
-        cleanup();
-      };
       const entry: PendingRequest = {
         operation: message.operation,
         controller,
-        resolve: (value) => resolve(value as OperationResults[K]),
-        reject,
+        resolve: (value) => {
+          finish();
+          resolve(value as OperationResults[K]);
+        },
+        reject: (error) => {
+          finish();
+          reject(error);
+        },
         timer,
       };
       this.#pending.set(request.requestId, entry);
       if (signal !== undefined) {
         const onAbort = () => {
-          const pending = this.#pending.get(request.requestId);
-          if (pending !== undefined) {
-            settle(() => this.#pending.delete(request.requestId));
-            reject(new PersistenceError("unavailable", "request aborted"));
+          if (this.#pending.get(request.requestId) === entry) {
+            controller.abort();
+            entry.reject(new PersistenceError("unavailable", "request aborted"));
           }
         };
         if (signal.aborted) {
-          settle(() => this.#pending.delete(request.requestId));
-          reject(new PersistenceError("unavailable", "request aborted"));
+          entry.reject(new PersistenceError("unavailable", "request aborted"));
           return;
         }
         signal.addEventListener("abort", onAbort, { once: true });
+        removeAbortListener = () => signal.removeEventListener("abort", onAbort);
       }
       this.worker.postMessage(request);
     });

@@ -19,7 +19,15 @@ export type OutboxPublishResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly errorCode: string; readonly retryable: boolean };
 
-export type OutboxPublisher = (message: OutboxMessage) => Promise<OutboxPublishResult>;
+/**
+ * 发布器：signal 在 stop() 的 Grace 超时后中止——挂起的发布器应当
+ * 监听该信号并尽快返回（仍不返回时 stop() 也不再无限等待，改由
+ * Lease 到期回收兜底）。
+ */
+export type OutboxPublisher = (
+  message: OutboxMessage,
+  signal: AbortSignal,
+) => Promise<OutboxPublishResult>;
 
 export interface OutboxDispatcherOptions {
   readonly client: PersistenceClient;
@@ -33,6 +41,8 @@ export interface OutboxDispatcherOptions {
   readonly leaseMs?: number;
   /** 单批 Claim 上限，默认 32。 */
   readonly claimLimit?: number;
+  /** stop() 等待当前批次的上限（毫秒），默认 5_000；超时后中止发布信号并返回。 */
+  readonly stopGraceMs?: number;
   /** 受控检查点观察器；生产留空（No-op）。 */
   readonly checkpointObserver?: PersistenceCheckpointObserver;
   readonly logger?: LoggerPort;
@@ -50,7 +60,8 @@ export interface OutboxDispatchRunSummary {
  * Dispatcher 公开接口：
  * - `runOnce()`：执行一次 Claim → Publish → Complete/Retry 批次（确定性测试入口）。
  * - `start()`：按 pollInterval 循环执行 runOnce。
- * - `stop()`：停止新 Claim，等待当前批次结束（Grace Period 语义）。
+ * - `stop()`：停止新 Claim，在 stopGraceMs 内等待当前批次结束；
+ *   超时后中止发布信号并立即返回（挂起项由 Lease 到期回收兜底）。
  */
 export interface OutboxDispatcher {
   runOnce(): Promise<OutboxDispatchRunSummary>;
@@ -62,6 +73,7 @@ export interface OutboxDispatcher {
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_LEASE_MS = 5_000;
 const DEFAULT_CLAIM_LIMIT = 32;
+const DEFAULT_STOP_GRACE_MS = 5_000;
 const DISPATCHER_TRACE_ID = "outbox-dispatcher";
 
 /** 创建 Outbox Dispatcher。publish 必须按 outboxId 幂等（至少一次交付）。 */
@@ -69,6 +81,7 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
   const claimLimit = options.claimLimit ?? DEFAULT_CLAIM_LIMIT;
+  const stopGraceMs = options.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
   const logger = options.logger ?? createNoopLogger();
   const metrics = options.metrics ?? createNoopMetrics();
   const checkpointObserver = options.checkpointObserver;
@@ -79,6 +92,9 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   let running = false;
   let loop: Promise<void> | null = null;
   let sleepController: AbortController | null = null;
+  const publishAbort = new AbortController();
+  /** 全部在途批次（含 start() 循环与外部直调的 runOnce）。 */
+  const activeRuns = new Set<Promise<unknown>>();
 
   async function reachCheckpoint(
     checkpoint: "after_scene_transaction_commit_before_outbox_dispatch",
@@ -109,7 +125,7 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   async function process(message: OutboxMessage): Promise<OutboxDispatchRunSummary> {
     let outcome: OutboxPublishResult;
     try {
-      outcome = await options.publish(message);
+      outcome = await options.publish(message, publishAbort.signal);
     } catch (error) {
       logger.log("warn", "bellis_outbox_publish_threw", {
         outboxId: message.outboxId,
@@ -138,7 +154,7 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
     return { claimed: 0, delivered: 1, retried: 0, dead: 0 };
   }
 
-  async function runOnce(): Promise<OutboxDispatchRunSummary> {
+  async function runOnceInternal(): Promise<OutboxDispatchRunSummary> {
     await reachCheckpoint("after_scene_transaction_commit_before_outbox_dispatch");
     const claimed = await options.client.claimOutbox({
       limit: claimLimit,
@@ -199,6 +215,16 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
     }
   }
 
+  async function runOnce(): Promise<OutboxDispatchRunSummary> {
+    const run = runOnceInternal();
+    activeRuns.add(run);
+    try {
+      return await run;
+    } finally {
+      activeRuns.delete(run);
+    }
+  }
+
   return {
     runOnce,
     start(): void {
@@ -211,10 +237,19 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
     async stop(): Promise<void> {
       running = false;
       sleepController?.abort();
-      if (loop !== null) {
-        await loop;
-        loop = null;
+      const active = [...activeRuns, ...(loop === null ? [] : [loop])];
+      if (active.length > 0) {
+        await Promise.race([
+          Promise.allSettled(active),
+          new Promise<void>((resolve) => {
+            setTimeout(() => {
+              publishAbort.abort();
+              resolve();
+            }, stopGraceMs);
+          }),
+        ]);
       }
+      loop = null;
     },
     get running(): boolean {
       return running;

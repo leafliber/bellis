@@ -183,6 +183,7 @@ export class WorkerOperationRuntime {
                 errorCode: (input as OperationInputs["retry_outbox"]).errorCode,
                 retryable: (input as OperationInputs["retry_outbox"]).retryable,
                 nowMs: this.databases.nowMs(),
+                leaseNowMs: this.databases.leaseClock.leaseNowMs(),
               },
               this.retryPolicy,
             ),
@@ -265,7 +266,13 @@ export class WorkerOperationRuntime {
         idempotencyKey: input.idempotencyKey,
       });
       advanceWatermarks(state, input.sessionId, input.watermarks, nowMs);
-      insertOutboxMessages(state, input.sessionId, input.outbox, nowMs);
+      insertOutboxMessages(
+        state,
+        input.sessionId,
+        input.outbox,
+        nowMs,
+        this.databases.leaseClock.leaseNowMs(),
+      );
       insertIdempotencyKey(state, {
         scope,
         key: input.idempotencyKey,

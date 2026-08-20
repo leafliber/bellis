@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
 import { VirtualClock } from "@bellis/testkit";
 import { createOutboxDispatcher, createPersistenceClient } from "../../src/index.js";
+import { createPersistenceClientForTesting } from "../../src/client/persistence-client.js";
 import type { PersistenceClient } from "../../src/index.js";
 import { STATE_MIGRATIONS } from "../../src/migrations/registry.js";
 import type { MigrationDefinition } from "../../src/migrations/definition.js";
@@ -297,7 +298,7 @@ describe("Crash Window 恢复（真实 SIGKILL）", () => {
       name: "extra",
       sql: "CREATE TABLE test_extra (id INTEGER PRIMARY KEY) STRICT;",
     };
-    const client = createPersistenceClient({
+    const client = createPersistenceClientForTesting({
       dataDirectory: dir,
       worker: WORKER_FIXTURE,
       migrations: {

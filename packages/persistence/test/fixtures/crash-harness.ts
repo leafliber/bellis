@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
-import { createOutboxDispatcher, createPersistenceClient } from "../../src/index.js";
+import { createOutboxDispatcher } from "../../src/index.js";
+import { createPersistenceClientForTesting } from "../../src/client/persistence-client.js";
 import type {
   PersistenceCheckpoint,
   PersistenceCheckpointObserver,
@@ -49,7 +50,7 @@ function buildClient(
   observer?: PersistenceCheckpointObserver,
   migrations?: { state?: MigrationDefinition[] },
 ): PersistenceClient {
-  return createPersistenceClient({
+  return createPersistenceClientForTesting({
     dataDirectory,
     worker: WORKER_FIXTURE,
     ...(observer === undefined ? {} : { checkpointObserver: observer }),

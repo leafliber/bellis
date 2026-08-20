@@ -90,8 +90,8 @@ export class PersistenceRpcRouter {
     }
     const parsed = PersistenceRpcRequestSchema.safeParse(message);
     if (!parsed.success) {
-      // 无法关联合法 requestId 的消息只能丢弃；细节进 stderr 供 CI 捕获。
-      console.error("[persistence-worker] dropped malformed rpc message");
+      // 无法关联合法 requestId 的消息只能丢弃；只输出稳定事件名供 CI 捕获。
+      console.error(JSON.stringify({ event: "persistence_worker_malformed_rpc_dropped" }));
       return;
     }
     const request = parsed.data;
@@ -125,7 +125,14 @@ export class PersistenceRpcRouter {
     } catch (error) {
       const safe = mapSqliteError(error);
       if (safe.code === "internal") {
-        console.error("[persistence-worker] operation failed:", error);
+        // 脱敏：只记录安全码与异常类别，不含 SQL/路径/堆栈/Payload。
+        console.error(
+          JSON.stringify({
+            event: "persistence_worker_operation_failed",
+            code: safe.code,
+            errorName: error instanceof Error ? error.name : "unknown",
+          }),
+        );
       }
       this.#respond(request.requestId, safe);
     }

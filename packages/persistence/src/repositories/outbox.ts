@@ -45,6 +45,8 @@ export function insertOutboxMessages(
   sessionId: string,
   messages: readonly OutboxMessage[],
   nowMs: number,
+  /** 调度时钟（Lease 单调投影）：available_at_ms 必须与 Claim 同域。 */
+  leaseNowMs: number,
 ): void {
   const statement = db.prepare(
     `INSERT INTO outbox
@@ -66,7 +68,7 @@ export function insertOutboxMessages(
         parsed.data.partitionKey,
         parsed.data.schemaVersion,
         JSON.stringify(parsed.data.payload),
-        nowMs,
+        leaseNowMs,
         nowMs,
         nowMs,
       );
@@ -101,18 +103,24 @@ export function claimOutboxRows(db: SqliteDatabase, query: ClaimOutboxQuery): Ou
   const claimed: OutboxMessage[] = [];
   db.exec("BEGIN IMMEDIATE");
   try {
+    // 可领取 = 到期的 pending，或 Lease 已到期未被完成的 in_flight
+    // （Dispatcher/Publisher 卡死但 Worker 存活时也能在同一 Worker
+    // 生命周期内回收，不必等待 Worker 重启——评审阻断项 2）。
     const rows = db
       .prepare(
         `SELECT * FROM outbox
-          WHERE status = 'pending' AND available_at_ms <= ?
+          WHERE (status = 'pending' AND available_at_ms <= ?)
+             OR (status = 'in_flight' AND lease_until_ms <= ?)
           ORDER BY available_at_ms, outbox_id LIMIT ?`,
       )
-      .all(query.leaseNowMs, query.limit);
+      .all(query.leaseNowMs, query.leaseNowMs, query.limit);
     const update = db.prepare(
       `UPDATE outbox
           SET status = 'in_flight', lease_until_ms = ?, lease_owner_instance_id = ?,
               updated_at_ms = ?
-        WHERE outbox_id = ? AND status = 'pending' AND available_at_ms <= ?`,
+        WHERE outbox_id = ?
+          AND ( (status = 'pending' AND available_at_ms <= ?)
+             OR (status = 'in_flight' AND lease_until_ms <= ?) )`,
     );
     const leaseUntil = query.leaseNowMs + query.leaseMs;
     for (const row of rows) {
@@ -121,6 +129,7 @@ export function claimOutboxRows(db: SqliteDatabase, query: ClaimOutboxQuery): Ou
         query.ownerInstanceId,
         query.leaseNowMs,
         readText(row, "outbox_id"),
+        query.leaseNowMs,
         query.leaseNowMs,
       );
       if (changed.changes === 1) {
@@ -164,7 +173,10 @@ export interface RetryOutboxCommand {
   readonly ownerInstanceId: string;
   readonly errorCode: string;
   readonly retryable: boolean;
+  /** 审计墙钟（updated_at_ms 等审计列）。 */
   readonly nowMs: number;
+  /** 调度时钟（Lease 单调投影）：退避 available_at_ms = leaseNowMs + delay。 */
+  readonly leaseNowMs: number;
 }
 
 export function retryOutboxRow(
@@ -203,7 +215,7 @@ export function retryOutboxRow(
       WHERE outbox_id = ? AND status = 'in_flight' AND lease_owner_instance_id = ?`,
   ).run(
     attempts + 1,
-    command.nowMs + delayMs,
+    command.leaseNowMs + delayMs,
     command.errorCode,
     command.nowMs,
     command.outboxId,
@@ -212,7 +224,11 @@ export function retryOutboxRow(
   return "retry";
 }
 
-/** Worker 启动恢复：旧实例的 in_flight 项立即回到可领取状态。 */
+/**
+ * Worker 启动恢复：in_flight 项立即回到可领取状态。
+ * 前置条件：worker-lock 单 Worker 独占（见 worker/database.ts）——
+ * 同一数据目录不存在仍存活的其它 Worker，清空不会抢走活跃 Lease。
+ */
 export function requeueInFlightRows(db: SqliteDatabase, nowMs: number): number {
   const changed = db
     .prepare(

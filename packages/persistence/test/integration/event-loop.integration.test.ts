@@ -83,9 +83,15 @@ describe("事件循环隔离", () => {
   });
 
   it("Close 后没有 Worker 线程残留", async () => {
-    const ephemeral = createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
-    await ephemeral.migrate();
-    await ephemeral.close();
+    // 独立目录：主客户端仍持有同目录的 Worker 独占守卫。
+    const dir = createTempDataDirectory("bellis-p2-loop-close-");
+    const ephemeral = createPersistenceClient({ dataDirectory: dir, worker: WORKER_FIXTURE });
+    try {
+      await ephemeral.migrate();
+      await ephemeral.close();
+    } finally {
+      cleanupTempDataDirectory(dir);
+    }
     expect(process.getActiveResourcesInfo().filter((r) => r === "Worker")).toEqual([]);
   });
 });

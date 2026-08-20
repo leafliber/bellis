@@ -26,10 +26,7 @@ import {
 
 let dataDirectory: string;
 let client: PersistenceClient;
-
-function freshClient(): PersistenceClient {
-  return createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
-}
+const tempDirs: string[] = [];
 
 async function commitInput(n: number, overrides?: { watermark?: bigint }) {
   return {
@@ -60,6 +57,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await client.close();
   cleanupTempDataDirectory(dataDirectory);
+  for (const dir of tempDirs) {
+    cleanupTempDataDirectory(dir);
+  }
 });
 
 afterEach(() => {
@@ -244,7 +244,10 @@ describe("Server Seq", () => {
 
 describe("Client 生命周期", () => {
   it("未 migrate 的客户端拒绝业务操作", async () => {
-    const virgin = freshClient();
+    // 独立目录：同目录第二个 Worker 会被独占守卫拒绝（见 worker-lock 测试）。
+    const virginDir = createTempDataDirectory("bellis-p2-virgin-");
+    tempDirs.push(virginDir);
+    const virgin = createPersistenceClient({ dataDirectory: virginDir, worker: WORKER_FIXTURE });
     try {
       await expect(
         virgin.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE }),
@@ -255,7 +258,12 @@ describe("Client 生命周期", () => {
   });
 
   it("close 后调用拒绝 closed", async () => {
-    const ephemeral = freshClient();
+    const ephemeralDir = createTempDataDirectory("bellis-p2-closed-");
+    tempDirs.push(ephemeralDir);
+    const ephemeral = createPersistenceClient({
+      dataDirectory: ephemeralDir,
+      worker: WORKER_FIXTURE,
+    });
     await ephemeral.close();
     await expect(ephemeral.migrate()).rejects.toMatchObject({ code: "closed" });
   });
