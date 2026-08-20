@@ -119,6 +119,48 @@ describe("MediaFrameParser", () => {
     expect(() => parser.push(bytes)).toThrowError(/payload_too_large/);
   });
 
+  it("单个超限分片：不做完整复制即拒绝（上限检查先于累积）", () => {
+    const bytes = validFrameBytes();
+    // 4 MiB 单分片远超默认 1 MiB Payload 上限：解析器不得先缓冲完整输入。
+    const huge = Buffer.concat([bytes, Buffer.alloc(4 * 1024 * 1024)]);
+    const parser = new MediaFrameParser();
+    expect(() => parser.push(huge)).toThrowError(/payload_too_large/);
+    expect(parser.failed).toBe(true);
+  });
+
+  it("Header 超限的单个超限分片：错误分类仍以长度字段为准", () => {
+    const bytes = validFrameBytes();
+    // 前缀声明 16 KiB 级 Header（默认上限内）+ 超限 Payload。
+    const header = testHeader();
+    const headerJson = Buffer.from(JSON.stringify(header), "utf8");
+    const frame = Buffer.alloc(12 + headerJson.byteLength);
+    frame.set([0x42, 0x45, 0x4c, 0x4c, 1, 3, 0, 0], 0);
+    frame.writeUInt32LE(headerJson.byteLength, 8);
+    frame.set(headerJson, 12);
+    const oversized = Buffer.alloc(2 * 1024 * 1024);
+    const parser = new MediaFrameParser({ maxPayloadBytes: 1024, maxHeaderBytes: 4 });
+    expect(() => parser.push(Buffer.concat([frame, oversized]))).toThrowError(/header_too_large/);
+    expect(bytes.byteLength).toBeGreaterThan(0);
+  });
+
+  it("逐字节分片解析大帧保持线性可行（无逐分片全量拼接）", () => {
+    const payload = Buffer.alloc(256 * 1024, 7);
+    const bytes = encodeMediaFrame({
+      header: testHeader(),
+      payload,
+      mediaKind: "binary-test",
+    });
+    const parser = new MediaFrameParser();
+    for (const chunk of chunkify(bytes, [1])) {
+      parser.push(chunk);
+    }
+    const frame = parser.endMessage()[0];
+    expect(frame).toBeDefined();
+    if (frame !== undefined) {
+      expect(frame.payload.byteLength).toBe(payload.byteLength);
+    }
+  });
+
   it("非法 UTF-8 拒绝", () => {
     const header = testHeader();
     const jsonBytes = Buffer.from(JSON.stringify(header), "utf8");

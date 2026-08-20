@@ -342,8 +342,8 @@ describe("ControlSession Seq / ACK / Replay", () => {
     const accepted = second.session.acceptClientMessage(helloText("2"), second.clock.nowUs());
     expect(accepted.status).toBe("accepted");
     const replaySends = sendTexts(second.session.tick(second.clock.nowUs()));
-    // 重放 lastAck 之后窗口内全部消息：原 seq=3..5（原文本）加上本连接
-    // 刚发送的 server.hello(seq=6) —— at-least-once 语义，客户端按 seq 去重。
+    // 重放 lastAck 之后窗口内全部消息（原 seq=3..5 原文本），随后才是本连接
+    // 的 server.hello（此刻才分配 seq=6）：线上 Seq 严格递增、无重复。
     expect(replaySends.length).toBe(4);
     const seqs = replaySends.map((text) => JSON.parse(text).seq);
     expect(seqs).toEqual(["3", "4", "5", "6"]);
@@ -601,10 +601,194 @@ describe("ControlSession 背压与关闭", () => {
     });
     expect(good.status).toBe("queued");
   });
+});
 
-  it("窗口容量大于队列上限 → 构造时抛出", () => {
-    expect(() =>
-      createSession({ replayWindowCapacity: 16, sendQueue: { maxMessages: 8 } }),
-    ).toThrow(RangeError);
+describe("ControlSession 评审回归：Seq 顺序与缺口", () => {
+  it("优先级调度不破坏线上 Seq 严格递增（P1 抢先但 Seq 按发送顺序分配）", () => {
+    const { session, clock } = createSession();
+    handshake(session, clock);
+    // 先暂存 P3，再暂存 P1：发送顺序 P1 在前，但 Seq 按实际发送分配。
+    session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] },
+    });
+    session.enqueueServerMessage({
+      type: "scene.committed",
+      payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, committedAtMs: 1 },
+    });
+    const effects = session.tick(clock.nowUs());
+    const sends = sendTexts(effects);
+    expect(sends.length).toBe(2);
+    const parsed = sends.map((text) => JSON.parse(text) as { type: string; seq: string });
+    // P1（scene.committed）先发送 → 先分配更小的 Seq；线上 Seq 严格递增。
+    expect(parsed.map((item) => item.type)).toEqual(["scene.committed", "scene.prepared"]);
+    expect(parsed.map((item) => item.seq)).toEqual(["3", "4"]);
+  });
+
+  it("被合并/淘汰/过期的消息不消耗 Seq、不进入 Replay Window", () => {
+    const { session, clock } = createSession();
+    handshake(session, clock);
+    const prepared = { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] };
+    // 合并：同 mergeKey 的旧消息被替换，只发送新消息，Seq 无缺口。
+    session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: prepared,
+      mergeKey: "world-delta",
+      replaceable: true,
+    });
+    session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: prepared,
+      mergeKey: "world-delta",
+      replaceable: true,
+    });
+    // 过期：deadline 已过的暂存消息在 tick 剪枝，不发送、不消耗 Seq。
+    session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: prepared,
+      deadlineUs: clock.nowUs() + 1n,
+    });
+    clock.advanceBy(2n);
+    const effects = session.tick(clock.nowUs());
+    const sends = sendTexts(effects);
+    expect(sends.length).toBe(1); // 只有合并后的新消息
+    const replay = session.replayAfter(0n);
+    expect(replay.status).toBe("replay");
+    if (replay.status === "replay") {
+      // 窗口内：hello=1, ready=2, 合并幸存者=3；没有为被合并/过期消息预留的 Seq。
+      expect(replay.messages.map((message) => message.seq)).toEqual([1n, 2n, 3n]);
+    }
+    expect(effects.some((effect) => effect.kind === "dropped" && effect.reason === "merged")).toBe(
+      true,
+    );
+    expect(effects.some((effect) => effect.kind === "dropped" && effect.reason === "expired")).toBe(
+      true,
+    );
+    // 下一条消息从 4 继续，不存在被静默消息消耗的 Seq。
+    session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: prepared,
+    });
+    const next = sendTexts(session.tick(clock.nowUs())).map(
+      (text) => (JSON.parse(text) as { seq: string }).seq,
+    );
+    expect(next).toEqual(["4"]);
+  });
+
+  it("优先级覆盖只能提升：error 被声明为 P4 仍按 P1 保护", () => {
+    const { session, clock } = createSession({
+      priorityOverrides: { error: 4 },
+      sendQueue: { maxMessages: 1 },
+    });
+    handshake(session, clock);
+    session.tick(clock.nowUs()); // 排空
+    session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] },
+    });
+    const errorPayload = {
+      error: { code: "internal_error", message: "x", retryable: false, traceId: TRACE_ID },
+    };
+    // 若覆盖能把 error 降级为 P4，这里会 dropped；安全下限应让它淘汰 P3 入队。
+    const outcome = session.enqueueServerMessage({ type: "error", payload: errorPayload });
+    expect(outcome.status).toBe("queued");
+    const sends = sendTexts(session.tick(clock.nowUs())).map(
+      (text) => (JSON.parse(text) as { type: string }).type,
+    );
+    expect(sends).toEqual(["error"]);
+  });
+
+  it("显式 priority 同样不能降低安全下限", () => {
+    const { session, clock } = createSession({ sendQueue: { maxMessages: 1 } });
+    handshake(session, clock);
+    session.tick(clock.nowUs());
+    session.enqueueServerMessage({
+      type: "scene.prepared",
+      payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] },
+    });
+    const outcome = session.enqueueServerMessage({
+      type: "error",
+      payload: {
+        error: { code: "internal_error", message: "x", retryable: false, traceId: TRACE_ID },
+      },
+      priority: 4,
+    });
+    expect(outcome.status).toBe("queued");
+  });
+});
+
+describe("ControlSession 评审回归：恢复与水位", () => {
+  it("恢复会话在 client.hello 前不发新消息；重放先于新消息且线上 Seq 递增", () => {
+    const first = createSession();
+    handshake(first.session, first.clock);
+    for (let index = 0; index < 3; index += 1) {
+      first.session.enqueueServerMessage({
+        type: "scene.prepared",
+        payload: { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] },
+      });
+    }
+    const sentTexts = sendTexts(first.session.tick(first.clock.nowUs()));
+    first.session.acknowledge(2n);
+
+    const second = createSession({ resume: first.session.exportLogicalState() });
+    second.session.enqueueServerMessage({
+      type: "server.hello",
+      payload: second.session.helloPayload(),
+    });
+    // 恢复会话：hello 保留到 client.hello 之后，否则重放 Seq 会回退。
+    expect(sendTexts(second.session.tick(second.clock.nowUs())).length).toBe(0);
+    const accepted = second.session.acceptClientMessage(helloText("2"), second.clock.nowUs());
+    expect(accepted.status).toBe("accepted");
+    const sends = sendTexts(second.session.tick(second.clock.nowUs()));
+    const seqs = sends.map((text) => BigInt((JSON.parse(text) as { seq: string }).seq));
+    // 重放（3,4,5）→ 新 hello（6）：线上 Seq 严格递增。
+    expect(seqs).toEqual([3n, 4n, 5n, 6n]);
+    expect(sends.slice(0, 3)).toEqual(sentTexts);
+  });
+
+  it("窗口全部确认后恢复：合法 ACK 不被误判超前，水位不回退", () => {
+    const first = createSession();
+    handshake(first.session, first.clock); // seq 1,2 已发送
+    first.session.acknowledge(2n); // 全部确认，窗口清空
+    const logical = first.session.exportLogicalState();
+    expect(logical.replay.length).toBe(0);
+    expect(logical.nextSeq).toBe(3n);
+
+    const second = createSession({ resume: logical });
+    const accepted = second.session.acceptClientMessage(helloText("2"), second.clock.nowUs());
+    expect(accepted.status).toBe("accepted");
+    expect(second.session.replayAfter(2n).status).toBe("up_to_date");
+    expect(second.session.state).toBe("active");
+  });
+
+  it("未发送的暂存消息随逻辑状态导出，恢复后从原水位继续分配 Seq", () => {
+    const first = createSession();
+    handshake(first.session, first.clock); // seq 1,2
+    const prepared = { sceneId: STREAM_ID, cycleId: STREAM_ID, cues: [] };
+    first.session.enqueueServerMessage({ type: "scene.prepared", payload: prepared }); // 未 tick
+    const logical = first.session.exportLogicalState();
+    expect(logical.pending?.length).toBe(1);
+
+    const second = createSession({ resume: logical });
+    second.session.acceptClientMessage(helloText("2"), second.clock.nowUs());
+    const sends = sendTexts(second.session.tick(second.clock.nowUs()));
+    // 暂存消息恢复发送，Seq 从 3 继续（未被丢失，也未被重复分配）。
+    expect(sends.length).toBe(1);
+    expect((JSON.parse(sends[0] ?? "") as { seq: string }).seq).toBe("3");
+  });
+
+  it("瞬时消息推进的 Seq 体现在导出水位（重启后不会复用 Seq）", () => {
+    const { session, clock } = createSession();
+    handshake(session, clock); // seq 1,2
+    session.acceptClientMessage(clientText({ type: "clock.ping" }), clock.nowUs());
+    const effects = session.tick(clock.nowUs());
+    const seqEffects = effects.filter(
+      (effect): effect is Extract<ControlEffect, { kind: "seq_advanced" }> =>
+        effect.kind === "seq_advanced",
+    );
+    expect(seqEffects[0]?.seq).toBe(3n);
+    expect(seqEffects[0]?.persistable).toBe(false);
+    // 即便 P4 不持久化瞬时消息的 Replay 内容，导出水位也必须覆盖它。
+    expect(session.exportLogicalState().nextSeq).toBe(4n);
   });
 });

@@ -42,7 +42,11 @@ export type ControlEffect =
       readonly lastAck: bigint;
     }
   | {
-      /** 新 Seq 已分配；P4 据此持久化推进（persistable=false 的瞬时消息除外）。 */
+      /**
+       * 新 Seq 已分配（消息实际发送时）。P4 必须为**所有**推进持久化最新
+       * 分配水位（含 persistable=false 的瞬时消息），否则进程重启后会复用
+       * Seq；persistable=false 仅表示不持久化该消息的 Replay 内容。
+       */
       readonly kind: "seq_advanced";
       readonly seq: bigint;
       readonly messageId: string;

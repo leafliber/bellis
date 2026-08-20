@@ -18,9 +18,12 @@ import type { MediaFrame, MediaFrameLimits } from "./frame-codec.js";
  * - 帧边界 = WebSocket 消息边界：适配器把一条 WS 二进制消息的任意分片
  *   依次 push，消息结束时调用 endMessage() 取得完整帧并复位累积器。
  *   布局没有 Payload 长度字段，因此分片本身无法自判帧结束。
- * - 读取长度后先检查上限，再继续累积：Header 超限在读到长度字段时立即
- *   拒绝，Payload 超限在累积越界字节时立即拒绝，不保留超限输入副本。
- * - 非法 Magic/版本/kind/Flags/Header 长度/UTF-8/JSON/Schema 稳定拒绝；
+ * - 累积器是预分配的有界缓冲（容量硬上限 = 12 + maxHeaderBytes +
+ *   maxPayloadBytes，跨消息复用）：push 只做一次写入，没有逐分片 concat；
+ *   累计长度越过当前上限时**先拒绝、后复制**——超限分片最多只补齐前缀
+ *   （≤12 字节）用于精确分类错误码，绝不保留超限输入的完整副本。
+ * - Header 超限在读到长度字段时立即拒绝；Payload 超限在越界字节到达时
+ *   立即拒绝；非法 Magic/版本/kind/Flags/UTF-8/JSON/Schema 稳定拒绝；
  *   消息在帧完成前结束（截断）同样拒绝。
  * - 失败后进入 failed 状态：后续 push/endMessage 一律拒绝，直到 reset()，
  *   绝不继续误读后续字节。
@@ -39,9 +42,12 @@ interface PrefixFields {
 export class MediaFrameParser {
   readonly #maxHeaderBytes: number;
   readonly #maxPayloadBytes: number;
+  /** 任何合法消息的字节数硬上限；也是缓冲容量的增长上界。 */
+  readonly #absoluteMaxBytes: number;
   #buffer: Buffer = Buffer.alloc(0);
+  #length = 0;
   #prefix: PrefixFields | null = null;
-  #headerValidated = false;
+  #header: MediaFrameHeader | null = null;
   #failed = false;
 
   constructor(options: MediaFrameParserOptions = {}) {
@@ -55,6 +61,7 @@ export class MediaFrameParser {
     }
     this.#maxHeaderBytes = maxHeaderBytes;
     this.#maxPayloadBytes = maxPayloadBytes;
+    this.#absoluteMaxBytes = MEDIA_FRAME_PREFIX_BYTES + maxHeaderBytes + maxPayloadBytes;
   }
 
   get failed(): boolean {
@@ -67,8 +74,22 @@ export class MediaFrameParser {
     if (chunk.byteLength === 0) {
       return [];
     }
-    this.#buffer =
-      this.#buffer.byteLength === 0 ? Buffer.from(chunk) : Buffer.concat([this.#buffer, chunk]);
+    const newLength = this.#length + chunk.byteLength;
+    if (newLength > this.#currentCap()) {
+      // 超限输入不整段复制：只补齐前缀（≤12 字节）以区分离败原因
+      // （header 超限在长度字段处、其余即 Payload 超限）。
+      const need = Math.min(chunk.byteLength, MEDIA_FRAME_PREFIX_BYTES - this.#length);
+      if (need > 0) {
+        this.#ensureCapacity(this.#length + need);
+        this.#buffer.set(chunk.subarray(0, need), this.#length);
+        this.#length += need;
+      }
+      this.#validateIncrementally();
+      this.#fail("payload_too_large", "payload exceeds the configured limit");
+    }
+    this.#ensureCapacity(newLength);
+    this.#buffer.set(chunk, this.#length);
+    this.#length = newLength;
     this.#validateIncrementally();
     return [];
   }
@@ -76,38 +97,30 @@ export class MediaFrameParser {
   /** 当前 WS 消息结束：产出完整帧并复位；消息在帧完成前结束视为非法。 */
   endMessage(): readonly MediaFrame[] {
     this.#guard();
-    if (this.#buffer.byteLength < MEDIA_FRAME_PREFIX_BYTES) {
+    if (this.#length < MEDIA_FRAME_PREFIX_BYTES) {
       this.#fail("truncated", "message ended before the frame prefix was complete");
     }
     this.#validateIncrementally();
-    if (this.#prefix === null || !this.#headerValidated) {
+    const prefix = this.#prefix;
+    const header = this.#header;
+    if (prefix === null || header === null) {
       this.#fail("truncated", "message ended before the header was complete");
     }
-    const prefix = this.#prefix;
-    const payload = this.#buffer.subarray(MEDIA_FRAME_PREFIX_BYTES + prefix.headerLength);
     const mediaKind = mediaKindFromCode(prefix.mediaKindCode);
     if (mediaKind === null) {
       this.#fail("invalid_media_kind", "unknown media kind byte");
     }
-    const frame: MediaFrame = {
-      header: this.#parseHeader(
-        this.#buffer.subarray(
-          MEDIA_FRAME_PREFIX_BYTES,
-          MEDIA_FRAME_PREFIX_BYTES + prefix.headerLength,
-        ),
-      ),
-      payload: Uint8Array.from(payload),
-      mediaKind,
-    };
+    const payloadStart = MEDIA_FRAME_PREFIX_BYTES + prefix.headerLength;
+    const payload = Uint8Array.from(this.#buffer.subarray(payloadStart, this.#length));
     this.reset();
-    return [frame];
+    return [{ header, payload, mediaKind }];
   }
 
-  /** 复位累积器与失败状态（适配器在新 WS 消息开始或出错恢复时调用）。 */
+  /** 复位累积进度与失败状态（缓冲保留复用；适配器在新 WS 消息开始时调用）。 */
   reset(): void {
-    this.#buffer = Buffer.alloc(0);
+    this.#length = 0;
     this.#prefix = null;
-    this.#headerValidated = false;
+    this.#header = null;
     this.#failed = false;
   }
 
@@ -119,48 +132,69 @@ export class MediaFrameParser {
 
   #fail(code: MediaErrorCode, message: string): never {
     this.#failed = true;
-    this.#buffer = Buffer.alloc(0);
+    this.#length = 0;
     this.#prefix = null;
-    this.#headerValidated = false;
+    this.#header = null;
     throw new MediaFrameError(code, message);
+  }
+
+  /** 前缀已知后收紧上限；未知时以绝对上限预判。 */
+  #currentCap(): number {
+    return this.#prefix === null
+      ? this.#absoluteMaxBytes
+      : MEDIA_FRAME_PREFIX_BYTES + this.#prefix.headerLength + this.#maxPayloadBytes;
+  }
+
+  /** 几何增长到硬上限为止的预分配缓冲；已复制内容随增长搬迁一次。 */
+  #ensureCapacity(size: number): void {
+    if (this.#buffer.byteLength >= size) {
+      return;
+    }
+    let next = this.#buffer.byteLength === 0 ? 64 : this.#buffer.byteLength;
+    while (next < size) {
+      next *= 2;
+    }
+    const grown = Buffer.allocUnsafe(Math.min(next, this.#absoluteMaxBytes));
+    grown.set(this.#buffer.subarray(0, this.#length), 0);
+    this.#buffer = grown;
   }
 
   /** 尽可能早地校验前缀与 Header；Payload 越界在累积时立即拒绝。 */
   #validateIncrementally(): void {
     const buffer = this.#buffer;
-    for (let index = 0; index < 4 && index < buffer.byteLength; index += 1) {
+    const length = this.#length;
+    for (let index = 0; index < 4 && index < length; index += 1) {
       if (buffer[index] !== MEDIA_MAGIC[index]) {
         this.#fail("bad_magic", "frame does not start with the BELL magic");
       }
     }
-    if (buffer.byteLength >= 5 && buffer[4] !== MEDIA_FRAME_PROTOCOL_VERSION) {
+    if (length >= 5 && buffer[4] !== MEDIA_FRAME_PROTOCOL_VERSION) {
       this.#fail("unsupported_version", "unsupported media frame protocol version");
     }
-    if (buffer.byteLength >= 6 && mediaKindFromCode(buffer[5] ?? 0) === null) {
+    if (length >= 6 && mediaKindFromCode(buffer[5] ?? 0) === null) {
       this.#fail("invalid_media_kind", "unknown media kind byte");
     }
-    if (buffer.byteLength >= 8) {
+    if (length >= 8) {
       const flags = (buffer[6] ?? 0) | ((buffer[7] ?? 0) << 8);
       if (flags !== 0) {
         this.#fail("bad_flags", "flags must be zero in protocol version 1");
       }
     }
-    if (this.#prefix === null && buffer.byteLength >= MEDIA_FRAME_PREFIX_BYTES) {
+    if (this.#prefix === null && length >= MEDIA_FRAME_PREFIX_BYTES) {
       const headerLength = buffer.readUInt32LE(8);
       if (headerLength > this.#maxHeaderBytes) {
         this.#fail("header_too_large", "header length exceeds the configured limit");
       }
       this.#prefix = { mediaKindCode: buffer[5] ?? 0, headerLength };
     }
-    if (this.#prefix !== null && !this.#headerValidated) {
+    if (this.#prefix !== null && this.#header === null) {
       const headerEnd = MEDIA_FRAME_PREFIX_BYTES + this.#prefix.headerLength;
-      if (buffer.byteLength >= headerEnd) {
-        this.#parseHeader(buffer.subarray(MEDIA_FRAME_PREFIX_BYTES, headerEnd));
-        this.#headerValidated = true;
+      if (length >= headerEnd) {
+        this.#header = this.#parseHeader(buffer.subarray(MEDIA_FRAME_PREFIX_BYTES, headerEnd));
       }
     }
-    if (this.#prefix !== null && this.#headerValidated) {
-      const payloadBytes = buffer.byteLength - MEDIA_FRAME_PREFIX_BYTES - this.#prefix.headerLength;
+    if (this.#prefix !== null && this.#header !== null) {
+      const payloadBytes = length - MEDIA_FRAME_PREFIX_BYTES - this.#prefix.headerLength;
       if (payloadBytes > this.#maxPayloadBytes) {
         this.#fail("payload_too_large", "payload exceeds the configured limit");
       }

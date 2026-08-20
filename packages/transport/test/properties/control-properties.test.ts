@@ -194,14 +194,10 @@ function makeQueued(fields: {
   category: string;
   replaceable: boolean;
 }): QueuedSend {
-  const text = serverText({ type: fields.category === "error" ? "error" : "server.ready" });
-  // 用填充键构造任意字节大小的消息（wire 上等价于更长的 payload）。
-  const padded = `${text.slice(0, -1)},"pad":"${"x".repeat(Math.max(0, fields.size - 8))}"}`;
+  // 暂存消息尚未编码：字节大小直接作为记账字段（等价于编码后的长度）。
   return {
     priority: fields.priority,
-    text: padded,
-    byteSize: Buffer.byteLength(padded, "utf8"),
-    envelope: JSON.parse(padded),
+    byteSize: fields.size,
     category: fields.category,
     deadlineUs: null,
     mergeKey: null,

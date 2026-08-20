@@ -45,6 +45,11 @@ HTTP Upgrade + Session 校验（P4）
 
 - 建连后服务端先发送 `server.hello`，然后只接受**一次**合法 `client.hello`；
   重复 Hello、Hello 前的业务消息稳定拒绝（`not_ready` / `invalid_message`）。
+- **重连（resume）流程**：客户端已有会话上下文，直接发送 `client.hello`
+  （携带 `lastAck`），无需等待 `server.hello`。服务端在处理 `client.hello`
+  之前不发送任何新消息（否则新消息先分配更大 Seq，随后的重放会造成线上
+  Seq 回退）；处理顺序为：先按原 Seq 重放窗口内容，再发送本连接的
+  `server.hello`（其 Seq 在重放之后分配）。
 - `client.hello` 声明的 `protocolVersion` 与服务端主版本不一致时返回
   `unsupported_version` 并以 4003 关闭连接，不做猜测性降级。
 - Hello 超时（默认 10 秒，可配置）未收到合法 `client.hello` → 关闭码 4004。
@@ -179,8 +184,13 @@ HTTP Upgrade + Session 校验（P4）
 ## 5. Seq / ACK / Replay（服务端 → 客户端）
 
 - 每个**逻辑 Session** 的服务端消息 `seq` 严格递增（从 1 开始），不因连接
-  重建归零。逻辑会话状态（`nextSeq` / `confirmedAck` / Replay Window）由 P4
-  在重连时通过 `ControlSession` 的 resume 导入；跨重启恢复由 P2/P4 持久化。
+  重建归零。逻辑会话状态（`nextSeq` / `confirmedAck` / Replay Window / 未发送
+  暂存消息）由 P4 在重连时通过 `ControlSession` 的 resume 导入；跨重启恢复由
+  P2/P4 持久化。
+- **Seq 在消息实际发送时分配**（而不是入队时）：发送优先级只作用于 Seq
+  分配之前的准入、淘汰、合并与调度。被淘汰/合并/过期的消息从未消耗 Seq、
+  从未进入 Replay Window，因此线上 Seq 严格递增且无缺口，累计 ACK 语义
+  始终成立。
 - `ack` 表示客户端**已处理**（不只是收到）的最大连续服务端 Seq。任意客户端
   消息都可携带 `ack` 累计确认。
 - ACK 语义：
@@ -188,13 +198,17 @@ HTTP Upgrade + Session 校验（P4）
   - `ack` > 已分配最大 Seq → 协议错误：返回 `invalid_message` 并以 4003 关闭。
 - Replay Window 有界（默认 512 条，容量配置化；`server.hello` 携带
   `replayWindowSize`）。重连 `client.hello.lastAck` 落在窗口内时，按**原 Seq、
-  原 messageId、原 JSON 文本**重放；重放批次整体按 Seq 原序进入最高可用
-  优先级车道。
+  原 messageId、原 JSON 文本**重放；重放消息进入独立的先行缓冲，
+  **先于一切新分配 Seq 的消息发送**，保证线上 Seq 不回退。
 - `lastAck + 1` 早于窗口最旧条目（缺口超出窗口）→ 服务端产生
   `snapshot_required` 内部 Effect，由 P4 读取 Persistence 后发送完整
   `session.snapshot`，不补发不完整历史。
 - 心跳 Pong 与 Clock Pong 也消耗 Seq 并占用窗口（排除会造成虚假缺口），
-  但标记为非持久化：P4 不为它们推进持久化的 Seq 记录。
+  标记为 `persistable=false`。持久化语义拆分为两层：
+  - **最新分配水位（nextSeq）必须为包括瞬时消息在内的一切 Seq 推进持久化**，
+    否则进程重启后会复用 Seq（客户端去重误判、ACK 超前甚至 4003 关闭）；
+  - `persistable=false` 仅表示不持久化该消息的 **Replay 内容**（瞬时消息
+    重放无意义）。
 
 ## 6. 客户端幂等（client → server）
 
@@ -243,7 +257,7 @@ Client 收到时记录 c3
 - 客户端消息可携带 `deadlineUs`。`deadlineUs ≤ nowUs`（单调域）时返回
   `deadline_exceeded`，不产生任何后续副作用（不进入去重集合、不触发注册）。
 - 排队中的服务端消息在发送前发现 Deadline 已过 → 丢弃并记录类别计数
-  （`dropped` Effect，reason=expired）。
+  （`dropped` Effect，reason=expired）；该消息从未分配 Seq，不产生缺口。
 
 ## 10. 背压与发送队列
 
@@ -258,10 +272,19 @@ Client 收到时记录 c3
 
 规则：
 
-- 同时统计消息数与编码后 UTF-8 字节数，任一达到上限即触发淘汰。
+- 队列持有的是**尚未分配 Seq 的暂存消息**：优先级只影响准入淘汰、合并、
+  过期剪枝与发送调度（drain 按优先级升序、同优先级 FIFO），全部发生在
+  Seq 分配之前。被淘汰/合并/过期的消息不产生线上 Seq 缺口，也不会在重连
+  时作为脏条目重放。
+- 同时统计消息数与估算 UTF-8 字节数，任一达到上限即触发淘汰。
 - 淘汰顺序确定：先淘汰更低优先级（数字更大）车道中最旧的条目；优先级 1
   永不淘汰；同优先级 FIFO。
-- 低优先级（3/4）可替代消息可按稳定 `mergeKey` 合并（同 Key 旧消息被替换）。
+- 低优先级（3/4）可替代消息可按稳定 `mergeKey` 合并（同 Key 旧消息被替换，
+  记 `dropped` Effect，reason=merged）。替换先做可行性计算：新消息放不下时
+  **旧消息原样保留**，绝不先删后拒。
+- 显式 `priority` 与 `priorityOverrides` 只能**提升**优先级（数值变小），
+  不能降低冻结的安全下限（`error` / `scene.committed` / `scene.cancelled`
+  恒为 P1，永不淘汰）。
 - 优先级 1/2 的消息在淘汰所有更低优先级后仍无法入队 → 返回
   `close_slow_consumer` 并以 4002 关闭该连接，绝不静默丢失。
 - 淘汰只记录消息类别与数量（`dropped` Effect），不记录 Payload。
@@ -273,7 +296,7 @@ Client 收到时记录 c3
 | 项 | 默认值 | 可配置 |
 | --- | --- | --- |
 | 入站文本上限 | 1 MiB | `maxTextBytes` |
-| Replay Window | 512 条 | `replayWindowCapacity`（须 ≤ 发送队列消息上限） |
+| Replay Window | 512 条 | `replayWindowCapacity` |
 | 发送队列 | 512 条 / 8 MiB | `sendQueue.maxMessages` / `maxBytes` |
 | 去重集合 | 1024 | `dedupCapacity` |
 | 心跳 | 30 s 间隔 / 90 s 超时 | `heartbeat` |
@@ -309,10 +332,16 @@ onTextMessage(text):
 onWsOpenFlush / 定时:
   pump(): for effect of session.tick(clock.nowUs()):
     send  → socket.write(effect.text)
-    seq_advanced → 持久化推进最新 Seq（persistable=false 的瞬时消息跳过）
+    seq_advanced → 持久化最新分配水位（所有消息，含瞬时消息；
+                   persistable=false 仅跳过该消息的 Replay 内容持久化）
     snapshot_required → 读 Persistence 后 enqueueServerMessage("session.snapshot")
     dropped → 记账指标（类别+数量）
     close   → socket.close(effect.code, effect.reason)；释放 registry.closeAll()
+
+onDisconnect:
+  state = session.exportLogicalState()   # nextSeq / confirmedAck / replay / pending
+  # 持久化 nextSeq 与 persistable=true 的 replay/pending 内容；重连用 resume 恢复。
+  # 恢复会话在 client.hello（含 lastAck）之前不会发送新消息——重放先行。
 
 onClose:
   session.close(reason)；registry.closeAll()；丢弃未完成等待（Abort）

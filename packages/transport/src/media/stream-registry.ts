@@ -60,6 +60,14 @@ interface StreamRecord {
   frameCount: number;
 }
 
+/** 关闭后只保留禁止复活的墓碑标记，帧级状态全部释放。 */
+function toTombstone(record: StreamRecord): void {
+  record.closed = true;
+  record.lastSequence = null;
+  record.frameIds.clear();
+  record.frameCount = 0;
+}
+
 const DEFAULT_MAX_OPEN_STREAMS = 8;
 const DEFAULT_MAX_TOTAL_STREAMS = 1024;
 const DEFAULT_MAX_FRAMES_PER_STREAM = 65_536;
@@ -208,7 +216,9 @@ export class MediaStreamRegistry {
     if (record.closed) {
       return { status: "already_closed" };
     }
-    record.closed = true;
+    // 关闭即释放帧级状态（frameId 集合等），只留轻量墓碑防止复活；
+    // 否则顺序创建大量流时 frameId 集合会驻留到 closeAll()。
+    toTombstone(record);
     return { status: "closed" };
   }
 

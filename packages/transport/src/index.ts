@@ -78,6 +78,7 @@ export type {
   ControlLogicalState,
   ControlSessionOptions,
   ControlSendQueueOptions,
+  PendingServerMessage,
   ServerEnqueueResult,
   ServerMessageInput,
 } from "./control/control-session.js";

@@ -11,8 +11,9 @@ import type { ServerControlEnvelope } from "@bellis/contracts";
  *   （缺口超出窗口，由 P4 读取 Persistence 后发送 session.snapshot）；
  *   否则按原 Seq、原 messageId、原文重放。
  * - 心跳/Clock Pong 等瞬时消息同样占用窗口（它们也消耗 Seq，排除会造成
- *   虚假缺口）；「不写 Replay 持久记录」通过 persistable=false 标记交给
- *   P4 的持久化 Effect 处理。
+ *   虚假缺口）；persistable=false 只表示**不持久化该消息的 Replay 内容**，
+ *   最新分配水位（nextSeq）对包括瞬时消息在内的一切 Seq 推进都必须持久化，
+ *   否则进程重启后会复用 Seq。
  */
 export interface ReplayMessage {
   readonly seq: bigint;
@@ -20,7 +21,7 @@ export interface ReplayMessage {
   /** 追加时编码的原始 JSON 文本；重放时按原文重发。 */
   readonly text: string;
   readonly envelope: ServerControlEnvelope;
-  /** false 表示瞬时消息（heartbeat.pong / clock.pong），P4 不得为其持久化 Seq。 */
+  /** false 表示瞬时消息（heartbeat.pong / clock.pong）：不持久化其内容。 */
   readonly persistable: boolean;
 }
 
@@ -33,6 +34,12 @@ export type ReplayOutcome =
 export interface ReplayWindowOptions {
   /** 窗口容量（消息条数），默认 512，必须 ≥ 1。 */
   readonly capacity?: number;
+  /**
+   * 恢复逻辑会话时的最新分配 Seq 水位（默认 0）。窗口内容可能已被全部
+   * 确认而清空，但单调计数器必须从恢复水位继续，否则合法 ACK 会被
+   * 误判为超前（invalid_ahead）。
+   */
+  readonly initialLatestSeq?: bigint;
 }
 
 const DEFAULT_REPLAY_CAPACITY = 512;
@@ -40,14 +47,19 @@ const DEFAULT_REPLAY_CAPACITY = 512;
 export class ReplayWindow {
   readonly #capacity: number;
   #entries: ReplayMessage[] = [];
-  #latestAssignedSeq = 0n;
+  #latestAssignedSeq: bigint;
 
   constructor(options: ReplayWindowOptions = {}) {
     const capacity = options.capacity ?? DEFAULT_REPLAY_CAPACITY;
     if (!Number.isInteger(capacity) || capacity < 1) {
       throw new RangeError("replay window capacity must be a positive integer");
     }
+    const initialLatestSeq = options.initialLatestSeq ?? 0n;
+    if (initialLatestSeq < 0n) {
+      throw new RangeError("initialLatestSeq must be non-negative");
+    }
     this.#capacity = capacity;
+    this.#latestAssignedSeq = initialLatestSeq;
   }
 
   get capacity(): number {
@@ -65,6 +77,29 @@ export class ReplayWindow {
     }
     this.#latestAssignedSeq = message.seq;
     this.#entries.push(message);
+    this.#trimToCapacity();
+  }
+
+  /**
+   * 恢复历史条目（resume 路径）：条目之间升序且不越过当前水位即可，
+   * 不推进单调计数器（水位已由 initialLatestSeq 表达）。
+   */
+  restore(messages: readonly ReplayMessage[]): void {
+    let previous = 0n;
+    for (const message of messages) {
+      if (message.seq <= previous) {
+        throw new RangeError("restored replay entries must strictly increase");
+      }
+      if (message.seq > this.#latestAssignedSeq) {
+        throw new RangeError("restored replay entry exceeds the assigned seq watermark");
+      }
+      previous = message.seq;
+    }
+    this.#entries.push(...messages);
+    this.#trimToCapacity();
+  }
+
+  #trimToCapacity(): void {
     if (this.#entries.length > this.#capacity) {
       this.#entries.splice(0, this.#entries.length - this.#capacity);
     }

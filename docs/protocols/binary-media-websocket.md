@@ -118,6 +118,12 @@ de ad be ef   payload（4 字节）
 
 - `push(chunk)`：按任意分片追加并做增量校验（magic / version / kind /
   flags / header 长度 / Header JSON 与 Schema / Payload 越界），恒返回空数组。
+- 累积器是**预分配的有界缓冲**（容量硬上限 = 12 + maxHeaderBytes +
+  maxPayloadBytes，跨消息复用）：push 只做一次写入，没有逐分片全量拼接；
+  分片再碎也不会出现平方级复制成本。
+- **上限检查先于复制**：分片使累计长度越过当前上限（前缀已知后即
+  12 + headerLen + maxPayloadBytes）时，最多补齐 12 字节前缀用于精确分类
+  错误码，绝不保留超限输入的完整副本，然后立即拒绝。
 - `endMessage()`：当前 WS 消息结束时调用，产出完整帧（Header + Payload 副本
   + 解析出的 media kind）并复位累积器；消息在帧完成前结束 → `truncated`。
 - 任意非法输入抛出稳定的 `MediaFrameError(code)`，解析器进入 **failed**
@@ -148,9 +154,11 @@ de ad be ef   payload（4 字节）
      `deadline_exceeded`。比较基准是 Runtime 单调时钟（注入的 nowUs）。
   7. 单 Stream 帧数上限（默认 65536，`frame_limit_reached`）。
 - 关闭（Control `media.stream.closed` 或服务端主动）：关闭后的 Stream 不能
-  复活（同 `streamId` 再注册被拒绝）。
+  复活（同 `streamId` 再注册被拒绝）。关闭时**立即释放帧级状态**
+  （frameId 去重集合、Sequence 游标、帧计数），只保留轻量墓碑防止复活；
+  frameId 集合不会驻留到连接结束。
 - 资源上限（默认，可配置）：并发打开 Stream 8 个；单连接生命周期总 Stream
-  1024 个。连接关闭时 `closeAll()` 释放全部状态与 frameId 集合。
+  1024 个。连接关闭时 `closeAll()` 释放全部状态。
 - **Media Stream 不重放**：重连 / Snapshot 后客户端必须重新注册 Stream。
 
 ## 8. 与 Control 通道的关系
