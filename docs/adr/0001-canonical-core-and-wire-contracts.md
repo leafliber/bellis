@@ -179,3 +179,19 @@ P0 必须证明：
 - 大序号和微秒时间 JSON 往返无精度损失。
 - 服务端 Replay、客户端不确定重试和 `session.snapshot` 有契约测试。
 - 2020-12 与 Draft 7 生成物通过同一组语义 Fixture。
+
+## 修订记录
+
+### 2026-08-20 · Envelope type 模式允许单段（P1 发现的缺陷修正）
+
+P1 Transport 实现错误分类时发现：`KNOWN_CONTROL_MESSAGE_TYPES` 与
+`ControlPayloadSchema` 已冻结单段类型 `"error"`，但 Envelope 的
+`CONTROL_MESSAGE_TYPE_PATTERN` 原为 `^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$`
+（至少一个点号），导致 `error` Envelope 永远无法通过外层校验，协议自身的
+稳定错误通道不可用。
+
+修正：量词从 `+` 放宽为 `*`（`^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)*$`），
+允许单段小写 type。属于纯扩展——原有合法值全部保持合法，Zod、双 dialect
+生成物与 Fixture 已同步更新（server/client/control envelope 三个 Schema
+的 pattern 与新增 `"error"` Envelope 合法 Fixture、`Clock.ping` 大小写
+非法 Fixture）。无并行任务需要同步（P2/P3 尚未开工）。

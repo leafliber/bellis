@@ -32,13 +32,21 @@ export const EnvelopeTraceSchema = extensibleJsonObject({
   spanId: SpanIdSchema.optional(),
 });
 
-export const CONTROL_MESSAGE_TYPE_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/;
+/**
+ * 消息 type 允许小写点分segments，也允许单段（如 "error"）。
+ * P1 期间发现的缺陷修正：原模式 `(?:\.[a-z][a-z0-9]*)+` 要求至少一个点号，
+ * 导致 KNOWN_CONTROL_MESSAGE_TYPES 中已冻结的 "error" 类型永远无法通过
+ * Envelope 校验（ControlPayloadSchema 与 Fixture 均已把 type: "error"
+ * 视为合法）。放宽为 `*` 是纯扩展（原合法值全部保持合法），
+ * 变更已同步双 dialect 生成物、Fixture 与 ADR 0001 修订记录。
+ */
+export const CONTROL_MESSAGE_TYPE_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)*$/;
 
 /** Envelope 基础字段：单一来源，供 server/client 两个方向共享。 */
 const controlEnvelopeBaseShape = {
   version: z.literal(CONTROL_PROTOCOL_VERSION),
   type: z.string().regex(CONTROL_MESSAGE_TYPE_PATTERN, {
-    message: 'message type must be dotted lowercase segments, e.g. "clock.ping"',
+    message: 'message type must be lowercase dot-separated segments, e.g. "clock.ping" or "error"',
   }),
   messageId: UuidSchema,
   sessionId: UuidSchema,

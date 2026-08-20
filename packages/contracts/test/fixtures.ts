@@ -722,6 +722,15 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
         type: "scene.committed",
         deadlineUs: "999999",
       }),
+      // 单段 type（修订后的模式）：KNOWN_CONTROL_MESSAGE_TYPES 已冻结 "error"。
+      envelope({
+        direction: "server",
+        seq: "0",
+        type: "error",
+        payload: {
+          error: { code: "not_ready", message: "starting", retryable: true, traceId: TRACE_ID },
+        },
+      }),
     ],
     invalid: [
       envelope({ direction: "server" }),
@@ -729,6 +738,7 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
       envelope({ direction: "server", seq: "1.5" }),
       envelope({ direction: "server", seq: "0", version: 2 }),
       envelope({ direction: "server", seq: "0", type: "clock_ping" }),
+      envelope({ direction: "server", seq: "0", type: "Clock.ping" }),
       envelope({ direction: "server", seq: "0", trace: { traceId: "nope" } }),
       envelope({ direction: "server", seq: "0", ack: "1" }),
       envelope({ direction: "server", seq: "0", idempotencyKey: "k" }),
