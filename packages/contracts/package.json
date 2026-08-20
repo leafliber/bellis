@@ -1,0 +1,38 @@
+{
+  "name": "@bellis/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "唯一协议源：Zod Schema 推导 TypeScript 类型，并生成 JSON Schema 2020-12 / Draft 7 双目标",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "generated"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src test scripts",
+    "format:check": "oxfmt --check src test scripts",
+    "contracts:generate": "node scripts/generate.mjs"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "ajv": "8.20.0",
+    "fast-check": "4.9.0",
+    "vitest": "4.1.11"
+  }
+}

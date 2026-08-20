@@ -185,13 +185,16 @@ interface DecisionInput {
 }
 
 interface DecisionPacket {
-  message: string;
+  schemaVersion: 1;
+  cycleId: string;
   toolCalls: ToolCall[];
   action: ActionFrame;
   next: "finish" | "after_tools" | "continue";
 }
 
 interface ActionFrame {
+  schemaVersion: 1;
+  noOp?: true;
   speech?: SpeechIntent;
   avatar?: AvatarIntent[];
   game?: GameIntent[];
@@ -199,6 +202,10 @@ interface ActionFrame {
   sync: SyncPolicy;
 }
 ```
+
+`DecisionPacket` 不再保留顶层 `message` 或 `speech`。发言只有一个来源：`DecisionPacket.action.speech`。模型 Provider 的原始输出可以不同，但进入核心前必须规范化为上述形态，避免文本、TTS、字幕和动作读取到互相冲突的内容。收敛记录见 [ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md)。
+
+`ActionFrame` 是闭合的版本化形态：必须携带 `schemaVersion: 1`；至少包含一个行动或显式 `noOp: true`，不允许空帧；`avatar`/`game`/`overlay` 数组必须非空（1–32 个意图）；`noOp` 与任何实际行动互斥。
 
 - `Signal`：尚未被决策消费的输入事实。
 - `WorldSnapshot`：某一水位上的只读直播世界状态。
@@ -404,11 +411,12 @@ interface ToolExecutionPolicy {
 
 ### 9.1 Scene 与 Cue
 
-Action Compiler 将 ActionFrame 转为 Scene：
+Action Compiler 将 ActionFrame 转为 Scene（字段命名与 `@bellis/contracts` 冻结形态一致：实体字段使用 `sceneId`/`cueId`，并携带 `schemaVersion`；`intent` 约束为 JSON 值）：
 
 ```ts
 interface Scene {
-  id: string;
+  schemaVersion: 1;
+  sceneId: string;
   cycleId: string;
   groups: SyncGroup[];
   deadlineMs: number;
@@ -416,11 +424,12 @@ interface Scene {
 }
 
 interface Cue {
-  id: string;
+  schemaVersion: 1;
+  cueId: string;
   lane: "audio" | "subtitle" | "avatar" | "game" | "overlay";
   anchor: "scene_start" | "speech_start" | "speech_end" | string;
   offsetMs: number;
-  intent: unknown;
+  intent: JsonValue;
 }
 ```
 

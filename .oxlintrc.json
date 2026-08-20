@@ -1,0 +1,21 @@
+{
+  "env": {
+    "builtin": true,
+    "node": true,
+    "es2024": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "off",
+    "restriction": "off",
+    "style": "off"
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "generated/**",
+    "coverage/**",
+    "node_modules/**",
+    "pnpm-lock.yaml"
+  ]
+}

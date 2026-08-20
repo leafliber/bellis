@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "cueId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "lane": {
+      "type": "string",
+      "enum": [
+        "audio",
+        "subtitle",
+        "avatar",
+        "game",
+        "overlay"
+      ]
+    },
+    "anchor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "offsetMs": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "intent": {
+      "$ref": "#/definitions/__schema0"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "cueId",
+    "lane",
+    "anchor",
+    "offsetMs",
+    "intent"
+  ],
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

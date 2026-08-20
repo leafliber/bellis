@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master, "codex/**"]
+  pull_request:
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows 11 为正式支持门槛，macOS 为当前开发门槛（phase-1-build-guide.md §5.3）。
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26.5.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check (runtime baseline, typecheck, lint, format, contracts, tests)
+        run: pnpm check
+
+      - name: Build
+        run: pnpm build

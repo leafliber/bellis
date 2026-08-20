@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z][a-z0-9]*)+$"
+    },
+    "messageId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "trace": {
+      "type": "object",
+      "properties": {
+        "traceId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "spanId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        }
+      },
+      "required": [
+        "traceId"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "sentAtUs": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "deadlineUs": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "payload": {
+      "$ref": "#/$defs/__schema0"
+    },
+    "direction": {
+      "type": "string",
+      "const": "server"
+    },
+    "seq": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    }
+  },
+  "required": [
+    "version",
+    "type",
+    "messageId",
+    "sessionId",
+    "trace",
+    "sentAtUs",
+    "payload",
+    "direction",
+    "seq"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

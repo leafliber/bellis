@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "streamId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "frameId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "sceneId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "cueId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "sequence": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "targetTimeUs": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "durationUs": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "contentType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "traceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "streamId",
+    "frameId",
+    "sessionId",
+    "sequence",
+    "contentType",
+    "traceId"
+  ],
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

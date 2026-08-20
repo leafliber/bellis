@@ -1,0 +1,35 @@
+{
+  "name": "@bellis/testkit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "确定性测试设施：Gate 1 交付的 VirtualClock 及后续测试工具（仅开发/测试依赖，生产包禁止引用）",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src test",
+    "format:check": "oxfmt --check src test"
+  },
+  "dependencies": {
+    "@bellis/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "fast-check": "4.9.0",
+    "vitest": "4.1.11"
+  }
+}

@@ -1,0 +1,727 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "server.hello"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "protocolVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "runtimeVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "heartbeatIntervalMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 600000
+            },
+            "replayWindowSize": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 100000
+            }
+          },
+          "required": [
+            "protocolVersion",
+            "runtimeVersion",
+            "heartbeatIntervalMs",
+            "replayWindowSize"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "client.hello"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "protocolVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "clientType": {
+              "type": "string",
+              "enum": [
+                "studio",
+                "stage",
+                "overlay",
+                "test-client"
+              ]
+            },
+            "lastAck": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            }
+          },
+          "required": [
+            "protocolVersion",
+            "clientType"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "server.ready"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "heartbeat.ping"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "heartbeat.pong"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "clock.ping"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "c0": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            }
+          },
+          "required": [
+            "c0"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "clock.pong"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "c0": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            },
+            "r1": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            },
+            "r2": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            }
+          },
+          "required": [
+            "c0",
+            "r1",
+            "r2"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "session.snapshot"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "initial",
+                    "replay_gap",
+                    "requested"
+                  ]
+                },
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                },
+                "sessionStatus": {
+                  "type": "string",
+                  "enum": [
+                    "starting",
+                    "ready",
+                    "draining"
+                  ]
+                },
+                "latestServerSeq": {
+                  "type": "string",
+                  "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                },
+                "signalWatermarks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "watermark": {
+                        "type": "string",
+                        "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "watermark"
+                    ],
+                    "additionalProperties": {
+                      "$ref": "#/definitions/__schema0"
+                    }
+                  }
+                },
+                "lastCommittedScene": {
+                  "type": "object",
+                  "properties": {
+                    "sceneId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    },
+                    "cycleId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "const": "committed"
+                    },
+                    "committedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "sceneId",
+                    "cycleId",
+                    "status",
+                    "committedAtMs"
+                  ],
+                  "additionalProperties": {
+                    "$ref": "#/definitions/__schema0"
+                  }
+                },
+                "activeScene": {
+                  "type": "null"
+                },
+                "openMediaStreams": {
+                  "maxItems": 0,
+                  "type": "array",
+                  "items": {}
+                },
+                "runtimeVersion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "generatedAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "reason",
+                "sessionId",
+                "sessionStatus",
+                "latestServerSeq",
+                "signalWatermarks",
+                "activeScene",
+                "openMediaStreams",
+                "runtimeVersion",
+                "generatedAtMs"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            }
+          },
+          "required": [
+            "snapshot"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.prepared"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cues": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cueId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "lane": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  }
+                },
+                "required": [
+                  "cueId",
+                  "lane"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
+              }
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "cues"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.committed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "committedAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "committedAtMs"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.cancelled"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "reason"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "media.stream.open"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "mediaKind": {
+              "type": "string",
+              "enum": [
+                "audio",
+                "viseme",
+                "binary-test"
+              ]
+            },
+            "contentType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "streamId",
+            "mediaKind",
+            "contentType"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "media.stream.closed"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "streamId",
+            "reason"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "error"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "invalid_message",
+                    "unsupported_version",
+                    "unauthorized",
+                    "deadline_exceeded",
+                    "backpressure",
+                    "not_ready",
+                    "internal_error"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                },
+                "retryable": {
+                  "type": "boolean"
+                },
+                "details": {
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/__schema0"
+                    }
+                  ]
+                },
+                "traceId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{32}$"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "retryable",
+                "traceId"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    }
+  ],
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

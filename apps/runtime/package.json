@@ -1,0 +1,38 @@
+{
+  "name": "@bellis/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "本地 Runtime：Fastify 边缘、Control/Media WebSocket 适配与生命周期编排（P4 交付）",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "lint": "oxlint src",
+    "format:check": "oxfmt --check src"
+  },
+  "dependencies": {
+    "@bellis/contracts": "workspace:*",
+    "@bellis/observability": "workspace:*",
+    "@bellis/persistence": "workspace:*",
+    "@bellis/transport": "workspace:*"
+  },
+  "devDependencies": {
+    "@bellis/testkit": "workspace:*",
+    "fastify": "5.12.1",
+    "vitest": "4.1.11"
+  }
+}

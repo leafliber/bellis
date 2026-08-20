@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "enum": [
+        "invalid_message",
+        "unsupported_version",
+        "unauthorized",
+        "deadline_exceeded",
+        "backpressure",
+        "not_ready",
+        "internal_error"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "details": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/__schema0"
+        }
+      ]
+    },
+    "traceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  },
+  "required": [
+    "code",
+    "message",
+    "retryable",
+    "traceId"
+  ],
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,3 @@
+# 统一全平台行尾为 LF：Windows CI runner 的 Git 默认 core.autocrlf=true，
+# 会在 checkout 时把 LF 转成 CRLF，导致 oxfmt --check 误报格式不符。
+* text=auto eol=lf

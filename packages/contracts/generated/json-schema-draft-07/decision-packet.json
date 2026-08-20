@@ -1,0 +1,1782 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "cycleId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "toolCalls": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "toolRunId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          "toolName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "arguments": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/definitions/__schema0"
+            }
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "toolRunId",
+          "toolName",
+          "arguments"
+        ],
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
+      }
+    },
+    "action": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "hardLanes": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  }
+                },
+                "softTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "hardLanes"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "speech": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "purpose": {
+                  "type": "string",
+                  "enum": [
+                    "answer",
+                    "tool_notice",
+                    "aside",
+                    "reaction"
+                  ]
+                },
+                "interruptible": {
+                  "type": "boolean"
+                },
+                "emotion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "text",
+                "purpose",
+                "interruptible"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "avatar": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "motion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "motion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "expression"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "game": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "enum": [
+                          "at_scene_start",
+                          "after_speech",
+                          "independent"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "const": "at_speech_word"
+                      },
+                      "wordIndex": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation",
+                      "wordIndex"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "overlay": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "intentId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "content": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/__schema0"
+                      }
+                    ]
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "intentId",
+                  "kind"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "sync",
+            "speech"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "hardLanes": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  }
+                },
+                "softTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "hardLanes"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "speech": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "purpose": {
+                  "type": "string",
+                  "enum": [
+                    "answer",
+                    "tool_notice",
+                    "aside",
+                    "reaction"
+                  ]
+                },
+                "interruptible": {
+                  "type": "boolean"
+                },
+                "emotion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "text",
+                "purpose",
+                "interruptible"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "avatar": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "motion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "motion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "expression"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "game": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "enum": [
+                          "at_scene_start",
+                          "after_speech",
+                          "independent"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "const": "at_speech_word"
+                      },
+                      "wordIndex": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation",
+                      "wordIndex"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "overlay": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "intentId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "content": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/__schema0"
+                      }
+                    ]
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "intentId",
+                  "kind"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "sync",
+            "avatar"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "hardLanes": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  }
+                },
+                "softTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "hardLanes"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "speech": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "purpose": {
+                  "type": "string",
+                  "enum": [
+                    "answer",
+                    "tool_notice",
+                    "aside",
+                    "reaction"
+                  ]
+                },
+                "interruptible": {
+                  "type": "boolean"
+                },
+                "emotion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "text",
+                "purpose",
+                "interruptible"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "avatar": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "motion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "motion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "expression"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "game": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "enum": [
+                          "at_scene_start",
+                          "after_speech",
+                          "independent"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "const": "at_speech_word"
+                      },
+                      "wordIndex": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation",
+                      "wordIndex"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "overlay": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "intentId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "content": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/__schema0"
+                      }
+                    ]
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "intentId",
+                  "kind"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "sync",
+            "game"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "hardLanes": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  }
+                },
+                "softTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "hardLanes"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "speech": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "purpose": {
+                  "type": "string",
+                  "enum": [
+                    "answer",
+                    "tool_notice",
+                    "aside",
+                    "reaction"
+                  ]
+                },
+                "interruptible": {
+                  "type": "boolean"
+                },
+                "emotion": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "text",
+                "purpose",
+                "interruptible"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "avatar": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "motion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "motion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "channels": {
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "head",
+                            "eyes",
+                            "body",
+                            "mouth",
+                            "expression"
+                          ]
+                        }
+                      },
+                      "priority": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeInMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "fadeOutMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "interruptible": {
+                        "type": "boolean"
+                      },
+                      "exclusive": {
+                        "type": "boolean"
+                      },
+                      "mutexTags": {
+                        "maxItems": 16,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "expression": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "channels",
+                      "priority",
+                      "durationMs",
+                      "interruptible",
+                      "exclusive",
+                      "mutexTags",
+                      "expression"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "game": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "enum": [
+                          "at_scene_start",
+                          "after_speech",
+                          "independent"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "intentId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "skillId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "arguments": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/definitions/__schema0"
+                        }
+                      },
+                      "timeRelation": {
+                        "type": "string",
+                        "const": "at_speech_word"
+                      },
+                      "wordIndex": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "intentId",
+                      "skillId",
+                      "arguments",
+                      "timeRelation",
+                      "wordIndex"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "overlay": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "schemaVersion": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "intentId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "content": {
+                    "allOf": [
+                      {
+                        "$ref": "#/definitions/__schema0"
+                      }
+                    ]
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "schemaVersion",
+                  "intentId",
+                  "kind"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/definitions/__schema0"
+                }
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "sync",
+            "overlay"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "sync": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "hardLanes": {
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  }
+                },
+                "softTimeoutMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "hardLanes"
+              ],
+              "additionalProperties": {
+                "$ref": "#/definitions/__schema0"
+              }
+            },
+            "noOp": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "sync",
+            "noOp"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "next": {
+      "type": "string",
+      "enum": [
+        "finish",
+        "after_tools",
+        "continue"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "cycleId",
+    "toolCalls",
+    "action",
+    "next"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

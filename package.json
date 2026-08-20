@@ -1,0 +1,29 @@
+{
+  "name": "bellis",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bellis Autonomous Live — 自主游戏直播系统",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "format:check": "pnpm -r --if-present format:check",
+    "test": "pnpm -r --if-present test",
+    "test:integration": "pnpm -r --if-present test:integration",
+    "contracts:check": "node scripts/check-generated-contracts.mjs",
+    "runtime:check": "node scripts/verify-runtime-baseline.mjs",
+    "check": "pnpm runtime:check && pnpm typecheck && pnpm lint && pnpm format:check && pnpm contracts:check && pnpm test && pnpm test:integration",
+    "demo:phase1": "node scripts/phase-1-demo.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "oxfmt": "0.64.0",
+    "oxlint": "1.79.0",
+    "typescript": "7.0.2"
+  }
+}

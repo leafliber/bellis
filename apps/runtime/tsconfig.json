@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/observability" },
+    { "path": "../../packages/transport" },
+    { "path": "../../packages/persistence" }
+  ]
+}
