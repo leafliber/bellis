@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { DecimalStringSchema } from "../common/decimal-string.js";
 import { UuidSchema } from "../common/ids.js";
-import { extensibleJsonObject } from "../common/json-value.js";
+import {
+  escapeDangerousOwnKeys,
+  extensibleJsonObject,
+  rawExtensibleJsonObject,
+  restoreEscapedOwnKeys,
+} from "../common/json-value.js";
 import { ErrorEnvelopeSchema } from "../errors/error-envelope.js";
 import { CueLaneSchema } from "../scene/cue.js";
 import { Phase1SessionSnapshotSchema } from "../session/session-snapshot.js";
@@ -135,37 +140,66 @@ export const ErrorPayloadSchema = extensibleJsonObject({
   error: ErrorEnvelopeSchema,
 });
 
-/** type + payload 的判别联合：Envelope 外层校验通过后按 type 校验 Payload。 */
-export const ControlPayloadSchema = z.discriminatedUnion("type", [
-  extensibleJsonObject({ type: z.literal("server.hello"), payload: ServerHelloPayloadSchema }),
-  extensibleJsonObject({ type: z.literal("client.hello"), payload: ClientHelloPayloadSchema }),
-  extensibleJsonObject({ type: z.literal("server.ready"), payload: ServerReadyPayloadSchema }),
-  extensibleJsonObject({ type: z.literal("heartbeat.ping"), payload: HeartbeatPingPayloadSchema }),
-  extensibleJsonObject({ type: z.literal("heartbeat.pong"), payload: HeartbeatPongPayloadSchema }),
-  extensibleJsonObject({ type: z.literal("clock.ping"), payload: ClockPingPayloadSchema }),
-  extensibleJsonObject({ type: z.literal("clock.pong"), payload: ClockPongPayloadSchema }),
-  extensibleJsonObject({
-    type: z.literal("session.snapshot"),
-    payload: SessionSnapshotPayloadSchema,
-  }),
-  extensibleJsonObject({ type: z.literal("scene.prepared"), payload: ScenePreparedPayloadSchema }),
-  extensibleJsonObject({
-    type: z.literal("scene.committed"),
-    payload: SceneCommittedPayloadSchema,
-  }),
-  extensibleJsonObject({
-    type: z.literal("scene.cancelled"),
-    payload: SceneCancelledPayloadSchema,
-  }),
-  extensibleJsonObject({
-    type: z.literal("media.stream.open"),
-    payload: MediaStreamOpenPayloadSchema,
-  }),
-  extensibleJsonObject({
-    type: z.literal("media.stream.closed"),
-    payload: MediaStreamClosedPayloadSchema,
-  }),
-  extensibleJsonObject({ type: z.literal("error"), payload: ErrorPayloadSchema }),
-]);
+/**
+ * type + payload 的判别联合：Envelope 外层校验通过后按 type 校验 Payload。
+ *
+ * 成员用 rawExtensibleJsonObject（判别联合成员必须是 ZodObject）；对象级
+ * 危险扩展键（如 "__proto__"）由包裹整个联合的 preprocess/refine 统一
+ * 转义/还原，成员内嵌的 Payload 对象则各自携带转义（extensibleJsonObject）。
+ */
+export const ControlPayloadSchema = z
+  .preprocess(
+    escapeDangerousOwnKeys,
+    z.discriminatedUnion("type", [
+      rawExtensibleJsonObject({
+        type: z.literal("server.hello"),
+        payload: ServerHelloPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("client.hello"),
+        payload: ClientHelloPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("server.ready"),
+        payload: ServerReadyPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("heartbeat.ping"),
+        payload: HeartbeatPingPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("heartbeat.pong"),
+        payload: HeartbeatPongPayloadSchema,
+      }),
+      rawExtensibleJsonObject({ type: z.literal("clock.ping"), payload: ClockPingPayloadSchema }),
+      rawExtensibleJsonObject({ type: z.literal("clock.pong"), payload: ClockPongPayloadSchema }),
+      rawExtensibleJsonObject({
+        type: z.literal("session.snapshot"),
+        payload: SessionSnapshotPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.prepared"),
+        payload: ScenePreparedPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.committed"),
+        payload: SceneCommittedPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.cancelled"),
+        payload: SceneCancelledPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("media.stream.open"),
+        payload: MediaStreamOpenPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("media.stream.closed"),
+        payload: MediaStreamClosedPayloadSchema,
+      }),
+      rawExtensibleJsonObject({ type: z.literal("error"), payload: ErrorPayloadSchema }),
+    ]),
+  )
+  .refine(restoreEscapedOwnKeys);
 
 export type ControlPayload = z.infer<typeof ControlPayloadSchema>;

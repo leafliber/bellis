@@ -122,7 +122,21 @@ function envelope(overrides: Record<string, unknown>): Record<string, unknown> {
 
 export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
   "json-value": {
-    valid: [null, 0, -1.5, "文本", true, [], [1, "a", [null]], {}, { a: { b: [false] } }],
+    valid: [
+      null,
+      0,
+      -1.5,
+      "文本",
+      true,
+      [],
+      [1, "a", [null]],
+      {},
+      { a: { b: [false] } },
+      // 危险键是合法 JSON 键：JSON.parse 生成自有数据属性，Zod/Ajv 双侧
+      // 都必须接受（转义/还原后无损保留，见 json-value-lossless.test.ts）。
+      JSON.parse('{"__proto__":null}'),
+      JSON.parse('{"\\u0000prefix":1,"nested":{"__proto__":true}}'),
+    ],
     invalid: [BIGINT_PAYLOAD, undefined, () => {}, Symbol("x")],
   },
   "trace-context": {
@@ -604,6 +618,17 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
         occurredAtMs: 0,
         payload: {},
       },
+      // 危险键 payload 与记录级危险扩展键：三方一致接受且无损保留。
+      JSON.parse(`{
+        "schemaVersion": 1,
+        "recordId": "${MESSAGE_ID}",
+        "sessionId": "${SESSION_ID}",
+        "recordType": "load.record",
+        "traceId": "${TRACE_ID}",
+        "occurredAtMs": 0,
+        "payload": {"__proto__":null},
+        "__proto__": {"ext": true}
+      }`),
     ],
     invalid: [
       {
@@ -731,6 +756,8 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
           error: { code: "not_ready", message: "starting", retryable: true, traceId: TRACE_ID },
         },
       }),
+      // 危险键 payload 经 Envelope 的 JsonValueSchema 字段三方一致接受。
+      envelope({ direction: "server", seq: "0", payload: JSON.parse('{"__proto__":null}') }),
     ],
     invalid: [
       envelope({ direction: "server" }),
@@ -784,6 +811,9 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
       { type: "clock.pong", payload: { c0: "1", r1: "2", r2: "3" } },
       // r2≥r1 是服务端生产者不变量，不是 Schema 约束。
       { type: "clock.pong", payload: { c0: "5", r1: "9", r2: "7" } },
+      // 危险键在 payload 内层与成员对象自身层都必须被三方一致接受。
+      JSON.parse('{"type":"clock.ping","payload":{"c0":"1","__proto__":null}}'),
+      JSON.parse('{"type":"clock.ping","payload":{"c0":"1"},"__proto__":{"top":1}}'),
       {
         type: "server.hello",
         payload: {

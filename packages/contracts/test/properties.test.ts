@@ -91,4 +91,22 @@ describe("envelope JSON round-trip", () => {
       { numRuns: 200 },
     );
   });
+
+  it("payloads carrying a dangerous __proto__ key stay lossless (评审回归)", () => {
+    // fc.json 的键生成依赖随机种子，__proto__ 键只在个别种子出现（评审
+    // 复现 {"__proto__":null} → {}）。这里把危险键确定性地注入每个样本：
+    // 顶层 __proto__ 键 + 任意 JSON 嵌套值，任何种子下都必须逐字节等价。
+    fc.assert(
+      fc.property(fc.json(), decimalArb, (jsonText, sentAtUs) => {
+        const payload = JSON.parse(`{"wrapped":${jsonText},"__proto__":null}`) as unknown;
+        const envelope = {
+          ...serverEnvelope("1", sentAtUs),
+          payload,
+        };
+        const parsed = ServerControlEnvelopeSchema.parse(JSON.parse(JSON.stringify(envelope)));
+        expect(JSON.stringify(parsed.payload)).toBe(JSON.stringify(payload));
+      }),
+      { numRuns: 200 },
+    );
+  });
 });

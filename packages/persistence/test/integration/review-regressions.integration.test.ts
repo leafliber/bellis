@@ -14,6 +14,7 @@ import {
   cycleId,
   makeOutboxMessage,
   makeScene,
+  makeSessionRecord,
   outboxId,
   sceneId,
 } from "../helpers.js";
@@ -446,5 +447,23 @@ describe("评审回归 11：干净 stop 不残留定时器、不中止信号", (
     );
     // 干净停止不中止发布信号（挂起场景才中止，见回归 5）。
     expect(signals[0]?.aborted).toBe(false);
+  });
+});
+
+describe("评审回归 12：危险键 payload 跨 Worker/SQLite 无损往返", () => {
+  it('记录 payload 含 "__proto__" 键时读取逐字节等价', async () => {
+    // JSON 允许 "__proto__" 作为普通键；曾因 Zod record 重建静默丢键，
+    // payload 在 Worker 侧校验后变成 {}（contracts 修复 + 端到端回归）。
+    const payloadText = '{"__proto__":null,"nested":{"__proto__":{"k":[1]}},"plain":2}';
+    const record = makeSessionRecord({
+      recordId: "99999999-9999-4999-8999-000000000012",
+      recordType: "dangerous.payload",
+      payload: JSON.parse(payloadText),
+    });
+    await client.appendRecord({ record, trace: TRACE });
+    const records = await client.listRecords({ sessionId: SESSION_ID, limit: 10 });
+    const found = records.find((entry) => entry.recordId === record.recordId);
+    expect(found).toBeDefined();
+    expect(JSON.stringify(found?.payload)).toBe(payloadText);
   });
 });

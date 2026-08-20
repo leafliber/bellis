@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
+import {
+  JsonValueSchema,
+  extensibleJsonRecord,
+  extensibleJsonObject,
+} from "../common/json-value.js";
 import { UuidSchema } from "../common/ids.js";
 import { CueLaneSchema } from "../scene/cue.js";
 import { SyncLevelSchema } from "../scene/scene.js";
@@ -69,7 +73,7 @@ const gameIntentBaseShape = {
   schemaVersion: z.literal(1),
   intentId: UuidSchema,
   skillId: z.string().min(1).max(128),
-  arguments: z.record(z.string(), JsonValueSchema),
+  arguments: extensibleJsonRecord(JsonValueSchema),
 } as const;
 
 export const GameIntentSchema = z.discriminatedUnion("timeRelation", [

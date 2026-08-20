@@ -41,18 +41,18 @@ afterAll(async () => {
 
 describe("事件循环隔离", () => {
   it("批量写入期间主线程保持响应（定时器漂移有界）", async () => {
+    // 固定 25 轮 × 10ms 采样窗口，与写入完成解耦：无论批量写多早结束，
+    // 采样都跑满固定轮数，样本数是确定值，消除「写入先于采样结束导致
+    // 样本不足」的时序抖动（评审残留项：不得依赖写入时长）。
+    const SAMPLE_ROUNDS = 25;
     const drifts: number[] = [];
-    let sampling = true;
     const sampleLoop = (async () => {
       let lastTick = performance.now();
-      for (;;) {
+      for (let round = 0; round < SAMPLE_ROUNDS; round += 1) {
         await new Promise((resolve) => setTimeout(resolve, 10));
         const now = performance.now();
         drifts.push(now - lastTick);
         lastTick = now;
-        if (!sampling) {
-          break;
-        }
       }
     })();
 
@@ -71,10 +71,9 @@ describe("事件循环隔离", () => {
       );
     }
     await Promise.all(writes);
-    sampling = false;
     await sampleLoop;
 
-    expect(drifts.length).toBeGreaterThan(3);
+    expect(drifts).toHaveLength(SAMPLE_ROUNDS);
     // SQLite 全部在 Worker 线程执行；主线程只处理 Promise 微任务。
     // 阈值 250ms 覆盖 CI 抖动，仍远小于同步写 500 条的量级。
     expect(Math.max(...drifts)).toBeLessThan(250);
