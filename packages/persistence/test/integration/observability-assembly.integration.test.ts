@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { VirtualClock } from "@bellis/testkit";
 import { createInMemoryMetrics, createPinoLogger } from "@bellis/observability";
 import type { LoggerDestination, MetricSnapshot } from "@bellis/observability";
 import { createOutboxDispatcher, createPersistenceClient } from "../../src/index.js";
-import type { PersistenceClient } from "../../src/index.js";
+import type { EnsureSessionInput, PersistenceClient } from "../../src/index.js";
 import {
   SESSION_ID,
   TRACE,
@@ -27,6 +29,10 @@ import {
  * 每个用例使用独立的临时数据库（评审 2-P2-4）：共享数据库时，上一用例
  * Retry 退避到期后的遗留消息会被下一用例的 claim 批次重新领取（慢 CI 下
  * 实测领取到 [2, 4]），用例间因此存在真实的时间耦合。
+ *
+ * createAssembly 在初始化失败（migrate/ensureSession 抛错）时同样清理
+ * 临时目录与 Worker（评审 3-P3-3）——此时 assembly 尚未返回，调用方的
+ * finally 接不到手，"失败也清理" 由第三个用例验证。
  */
 
 interface Assembly {
@@ -34,15 +40,45 @@ interface Assembly {
   close: () => Promise<void>;
 }
 
-async function createAssembly(prefix: string): Promise<Assembly> {
-  const dataDirectory = createTempDataDirectory(prefix);
+interface AssemblyInit {
+  prefix: string;
+  /**
+   * 覆盖初始化 Session 序列（默认写入一次合法 Session）。测试可注入
+   * 冲突元数据（同 sessionId、不同 createdAtMs）触发 ensureSession 的
+   * session_conflict，用于验证初始化失败路径的清理（评审 3-P3-3）。
+   */
+  sessions?: EnsureSessionInput[];
+}
+
+async function createAssembly(init: AssemblyInit): Promise<Assembly> {
+  const dataDirectory = createTempDataDirectory(init.prefix);
   const client = createPersistenceClient({
     dataDirectory,
     worker: WORKER_FIXTURE,
     retryPolicy: { baseMs: 40, maxMs: 200, maxAttempts: 8, jitterSeed: 3 },
   });
-  await client.migrate();
-  await client.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE });
+  try {
+    await client.migrate();
+    for (const session of init.sessions ?? [
+      { sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE },
+    ]) {
+      await client.ensureSession(session);
+    }
+  } catch (error) {
+    // 初始化失败时调用方的 finally 尚未接手：临时目录与 Worker 必须在这里
+    // 自行清理；清理自身的失败只吞掉，绝不掩盖原始错误（评审 3-P3-3）。
+    try {
+      await client.close();
+    } catch {
+      // 尽力而为：close 失败不掩盖 migrate/ensureSession 的原始错误。
+    }
+    try {
+      cleanupTempDataDirectory(dataDirectory);
+    } catch {
+      // 同上：目录清理失败不掩盖原始错误。
+    }
+    throw error;
+  }
   return {
     client,
     close: async () => {
@@ -75,7 +111,7 @@ function deliveryTotal(snapshot: MetricSnapshot, result: string): number | undef
 
 describe("Outbox Dispatcher × Observability 真实装配", () => {
   it("delivered/retry/dead 三种结果都写入规范指标，Registry 零拒绝", async () => {
-    const assembly = await createAssembly("bellis-p2-obs-assembly-1-");
+    const assembly = await createAssembly({ prefix: "bellis-p2-obs-assembly-1-" });
     try {
       const metrics = createInMemoryMetrics();
       const lines: string[] = [];
@@ -142,7 +178,7 @@ describe("Outbox Dispatcher × Observability 真实装配", () => {
   });
 
   it("只领取本用例写入的消息，与上一用例的退避遗留完全隔离", async () => {
-    const assembly = await createAssembly("bellis-p2-obs-assembly-2-");
+    const assembly = await createAssembly({ prefix: "bellis-p2-obs-assembly-2-" });
     try {
       await commitWithOutbox(assembly.client, 4);
       const seen: string[] = [];
@@ -167,5 +203,27 @@ describe("Outbox Dispatcher × Observability 真实装配", () => {
     } finally {
       await assembly.close();
     }
+  });
+
+  it("cleans up the temp directory and worker when initialization fails (评审 3-P3-3)", async () => {
+    // 同 sessionId、不同 createdAtMs → ensureSession 确定性抛 session_conflict。
+    // 此时 assembly 尚未返回、调用方 finally 未接手，清理必须由
+    // createAssembly 自己完成。
+    const prefix = "bellis-p2-obs-assembly-fail-";
+    const before = new Set(readdirSync(tmpdir()));
+    await expect(
+      createAssembly({
+        prefix,
+        sessions: [
+          { sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE },
+          { sessionId: SESSION_ID, createdAtMs: 2, trace: TRACE },
+        ],
+      }),
+    ).rejects.toThrow("session already exists");
+    // 失败路径同样清理：本测试期间创建的、带唯一前缀的临时目录不残留。
+    const leftovers = readdirSync(tmpdir()).filter(
+      (entry) => !before.has(entry) && entry.startsWith(prefix),
+    );
+    expect(leftovers).toEqual([]);
   });
 });

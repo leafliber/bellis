@@ -185,6 +185,32 @@ describe("redactValue", () => {
     const wrapped = redactValue({ hostile }) as Record<string, unknown>;
     expect(wrapped.hostile).toBe("[redaction-error]");
   });
+
+  it("keeps Error own properties and the cause inside safe recursion (评审 3-P2-1)", () => {
+    // 敌意对象藏在 Error 自有属性或 cause 里：属性读取本身受保护，但其
+    // 递归净化若不走 safeRedactNode，公开 serializeErrorForLog 会被穿透。
+    const hostile = new Proxy(
+      {},
+      {
+        getPrototypeOf() {
+          throw new Error("nested trap");
+        },
+      },
+    );
+    const withHostileProperty = Object.assign(new Error("boom"), { meta: hostile });
+    const direct = serializeErrorForLog(withHostileProperty) as Record<string, unknown>;
+    expect(direct.meta).toBe("[redaction-error]");
+    expect(direct.message).toBe("boom");
+    const viaValue = redactValue(withHostileProperty) as Record<string, unknown>;
+    expect(viaValue.meta).toBe("[redaction-error]");
+    expect(viaValue.message).toBe("boom");
+
+    const withHostileCause = new Error("wrapped");
+    withHostileCause.cause = hostile;
+    const causeOutput = serializeErrorForLog(withHostileCause) as Record<string, unknown>;
+    expect(causeOutput.cause).toBe("[redaction-error]");
+    expect(causeOutput.message).toBe("wrapped");
+  });
 });
 
 describe("serializeErrorForLog", () => {
@@ -316,6 +342,26 @@ describe("serializeErrorForLog", () => {
     expect(scrubbed).toContain("2026/08/20");
     expect(scrubbed).toContain("a / b");
     expect(scrubbed).toContain("src/a/b.ts");
+  });
+
+  it("scrubs single-segment paths with spaces anchored by :line:column (评审 3-P2-2)", () => {
+    // 单段 + 含空格的文件名没有第二个分隔符可供多段分支锚定；以 V8 堆栈
+    // 位置的 `:line:column` 收尾作锚，整段替换，` file.ts` 后缀不残留。
+    const stack = [
+      "Error: spaced",
+      "    at spaced (/secret file.ts:1:1)",
+      "    at win (C:\\secret file.ts:2:2)",
+      "    at plain (/secret.ts:3:3)",
+    ].join("\n");
+    const output = serializeErrorForLog(Object.assign(new Error("spaced"), { stack }));
+    const scrubbed = output.stack as string;
+    expect(scrubbed).toContain("at spaced (<path>)");
+    expect(scrubbed).toContain("at win (<path>)");
+    expect(scrubbed).toContain("at plain (<path>)");
+    expect(scrubbed).not.toContain("secret");
+    expect(scrubbed).not.toContain("file.ts");
+    // 普通文本里的空格斜杠不受 :line:column 分支影响。
+    expect(scrubbed).toContain("Error: spaced");
   });
 
   it("degrades unenumerable (proxy-trapped) objects and invalid dates stably", () => {

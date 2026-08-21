@@ -47,13 +47,16 @@ export function isSensitiveFieldName(key: string): boolean {
 function scrubPaths(text: string): string {
   // 匹配绝对路径形态：Unix `/…`、Windows 盘符 `C:\…` 或 UNC `\\…`。
   // 匹配起点须在词边界之后（行首/空白/引号/括号等），因此 `and/or`、
-  // `2026/08/20` 这类单词内分隔符不受影响。两种形态：
+  // `2026/08/20` 这类单词内分隔符不受影响。三种形态：
   //  - 多段路径：段内允许空格，引号/尖括号/换行终止，`)` 之前结束以保留堆栈帧；
-  //  - 单段绝对路径（`/secret.ts`、`C:\secret.ts`）：匹配到最近的空白/引号/
-  //    括号为止，不跨越空格——普通文本中的 `a / b` 不会被吞掉。
+  //  - 单段路径但以 `:line:column` 收尾（V8 堆栈位置）：允许段内空格，括号/
+  //    引号/换行终止——`/secret file.ts:1:1`、`C:\secret file.ts:2:2` 整体
+  //    替换，含空格文件名不残留后缀（评审 3-P2-2）；
+  //  - 其余单段绝对路径（`/secret.ts`）：匹配到最近的空白/引号/括号为止，
+  //    不跨越空格——普通文本中的 `a / b` 不会被吞掉。
   // 同一行多个路径可能被并成一个匹配——过度替换只损失可读性，不泄露路径。
   return text.replace(
-    /(?<=^|[\s"'`()\]{}<>,;:=])(?:[A-Za-z]:)?(?:[\\/][^\n'"<>]*[\\/][^\n'"<>)]*|[\\/][^\s\n'"<>()]+)/g,
+    /(?<=^|[\s"'`()\]{}<>,;:=])(?:[A-Za-z]:)?(?:[\\/][^\n'"<>]*[\\/][^\n'"<>)]*|[\\/][^\n'"<>()]*:\d+:\d+|[\\/][^\s\n'"<>()]+)/g,
     "<path>",
   );
 }
@@ -279,7 +282,9 @@ export function serializeErrorForLog(
       defineField(out, key, "[getter-error]");
       continue;
     }
-    defineField(out, key, redactNode(propertyValue, seen, depth + 1));
+    // 自有属性值可能是嵌套敌意对象：递归必须经过 safeRedactNode，
+    // 否则公开 serializeErrorForLog 会被属性值内部的陷阱穿透（评审 3-P2-1）。
+    defineField(out, key, safeRedactNode(propertyValue, seen, depth + 1));
   }
   let cause: unknown;
   try {
@@ -288,7 +293,8 @@ export function serializeErrorForLog(
     cause = undefined;
   }
   if (cause !== undefined && cause !== null && depth < MAX_ERROR_CAUSE_DEPTH) {
-    defineField(out, "cause", redactNode(cause, seen, depth + 1));
+    // cause 同样可能是敌意对象，与自有属性走同一保护（评审 3-P2-1）。
+    defineField(out, "cause", safeRedactNode(cause, seen, depth + 1));
   }
   return out;
 }
