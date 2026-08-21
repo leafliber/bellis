@@ -301,4 +301,41 @@ describe("InMemoryMetrics semantics", () => {
     expect(snapshot.seriesCount).toBe(1);
     expect(snapshot.counters[0]?.value).toBe(1);
   });
+
+  it("rejects hostile label objects (throwing getters / proxy traps) instead of throwing (评审 2-P1)", () => {
+    const rejections: MetricsRejection[] = [];
+    const metrics = createInMemoryMetrics({ onError: (r) => rejections.push(r) });
+    const hostile: Record<string, string> = {};
+    Object.defineProperty(hostile, "channel", {
+      get() {
+        throw new Error("label getter");
+      },
+      enumerable: true,
+    });
+    const trapped = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error("ownKeys trap");
+        },
+      },
+    ) as unknown as Record<string, string>;
+
+    expect(() => metrics.counter("bellis_ws_dropped_messages_total", hostile).inc(3)).not.toThrow();
+    expect(() => metrics.gauge("bellis_ws_connections", trapped).set(1)).not.toThrow();
+    expect(() =>
+      metrics.histogram("bellis_db_operation_duration_ms", hostile).observe(1),
+    ).not.toThrow();
+    const snapshot = metrics.snapshot();
+    expect(snapshot.rejectedOperations).toBe(3);
+    expect(snapshot.counters).toHaveLength(0);
+    expect(snapshot.gauges).toHaveLength(0);
+    expect(snapshot.histograms).toHaveLength(0);
+    expect(rejections.every((r) => r.reason === "invalid-label-value")).toBe(true);
+    // 拒绝之后 Registry 仍正常服务后续合法写入。
+    metrics
+      .counter("bellis_ws_dropped_messages_total", { channel: "control", reason: "overflow" })
+      .inc();
+    expect(metrics.snapshot().counters[0]?.value).toBe(1);
+  });
 });

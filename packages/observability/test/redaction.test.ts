@@ -145,6 +145,46 @@ describe("redactValue", () => {
     expect(Object.hasOwn(output, "__proto__")).toBe(true);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
+
+  it("replaces throwing array index getters with [getter-error] (评审 2-P2)", () => {
+    const arr = [1, 2, 3];
+    Object.defineProperty(arr, 1, {
+      get() {
+        throw new Error("array getter");
+      },
+      configurable: true,
+    });
+    // 直接调用公开入口与嵌套在对象里两种形态都不抛错，其余元素保留。
+    expect(redactValue(arr)).toEqual([1, "[getter-error]", 3]);
+    const wrapped = redactValue({ arr }) as Record<string, unknown>;
+    expect(wrapped.arr).toEqual([1, "[getter-error]", 3]);
+
+    const trapped = new Proxy([7], {
+      get(target, prop) {
+        if (prop === "0") {
+          throw new Error("proxy array getter");
+        }
+        return Reflect.get(target, prop);
+      },
+    });
+    expect(redactValue(trapped)).toEqual(["[getter-error]"]);
+  });
+
+  it("degrades unforeseen traps to [redaction-error] without throwing from the public entry", () => {
+    // instanceof 会触发 Proxy 的 getPrototypeOf 陷阱——这是逐项保护覆盖不到的
+    // 路径，最终兜底必须接住（直接调用与嵌套两种形态）。
+    const hostile = new Proxy(
+      {},
+      {
+        getPrototypeOf() {
+          throw new Error("prototype trap");
+        },
+      },
+    );
+    expect(redactValue(hostile)).toBe("[redaction-error]");
+    const wrapped = redactValue({ hostile }) as Record<string, unknown>;
+    expect(wrapped.hostile).toBe("[redaction-error]");
+  });
 });
 
 describe("serializeErrorForLog", () => {
@@ -254,6 +294,28 @@ describe("serializeErrorForLog", () => {
     ]) {
       expect(scrubbed).not.toContain(leaked);
     }
+  });
+
+  it("scrubs single-segment absolute paths but keeps word-internal separators (评审 2-P2)", () => {
+    const stack = [
+      "Error: keep and/or, date 2026/08/20, ratio a / b",
+      "    at single (/secret.ts:1:1)",
+      "    at win (C:\\secret.ts:2:2)",
+      "    at unc (\\\\share\\cfg.ini:3:3)",
+      "    at relative (src/a/b.ts:4:4)",
+    ].join("\n");
+    const output = serializeErrorForLog(Object.assign(new Error("keep"), { stack }));
+    const scrubbed = output.stack as string;
+    expect(scrubbed).toContain("at single (<path>)");
+    expect(scrubbed).toContain("at win (<path>)");
+    expect(scrubbed).toContain("at unc (<path>)");
+    expect(scrubbed).not.toContain("secret.ts");
+    expect(scrubbed).not.toContain("cfg.ini");
+    // 单词内分隔符、无路径语义的空格斜杠与相对路径不受影响。
+    expect(scrubbed).toContain("and/or");
+    expect(scrubbed).toContain("2026/08/20");
+    expect(scrubbed).toContain("a / b");
+    expect(scrubbed).toContain("src/a/b.ts");
   });
 
   it("degrades unenumerable (proxy-trapped) objects and invalid dates stably", () => {

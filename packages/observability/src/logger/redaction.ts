@@ -46,9 +46,16 @@ export function isSensitiveFieldName(key: string): boolean {
 /** 绝对路径（含堆栈中的文件位置）替换为 `<path>`，本地日志保留脱敏 Stack。 */
 function scrubPaths(text: string): string {
   // 匹配绝对路径形态：Unix `/…`、Windows 盘符 `C:\…` 或 UNC `\\…`。
-  // 路径内部允许空格；引号/尖括号/换行终止，`)` 之前结束以保留堆栈帧结构。
+  // 匹配起点须在词边界之后（行首/空白/引号/括号等），因此 `and/or`、
+  // `2026/08/20` 这类单词内分隔符不受影响。两种形态：
+  //  - 多段路径：段内允许空格，引号/尖括号/换行终止，`)` 之前结束以保留堆栈帧；
+  //  - 单段绝对路径（`/secret.ts`、`C:\secret.ts`）：匹配到最近的空白/引号/
+  //    括号为止，不跨越空格——普通文本中的 `a / b` 不会被吞掉。
   // 同一行多个路径可能被并成一个匹配——过度替换只损失可读性，不泄露路径。
-  return text.replace(/(?:[A-Za-z]:)?(?:\/|\\)[^\n'"<>]*[\\/][^\n'"<>)]*/g, "<path>");
+  return text.replace(
+    /(?<=^|[\s"'`()\]{}<>,;:=])(?:[A-Za-z]:)?(?:[\\/][^\n'"<>]*[\\/][^\n'"<>)]*|[\\/][^\s\n'"<>()]+)/g,
+    "<path>",
+  );
 }
 
 function truncateString(value: string): string {
@@ -73,10 +80,24 @@ export function defineField(target: Record<string, unknown>, key: string, value:
  * 递归净化任意值，返回可安全 JSON 序列化的新结构。
  * - 敏感字段 → "[redacted]"；bigint → 十进制字符串；
  * - 循环引用 → "[circular]"；超深 → "[depth-limit]"；
- * - Getter 抛错 → "[getter-error]"；超长字符串与超大对象截断。
+ * - Getter 抛错 → "[getter-error]"；超长字符串与超大对象截断；
+ * - 未预见的敌意陷阱 → "[redaction-error]"。公开入口对任何输入都不抛错。
  */
 export function redactValue(value: unknown): unknown {
-  return redactNode(value, new WeakSet<object>(), 0);
+  return safeRedactNode(value, new WeakSet<object>(), 0);
+}
+
+/**
+ * redactNode 的安全包装：任何未预见的陷阱（如 Proxy 的 getPrototypeOf
+ * 陷阱会让 instanceof 抛错）降级为 "[redaction-error]"，绝不向上传播。
+ * 所有递归调用点都必须经过本包装，嵌套敌意对象才同样受保护。
+ */
+function safeRedactNode(value: unknown, ancestors: WeakSet<object>, depth: number): unknown {
+  try {
+    return redactNode(value, ancestors, depth);
+  } catch {
+    return "[redaction-error]";
+  }
 }
 
 function redactNode(value: unknown, ancestors: WeakSet<object>, depth: number): unknown {
@@ -145,12 +166,27 @@ function redactArray(
 ): unknown[] {
   ancestors.add(items);
   const out: unknown[] = [];
-  for (const item of items) {
+  let length: number;
+  try {
+    length = items.length;
+  } catch {
+    ancestors.delete(items);
+    return ["[getter-error]"];
+  }
+  for (let i = 0; i < length; i += 1) {
     if (out.length >= MAX_OBJECT_KEYS) {
-      out.push(`[truncated ${items.length - out.length} more items]`);
+      out.push(`[truncated ${length - out.length} more items]`);
       break;
     }
-    out.push(redactNode(item, ancestors, depth + 1));
+    // 数组索引可能是抛错的访问器（或 Proxy get 陷阱）：逐项保护，其余元素保留。
+    let item: unknown;
+    try {
+      item = items[i];
+    } catch {
+      out.push("[getter-error]");
+      continue;
+    }
+    out.push(safeRedactNode(item, ancestors, depth + 1));
   }
   ancestors.delete(items);
   return out;
@@ -189,7 +225,7 @@ function redactRecord(
       defineField(out, key, "[getter-error]");
       continue;
     }
-    defineField(out, key, redactNode(propertyValue, ancestors, depth + 1));
+    defineField(out, key, safeRedactNode(propertyValue, ancestors, depth + 1));
   }
   ancestors.delete(source);
   return out;

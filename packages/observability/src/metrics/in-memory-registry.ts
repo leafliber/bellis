@@ -18,6 +18,7 @@ import type { MetricDefinition, MetricKind } from "./definitions.js";
  * - 只接受 PHASE_1_METRIC_DEFINITIONS 中声明的指标：未知指标名、类型不匹配、
  *   未允许 Label、非法 Label 值、非有限数值与负 Counter 增量都被稳定拒绝
  *   （丢弃本次操作、计数并回调 onError），绝不抛错阻塞业务路径。
+ *   敌意 Label 对象（抛错 Getter、Proxy 陷阱）同样被拒绝而不是抛出。
  * - Series 总量受 maxSeriesPerMetric / maxTotalSeries 上限约束，超限拒绝
  *   该新 Series 的创建并记录一次性告警；既有 Series 的更新不受影响。
  * - snapshot() 返回深冻结的不可变副本，不暴露内部 Map。
@@ -238,7 +239,20 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
       return null;
     }
     const normalized: Record<string, string> = {};
-    for (const [key, value] of Object.entries(labels ?? {})) {
+    // Object.entries 会读取每个自有属性：抛错 Getter / Proxy get·ownKeys 陷阱
+    // 在这里被拦截为一次拒绝，绝不向业务路径传播（评审 2-P1）。
+    let entries: [string, unknown][];
+    try {
+      entries = Object.entries(labels ?? {});
+    } catch {
+      reject({
+        reason: "invalid-label-value",
+        metric: name,
+        message: `labels object could not be read for metric ${name}`,
+      });
+      return null;
+    }
+    for (const [key, value] of entries) {
       if (!state.allowlist.has(key)) {
         reject({
           reason: "label-not-allowed",
@@ -289,133 +303,149 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
 
   const registry: InMemoryMetrics = {
     counter(name: string, labels?: MetricLabels): CounterMetric {
-      const resolved = resolveSeries(name, "counter", labels);
-      if (resolved === null) {
-        return noopCounter;
-      }
-      const state = states.get(name) as MetricState;
-      const key = resolved.seriesKey;
-      return {
-        inc: (value = 1) => {
-          try {
-            if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-              reject({
-                reason: "invalid-value",
-                metric: name,
-                message: `counter increment must be a finite non-negative number, got ${String(value)}`,
-              });
-              return;
-            }
-            const series = seriesMap<CounterSeries>(state, key, () => ({
-              labels: resolved.normalizedLabels,
-              value: 0,
-            }));
-            if (series !== null) {
-              // 两个有限数相加仍可能溢出为 Infinity；聚合结果必须保持有限，
-              // 否则快照经 JSON 序列化会变成 null（评审 P2-5）。
-              const next = series.value + value;
-              if (!Number.isFinite(next)) {
+      try {
+        const resolved = resolveSeries(name, "counter", labels);
+        if (resolved === null) {
+          return noopCounter;
+        }
+        const state = states.get(name) as MetricState;
+        const key = resolved.seriesKey;
+        return {
+          inc: (value = 1) => {
+            try {
+              if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
                 reject({
                   reason: "invalid-value",
                   metric: name,
-                  message: `counter aggregate overflow: ${series.value} + ${value}`,
+                  message: `counter increment must be a finite non-negative number, got ${String(value)}`,
                 });
                 return;
               }
-              series.value = next;
+              const series = seriesMap<CounterSeries>(state, key, () => ({
+                labels: resolved.normalizedLabels,
+                value: 0,
+              }));
+              if (series !== null) {
+                // 两个有限数相加仍可能溢出为 Infinity；聚合结果必须保持有限，
+                // 否则快照经 JSON 序列化会变成 null（评审 P2-5）。
+                const next = series.value + value;
+                if (!Number.isFinite(next)) {
+                  reject({
+                    reason: "invalid-value",
+                    metric: name,
+                    message: `counter aggregate overflow: ${series.value} + ${value}`,
+                  });
+                  return;
+                }
+                series.value = next;
+              }
+            } catch {
+              rejectedOperations += 1;
             }
-          } catch {
-            rejectedOperations += 1;
-          }
-        },
-      };
+          },
+        };
+      } catch {
+        // 最终兜底：工厂方法对任何敌意输入都返回 No-op，不阻塞业务路径。
+        rejectedOperations += 1;
+        return noopCounter;
+      }
     },
     gauge(name: string, labels?: MetricLabels): GaugeMetric {
-      const resolved = resolveSeries(name, "gauge", labels);
-      if (resolved === null) {
+      try {
+        const resolved = resolveSeries(name, "gauge", labels);
+        if (resolved === null) {
+          return noopGauge;
+        }
+        const state = states.get(name) as MetricState;
+        const key = resolved.seriesKey;
+        return {
+          set: (value) => {
+            try {
+              if (typeof value !== "number" || !Number.isFinite(value)) {
+                reject({
+                  reason: "invalid-value",
+                  metric: name,
+                  message: `gauge value must be a finite number, got ${String(value)}`,
+                });
+                return;
+              }
+              const series = seriesMap<GaugeSeries>(state, key, () => ({
+                labels: resolved.normalizedLabels,
+                value: 0,
+              }));
+              if (series !== null) {
+                series.value = value;
+              }
+            } catch {
+              rejectedOperations += 1;
+            }
+          },
+        };
+      } catch {
+        rejectedOperations += 1;
         return noopGauge;
       }
-      const state = states.get(name) as MetricState;
-      const key = resolved.seriesKey;
-      return {
-        set: (value) => {
-          try {
-            if (typeof value !== "number" || !Number.isFinite(value)) {
-              reject({
-                reason: "invalid-value",
-                metric: name,
-                message: `gauge value must be a finite number, got ${String(value)}`,
-              });
-              return;
-            }
-            const series = seriesMap<GaugeSeries>(state, key, () => ({
-              labels: resolved.normalizedLabels,
-              value: 0,
-            }));
-            if (series !== null) {
-              series.value = value;
-            }
-          } catch {
-            rejectedOperations += 1;
-          }
-        },
-      };
     },
     histogram(name: string, labels?: MetricLabels): HistogramMetric {
-      const resolved = resolveSeries(name, "histogram", labels);
-      if (resolved === null) {
+      try {
+        const resolved = resolveSeries(name, "histogram", labels);
+        if (resolved === null) {
+          return noopHistogram;
+        }
+        const state = states.get(name) as MetricState;
+        const key = resolved.seriesKey;
+        return {
+          observe: (value) => {
+            try {
+              if (typeof value !== "number" || !Number.isFinite(value)) {
+                reject({
+                  reason: "invalid-value",
+                  metric: name,
+                  message: `histogram observation must be a finite number, got ${String(value)}`,
+                });
+                return;
+              }
+              const series = seriesMap<HistogramSeries>(state, key, () => ({
+                labels: resolved.normalizedLabels,
+                count: 0,
+                sum: 0,
+                min: Number.POSITIVE_INFINITY,
+                max: Number.NEGATIVE_INFINITY,
+                bucketCounts: Array.from<number, number>({ length: state.buckets.length }, () => 0),
+              }));
+              if (series === null) {
+                return;
+              }
+              // 与 Counter 相同：sum 聚合必须保持有限，溢出则拒绝本次观测。
+              const nextSum = series.sum + value;
+              if (!Number.isFinite(nextSum)) {
+                reject({
+                  reason: "invalid-value",
+                  metric: name,
+                  message: `histogram sum overflow: ${series.sum} + ${value}`,
+                });
+                return;
+              }
+              series.count += 1;
+              series.sum = nextSum;
+              series.min = Math.min(series.min, value);
+              series.max = Math.max(series.max, value);
+              for (let i = 0; i < state.buckets.length; i += 1) {
+                const bound = state.buckets[i];
+                if (bound !== undefined && value <= bound) {
+                  series.bucketCounts[i] = (series.bucketCounts[i] ?? 0) + 1;
+                  break;
+                }
+              }
+            } catch {
+              rejectedOperations += 1;
+            }
+          },
+        };
+      } catch {
+        rejectedOperations += 1;
         return noopHistogram;
       }
-      const state = states.get(name) as MetricState;
-      const key = resolved.seriesKey;
-      return {
-        observe: (value) => {
-          try {
-            if (typeof value !== "number" || !Number.isFinite(value)) {
-              reject({
-                reason: "invalid-value",
-                metric: name,
-                message: `histogram observation must be a finite number, got ${String(value)}`,
-              });
-              return;
-            }
-            const series = seriesMap<HistogramSeries>(state, key, () => ({
-              labels: resolved.normalizedLabels,
-              count: 0,
-              sum: 0,
-              min: Number.POSITIVE_INFINITY,
-              max: Number.NEGATIVE_INFINITY,
-              bucketCounts: Array.from<number, number>({ length: state.buckets.length }, () => 0),
-            }));
-            if (series === null) {
-              return;
-            }
-            // 与 Counter 相同：sum 聚合必须保持有限，溢出则拒绝本次观测。
-            const nextSum = series.sum + value;
-            if (!Number.isFinite(nextSum)) {
-              reject({
-                reason: "invalid-value",
-                metric: name,
-                message: `histogram sum overflow: ${series.sum} + ${value}`,
-              });
-              return;
-            }
-            series.count += 1;
-            series.sum = nextSum;
-            series.min = Math.min(series.min, value);
-            series.max = Math.max(series.max, value);
-            for (let i = 0; i < state.buckets.length; i += 1) {
-              const bound = state.buckets[i];
-              if (bound !== undefined && value <= bound) {
-                series.bucketCounts[i] = (series.bucketCounts[i] ?? 0) + 1;
-                break;
-              }
-            }
-          } catch {
-            rejectedOperations += 1;
-          }
-        },
-      };
     },
     snapshot(): MetricSnapshot {
       const counters: CounterSeriesSnapshot[] = [];
