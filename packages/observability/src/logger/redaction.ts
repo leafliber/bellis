@@ -44,7 +44,7 @@ export function isSensitiveFieldName(key: string): boolean {
 }
 
 /**
- * 内容级脱敏（Gate 3 重开评审修复 1 + 复审/三审/四审修复）：
+ * 内容级脱敏（Gate 3 重开评审修复 1 + 复审~五审修复）：
  * Error.message/stack 与任意嵌入字符串可能携带凭证原值（如异常消息回显
  * `Authorization: …` 头、嵌套序列化的转义 JSON 片段），字段名匹配无法
  * 覆盖自由文本，必须在字符串内容层清理。两条规则：
@@ -52,23 +52,51 @@ export function isSensitiveFieldName(key: string): boolean {
  * 1. 敏感键值：名称匹配**复用字段级的同一份规范化敏感名称集合**
  *    （SENSITIVE_LOG_FIELD_NAMES → canonicalFieldName），且名称字符间
  *    允许任意非字母数字、非换行填充——与 canonicalFieldName「移除全部
- *    非字母数字」的语义对齐（`author.ization`/`auth/orization`/`api.key`
- *    与常见写法同形）；名称与 `:`/`=` 之间的填充任意长（嵌套
- *    JSON.stringify 每层使键关闭引号前的反斜杠序列翻倍再增一，
- *    1→3→7→…，不能按固定层数枚举）；值**整段到行尾**替换——单词级
- *    匹配在空格/分号/逗号/引号处停止，多片段值（多段 Cookie、未知
- *    scheme、Digest auth-param、`credentials=alice s3cret…` 多词值）
- *    必然残留尾段，只有整段才安全（复审/三审教训）。
- * 2. 裸 scheme 凭证（`Bearer/Basic/Digest…`，无键名前缀）：scheme 后
- *    整段到行尾替换——多片段 auth-param 同样只有整段才安全。
- * 与路径清理同一取舍：过度替换只损失可读性，绝不泄露原值。名称内外的
- * 填充绝不含换行（`\n`/`\r`）与字母数字——不跨行拼接名称、不吞并相邻
- * 日志行、不跨单词拼名。
+ *    非字母数字」的语义对齐；名称的每个字符、字符间填充与键值分隔符
+ *    （`:`/`=`）自身都可写成 JSON `\uXXXX` 转义（解码后即目标字符；
+ *    转义反斜杠序列任意长——嵌套 JSON.stringify 每层翻倍，不能按固定
+ *    层数枚举）；值**整段到行尾**替换——单词级匹配在空格/分号/逗号/
+ *    引号处停止，多片段值必然残留尾段，只有整段才安全（复审/三审教训）。
+ * 2. 裸 scheme 凭证（`Bearer/Basic/Digest…`，无键名前缀）：scheme 词
+ *    同样接受转义写法，scheme 后整段到行尾替换。
+ * 与路径清理同一取舍：过度替换只损失可读性，绝不泄露原值。填充绝不含
+ * 换行——明文 `\n`/`\r` 与转义 `\u000a`/`\u000d` 同样不得跨行拼接名称
+ * 或吞并相邻日志行；明文字母数字不出现在填充中，不跨单词拼名。
+ * 防回溯：所有反斜杠序列扫描分支带 (?<!\\) 起点守卫、填充元素恒定
+ * 宽度——长反斜杠串（Windows 路径、正则文本）不触发 O(n²) 回溯。
  */
 
-/** 规范名的文本形态：字符间允许任意非字母数字、非换行填充。 */
+/** 十六进制码位（4 位小写；外层 /i 同时覆盖大写十六进制与 U）。 */
+function hexCode(char: string): string {
+  return char.charCodeAt(0).toString(16).padStart(4, "0");
+}
+
+/**
+ * 规范名单个字符的文本形态：明文字符，或其 JSON `\uXXXX` 转义（小写
+ * 与大写两个码位都接受——`\u0069`/`\u0049` 均可代表 i；转义反斜杠
+ * 序列任意长）。转义分支带 (?<!\\) 起点守卫：反斜杠串内部 O(1) 失败。
+ */
+function nameCharPattern(char: string): string {
+  const lower = hexCode(char);
+  const upper = hexCode(char.toUpperCase());
+  const codes = lower === upper ? [lower] : [lower, upper];
+  return `(?:${char}|${codes.map((code) => `(?<!\\\\)\\\\+u${code}`).join("|")})`;
+}
+
+/**
+ * 填充元素（名称字符间、名称到分隔符之间），恒定宽度、无回溯放大：
+ * 1. JSON Unicode 转义（排除 `\u000a`/`\u000d`——转义形式的换行同样
+ *    不得跨行拼接）；
+ * 2. 孤立反斜杠（其后不是 u+4 位十六进制——长反斜杠串的非转义尾段
+ *    之外的每个反斜杠逐个消费，多反斜杠转义由此分解为多个元素）；
+ * 3. 其余任意非字母数字、非换行字符。
+ */
+const FILLER_ELEMENT =
+  "(?:\\\\u(?!000[ad])[0-9a-fA-F]{4}|\\\\(?!u[0-9a-fA-F]{4})|[^\\nA-Za-z0-9\\r\\\\])";
+
+/** 规范名的文本形态：字符可为明文或其转义，字符间为任意填充。 */
 function flexibleNamePattern(canonicalName: string): string {
-  return canonicalName.split("").join("[^\\nA-Za-z0-9\\r]*");
+  return canonicalName.split("").map(nameCharPattern).join(`${FILLER_ELEMENT}*`);
 }
 
 /** 长名在前，避免带填充的短名（如 `token`）先匹配截断长名。 */
@@ -81,17 +109,42 @@ function buildNameAlternation(canonicalNames: readonly string[]): string {
 
 const SENSITIVE_TEXT_CANONICAL_NAMES: readonly string[] = [...SENSITIVE_CANONICAL_NAMES];
 
-// 名称与 `:`/`=` 之间的填充同样允许任意非字母数字、非换行（吸收任意
-// 深度的转义引号/反斜杠序列），但必须**懒惰**锚定名称后的第一个分隔符：
-// 贪婪回溯会锚定到纯标点值内部的最后一个 `=`/`:`，把凭证保留进捕获组
-// （`token: -.___=` 反例）。值整段到行尾且不含 `\r`（保留 CRLF）。
+/**
+ * 名称起点锚：前一字符为非字母数字，**或**为一段解码后非字母数字的
+ * `\uXXXX` 转义——转义的十六进制尾字符本身可能是字母数字（如
+ * `\u002eauthorization` 解码后即 `.authorization`，按原始字符会被误判
+ * 为单词内部）。解码为字母数字的转义（`\u0031` = 1）仍然阻断，不跨
+ * 单词拼名。
+ */
+const NAME_START_ANCHOR =
+  "(?:(?<![A-Za-z0-9])|(?<=\\\\u(?!00(?:3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a]|7[0-9a]))[0-9a-f]{4}))";
+
+// 键值分隔符自身也可能被转义（`\u003a` = :、`\u003d` = =，分支带起点
+// 守卫）。名称后的填充**懒惰**锚定第一个分隔符——贪婪回溯会锚定到纯
+// 标点值内部的最后一个 `=`/`:`，把凭证保留进捕获组
+// （`authorization: -.___=` 反例）。值整段到行尾且不含 `\r`（保留 CRLF）。
 const SENSITIVE_KEY_VALUE_PATTERN = new RegExp(
-  `(\\b(?:${buildNameAlternation(SENSITIVE_TEXT_CANONICAL_NAMES)})[^\\nA-Za-z0-9\\r]*?[:=][ \\t]*)([^\\n\\r]*)`,
+  `(${NAME_START_ANCHOR}(?:${buildNameAlternation(SENSITIVE_TEXT_CANONICAL_NAMES)})${FILLER_ELEMENT}*?(?:[:=]|(?<!\\\\)\\\\+u003[ad])[ \\t]*)([^\\n\\r]*)`,
   "gi",
 );
 
-const SCHEME_CREDENTIAL_PATTERN =
-  /(\b(?:bearer|basic|digest|hoba|mutual|negotiate|ntlm|startuptoken)[ \t]+)[^\n\r]*/gi;
+const SCHEME_WORDS: readonly string[] = [
+  "bearer",
+  "basic",
+  "digest",
+  "hoba",
+  "mutual",
+  "negotiate",
+  "ntlm",
+  "startuptoken",
+];
+
+// 裸 scheme 词复用同一名称形态（含转义写法与起点锚）；scheme 与凭证
+// 的间隔还接受转义空格（`\u0020`）。scheme 后整段到行尾且不含 `\r`。
+const SCHEME_CREDENTIAL_PATTERN = new RegExp(
+  `(${NAME_START_ANCHOR}(?:${buildNameAlternation(SCHEME_WORDS)})(?:[ \\t]|(?<!\\\\)\\\\+u0020)+)[^\\n\\r]*`,
+  "gi",
+);
 
 /** 优先级：敏感键值整段 → 裸 scheme 整段（见上方注释）。 */
 function scrubSensitiveText(text: string): string {

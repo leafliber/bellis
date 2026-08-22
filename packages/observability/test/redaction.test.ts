@@ -22,6 +22,11 @@ function createThrowingGetterObject(): object {
   };
 }
 
+/** 字符的 JSON Unicode 转义源文本（\uXXXX）。 */
+function escapeCode(char: string): string {
+  return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+}
+
 describe("field name matching", () => {
   it("covers the full sensitive list case-insensitively", () => {
     for (const name of SENSITIVE_LOG_FIELD_NAMES) {
@@ -677,5 +682,103 @@ describe("content-level scrubbing round 4 (Gate 3 四审修复)", () => {
       expect(output, label).toContain("[redacted]");
       expect(output.includes(value), label).toBe(false);
     }
+  });
+});
+
+describe("content-level scrubbing round 5 (Gate 3 五审修复)", () => {
+  const CANARY = "CANARY_2a8f5e7c4b1d9630";
+
+  const PROBES: ReadonlyArray<[label: string, text: string]> = [
+    ["escapedNameCharI", `{"author\\u0069zation":"${CANARY}"}`],
+    ["escapedFirstChar", `{"\\u0061uthorization":"${CANARY}"}`],
+    ["escapedSeparator", `{"author\\u002eization":"${CANARY}"}`],
+    ["escapedUpperCode", `{"\\u0041uthorization":"${CANARY}"}`],
+    ["escapedColon", `authorization\\u003a ${CANARY}`],
+    ["escapedEquals", `token\\u003d${CANARY}`],
+  ];
+
+  it("decodes \\uXXXX-escaped names, separators and key-value separators", () => {
+    // 合法 JSON 允许把键名写成 {"author\u0069zation":…}——解码后即
+    // authorization；名称字符、名称内分隔符与 :/= 分隔符的转义形态
+    // 都必须识别（五审探针）。
+    for (const [label, text] of PROBES) {
+      const fieldOut = JSON.stringify(redactValue({ error: text }));
+      expect(fieldOut.includes(CANARY), label).toBe(false);
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(text)));
+      expect(errorOut.includes(CANARY), label).toBe(false);
+    }
+  });
+
+  it("escaped forms survive nested stringify (backslash doubling per layer)", () => {
+    let nested = `{"author\\u0069zation":"${CANARY}"}`;
+    for (let depth = 1; depth <= 3; depth += 1) {
+      nested = JSON.stringify({ payload: nested });
+      const fieldOut = JSON.stringify(redactValue({ error: nested }));
+      expect(fieldOut.includes(CANARY), `depth${depth}`).toBe(false);
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(nested)));
+      expect(errorOut.includes(CANARY), `depth${depth}`).toBe(false);
+    }
+  });
+
+  it("escaped newlines (\\u000a/\\u000d) do not join names across lines", () => {
+    for (const escapedBreak of ["\\u000a", "\\u000A", "\\u000d"]) {
+      const text = `first line ends t${escapedBreak}oken: ${CANARY}`;
+      const output = JSON.stringify(redactValue({ detail: text }));
+      expect(output).toContain(`oken: ${CANARY}`);
+      expect(output).not.toContain("[redacted]");
+    }
+  });
+
+  it("property: random \\uXXXX rewrites at stringify depth 0-3 never leak", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: SENSITIVE_LOG_FIELD_NAMES.length - 1 }),
+        fc.array(fc.boolean(), { minLength: 18, maxLength: 18 }),
+        fc.array(fc.constantFrom("none", "plain", "escape"), {
+          minLength: 18,
+          maxLength: 18,
+        }),
+        fc.array(fc.constantFrom(".", "_", "-", " "), {
+          minLength: 18,
+          maxLength: 18,
+        }),
+        fc.boolean(),
+        fc.constantFrom(":", "="),
+        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        fc.integer({ min: 0, max: 3 }),
+        fc.boolean(),
+        (
+          nameIndex,
+          charEscapes,
+          gapStyles,
+          gapChars,
+          escapeSep,
+          sepChar,
+          token,
+          depth,
+          asError,
+        ) => {
+          const baseName = SENSITIVE_LOG_FIELD_NAMES[nameIndex] ?? "token";
+          const canonicalName = baseName.toLowerCase().replace(/[^a-z0-9]/g, "");
+          let key = "";
+          canonicalName.split("").forEach((char, i) => {
+            const style = gapStyles[i] ?? "none";
+            const gapChar = gapChars[i] ?? ".";
+            key += style === "plain" ? gapChar : style === "escape" ? escapeCode(gapChar) : "";
+            key += (charEscapes[i] ?? false) ? escapeCode(char) : char;
+          });
+          const separator = escapeSep ? escapeCode(sepChar) : sepChar;
+          let payload = `{${key}${separator}"${token}"}`;
+          for (let level = 0; level < depth; level += 1) {
+            payload = JSON.stringify({ payload });
+          }
+          const output = asError
+            ? JSON.stringify(serializeErrorForLog(new Error(`body ${payload}`)))
+            : JSON.stringify(redactValue({ error: payload }));
+          expect(output.includes(token)).toBe(false);
+        },
+      ),
+      { numRuns: 200 },
+    );
   });
 });
