@@ -41,6 +41,15 @@ describe("StartupTokenService", () => {
     expect(results.filter((result) => result.ok).length).toBe(1);
   });
 
+  it("内部记录不保存原始 Token 值（P4 修复 10）", () => {
+    const tokens = new StartupTokenService();
+    const issued = tokens.issue();
+    expect(tokens.containsRawValue(issued.token)).toBe(false);
+    // 交换成功后同样不保存原值。
+    expect(tokens.exchange(issued.token).ok).toBe(true);
+    expect(tokens.containsRawValue(issued.token)).toBe(false);
+  });
+
   it("签发互不相同", () => {
     const tokens = new StartupTokenService();
     const first = tokens.issue().token;

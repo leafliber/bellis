@@ -41,68 +41,81 @@ const OriginSchema = z
 
 const PositiveInt = (max: number) => z.number().int().positive().max(max);
 
-const RuntimeConfigSchema = z.object({
-  host: BindHostSchema.default("127.0.0.1"),
-  /** 正式默认 17890；测试可注入随机空闲端口（0 = 由 OS 分配 loopback 临时端口）。 */
-  port: z.number().int().min(0).max(65_535).default(17_890),
-  allowedHosts: z.array(AllowedHostSchema).min(1).default(["127.0.0.1", "localhost"]),
-  /**
-   * 显式 Origin 允许列表；缺省时按 allowedHosts + 实际监听端口推导
-   * （http://<host>:<port>）。显式条目必须是 loopback http(s) URL。
-   */
-  allowedOrigins: z.array(OriginSchema).min(1).optional(),
-  /** 允许缺失 Origin 的非浏览器客户端；默认拒绝（P4 文档 §8）。 */
-  allowMissingOrigin: z.boolean().default(false),
-  /** 数据目录绝对路径；必填，无默认值。 */
-  dataDirectory: z
-    .string()
-    .min(1)
-    .refine((value) => isAbsolute(value), "dataDirectory must be an absolute path"),
-  runtimeVersion: z.string().min(1).max(64),
-  buildInfo: z
-    .object({
-      commit: z.string().min(1).max(64).optional(),
-      builtAtMs: z.number().int().nonnegative().optional(),
-    })
-    .default({}),
-  startupTokenTtlMs: PositiveInt(3_600_000).default(60_000),
-  sessionCookieName: z.string().min(1).max(64).default("bellis_session"),
-  logLevel: z.enum(["trace", "debug", "info", "warn", "error"]).default("info"),
-  shutdownGraceMs: PositiveInt(120_000).default(10_000),
-  limits: z
-    .object({
-      heartbeatIntervalMs: PositiveInt(600_000).default(30_000),
-      helloTimeoutMs: PositiveInt(600_000).default(10_000),
-      replayWindowCapacity: PositiveInt(100_000).default(512),
-      dedupCapacity: PositiveInt(1_000_000).default(1024),
-      maxControlTextBytes: PositiveInt(16 * 1024 * 1024).default(1_048_576),
-      sendQueue: z
-        .object({
-          maxMessages: PositiveInt(1_000_000).default(512),
-          maxBytes: PositiveInt(64 * 1024 * 1024).default(8 * 1024 * 1024),
-        })
-        .prefault({}),
-      maxMediaHeaderBytes: PositiveInt(1024 * 1024).default(16 * 1024),
-      maxMediaPayloadBytes: PositiveInt(64 * 1024 * 1024).default(1024 * 1024),
-      maxOpenStreams: PositiveInt(1024).default(8),
-      maxTotalStreams: PositiveInt(1_000_000).default(1024),
-      maxFramesPerStream: PositiveInt(10_000_000).default(65_536),
-    })
-    .prefault({}),
-  outbox: z
-    .object({
-      pollIntervalMs: PositiveInt(60_000).default(100),
-      leaseMs: PositiveInt(600_000).default(5_000),
-      claimLimit: PositiveInt(256).default(32),
-      stopGraceMs: PositiveInt(120_000).default(5_000),
-    })
-    .prefault({}),
-  persistence: z
-    .object({
-      defaultDeadlineMs: PositiveInt(120_000).default(10_000),
-    })
-    .prefault({}),
-});
+const RuntimeConfigSchema = z
+  .object({
+    host: BindHostSchema.default("127.0.0.1"),
+    /** 正式默认 17890；测试可注入随机空闲端口（0 = 由 OS 分配 loopback 临时端口）。 */
+    port: z.number().int().min(0).max(65_535).default(17_890),
+    allowedHosts: z.array(AllowedHostSchema).min(1).default(["127.0.0.1", "localhost"]),
+    /**
+     * 显式 Origin 允许列表；缺省时按 allowedHosts + 实际监听端口推导
+     * （http://<host>:<port>）。显式条目必须是 loopback http(s) URL。
+     */
+    allowedOrigins: z.array(OriginSchema).min(1).optional(),
+    /** 允许缺失 Origin 的非浏览器客户端；默认拒绝（P4 文档 §8）。 */
+    allowMissingOrigin: z.boolean().default(false),
+    /** 数据目录绝对路径；必填，无默认值。 */
+    dataDirectory: z
+      .string()
+      .min(1)
+      .refine((value) => isAbsolute(value), "dataDirectory must be an absolute path"),
+    runtimeVersion: z.string().min(1).max(64),
+    buildInfo: z
+      .object({
+        commit: z.string().min(1).max(64).optional(),
+        builtAtMs: z.number().int().nonnegative().optional(),
+      })
+      .default({}),
+    startupTokenTtlMs: PositiveInt(3_600_000).default(60_000),
+    sessionCookieName: z.string().min(1).max(64).default("bellis_session"),
+    logLevel: z.enum(["trace", "debug", "info", "warn", "error"]).default("info"),
+    shutdownGraceMs: PositiveInt(120_000).default(10_000),
+    limits: z
+      .object({
+        heartbeatIntervalMs: PositiveInt(600_000).default(30_000),
+        helloTimeoutMs: PositiveInt(600_000).default(10_000),
+        replayWindowCapacity: PositiveInt(100_000).default(512),
+        dedupCapacity: PositiveInt(1_000_000).default(1024),
+        maxControlTextBytes: PositiveInt(16 * 1024 * 1024).default(1_048_576),
+        sendQueue: z
+          .object({
+            maxMessages: PositiveInt(1_000_000).default(512),
+            maxBytes: PositiveInt(64 * 1024 * 1024).default(8 * 1024 * 1024),
+          })
+          .prefault({}),
+        maxMediaHeaderBytes: PositiveInt(1024 * 1024).default(16 * 1024),
+        maxMediaPayloadBytes: PositiveInt(64 * 1024 * 1024).default(1024 * 1024),
+        maxOpenStreams: PositiveInt(1024).default(8),
+        maxTotalStreams: PositiveInt(1_000_000).default(1024),
+        maxFramesPerStream: PositiveInt(10_000_000).default(65_536),
+      })
+      .prefault({}),
+    outbox: z
+      .object({
+        pollIntervalMs: PositiveInt(60_000).default(100),
+        leaseMs: PositiveInt(600_000).default(5_000),
+        claimLimit: PositiveInt(256).default(32),
+        stopGraceMs: PositiveInt(120_000).default(5_000),
+      })
+      .prefault({}),
+    persistence: z
+      .object({
+        defaultDeadlineMs: PositiveInt(120_000).default(10_000),
+      })
+      .prefault({}),
+  })
+  .superRefine((config, ctx) => {
+    // 跨字段约束：P1 ControlSession 构造要求 Replay Window 容量不超过
+    // 发送队列消息上限（否则 Upgrade 时构造失败）。无效组合必须在启动
+    // 前稳定失败，不允许进入装配。
+    if (config.limits.replayWindowCapacity > config.limits.sendQueue.maxMessages) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["limits", "replayWindowCapacity"],
+        message: `replayWindowCapacity (${config.limits.replayWindowCapacity}) must not exceed sendQueue.maxMessages (${config.limits.sendQueue.maxMessages})`,
+      });
+    }
+  });
 
 export type RuntimeConfigInput = z.input<typeof RuntimeConfigSchema>;
 
@@ -138,31 +151,38 @@ export function parseRuntimeConfig(input: unknown): ParseConfigResult {
 
 /**
  * 解析 Host 头的主机名（剥离端口；IPv6 [::1]:port 形式归一为 ::1）。
- * 返回 null 表示无法解析的欺骗值，一律拒绝。
+ * 返回 null 表示无法解析的欺骗值，一律拒绝：
+ * - 方括号形式只允许 `[host]` 或 `[host]:port`（port 为纯数字），
+ *   `[::1]evil` / `[::1]:17890evil` 等后缀欺骗返回 null；
+ * - 非 bracket、非多冒号形式按最后一个冒号剥端口；
+ * - 多冒号裸 IPv6 字面量整体作为主机名（不在允许列表内即被拒）。
  */
 export function normalizeHostHeader(hostHeader: string): string | null {
   const trimmed = hostHeader.trim().toLowerCase();
   if (trimmed.length === 0 || trimmed.length > 255) {
     return null;
   }
-  let hostname = trimmed;
   if (trimmed.startsWith("[")) {
     const end = trimmed.indexOf("]");
     if (end < 0) {
       return null;
     }
-    hostname = trimmed.slice(1, end);
-  } else if (trimmed.lastIndexOf(":") > 0 && trimmed.indexOf(":") !== trimmed.lastIndexOf(":")) {
-    // 多个冒号：裸 IPv6 字面量（无端口）
-    hostname = trimmed;
-  } else if (trimmed.includes(":")) {
-    hostname = trimmed.slice(0, trimmed.lastIndexOf(":"));
+    // ']' 之后只允许为空或 ":<纯数字端口>"。
+    const suffix = trimmed.slice(end + 1);
+    if (suffix !== "" && !/^:\d{1,5}$/.test(suffix)) {
+      return null;
+    }
+    return trimmed.slice(1, end);
   }
-  if (hostname === "::1" || hostname === "localhost" || hostname === "127.0.0.1") {
-    return hostname;
+  const colonCount = (trimmed.match(/:/g) ?? []).length;
+  if (colonCount > 1) {
+    // 多个冒号：裸 IPv6 字面量（无端口；带端口必须用方括号形式）。
+    return trimmed;
   }
-  // 127.0.0.0/8 其余成员按显式 allowedHosts 处理；这里仅做归一。
-  return hostname;
+  if (colonCount === 1) {
+    return trimmed.slice(0, trimmed.lastIndexOf(":"));
+  }
+  return trimmed;
 }
 
 /** 按实际监听端口解析生效的 Origin 允许列表。 */

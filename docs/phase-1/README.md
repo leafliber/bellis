@@ -7,26 +7,23 @@
 
 ## 1. 当前状态
 
-Phase 1 的 P0 / Gate 1 已合入，当前仓库已经具备：
+Phase 1 的 P0 / Gate 1 已合入；P1、P2、P3 已通过 Gate 2 合入；P4（Runtime 集成、
+故障验证与 Demo）已交付，等待 Gate 3 人工核查。当前仓库已经具备：
 
 - pnpm Monorepo、Node.js 26.5、TypeScript 7、ESM 与双平台 CI 基线。
 - `@bellis/contracts`、双 dialect JSON Schema、ADR 0001。
-- `MonotonicClock`、可用的 `VirtualClock`。
-- Observability 的最小 Port 与 No-op 实现。
-- Transport、Persistence、Runtime 的可编译包边界和待实现空壳。
+- `MonotonicClock`、可用的 `VirtualClock`（P1 交付 Transport 核心）。
+- SQLite DB Worker、原子 commitScene、Outbox 与恢复（P2 交付）。
+- Trace/Pino/Redaction/内存 Metrics 与确定性 Testkit（P3 交付）。
+- `apps/runtime` Fastify 边缘、Control/Media WS 适配、Fake Scene Commit、
+  崩溃恢复与 `pnpm demo:phase1`（P4 交付）。
 
-以下内容尚未完成：
-
-| 任务 | 内容 | 当前入口 | 详细文档 |
-| --- | --- | --- | --- |
-| P1 | Clock、Control WS、Binary Media WS | `packages/transport` 空壳 | [P1 Transport](./p1-transport.md) |
-| P2 | SQLite Worker、事务、Outbox、恢复 | `packages/persistence` 只有 Port | [P2 Persistence](./p2-persistence.md) |
-| P3 | Trace、Pino、Metrics、Testkit | Observability 只有 No-op | [P3 Observability/Testkit](./p3-observability-testkit.md) |
-| P4 | Runtime 集成、故障验证、Demo | `apps/runtime` 空壳，Demo 显式失败 | [P4 Runtime Integration](./p4-runtime-integration.md) |
-
-P4 已交付：`apps/runtime` 完成 Fastify 边缘、Control/Media WS 适配、
-Fake Scene Commit、崩溃恢复与 `pnpm demo:phase1`（提交 → 检查点强制终止
-→ 重启恢复）。
+| 任务 | 状态 | 详细文档 |
+| --- | --- | --- |
+| P1 | 已交付（Gate 2 通过） | [P1 Transport](./p1-transport.md) |
+| P2 | 已交付（Gate 2 通过） | [P2 Persistence](./p2-persistence.md) |
+| P3 | 已交付（Gate 2 通过） | [P3 Observability/Testkit](./p3-observability-testkit.md) |
+| P4 | 已交付（等待 Gate 3） | [P4 Runtime Integration](./p4-runtime-integration.md) |
 
 ## 2. 执行顺序
 

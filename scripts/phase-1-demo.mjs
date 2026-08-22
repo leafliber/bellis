@@ -384,6 +384,9 @@ async function main() {
 
     // 6-7. Fake Scene Commit（Speech/Avatar Cue + Watermark + Outbox）；
     //      仅在数据库 Commit 后观察 scene.committed。
+    //      先武装检查点 2（评审修复 8）：Dispatcher 在 Claim 前冻结，
+    //      目标 Outbox 在实例 1 内绝无发布机会。
+    instance1.send({ type: "arm", checkpoint: "after_scene_transaction_commit_before_outbox_dispatch" });
     const commitInput = {
       sessionId,
       sceneId: DEMO.sceneId,
@@ -396,7 +399,24 @@ async function main() {
       watermarks: [{ source: DEMO.watermarkSource, watermark: DEMO.watermark }],
     };
     instance1.send({ type: "commit", input: commitInput });
-    const committedReply = await instance1.expect("committed", "scene-commit");
+    // arm 先于提交：Dispatcher 冻结检查点与提交完成两条消息的先后不定，
+    // 顺序无关地收集两者。
+    let committedReply = null;
+    let checkpointMsg = null;
+    while (committedReply === null || checkpointMsg === null) {
+      const message = await instance1.next(15_000, "scene-commit");
+      if (message.type === "committed") {
+        committedReply = message;
+      } else if (message.type === "checkpoint") {
+        checkpointMsg = message;
+      } else if (
+        message.type === "harness-error" ||
+        message.type === "commit-error" ||
+        message.type === "recovery-error"
+      ) {
+        throw new DemoFailure("scene-commit", message.message ?? "harness error");
+      }
+    }
     if (committedReply.duplicate) {
       throw new DemoFailure("scene-commit", "first commit reported duplicate");
     }
@@ -414,11 +434,19 @@ async function main() {
       throw new DemoFailure("scene-commit", "scene.committed observed before durable DB fact");
     }
 
-    // 8. 检查点 after_scene_transaction_commit_before_outbox_dispatch 强制终止。
-    instance1.send({ type: "arm", checkpoint: "after_scene_transaction_commit_before_outbox_dispatch" });
-    const checkpoint = await instance1.expect("checkpoint", "crash", 15_000);
-    if (checkpoint.checkpoint !== "after_scene_transaction_commit_before_outbox_dispatch") {
-      throw new DemoFailure("crash", `unexpected checkpoint ${checkpoint.checkpoint}`);
+    // 8. 检查点 after_scene_transaction_commit_before_outbox_dispatch 强制终止
+    //    （检查点消息已在上方收到，这里只验证其身份）。
+    if (
+      checkpointMsg.checkpoint !== "after_scene_transaction_commit_before_outbox_dispatch"
+    ) {
+      throw new DemoFailure("crash", `unexpected checkpoint ${checkpointMsg.checkpoint}`);
+    }
+    const checkpoint = checkpointMsg;
+    // 目标状态严格对应：实例 1 零交付（目标 Outbox 尚未被 Claim/发布）。
+    instance1.send({ type: "deliveries" });
+    const beforeKill = await instance1.expect("deliveries", "crash");
+    if (beforeKill.records.length !== 0) {
+      throw new DemoFailure("crash", `expected 0 deliveries before kill, got ${beforeKill.records.length}`);
     }
     await instance1.kill("crash");
     control.close();

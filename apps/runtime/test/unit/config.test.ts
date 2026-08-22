@@ -63,6 +63,30 @@ describe("parseRuntimeConfig", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("跨字段约束：replayWindowCapacity 超过 sendQueue.maxMessages 在启动前拒绝（P4 修复 5）", () => {
+    const invalid = parseRuntimeConfig({
+      ...validBase,
+      limits: {
+        replayWindowCapacity: 513,
+        sendQueue: { maxMessages: 512, maxBytes: 8 * 1024 * 1024 },
+      },
+    });
+    expect(invalid.ok).toBe(false);
+    if (invalid.ok) {
+      return;
+    }
+    expect(invalid.issues.some((issue) => issue.path === "limits.replayWindowCapacity")).toBe(true);
+    // 合法组合通过。
+    const valid = parseRuntimeConfig({
+      ...validBase,
+      limits: {
+        replayWindowCapacity: 512,
+        sendQueue: { maxMessages: 512, maxBytes: 8 * 1024 * 1024 },
+      },
+    });
+    expect(valid.ok).toBe(true);
+  });
+
   it("非对象输入稳定失败", () => {
     for (const input of [null, undefined, 42, "config", []]) {
       expect(parseRuntimeConfig(input).ok).toBe(false);
@@ -78,10 +102,20 @@ describe("normalizeHostHeader", () => {
     expect(normalizeHostHeader("LOCALHOST")).toBe("localhost");
   });
 
-  it("欺骗与非法值返回 null", () => {
+  it("欺骗与非法值返回 null（含 IPv6 方括号后缀欺骗，P4 修复 6）", () => {
     expect(normalizeHostHeader("evil.example.com:80")).toBe("evil.example.com");
     expect(normalizeHostHeader("")).toBeNull();
     expect(normalizeHostHeader("[::1")).toBeNull();
+    // 方括号后只允许空或 :纯数字端口。
+    expect(normalizeHostHeader("[::1]evil")).toBeNull();
+    expect(normalizeHostHeader("[::1]:17890evil")).toBeNull();
+    expect(normalizeHostHeader("[::1]:17890x")).toBeNull();
+    expect(normalizeHostHeader("[::1]:")).toBeNull();
+    // 合法形式仍被归一。
+    expect(normalizeHostHeader("[::1]:17890")).toBe("::1");
+    expect(normalizeHostHeader("[::1]")).toBe("::1");
+    // 裸 IPv6 带欺骗后缀整体作为主机名（不在允许列表内即被拒）。
+    expect(normalizeHostHeader("::1:17890evil")).toBe("::1:17890evil");
   });
 });
 

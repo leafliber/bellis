@@ -56,11 +56,18 @@ let armedCheckpoint: PersistenceCheckpoint | null = null;
 const observer: PersistenceCheckpointObserver | undefined =
   mode === "armed"
     ? {
-        reached: (checkpoint: PersistenceCheckpoint) => {
+        reached: (
+          checkpoint: PersistenceCheckpoint,
+          context: { traceId: string; sceneId?: string; outboxId?: string },
+        ) => {
           if (armedCheckpoint !== checkpoint) {
             return Promise.resolve();
           }
-          notify({ type: "checkpoint", checkpoint });
+          notify({
+            type: "checkpoint",
+            checkpoint,
+            ...(context.outboxId === undefined ? {} : { outboxId: context.outboxId }),
+          });
           return new Promise<void>(() => {});
         },
       }

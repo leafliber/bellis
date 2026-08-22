@@ -28,11 +28,15 @@ let armedCheckpoint = null;
 const observer =
   mode === "armed"
     ? {
-        reached(checkpoint) {
+        reached(checkpoint, context) {
           if (armedCheckpoint !== checkpoint) {
             return Promise.resolve();
           }
-          notify({ type: "checkpoint", checkpoint });
+          notify({
+            type: "checkpoint",
+            checkpoint,
+            ...(context?.outboxId === undefined ? {} : { outboxId: context.outboxId }),
+          });
           return new Promise(() => {});
         },
       }

@@ -1,9 +1,10 @@
 import { MediaStreamClosedPayloadSchema, MediaStreamOpenPayloadSchema } from "@bellis/contracts";
 import type { ClientControlEnvelope, MonotonicClock, TraceContext } from "@bellis/contracts";
+import { parseDecimalString } from "@bellis/contracts";
 import type { RecoveryState, PersistenceClient } from "@bellis/persistence";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
-import { CONTROL_CLOSE_CODES, ControlSession } from "@bellis/transport";
-import type { ControlEffect, ServerEnqueueResult } from "@bellis/transport";
+import { CONTROL_CLOSE_CODES, ControlSession, decodeControlMessage } from "@bellis/transport";
+import type { ControlEffect, ControlLogicalState, ServerEnqueueResult } from "@bellis/transport";
 import type { WebSocket } from "ws";
 import { buildSessionSnapshot } from "../application/recovery.js";
 import type { BroadcastOutcome } from "../application/commit-fake-scene.js";
@@ -15,19 +16,23 @@ import type { LogicalSession } from "./session-store.js";
  *
  * 只负责 Socket 边界与 P1 Effect 映射：入站文本全部交给
  * `ControlSession.acceptClientMessage`（P1 完整校验，Route 中无
- * `JSON.parse as Type`）；出站全部来自 `tick()` 的 Effect：
+ * `JSON.parse as Type`）；出站 Effect 串行异步执行，顺序保证：
  *
- * - `send` → socket.write(text)
- * - `seq_advanced` → P2 `advanceServerSeq` 持久化最新分配水位
- *   （含瞬时消息；进程重启后不复用 Seq）
- * - `snapshot_required` → P2 `readRecoveryState` 构造 Phase1SessionSnapshot
- *   （activeScene 恒 null、openMediaStreams 恒空）
- * - `dropped` → 指标（类别+数量，不含 Payload）
- * - `close` → socket.close(code, reason)
+ * - `seq_advanced` → **先等待 P2 advanceServerSeq 成功落库**，才执行同一
+ *   消息的 `send`（P4 修复 2）。落库失败不得发送，连接降级关闭（1011）。
+ * - `send` → socket.send 的**成功回调**后才确认写出（P4 修复 11）；
+ *   广播等待者据此得到真实写出结果。
+ * - `snapshot_required` → Replay Gap 快照用**预加载**的恢复状态同步入队，
+ *   保证 `session.snapshot` 严格先于 `server.ready` 与后续业务消息
+ *   （P4 修复 3）。
+ * - `dropped` → 指标（类别+数量，不含 Payload）；`close` → socket.close。
  */
 
 const TICK_INTERVAL_US = 50_000n;
-const SEND_FLUSH_TIMEOUT_MS = 2_000;
+/** 等待 prepared 实际写出的上限；超时降级关闭连接（防 committed 反超）。 */
+const SEND_FLUSH_TIMEOUT_MS = 5_000;
+/** Seq 水位落库失败时的降级关闭码（P1 关闭码之外的内部错误）。 */
+const SEQ_PERSIST_FAILED_CLOSE = 1011;
 
 export interface ControlLimits {
   readonly heartbeatIntervalMs: number;
@@ -37,6 +42,13 @@ export interface ControlLimits {
   readonly maxControlTextBytes: number;
   readonly sendQueueMaxMessages: number;
   readonly sendQueueMaxBytes: number;
+}
+
+export interface ControlResumePlan {
+  /** 同进程导出状态（优先）或跨重启从 P2 水位构造的 resume。 */
+  readonly resume?: ControlLogicalState;
+  /** 预加载的 P2 恢复状态（Replay Gap 快照内容；可能为 null）。 */
+  readonly recoveryState: RecoveryState | null;
 }
 
 export interface ControlConnectionOptions {
@@ -49,26 +61,46 @@ export interface ControlConnectionOptions {
   readonly connections: ConnectionMetrics;
   readonly persistence: PersistenceClient;
   readonly limits: ControlLimits;
+  /**
+   * resume/恢复状态加载器（P4 修复 1/3）：同步挂接 Socket 监听后异步
+   * 解析；解析完成前入站消息进入有界缓冲，不丢失。
+   */
+  readonly loadResume: () => Promise<ControlResumePlan>;
 }
 
 type SendWaiter = (outcome: BroadcastOutcome) => void;
 
+interface BufferedMessage {
+  readonly data: unknown;
+  readonly isBinary: boolean;
+}
+
+const RESUME_INBOX_LIMIT = 256;
+const RESUME_FAILED_CLOSE = 1011;
+
 export class ControlConnection {
   readonly #socket: WebSocket;
   readonly #logical: LogicalSession;
-  readonly #session: ControlSession;
   readonly #clock: MonotonicClock;
   readonly #logger: LoggerPort;
   readonly #metrics: MetricsPort;
   readonly #connections: ConnectionMetrics;
   readonly #persistence: PersistenceClient;
   readonly #runtimeVersion: string;
+  readonly #limits: ControlLimits;
+  readonly #resumeLoader: () => Promise<ControlResumePlan>;
   readonly #pumpAbort = new AbortController();
   readonly #sendWaiters = new Map<string, SendWaiter[]>();
+  #session: ControlSession | null = null;
+  #recoveryState: RecoveryState | null = null;
+  /** resume 解析期间的入站缓冲（同步挂监听，零丢失）。 */
+  readonly #inbox: BufferedMessage[] = [];
   #pumpRunning = false;
   #pumpAgain = false;
   #finished = false;
   #lastPersistedSeq = 0n;
+  #helloHandled = false;
+  #snapshotEnqueued = false;
 
   constructor(options: ControlConnectionOptions) {
     this.#socket = options.socket;
@@ -79,31 +111,78 @@ export class ControlConnection {
     this.#connections = options.connections;
     this.#persistence = options.persistence;
     this.#runtimeVersion = options.runtimeVersion;
-    const resume = options.logical.exportedControlState;
-    this.#session = new ControlSession({
-      sessionId: options.logical.sessionId,
-      runtimeVersion: options.runtimeVersion,
-      clock: options.clock,
-      heartbeat: { intervalMs: options.limits.heartbeatIntervalMs },
-      helloTimeoutUs: BigInt(options.limits.helloTimeoutMs) * 1000n,
-      replayWindowCapacity: options.limits.replayWindowCapacity,
-      dedupCapacity: options.limits.dedupCapacity,
-      maxTextBytes: options.limits.maxControlTextBytes,
-      sendQueue: {
-        maxMessages: options.limits.sendQueueMaxMessages,
-        maxBytes: options.limits.sendQueueMaxBytes,
-      },
-      ...(resume === null ? {} : { resume }),
-      logger: options.logger,
-    });
-    // resume 状态已被本连接消费；断线时由 close 处理器重新导出。
-    options.logical.exportedControlState = null;
+    this.#limits = options.limits;
+    this.#resumeLoader = options.loadResume;
+    // 注意：不在构造器清空 exportedControlState——loader 稍后读取它
+    // （构造先于异步加载执行，提前清空会丢失同进程 resume 状态）。
     options.logical.control = this;
   }
 
-  /** 接入 Socket 并发送 server.hello（P1 在 resume 会话上先重放后 hello）。 */
+  /**
+   * 同步挂接 Socket 监听（Upgrade 与异步 resume 解析之间的入站消息进入
+   * 有界缓冲，不丢失），然后异步解析 resume → 构造 P1 ControlSession →
+   * 发送 server.hello → 按序回放入站缓冲。
+   */
   start(): void {
     this.#connections.acquire("control");
+    this.#socket.on("message", (data: unknown, isBinary: boolean) => {
+      if (this.#finished) {
+        return;
+      }
+      if (this.#session === null) {
+        if (this.#inbox.length >= RESUME_INBOX_LIMIT) {
+          this.#socket.terminate();
+          this.#handleSocketClosed("inbox_overflow");
+          return;
+        }
+        this.#inbox.push({ data, isBinary });
+        return;
+      }
+      this.#handleSocketMessage(data, isBinary);
+    });
+    this.#socket.on("close", () => this.#handleSocketClosed("close"));
+    this.#socket.on("error", (error: Error) => {
+      this.#logger.log("warn", "runtime_control_socket_error", {
+        sessionId: this.#logical.sessionId,
+        error: error.message,
+      });
+      this.#handleSocketClosed("error");
+    });
+    void this.#initialize();
+  }
+
+  async #initialize(): Promise<void> {
+    let plan: ControlResumePlan;
+    try {
+      plan = await this.#resumeLoader();
+    } catch (error) {
+      this.#logger.log("warn", "runtime_control_resume_failed", {
+        sessionId: this.#logical.sessionId,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+      this.#finish(RESUME_FAILED_CLOSE, "session resume failed");
+      return;
+    }
+    if (this.#finished) {
+      return;
+    }
+    this.#recoveryState = plan.recoveryState;
+    this.#session = new ControlSession({
+      sessionId: this.#logical.sessionId,
+      runtimeVersion: this.#runtimeVersion,
+      clock: this.#clock,
+      heartbeat: { intervalMs: this.#limits.heartbeatIntervalMs },
+      helloTimeoutUs: BigInt(this.#limits.helloTimeoutMs) * 1000n,
+      replayWindowCapacity: this.#limits.replayWindowCapacity,
+      dedupCapacity: this.#limits.dedupCapacity,
+      maxTextBytes: this.#limits.maxControlTextBytes,
+      sendQueue: {
+        maxMessages: this.#limits.sendQueueMaxMessages,
+        maxBytes: this.#limits.sendQueueMaxBytes,
+      },
+      ...(plan.resume === undefined ? {} : { resume: plan.resume }),
+      logger: this.#logger,
+    });
     const hello = this.#session.enqueueServerMessage({
       type: "server.hello",
       payload: this.#session.helloPayload(),
@@ -115,51 +194,55 @@ export class ControlConnection {
         status: hello.status,
       });
     }
-    this.#socket.on("message", (data: unknown, isBinary: boolean) => {
+    void this.#pumpLoop();
+    const buffered = this.#inbox.splice(0, this.#inbox.length);
+    for (const message of buffered) {
       if (this.#finished) {
         return;
       }
-      if (isBinary) {
-        // Control 通道只接受文本；二进制帧按协议错误关闭。
-        this.#session.enqueueServerMessage({
-          type: "error",
-          payload: {
-            error: {
-              code: "invalid_message",
-              message: "control channel accepts text frames only",
-              retryable: false,
-              traceId: this.#newTraceId(),
-            },
+      this.#handleSocketMessage(message.data, message.isBinary);
+    }
+  }
+
+  #handleSocketMessage(data: unknown, isBinary: boolean): void {
+    if (isBinary) {
+      // Control 通道只接受文本；二进制帧按协议错误关闭。
+      this.#session?.enqueueServerMessage({
+        type: "error",
+        payload: {
+          error: {
+            code: "invalid_message",
+            message: "control channel accepts text frames only",
+            retryable: false,
+            traceId: this.#newTraceId(),
           },
-          sentAtUs: this.#clock.nowUs(),
-        });
-        this.#session.close("binary_frame_rejected", CONTROL_CLOSE_CODES.protocol_error);
-        void this.#pump();
-        return;
-      }
-      const text =
-        typeof data === "string" ? data : Buffer.from(data as ArrayBufferLike).toString("utf8");
-      void this.#acceptText(text);
-    });
-    this.#socket.on("close", () => this.#handleSocketClosed("close"));
-    this.#socket.on("error", (error: Error) => {
-      this.#logger.log("warn", "runtime_control_socket_error", {
-        sessionId: this.#logical.sessionId,
-        error: error.message,
+        },
+        sentAtUs: this.#clock.nowUs(),
       });
-      this.#handleSocketClosed("error");
-    });
-    void this.#pumpLoop();
+      this.#session?.close("binary_frame_rejected", CONTROL_CLOSE_CODES.protocol_error);
+      void this.#pump();
+      return;
+    }
+    const text =
+      typeof data === "string" ? data : Buffer.from(data as ArrayBufferLike).toString("utf8");
+    void this.#acceptText(text);
   }
 
   /** 是否还能接收广播（活跃且未进入关闭）。 */
   acceptsBroadcast(): boolean {
-    return !this.#finished && this.#session.state !== "closed" && this.#socket.readyState === 1;
+    const session = this.#session;
+    return (
+      !this.#finished &&
+      session !== null &&
+      session.state !== "closed" &&
+      this.#socket.readyState === 1
+    );
   }
 
   /**
-   * Application 广播入口：enqueue + pump；`awaitSent` 时等到实际写出。
-   * 返回值不抛异常——发布是尽力而为的协议事件，事实以数据库为准。
+   * Application 广播入口：enqueue + pump；`awaitSent` 时等到 Socket 发送
+   * 回调成功（P4 修复 11）。等待超时降级关闭连接——committed（P1）不允许
+   * 在线上反超尚未写出的 prepared（P3）。
    */
   async broadcast(
     message: {
@@ -170,11 +253,12 @@ export class ControlConnection {
     },
     options?: { readonly awaitSent?: boolean },
   ): Promise<BroadcastOutcome> {
-    if (!this.acceptsBroadcast()) {
+    const session = this.#session;
+    if (session === null || !this.acceptsBroadcast()) {
       return "no_connection";
     }
     const messageId = crypto.randomUUID();
-    const result: ServerEnqueueResult = this.#session.enqueueServerMessage({
+    const result: ServerEnqueueResult = session.enqueueServerMessage({
       type: message.type,
       payload: message.payload,
       messageId,
@@ -201,7 +285,7 @@ export class ControlConnection {
     if (this.#finished) {
       return;
     }
-    this.#session.close(reason, CONTROL_CLOSE_CODES.server_shutdown);
+    this.#session?.close(reason, CONTROL_CLOSE_CODES.server_shutdown);
     void this.#pump();
   }
 
@@ -212,11 +296,43 @@ export class ControlConnection {
     this.#socket.terminate();
   }
 
+  /**
+   * Replay Gap 预判（P4 修复 3）：client.hello 携带 lastAck 且重放判定为
+   * snapshot_required 时，在 acceptClientMessage 之后、pump 排空之前
+   * **同步**入队 session.snapshot，随后才入队 server.ready——保证线上
+   * 顺序 replay（P1 先行缓冲）/ server.hello → session.snapshot →
+   * server.ready → 业务消息。
+   * （decodeControlMessage 是 P1 包根公开 API，非 Route 内裸 JSON.parse。）
+   */
+  #snapshotRequiredForHello(text: string): boolean {
+    const session = this.#session;
+    if (session === null) {
+      return false;
+    }
+    const decoded = decodeControlMessage(text);
+    if (!decoded.ok || decoded.value.type !== "client.hello") {
+      return false;
+    }
+    const lastAck = (decoded.value.payload as { lastAck?: unknown }).lastAck;
+    if (typeof lastAck !== "string") {
+      return false;
+    }
+    return session.replayAfter(parseDecimalString(lastAck)).status === "snapshot_required";
+  }
+
   async #acceptText(text: string): Promise<void> {
+    const session = this.#session;
+    if (session === null || this.#finished) {
+      return;
+    }
     const nowUs = this.#clock.nowUs();
+    let needsSnapshot = false;
+    if (!this.#helloHandled) {
+      needsSnapshot = this.#snapshotRequiredForHello(text);
+    }
     let accepted: ReturnType<ControlSession["acceptClientMessage"]>;
     try {
-      accepted = this.#session.acceptClientMessage(text, nowUs);
+      accepted = session.acceptClientMessage(text, nowUs);
     } catch (error) {
       this.#logger.log("error", "runtime_control_accept_crashed", {
         sessionId: this.#logical.sessionId,
@@ -226,7 +342,21 @@ export class ControlConnection {
     }
     if (accepted.status === "accepted") {
       try {
-        this.#handleAccepted(accepted.envelope, nowUs);
+        if (accepted.envelope.type === "client.hello") {
+          this.#helloHandled = true;
+          // 先快照后 ready（快照内容来自预加载状态，同步可用）。
+          if (needsSnapshot) {
+            this.#enqueueSnapshotFromPreloaded();
+          }
+          session.enqueueServerMessage({
+            type: "server.ready",
+            payload: {},
+            trace: { traceId: accepted.envelope.trace.traceId },
+            sentAtUs: nowUs,
+          });
+        } else {
+          this.#handleAccepted(accepted.envelope, nowUs);
+        }
       } catch (error) {
         this.#logger.log("error", "runtime_control_effect_failed", {
           sessionId: this.#logical.sessionId,
@@ -237,7 +367,7 @@ export class ControlConnection {
     } else if (accepted.status === "rejected" && !accepted.closeInitiated) {
       // P1 对普通拒绝只返回结果值；稳定错误响应由适配器入队
       // （closeInitiated=true 时 P1 已入队错误并进入关闭流程）。
-      this.#session.enqueueServerMessage({
+      session.enqueueServerMessage({
         type: "error",
         payload: {
           error: {
@@ -254,16 +384,36 @@ export class ControlConnection {
     await this.#pump();
   }
 
+  #enqueueSnapshotFromPreloaded(): boolean {
+    const session = this.#session;
+    if (session === null || this.#snapshotEnqueued) {
+      return this.#snapshotEnqueued;
+    }
+    if (this.#recoveryState === null) {
+      return false;
+    }
+    const snapshot = buildSessionSnapshot(this.#recoveryState, {
+      reason: "replay_gap",
+      sessionStatus: "ready",
+      runtimeVersion: this.#runtimeVersion,
+      generatedAtMs: Date.now(),
+    });
+    const enqueued = session.enqueueServerMessage({
+      type: "session.snapshot",
+      payload: { snapshot },
+      sentAtUs: this.#clock.nowUs(),
+    });
+    if (enqueued.status === "queued") {
+      this.#snapshotEnqueued = true;
+      return true;
+    }
+    return false;
+  }
+
   /** 已通过 P1 全量校验的客户端消息 → Application Effect 映射。 */
   #handleAccepted(envelope: ClientControlEnvelope, nowUs: bigint): void {
-    if (envelope.type === "client.hello") {
-      // 握手完成：声明会话就绪（空 Payload 的协议事件）。
-      this.#session.enqueueServerMessage({
-        type: "server.ready",
-        payload: {},
-        trace: { traceId: envelope.trace.traceId },
-        sentAtUs: nowUs,
-      });
+    const session = this.#session;
+    if (session === null) {
       return;
     }
     if (envelope.type === "media.stream.open") {
@@ -275,7 +425,7 @@ export class ControlConnection {
         contentType: payload.contentType,
       });
       if (opened.status === "rejected") {
-        this.#session.enqueueServerMessage({
+        session.enqueueServerMessage({
           type: "error",
           payload: {
             error: {
@@ -295,7 +445,7 @@ export class ControlConnection {
       const payload = MediaStreamClosedPayloadSchema.parse(envelope.payload);
       this.#logical.mediaStreams.close(payload.streamId);
       // 双向消息类型：服务端回执确认（Stream 关闭后不能复活）。
-      this.#session.enqueueServerMessage({
+      session.enqueueServerMessage({
         type: "media.stream.closed",
         payload: { streamId: payload.streamId, reason: "closed_by_client" },
         trace: { traceId: envelope.trace.traceId },
@@ -304,8 +454,12 @@ export class ControlConnection {
     }
   }
 
+  /**
+   * Effect 串行执行（P4 修复 2/11）：seq_advanced 落库成功后才执行对应
+   * send；send 以回调确认为准。任一 Seq 落库失败即停止发送并降级关闭。
+   */
   async #pump(): Promise<void> {
-    if (this.#finished) {
+    if (this.#finished || this.#session === null) {
       return;
     }
     if (this.#pumpRunning) {
@@ -318,7 +472,62 @@ export class ControlConnection {
         this.#pumpAgain = false;
         const effects: readonly ControlEffect[] = this.#session.tick(this.#clock.nowUs());
         for (const effect of effects) {
-          this.#executeEffect(effect);
+          // 连接已关闭：立即停止处理（await 期间可能发生关闭）。已分配
+          // 但未发送的 Seq 保留在导出状态/replay 窗口中，由重连连接在
+          // 实际发送时落库——避免旧连接关闭后继续写入水位，与重连连接
+          // 的 advanceServerSeq 竞争触发 seq_regression。
+          if (this.#finished) {
+            return;
+          }
+          if (effect.kind === "seq_advanced") {
+            if (effect.seq > this.#lastPersistedSeq) {
+              const persisted = await this.#persistServerSeqAwait(effect.seq);
+              if (this.#finished) {
+                return;
+              }
+              if (!persisted) {
+                this.#logger.log("error", "runtime_seq_persist_failed_close", {
+                  sessionId: this.#logical.sessionId,
+                  seq: effect.seq.toString(),
+                });
+                // 水位未落库：不得发送该消息（及后续），降级关闭连接。
+                this.#finish(SEQ_PERSIST_FAILED_CLOSE, "seq persistence failed");
+                return;
+              }
+              this.#lastPersistedSeq = effect.seq;
+            }
+            continue;
+          }
+          if (effect.kind === "send") {
+            const outcome = await this.#sendAwait(effect.text, effect.envelope.messageId);
+            this.#resolveWaiter(effect.envelope.messageId, outcome);
+            if (this.#finished) {
+              return;
+            }
+            continue;
+          }
+          if (effect.kind === "snapshot_required") {
+            // 兜底路径：预判未覆盖时（不应发生）用预加载状态补发。
+            if (!this.#enqueueSnapshotFromPreloaded()) {
+              this.#logger.log("warn", "runtime_snapshot_unavailable", {
+                sessionId: this.#logical.sessionId,
+              });
+            }
+            await this.#pump();
+            continue;
+          }
+          if (effect.kind === "dropped") {
+            this.#metrics
+              .counter("bellis_ws_dropped_messages_total", {
+                channel: "control",
+                reason: effect.reason,
+              })
+              .inc(effect.count);
+            continue;
+          }
+          // close：排空完成，按 Effect 的关闭码关闭 Socket。
+          this.#finish(effect.code, effect.reason);
+          return;
         }
       } while (this.#pumpAgain);
     } finally {
@@ -326,87 +535,27 @@ export class ControlConnection {
     }
   }
 
-  #executeEffect(effect: ControlEffect): void {
-    if (effect.kind === "send") {
-      if (this.#socket.readyState === 1) {
-        this.#socket.send(effect.text, (error) => {
-          if (error != null) {
-            this.#logger.log("warn", "runtime_control_send_failed", {
-              sessionId: this.#logical.sessionId,
-              error: error.message,
-            });
-            this.#handleSocketClosed("send_error");
-          }
-        });
+  /** Socket 写出：只在发送回调成功时确认（P4 修复 11）。 */
+  #sendAwait(text: string, messageId: string): Promise<BroadcastOutcome> {
+    return new Promise<BroadcastOutcome>((resolve) => {
+      if (this.#socket.readyState !== 1) {
+        resolve("unsent");
+        return;
       }
-      this.#resolveWaiter(effect.envelope.messageId, "sent");
-      return;
-    }
-    if (effect.kind === "seq_advanced") {
-      if (effect.seq > this.#lastPersistedSeq) {
-        this.#lastPersistedSeq = effect.seq;
-        this.#persistServerSeq(effect.seq);
-      }
-      return;
-    }
-    if (effect.kind === "snapshot_required") {
-      void this.#sendSnapshot();
-      return;
-    }
-    if (effect.kind === "dropped") {
-      this.#metrics
-        .counter("bellis_ws_dropped_messages_total", { channel: "control", reason: effect.reason })
-        .inc(effect.count);
-      return;
-    }
-    // close：排空完成，按 Effect 的关闭码关闭 Socket。
-    this.#finish(effect.code, effect.reason);
-  }
-
-  async #sendSnapshot(): Promise<void> {
-    if (this.#finished || !this.acceptsBroadcast()) {
-      return;
-    }
-    try {
-      const state: RecoveryState = await this.#persistence.readRecoveryState(
-        this.#logical.sessionId,
-      );
-      const snapshot = buildSessionSnapshot(state, {
-        reason: "replay_gap",
-        sessionStatus: "ready",
-        runtimeVersion: this.#runtimeVersion,
-        generatedAtMs: Date.now(),
+      this.#socket.send(text, (error) => {
+        if (error != null) {
+          this.#logger.log("warn", "runtime_control_send_failed", {
+            sessionId: this.#logical.sessionId,
+            messageId,
+            error: error.message,
+          });
+          this.#handleSocketClosed("send_error");
+          resolve("unsent");
+          return;
+        }
+        resolve("sent");
       });
-      const enqueued = this.#session.enqueueServerMessage({
-        type: "session.snapshot",
-        payload: { snapshot },
-        sentAtUs: this.#clock.nowUs(),
-      });
-      if (enqueued.status !== "queued") {
-        this.#logger.log("warn", "runtime_snapshot_enqueue_failed", {
-          sessionId: this.#logical.sessionId,
-          status: enqueued.status,
-        });
-      }
-    } catch (error) {
-      this.#logger.log("warn", "runtime_snapshot_failed", {
-        sessionId: this.#logical.sessionId,
-        error: error instanceof Error ? error.message : "unknown",
-      });
-      this.#session.enqueueServerMessage({
-        type: "error",
-        payload: {
-          error: {
-            code: "internal_error",
-            message: "failed to build session snapshot",
-            retryable: false,
-            traceId: this.#newTraceId(),
-          },
-        },
-        sentAtUs: this.#clock.nowUs(),
-      });
-    }
-    await this.#pump();
+    });
   }
 
   /** 周期 tick：Hello/心跳超时、Deadline 剪枝与队列排空。 */
@@ -431,6 +580,12 @@ export class ControlConnection {
     return new Promise<BroadcastOutcome>((resolve) => {
       const timer = setTimeout(() => {
         this.#removeWaiter(messageId, waiter);
+        // 超时降级：关闭连接，防止高优先级后续消息反超未写出的本消息。
+        this.#logger.log("warn", "runtime_control_flush_timeout", {
+          sessionId: this.#logical.sessionId,
+          messageId,
+        });
+        this.forceClose();
         resolve("unsent");
       }, SEND_FLUSH_TIMEOUT_MS);
       const waiter: SendWaiter = (outcome) => {
@@ -471,16 +626,19 @@ export class ControlConnection {
     }
   }
 
-  #persistServerSeq(seq: bigint): void {
+  /** Seq 水位落库（await 版本，P4 修复 2）。 */
+  async #persistServerSeqAwait(seq: bigint): Promise<boolean> {
     const trace: TraceContext = { traceId: this.#newTraceId(), sessionId: this.#logical.sessionId };
-    this.#persistence
-      .advanceServerSeq({ sessionId: this.#logical.sessionId, latestServerSeq: seq, trace })
-      .catch((error: unknown) => {
-        this.#logger.log("warn", "runtime_seq_persist_failed", {
-          sessionId: this.#logical.sessionId,
-          error: error instanceof Error ? error.message : "unknown",
-        });
+    try {
+      await this.#persistence.advanceServerSeq({
+        sessionId: this.#logical.sessionId,
+        latestServerSeq: seq,
+        trace,
       });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   #finish(code: number, reason: string): void {
@@ -497,14 +655,12 @@ export class ControlConnection {
     }
     this.#finished = true;
     this.#pumpAbort.abort();
-    // 导出逻辑状态供同进程重连 resume；并持久化最终 Seq 水位。
+    // 导出逻辑状态供同进程重连 resume；最终水位已随每次发送落库
+    // （修复 2），此处无需额外补偿写。
     if (this.#logical.control === this) {
       this.#logical.control = null;
-      const exported = this.#session.exportLogicalState();
-      this.#logical.exportedControlState = exported;
-      if (exported.nextSeq - 1n > this.#lastPersistedSeq) {
-        this.#lastPersistedSeq = exported.nextSeq - 1n;
-        this.#persistServerSeq(exported.nextSeq - 1n);
+      if (this.#session !== null) {
+        this.#logical.exportedControlState = this.#session.exportLogicalState();
       }
     }
     // Stream 是连接级资源：Control 关闭即全部关闭，重连后重新注册。
@@ -520,6 +676,7 @@ export class ControlConnection {
       }
     }
     this.#sendWaiters.clear();
+    void trigger;
   }
 
   #newTraceId(): string {

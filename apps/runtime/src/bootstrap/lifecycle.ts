@@ -43,9 +43,12 @@ import { buildServer } from "./server.js";
  * Dispatcher 启动 → ready=true。任一步失败逆序清理已创建资源，
  * ready 保持 false。
  *
- * 关闭（幂等）：ready=false → 停止接受新连接 → 通知 Control draining →
- * Abort Application → Dispatcher 停止 Claim（Grace 内结束批次）→
- * 关闭连接 → Persistence 关闭 → Fastify 关闭。
+ * 关闭（幂等，P4 修复 4）：ready=false → 停止接受新连接 → 通知 Control
+ * draining → 停止接收新提交并 Abort/等待在途 Application 任务 →
+ * Dispatcher 停止 Claim（Grace 内结束批次）→ 强制关闭残余连接 →
+ * Persistence 关闭 → Fastify 关闭。每个步骤独立捕获错误并聚合：任一步
+ * 抛错也保证剩余步骤执行、markClosed 与 closed 兑现；deadline 使用
+ * 配置的 shutdownGraceMs 与单调时钟。
  */
 
 export type RuntimePhase = "starting" | "ready" | "draining" | "closed";
@@ -95,9 +98,16 @@ export interface RuntimeOptions {
   readonly checkpointObserver?: PersistenceCheckpointObserver;
   /** 测试注入的持久化 Worker 装配（TS 源码 Worker）；生产留空。 */
   readonly persistenceWorker?: PersistenceWorkerOptions;
+  /**
+   * 测试注入的 PersistenceClient（包装延迟/失败注入用）；提供时不再
+   * 内部创建客户端，migrate/close 语义由注入对象承担。生产留空。
+   */
+  readonly persistenceClient?: PersistenceClient;
+  /** 测试注入 LoggerPort；生产默认 Pino(stdout)。 */
+  readonly logger?: LoggerPort;
   /** 测试注入时钟；生产为 SystemMonotonicClock。 */
   readonly clock?: MonotonicClock;
-  /** 日志输出口；生产默认 stdout。 */
+  /** Pino 日志输出口（仅默认 Pino 装配时生效）。 */
   readonly logDestination?: LoggerDestination;
   /** Metrics 注入（测试）；生产为 InMemoryMetrics。 */
   readonly metrics?: MetricsPort;
@@ -122,12 +132,34 @@ export interface RuntimeHandle {
   mediaFrameStats(sessionId: string): { accepted: number; rejected: number } | null;
   /** InMemory Metrics 快照（注入自定义 Metrics 时为 null）。 */
   metricsSnapshot(): ReturnType<InMemoryMetrics["snapshot"]> | null;
+  /**
+   * 优雅关闭（幂等；可处理重复调用与启动中关闭）。某一步骤失败时其余
+   * 步骤仍会执行，最终以聚合错误 reject；`closed` 仍然兑现。
+   */
   close(): Promise<void>;
-  /** 全部关闭资源后 resolve；重复 close 幂等。 */
+  /** 全部关闭资源后 resolve；即使 close() 本身抛错也会兑现。 */
   readonly closed: Promise<void>;
 }
 
-const DRAIN_WAIT_MS = 1_500;
+/** 合并多个 AbortSignal（任一触发即触发）。 */
+function mergeSignals(signals: readonly AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  const relay = (signal: AbortSignal): void => {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+  };
+  for (const signal of signals) {
+    relay(signal);
+  }
+  return controller.signal;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHandle> {
   const parsed = parseRuntimeConfig(options.config);
@@ -141,12 +173,27 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     );
   }
   const config = parsed.config;
-  const logger: LoggerPort = createPinoLogger({
-    service: "bellis-runtime",
-    version: config.runtimeVersion,
-    level: config.logLevel,
-    ...(options.logDestination === undefined ? {} : { destination: options.logDestination }),
-  });
+  let systemClock: SystemMonotonicClock | undefined;
+  let clock: MonotonicClock;
+  if (options.clock === undefined) {
+    systemClock = new SystemMonotonicClock();
+    clock = systemClock;
+  } else {
+    clock = options.clock;
+  }
+  const logger: LoggerPort =
+    options.logger ??
+    createPinoLogger({
+      service: "bellis-runtime",
+      version: config.runtimeVersion,
+      level: config.logLevel,
+      ...(options.logDestination === undefined ? {} : { destination: options.logDestination }),
+    });
+  if (options.logger !== undefined && options.logDestination !== undefined) {
+    logger.log("warn", "runtime_logger_options_conflict", {
+      message: "both logger and logDestination provided; injected logger wins",
+    });
+  }
   const inMemoryMetrics =
     options.metrics === undefined
       ? createInMemoryMetrics({
@@ -158,14 +205,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
         })
       : null;
   const metrics: MetricsPort = options.metrics ?? inMemoryMetrics ?? createInMemoryMetrics();
-  let systemClock: SystemMonotonicClock | undefined;
-  let clock: MonotonicClock;
-  if (options.clock === undefined) {
-    systemClock = new SystemMonotonicClock();
-    clock = systemClock;
-  } else {
-    clock = options.clock;
-  }
   const instanceId = randomUUID();
   const status = new RuntimeStatusView();
   const requestTraces = new RequestTraceStore();
@@ -179,23 +218,28 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
   });
   const publisher = createRecordingOutboxPublisher({ logger });
   const appAbort = new AbortController();
-  const persistence: PersistenceClient = createPersistenceClient({
-    dataDirectory: config.dataDirectory,
-    defaultDeadlineMs: config.persistence.defaultDeadlineMs,
-    logger,
-    ...(options.checkpointObserver === undefined
-      ? {}
-      : { checkpointObserver: options.checkpointObserver }),
-    ...(options.persistenceWorker === undefined ? {} : { worker: options.persistenceWorker }),
-  });
+  const ownsPersistence = options.persistenceClient === undefined;
+  const persistence: PersistenceClient =
+    options.persistenceClient ??
+    createPersistenceClient({
+      dataDirectory: config.dataDirectory,
+      defaultDeadlineMs: config.persistence.defaultDeadlineMs,
+      logger,
+      ...(options.checkpointObserver === undefined
+        ? {}
+        : { checkpointObserver: options.checkpointObserver }),
+      ...(options.persistenceWorker === undefined ? {} : { worker: options.persistenceWorker }),
+    });
 
   // —— 启动序列：任一步失败逆序清理已创建资源，ready 保持 false ——
-  try {
-    await persistence.migrate();
-  } catch (error) {
-    await persistence.close().catch(() => undefined);
-    systemClock?.close();
-    throw error;
+  if (ownsPersistence) {
+    try {
+      await persistence.migrate();
+    } catch (error) {
+      await persistence.close().catch(() => undefined);
+      systemClock?.close();
+      throw error;
+    }
   }
 
   const broadcast: ControlBroadcast = async (sessionId, message, broadcastOptions) => {
@@ -276,13 +320,75 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     throw error;
   }
 
-  let appInstance: NonNullable<typeof app> = app;
-  let dispatcherInstance: OutboxDispatcher = dispatcher;
+  const appInstance: NonNullable<typeof app> = app;
+  const dispatcherInstance: OutboxDispatcher = dispatcher;
+  const graceUs = BigInt(Math.max(1, config.shutdownGraceMs)) * 1000n;
+  const inflightCommits = new Set<Promise<unknown>>();
   let closeStarted = false;
   let closedResolve: (() => void) | null = null;
   const closed = new Promise<void>((resolve) => {
     closedResolve = resolve;
   });
+
+  /** 单步关闭：错误捕获并聚合，不阻断后续步骤（P4 修复 4）。 */
+  const closeSteps: Array<{ name: string; run: () => Promise<void> | void }> = [
+    {
+      name: "stop-listen",
+      run: () => {
+        // 只发起不等待：server.close() 回调要等现有连接全部结束，
+        // 现有连接由后续步骤排空，最终由 fastify.close 兜底回收。
+        appInstance.server.closeIdleConnections();
+        appInstance.server.close();
+      },
+    },
+    {
+      name: "drain-connections",
+      run: async () => {
+        store.drainAll("server_shutdown");
+        const deadline = clock.nowUs() + graceUs;
+        while (store.anyOpenConnections() && clock.nowUs() < deadline) {
+          await sleep(25);
+        }
+      },
+    },
+    {
+      name: "abort-app-tasks",
+      run: async () => {
+        // 停止接收新提交已在 commitFakeScene 包装层完成（draining 拒绝）。
+        appAbort.abort();
+        const deadline = clock.nowUs() + graceUs;
+        while (inflightCommits.size > 0 && clock.nowUs() < deadline) {
+          await sleep(25);
+        }
+        if (inflightCommits.size > 0) {
+          logger.log("warn", "runtime_close_inflight_commits_timeout", {
+            remaining: inflightCommits.size,
+          });
+        }
+      },
+    },
+    {
+      name: "dispatcher-stop",
+      run: () => dispatcherInstance.stop(),
+    },
+    {
+      name: "force-close-connections",
+      run: () => {
+        store.forceCloseAll("server_shutdown");
+      },
+    },
+    {
+      name: "persistence-close",
+      run: () => persistence.close(),
+    },
+    {
+      name: "fastify-close",
+      run: async () => {
+        // Flush Logger/Metrics（stdout 同步目标，无异步缓冲）后关闭。
+        await appInstance.close();
+      },
+    },
+  ];
 
   const close = async (): Promise<void> => {
     if (closeStarted) {
@@ -291,30 +397,33 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     }
     closeStarted = true;
     status.markDraining();
-    // 1. 停止接受新连接。注意：Node server.close() 的回调会等到现有连接
-    // 全部结束才触发，因此这里只发起不等待——现有连接由后续步骤排空，
-    // 最终由 fastify.close(forceCloseConnections) 兜底回收。
-    appInstance.server.closeIdleConnections();
-    appInstance.server.close();
-    // 2. 通知 Control 连接 draining（4005），有界等待队列排空。
-    store.drainAll("server_shutdown");
-    const drainDeadline = Date.now() + DRAIN_WAIT_MS;
-    while (Date.now() < drainDeadline && store.anyOpenConnections()) {
-      await sleep(50);
+    const failures: Array<{ name: string; error: unknown }> = [];
+    try {
+      for (const step of closeSteps) {
+        try {
+          await step.run();
+        } catch (error) {
+          failures.push({ name: step.name, error });
+          logger.log("warn", "runtime_close_step_failed", {
+            step: step.name,
+            error: error instanceof Error ? error.message : "unknown",
+          });
+        }
+      }
+      systemClock?.close();
+    } finally {
+      status.markClosed();
+      closedResolve?.();
     }
-    store.forceCloseAll("server_shutdown");
-    // 3. Abort Application 子任务。
-    appAbort.abort();
-    // 4. Dispatcher 停止 Claim，Grace 内结束当前批次。
-    await dispatcherInstance.stop();
-    // 5. 关闭 Persistence Client / DB Worker。
-    await persistence.close();
-    // 6. Flush Logger/Metrics（stdout 同步目标，无异步缓冲）。
-    // 7. Fastify 关闭（forceCloseConnections 兜底销毁残余连接）。
-    await appInstance.close().catch(() => undefined);
-    systemClock?.close();
-    status.markClosed();
-    closedResolve?.();
+    if (failures.length > 0) {
+      const first = failures[0];
+      if (first === undefined) {
+        throw new ApplicationError("internal_error", "runtime close failed");
+      }
+      throw new ApplicationError("internal_error", `runtime close failed at step ${first.name}`, {
+        cause: first.error,
+      });
+    }
   };
 
   return {
@@ -322,7 +431,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     instanceId,
     status,
     issueStartupToken: () => tokens.issue(),
-    commitFakeScene: (input, signal) => appService.commit(input, signal),
+    commitFakeScene: (input, signal) => {
+      if (closeStarted || status.phase !== "ready") {
+        return Promise.reject(new ApplicationError("not_ready", "runtime is shutting down"));
+      }
+      const merged = mergeSignals([appAbort.signal, ...(signal === undefined ? [] : [signal])]);
+      const run = appService.commit(input, merged);
+      const tracked = run.finally(() => {
+        inflightCommits.delete(tracked);
+      });
+      inflightCommits.add(tracked);
+      return tracked;
+    },
     readSessionRecovery: (sessionId) => persistence.readRecoveryState(sessionId),
     outboxDeliveries: () => publisher.records(),
     mediaFrameStats: (sessionId) => {
@@ -333,8 +453,4 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     close,
     closed,
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { z } from "zod";
+import { AuthExchangeRequestSchema, AuthExchangeResponseSchema } from "./schemas.js";
 import type { AuthRouteContext } from "./context.js";
 
 /**
@@ -7,15 +7,12 @@ import type { AuthRouteContext } from "./context.js";
  *
  * - Startup Token 从请求 Body 或 `Authorization` 头接收，绝不放 URL Query。
  * - Ready 前的业务请求返回稳定 `not_ready`（此时尚未消耗 Token）。
- * - 成功创建/确认本地 Session，设置 HttpOnly、SameSite=Strict、限定
+ * - 成功创建/挂载本地 Session，设置 HttpOnly、SameSite=Strict、限定
  *   Path 的 Cookie；同一 Token 第二次交换失败。
- * - 过期、未知、错误 Host/Origin 的交换返回统一 `unauthorized`，
- *   不泄露 Token 状态；成功与失败都不记录 Token 原值。
+ * - `resumeSessionId`（可选）：跨重启重新挂载旧逻辑 Session（P4 修复 1）；
+ *   目标不存在时与其它失败统一 `unauthorized`。
+ * - 请求/响应 Schema 与 OpenAPI 共用 schemas.ts 单一来源。
  */
-
-const ExchangeRequestSchema = z.object({
-  startupToken: z.string().min(1).max(256).optional(),
-});
 
 function tokenFromRequest(request: FastifyRequest, body: unknown): string | null {
   const authorization = request.headers.authorization;
@@ -26,7 +23,7 @@ function tokenFromRequest(request: FastifyRequest, body: unknown): string | null
     }
     return null;
   }
-  const parsed = ExchangeRequestSchema.safeParse(body);
+  const parsed = AuthExchangeRequestSchema.safeParse(body);
   if (parsed.success && typeof parsed.data.startupToken === "string") {
     return parsed.data.startupToken;
   }
@@ -44,8 +41,17 @@ export function registerAuthRoute(app: FastifyInstance, ctx: AuthRouteContext): 
       });
       return reply;
     }
-    const body: unknown = request.body;
-    const startupToken = tokenFromRequest(request, body);
+    const parsed = AuthExchangeRequestSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      await reply.code(400).send({
+        code: "invalid_message",
+        message: "request body failed schema validation",
+        retryable: false,
+        traceId: ctx.requestTraces.get(request).traceId,
+      });
+      return reply;
+    }
+    const startupToken = tokenFromRequest(request, parsed.success ? parsed.data : {}) ?? null;
     if (startupToken === null) {
       await reply.code(400).send({
         code: "invalid_message",
@@ -56,12 +62,16 @@ export function registerAuthRoute(app: FastifyInstance, ctx: AuthRouteContext): 
       return reply;
     }
     const trace = ctx.requestTraces.get(request);
-    const session = await ctx.sessions.exchange(startupToken, trace);
+    const session = await ctx.sessions.exchange(startupToken, trace, parsed.data.resumeSessionId);
     reply.setCookie(ctx.config.sessionCookieName, session.cookieToken, {
       path: "/",
       httpOnly: true,
       sameSite: "strict",
     });
-    return { sessionId: session.sessionId, createdAtMs: session.createdAtMs };
+    return AuthExchangeResponseSchema.parse({
+      sessionId: session.sessionId,
+      resumed: session.resumed,
+      createdAtMs: session.createdAtMs,
+    });
   });
 }

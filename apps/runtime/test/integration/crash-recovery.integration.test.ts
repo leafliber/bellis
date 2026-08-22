@@ -143,6 +143,25 @@ async function exchangeSession(port: number, token: string): Promise<string> {
   return body.sessionId;
 }
 
+/** 顺序无关地收集 committed 与 checkpoint（arm 先于提交时两者先后不定）。 */
+async function collectCommitAndCheckpoint(
+  harness: HarnessChild,
+): Promise<{ committed: HarnessMessage; checkpoint: HarnessMessage }> {
+  let committed: HarnessMessage | null = null;
+  let checkpoint: HarnessMessage | null = null;
+  while (committed === null || checkpoint === null) {
+    const message = await harness.next();
+    if (message.type === "committed") {
+      committed = message;
+    } else if (message.type === "checkpoint") {
+      checkpoint = message;
+    } else if (message.type === "commit-error") {
+      throw new Error(`commit failed: ${String(message.message)}`);
+    }
+  }
+  return { committed, checkpoint };
+}
+
 async function pollDeliveries(harness: HarnessChild): Promise<readonly Record<string, unknown>[]> {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     harness.send({ type: "deliveries" });
@@ -204,19 +223,23 @@ describe("Crash Window W2：提交后、Outbox 发布前终止", () => {
     const token = await first.exchangeToken();
     const sessionId = await exchangeSession(first.port, token);
 
-    first.send({ type: "commit", input: { sessionId, ...COMMIT_INPUT } });
-    const committed = await first.next();
-    expect(committed.type).toBe("committed");
-    expect(committed.duplicate).toBe(false);
-    const traceId = committed.traceId as string;
-
-    // 武装检查点 2（Dispatcher Claim 前）→ 下一轮调度到达 → SIGKILL。
+    // 先武装再提交（评审修复 8）：Dispatcher 下一轮调度在 Claim 前被冻结，
+    // 目标 Outbox 在实例 1 内绝无发布机会（消除 Dispatcher 竞态）。
     first.send({
       type: "arm",
       checkpoint: "after_scene_transaction_commit_before_outbox_dispatch",
     });
-    const checkpoint = await first.next();
-    expect(checkpoint.type).toBe("checkpoint");
+    first.send({ type: "commit", input: { sessionId, ...COMMIT_INPUT } });
+    const { committed, checkpoint } = await collectCommitAndCheckpoint(first);
+    expect(committed.duplicate).toBe(false);
+    const traceId = committed.traceId as string;
+    expect(checkpoint.checkpoint).toBe("after_scene_transaction_commit_before_outbox_dispatch");
+
+    // 检查点对应的目标状态：实例 1 零交付（未 Claim/未发布）。
+    first.send({ type: "deliveries" });
+    const beforeKill = await first.next();
+    expect(beforeKill.type).toBe("deliveries");
+    expect(beforeKill.records).toEqual([]);
     await first.kill();
 
     const second = await forkHarness(directory, "production");
@@ -262,16 +285,24 @@ describe("Crash Window W3/W4：发布后标记前终止（Lease 期间）", () =
     const token = await first.exchangeToken();
     const sessionId = await exchangeSession(first.port, token);
 
-    first.send({ type: "commit", input: { sessionId, ...COMMIT_INPUT } });
-    const committed = await first.next();
-    expect(committed.type).toBe("committed");
-    const traceId = committed.traceId as string;
-
-    // 武装检查点 3（发布成功后、complete 前；此刻行处于 in_flight Lease）。
+    // 先武装再提交（评审修复 8）：只有目标消息发布成功后才会触发检查点 3
+    // （空轮次不触发——发布未发生），检查点携带目标 outboxId。
     first.send({ type: "arm", checkpoint: "after_outbox_publish_before_mark_delivered" });
-    const checkpoint = await first.next();
-    expect(checkpoint.type).toBe("checkpoint");
+    first.send({ type: "commit", input: { sessionId, ...COMMIT_INPUT } });
+    const { committed, checkpoint } = await collectCommitAndCheckpoint(first);
+    const traceId = committed.traceId as string;
     expect(checkpoint.checkpoint).toBe("after_outbox_publish_before_mark_delivered");
+    const targetOutboxId = checkpoint.outboxId as string;
+    expect(targetOutboxId).toMatch(/^[0-9a-f-]{36}$/);
+
+    // 严格对应：实例 1 的交付记录恰为检查点携带的 outboxId（此刻行处于
+    // in_flight Lease，尚未标记 delivered）。
+    first.send({ type: "deliveries" });
+    const beforeKill = await first.next();
+    expect(beforeKill.type).toBe("deliveries");
+    expect(beforeKill.records).toEqual([
+      expect.objectContaining({ outboxId: targetOutboxId, topic: "scene.committed" }),
+    ]);
     await first.kill();
 
     // 重启：migrate 把 in_flight 重排队，Dispatcher 重新发布后标记 delivered。

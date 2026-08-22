@@ -2,26 +2,24 @@ import type { FastifyInstance } from "fastify";
 import { generateJsonSchemaFiles } from "@bellis/contracts";
 import { z } from "zod";
 import type { RouteContext } from "./context.js";
+import {
+  AuthExchangeRequestSchema,
+  AuthExchangeResponseSchema,
+  HealthLiveResponseSchema,
+  HealthReadyResponseSchema,
+  VersionResponseSchema,
+} from "./schemas.js";
 
 /**
  * OpenAPI 3.1 路由（P4 文档 §7.5）。
  *
- * - 请求/响应 Schema 来源于同一 Zod 源（Auth Exchange 属 Runtime 边界，
- *   在此定义；ErrorEnvelope 直接复用 @bellis/contracts 生成物），
- *   不复制手写 JSON Schema。
- * - 文档只包含实际注册的 Phase 1 REST 接口；WebSocket 协议通过
- *   `x-bellis-websocket` 扩展指向三份协议文档，不伪装成普通 REST。
+ * - 请求/响应 Schema 与 Route Handler 共用 schemas.ts / @bellis/contracts
+ *   生成物（ErrorEnvelope），不在文档中维护重复定义。
+ * - 文档只包含实际注册的 Phase 1 REST 接口；WebSocket 与持久化协议通过
+ *   `x-bellis-websocket` / `x-bellis-protocols` 扩展指向三份协议文档，
+ *   不伪装成普通 REST。
  * - 文档确定性生成：不含时间戳，同一构建输入得到同一输出。
  */
-
-const AuthExchangeRequestSchema = z.object({
-  startupToken: z.string().min(1).max(256).optional(),
-});
-
-const AuthExchangeResponseSchema = z.object({
-  sessionId: z.string().uuid(),
-  createdAtMs: z.number().int().nonnegative(),
-});
 
 function contractSchema(key: string): Record<string, unknown> {
   const path = `json-schema-2020-12/${key}.json`;
@@ -46,7 +44,6 @@ export function buildOpenApiDocument(options: {
   readonly runtimeVersion: string;
   readonly serverOrigin: string;
 }): Record<string, unknown> {
-  const errorRef = ERROR_REF;
   return {
     openapi: "3.1.0",
     info: {
@@ -54,7 +51,7 @@ export function buildOpenApiDocument(options: {
       version: options.runtimeVersion,
       summary: "Bellis 本地 Runtime 的 Phase 1 REST 边界",
       description:
-        "Health/Version/Auth Exchange。Control 与 Binary Media WebSocket 不在 REST 文档内伪装，见 x-bellis-websocket。",
+        "Health/Version/Auth Exchange。Control 与 Binary Media WebSocket 不在 REST 文档内伪装，见 x-bellis-websocket；持久化协议见 x-bellis-protocols。",
     },
     servers: [{ url: options.serverOrigin }],
     paths: {
@@ -63,11 +60,7 @@ export function buildOpenApiDocument(options: {
           operationId: "healthLive",
           summary: "进程存活探针（不检查下游依赖）",
           responses: {
-            200: jsonResponse({
-              type: "object",
-              properties: { status: { const: "live" } },
-              required: ["status"],
-            }),
+            200: jsonResponse(jsonSchemaOf(HealthLiveResponseSchema)),
           },
         },
       },
@@ -76,12 +69,8 @@ export function buildOpenApiDocument(options: {
           operationId: "healthReady",
           summary: "就绪探针（Migration/DB Worker/恢复/协议注册完成后为 200）",
           responses: {
-            200: jsonResponse({
-              type: "object",
-              properties: { status: { const: "ready" } },
-              required: ["status"],
-            }),
-            503: jsonResponse(errorRef),
+            200: jsonResponse(jsonSchemaOf(HealthReadyResponseSchema)),
+            503: jsonResponse(ERROR_REF),
           },
         },
       },
@@ -90,23 +79,7 @@ export function buildOpenApiDocument(options: {
           operationId: "getVersion",
           summary: "应用版本、协议版本、构建信息与 Runtime Instance ID",
           responses: {
-            200: jsonResponse({
-              type: "object",
-              properties: {
-                version: { type: "string" },
-                protocol: {
-                  type: "object",
-                  properties: {
-                    control: { const: 1 },
-                    media: { const: 1 },
-                  },
-                  required: ["control", "media"],
-                },
-                buildInfo: { type: "object", additionalProperties: true },
-                runtimeInstanceId: { type: "string" },
-              },
-              required: ["version", "protocol", "buildInfo", "runtimeInstanceId"],
-            }),
+            200: jsonResponse(jsonSchemaOf(VersionResponseSchema)),
           },
         },
       },
@@ -115,18 +88,18 @@ export function buildOpenApiDocument(options: {
           operationId: "authExchange",
           summary: "一次性启动 Token 换取本地 Session Cookie",
           description:
-            "Token 从请求 Body 或 Authorization: Bearer 头接收，绝不放 URL Query。成功设置 HttpOnly、SameSite=Strict Cookie。",
+            "Token 从请求 Body 或 Authorization: Bearer 头接收，绝不放 URL Query。成功设置 HttpOnly、SameSite=Strict Cookie。可选 resumeSessionId 跨重启重新挂载已存在的逻辑 Session（从持久化 Server Seq 水位恢复）。",
           requestBody: {
             required: true,
             content: {
-              "application/json": { schema: jsonSchemaOf(AuthExchangeRequestSchema) },
+              "application/json": { schema: { $ref: "#/components/schemas/AuthExchangeRequest" } },
             },
           },
           responses: {
             200: jsonResponse({ $ref: "#/components/schemas/AuthExchangeResponse" }),
-            400: jsonResponse(errorRef),
-            401: jsonResponse(errorRef),
-            503: jsonResponse(errorRef),
+            400: jsonResponse(ERROR_REF),
+            401: jsonResponse(ERROR_REF),
+            503: jsonResponse(ERROR_REF),
           },
         },
       },
@@ -160,6 +133,11 @@ export function buildOpenApiDocument(options: {
         authentication: "session cookie; streams registered via control channel",
         documentation: "docs/protocols/binary-media-websocket.md",
       },
+    ],
+    "x-bellis-protocols": [
+      "docs/protocols/control-websocket.md",
+      "docs/protocols/binary-media-websocket.md",
+      "docs/protocols/persistence-and-recovery.md",
     ],
   };
 }

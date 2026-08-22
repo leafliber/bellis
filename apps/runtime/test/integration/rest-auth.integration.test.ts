@@ -130,6 +130,52 @@ describe("Host / Origin 边界", () => {
     }
   });
 
+  it("Host 欺骗值在 WS Upgrade 上同样被拒绝（含 IPv6 后缀欺骗，P4 修复 6）", async () => {
+    for (const spoof of [
+      "evil.example.com",
+      "[::1]evil",
+      "[::1]:17890evil",
+      "127.0.0.1.evil.com",
+    ]) {
+      const outcome = await new Promise<{ kind: "status"; status: number } | { kind: "reset" }>(
+        (resolve, reject) => {
+          const request = httpRequest(
+            {
+              host: "127.0.0.1",
+              port: handle.status.port,
+              path: "/ws/v1/control",
+              headers: {
+                host: spoof,
+                origin: originFor(handle),
+                connection: "Upgrade",
+                upgrade: "websocket",
+                "sec-websocket-version": "13",
+                "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+              },
+            },
+            (response) => {
+              response.resume();
+              response.on("end", () =>
+                resolve({ kind: "status", status: response.statusCode ?? 0 }),
+              );
+            },
+          );
+          request.on("error", (error: Error) => {
+            // 拒绝 Upgrade 时服务器可能直接重置/挂断连接：同样证明未升级。
+            if (error.message.includes("socket hang up") || error.message.includes("ECONNRESET")) {
+              resolve({ kind: "reset" });
+              return;
+            }
+            reject(error);
+          });
+          request.end();
+        },
+      );
+      // 未升级为 WebSocket：要么 403 拒绝，要么连接被重置。
+      expect(outcome.kind === "status" ? outcome.status : 403).toBe(403);
+    }
+  });
+
   it("非允许 Origin 被拒绝（跨站伪造）", async () => {
     const response = await fetch(`${base()}/api/v1/health/live`, {
       headers: { origin: "http://127.0.0.1:9999" },

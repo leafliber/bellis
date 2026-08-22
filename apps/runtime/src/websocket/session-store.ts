@@ -8,10 +8,13 @@ import type { ControlLogicalState, MediaStreamRegistryOptions } from "@bellis/tr
  * Cookie 令牌 → 逻辑 Session 的进程内映射。逻辑 Session 拥有：
  * - P1 `MediaStreamRegistry`（Stream 必须经同 Session 的 Control 注册）；
  * - 同进程上一次 Control 连接导出的逻辑状态（重连 resume 用）；
+ * - `restorable` 标记：经 resumeSessionId 重新挂载的 Session，Control
+ *   连接应从 P2 latestServerSeq 恢复 Seq 水位（跨重启不复用 Seq）；
  * - 活跃 Control/Media 连接与媒体帧计数（仅聚合计数，不存帧内容）。
  *
- * Cookie 令牌是 256-bit 随机值，进程内有效；重启后客户端重新交换 Token
- * 建立新 Session（Phase 1 不跨重启恢复 Cookie，也不恢复旧 Stream）。
+ * Media Registry 的所有权与 Media 连接生命周期一致（P4 修复 7）：
+ * 同一 Session 同时只允许一条 Media 连接；该连接关闭时 Registry 整体重建
+ * （P1 closeAll 不重置 totalStreams，重连必须拿到全新 Registry）。
  */
 
 /** Control 连接的最小结构契约（避免与适配器模块循环依赖）。 */
@@ -30,20 +33,49 @@ export interface MediaFrameStats {
   rejected: number;
 }
 
+export interface LogicalSessionOptions {
+  /** 经 resumeSessionId 挂载：从 P2 恢复 Seq 水位。 */
+  readonly restorable?: boolean;
+}
+
 export class LogicalSession {
   readonly sessionId: string;
   readonly createdAtMs: number;
-  readonly mediaStreams: MediaStreamRegistry;
+  readonly restorable: boolean;
+  #mediaStreams: MediaStreamRegistry;
   /** 同进程内上一次 Control 连接导出的逻辑状态；跨重启为 null。 */
   exportedControlState: ControlLogicalState | null = null;
   control: ControlConnectionLike | null = null;
   readonly mediaConnections = new Set<MediaConnectionLike>();
   readonly mediaFrames: MediaFrameStats = { accepted: 0, rejected: 0 };
+  readonly #registryDefaults: Omit<MediaStreamRegistryOptions, "sessionId">;
 
-  constructor(sessionId: string, createdAtMs: number, registryOptions: MediaStreamRegistryOptions) {
+  constructor(
+    sessionId: string,
+    createdAtMs: number,
+    registryDefaults: Omit<MediaStreamRegistryOptions, "sessionId">,
+    options?: LogicalSessionOptions,
+  ) {
     this.sessionId = sessionId;
     this.createdAtMs = createdAtMs;
-    this.mediaStreams = new MediaStreamRegistry(registryOptions);
+    this.restorable = options?.restorable === true;
+    this.#registryDefaults = registryDefaults;
+    this.#mediaStreams = new MediaStreamRegistry({ ...registryDefaults, sessionId });
+  }
+
+  get mediaStreams(): MediaStreamRegistry {
+    return this.#mediaStreams;
+  }
+
+  /**
+   * 重建全新 Registry（关闭全部旧 Stream 且重置 totalStreams 计数）。
+   * 仅在 Media 连接关闭/重连时调用——旧连接的总量配额不跨连接继承。
+   */
+  resetMediaRegistry(): void {
+    this.#mediaStreams = new MediaStreamRegistry({
+      ...this.#registryDefaults,
+      sessionId: this.sessionId,
+    });
   }
 }
 
@@ -57,11 +89,13 @@ export class SessionStore {
   }
 
   /** 创建逻辑 Session 并登记 Cookie 令牌。 */
-  create(cookieToken: string, sessionId: string, createdAtMs: number): LogicalSession {
-    const session = new LogicalSession(sessionId, createdAtMs, {
-      ...this.#registryDefaults,
-      sessionId,
-    });
+  create(
+    cookieToken: string,
+    sessionId: string,
+    createdAtMs: number,
+    options?: LogicalSessionOptions,
+  ): LogicalSession {
+    const session = new LogicalSession(sessionId, createdAtMs, this.#registryDefaults, options);
     this.#byCookie.set(cookieToken, session);
     this.#byId.set(sessionId, session);
     return session;
@@ -93,7 +127,7 @@ export class SessionStore {
     return false;
   }
 
-  /** 关闭全部连接（优雅关闭序列用）。返回被要求排空的连接数。 */
+  /** 通知全部 Control 连接 draining 并强关 Media 连接；返回 Control 连接数。 */
   drainAll(reason: string): number {
     let count = 0;
     for (const session of this.#byId.values()) {

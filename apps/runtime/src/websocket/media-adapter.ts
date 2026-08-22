@@ -134,8 +134,11 @@ export class MediaConnection {
     this.#finished = true;
     this.#logical.mediaConnections.delete(this);
     this.#parser.reset();
-    // 连接关闭释放全部 Stream；重连后重新注册（Phase 1 不恢复 Stream）。
+    // Registry 所有权与本连接绑定（P4 修复 7）：关闭全部 Stream 并整体重建
+    // ——P1 closeAll 不重置 totalStreams，重连必须拿到全新 Registry，
+    // 旧连接的总量配额不跨连接继承；重连后重新注册 Stream。
     this.#logical.mediaStreams.closeAll();
+    this.#logical.resetMediaRegistry();
     this.#connections.release("media");
   }
 }

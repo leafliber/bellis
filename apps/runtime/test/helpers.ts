@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { PersistenceWorkerOptions } from "@bellis/persistence";
+import type { PersistenceClient, PersistenceWorkerOptions } from "@bellis/persistence";
+import { createPersistenceClient } from "@bellis/persistence";
 import type { RuntimeHandle } from "../src/index.js";
 import { startRuntime } from "../src/index.js";
 
@@ -48,6 +49,8 @@ export interface TestRuntimeOptions {
   readonly allowMissingOrigin?: boolean;
   readonly startupTokenTtlMs?: number;
   readonly replayWindowCapacity?: number;
+  readonly maxTotalStreams?: number;
+  readonly persistenceClient?: PersistenceClient;
 }
 
 /** 启动测试 Runtime（随机空闲端口、TS Worker、无检查点观察器）。 */
@@ -63,12 +66,39 @@ export async function startTestRuntime(options: TestRuntimeOptions): Promise<Run
       ...(options.startupTokenTtlMs === undefined
         ? {}
         : { startupTokenTtlMs: options.startupTokenTtlMs }),
-      ...(options.replayWindowCapacity === undefined
+      ...(options.replayWindowCapacity === undefined && options.maxTotalStreams === undefined
         ? {}
-        : { limits: { replayWindowCapacity: options.replayWindowCapacity } }),
+        : {
+            limits: {
+              ...(options.replayWindowCapacity === undefined
+                ? {}
+                : { replayWindowCapacity: options.replayWindowCapacity }),
+              ...(options.maxTotalStreams === undefined
+                ? {}
+                : { maxTotalStreams: options.maxTotalStreams }),
+            },
+          }),
     },
     persistenceWorker: WORKER_FIXTURE,
+    ...(options.persistenceClient === undefined
+      ? {}
+      : { persistenceClient: options.persistenceClient }),
   });
+}
+
+/** 创建并迁移基础客户端（包装注入用）。 */
+export async function createMigratedBaseClient(dataDirectory: string): Promise<PersistenceClient> {
+  const client = createPersistenceClient({ dataDirectory, worker: WORKER_FIXTURE });
+  await client.migrate();
+  return client;
+}
+
+/** 用覆盖方法包装基础客户端（延迟/失败注入）。 */
+export function wrapPersistenceClient(
+  base: PersistenceClient,
+  overrides: Partial<PersistenceClient>,
+): PersistenceClient {
+  return { ...base, ...overrides };
 }
 
 /** 测试用 Origin 头（与默认推导的允许列表一致）。 */

@@ -3,9 +3,9 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import fastify from "fastify";
 import type { MonotonicClock } from "@bellis/contracts";
-import type { PersistenceClient } from "@bellis/persistence";
+import type { PersistenceClient, RecoveryState } from "@bellis/persistence";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
-import { ApplicationError } from "../errors/mapping.js";
+import { mapErrorToEnvelope, toErrorEnvelopeJson } from "../errors/mapping.js";
 import { registerAuthRoute } from "../routes/auth.js";
 import type { OriginAllowlist, RequestTraceStore } from "../routes/context.js";
 import { registerHealthRoutes } from "../routes/health.js";
@@ -18,12 +18,17 @@ import { normalizeHostHeader } from "./config.js";
 import type { ConnectionMetrics } from "../websocket/connection-metrics.js";
 import { ControlConnection } from "../websocket/control-adapter.js";
 import { MediaConnection } from "../websocket/media-adapter.js";
+import type { ControlResumePlan } from "../websocket/control-adapter.js";
 import type { LogicalSession } from "../websocket/session-store.js";
 
 /**
  * Fastify 装配（P4 文档 §6/§7/§9/§10）：只承担 Host/Origin/Session/Schema
  * 边界、协议转换、调用 Application Service 与响应映射；领域事务顺序
  * 全部在 application/**。
+ *
+ * Control Upgrade 的 resume 加载（P4 修复 1）：同进程导出状态优先；
+ * `restorable` Session（resumeSessionId 挂载）从 P2 latestServerSeq 构造
+ * resume，跨重启不复用 Seq。加载期间同步挂接缓冲收集器，不丢入站消息。
  */
 
 export interface ServerContext {
@@ -107,21 +112,12 @@ export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> 
       });
       return;
     }
-    if (error instanceof ApplicationError) {
-      void reply.code(error.status).send({
-        code: error.code,
-        message: error.message,
-        retryable: error.retryable,
-        traceId,
-      });
-      return;
-    }
+    // Fastify 自身 4xx（JSON 解析、body 限制等）：客户端可修复输入。
     const fastifyStatus =
       typeof error === "object" && error !== null && "statusCode" in error
         ? Number((error as { statusCode: unknown }).statusCode)
         : Number.NaN;
     if (Number.isInteger(fastifyStatus) && fastifyStatus >= 400 && fastifyStatus < 500) {
-      // Fastify 边界错误（JSON 解析、body 限制等）：客户端可修复输入。
       ctx.logger.log("info", "runtime_request_boundary_rejected", {
         traceId,
         status: fastifyStatus,
@@ -134,16 +130,11 @@ export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> 
       });
       return;
     }
-    ctx.logger.log("warn", "runtime_request_failed", {
-      traceId,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-    void reply.code(500).send({
-      code: "internal_error",
-      message: "internal runtime error",
-      retryable: false,
-      traceId,
-    });
+    // 集中错误映射（P4 修复 9）：Application/Zod/Persistence/未知错误统一
+    // 折叠为 ErrorEnvelope（database_busy → backpressure/503 等），
+    // 原始错误保留在本地日志。
+    const mapped = mapErrorToEnvelope(error, traceId, ctx.logger);
+    void reply.code(mapped.status).send(toErrorEnvelopeJson(mapped, traceId));
   });
 
   app.setNotFoundHandler(async (request: FastifyRequest, reply: FastifyReply) => {
@@ -178,6 +169,48 @@ function resolveWsSession(ctx: ServerContext, request: FastifyRequest): LogicalS
   return ctx.sessions.store.resolveByCookie(cookieToken);
 }
 
+/**
+ * 解析 Control 连接的 resume 与预加载恢复状态（P4 修复 1/3）：
+ * - 同进程导出状态优先（完整 Replay 内容）；
+ * - restorable Session 从 P2 latestServerSeq 构造跨重启 resume
+ *   （Replay 内容不持久化，缺口走 Snapshot）；
+ * - 新建 Session 无需 resume，也不会有 Replay Gap。
+ */
+async function loadControlResume(
+  ctx: ServerContext,
+  logical: LogicalSession,
+): Promise<ControlResumePlan> {
+  if (logical.exportedControlState !== null) {
+    // 原子消费：读取即清空，避免并发连接重复消费同一导出状态。
+    const resume = logical.exportedControlState;
+    logical.exportedControlState = null;
+    let recoveryState: RecoveryState | null = null;
+    try {
+      recoveryState = await ctx.persistence.readRecoveryState(logical.sessionId);
+    } catch {
+      recoveryState = null;
+    }
+    return { resume, recoveryState };
+  }
+  if (logical.restorable) {
+    try {
+      const state = await ctx.persistence.readRecoveryState(logical.sessionId);
+      if (state.latestServerSeq <= 0n) {
+        return { recoveryState: state };
+      }
+      const resume: ControlResumePlan["resume"] = {
+        nextSeq: state.latestServerSeq + 1n,
+        confirmedAck: state.latestServerSeq,
+        replay: [],
+      };
+      return { resume, recoveryState: state };
+    } catch {
+      return { recoveryState: null };
+    }
+  }
+  return { recoveryState: null };
+}
+
 function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void {
   app.get("/ws/v1/control", { websocket: true }, (socket, request) => {
     if (!ctx.status.ready) {
@@ -193,6 +226,8 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
       socket.close(UNAUTHORIZED_CLOSE, "session already has a control connection");
       return;
     }
+    // ControlConnection 同步挂接 Socket 监听并内部缓冲 resume 解析期间的
+    // 入站消息（Upgrade 与异步加载之间零丢失）。
     const connection = new ControlConnection({
       socket,
       logical,
@@ -211,6 +246,7 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
         sendQueueMaxMessages: ctx.config.limits.sendQueue.maxMessages,
         sendQueueMaxBytes: ctx.config.limits.sendQueue.maxBytes,
       },
+      loadResume: () => loadControlResume(ctx, logical),
     });
     connection.start();
   });
@@ -223,6 +259,12 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
     const logical = resolveWsSession(ctx, request);
     if (logical === null) {
       socket.close(UNAUTHORIZED_CLOSE, "unauthorized");
+      return;
+    }
+    // 同一 Session 同时只允许一条 Media 连接（P4 修复 7）：Registry 的
+    // 所有权与该连接绑定，避免多条连接互相 closeAll 串扰。
+    if (logical.mediaConnections.size > 0) {
+      socket.close(UNAUTHORIZED_CLOSE, "session already has a media connection");
       return;
     }
     const connection = new MediaConnection({
