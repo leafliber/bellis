@@ -313,3 +313,35 @@ describe("free-text credential scrubbing round 3 (Gate 3 三审修复)", () => {
     expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(8);
   });
 });
+
+describe("free-text credential scrubbing round 4 (Gate 3 四审修复)", () => {
+  it("scrubs field-canonical name variants and nested-stringify keys on the real Pino assembly", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0",
+      level: "info",
+      destination,
+    });
+    const canary = "CANARY_4f7b2e9a6d1c8530";
+    // 评审者构造：JSON.stringify({payload: JSON.stringify({payload:
+    // JSON.stringify({authorization: canary})})})——键关闭引号前为 3 个
+    // 反斜杠，单层 \\? 转义匹配在此形态失效。
+    let nested = JSON.stringify({ authorization: canary });
+    nested = JSON.stringify({ payload: nested });
+    nested = JSON.stringify({ payload: nested });
+    const probes: ReadonlyArray<[label: string, text: string]> = [
+      ["dottedAuthorization", `author.ization=${canary}`],
+      ["slashedAuthorization", `auth/orization=${canary}`],
+      ["dottedApiKey", `api.key=${canary}`],
+      ["nestedStringify", nested],
+    ];
+    for (const [label, text] of probes) {
+      logger.log("warn", `probe_field_${label}`, { error: text });
+      logger.log("error", `probe_object_${label}`, { errorObject: new Error(text) });
+    }
+    const text = lines.join("\n");
+    expect(text).not.toContain(canary);
+    expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(8);
+  });
+});

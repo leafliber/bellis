@@ -44,32 +44,34 @@ export function isSensitiveFieldName(key: string): boolean {
 }
 
 /**
- * 内容级脱敏（Gate 3 重开评审修复 1 + 复审修复 + 三审修复）：
+ * 内容级脱敏（Gate 3 重开评审修复 1 + 复审/三审/四审修复）：
  * Error.message/stack 与任意嵌入字符串可能携带凭证原值（如异常消息回显
  * `Authorization: …` 头、嵌套序列化的转义 JSON 片段），字段名匹配无法
  * 覆盖自由文本，必须在字符串内容层清理。两条规则：
  *
  * 1. 敏感键值：名称匹配**复用字段级的同一份规范化敏感名称集合**
- *    （SENSITIVE_LOG_FIELD_NAMES → canonicalFieldName），camelCase、
- *    snake_case、kebab-case 与大小写变体视为同一名称；键名后的关闭引号
- *    允许转义形态（`\"`——嵌套序列化文本里的 JSON 键形如
- *    `"{\"authorization\":\"…"}`）；值**整段到行尾**替换。单词级匹配在
- *    空格/分号/逗号/引号处停止，多片段值（多段 Cookie、未知 scheme、
- *    Digest auth-param、`credentials=alice s3cret…` 多词值）必然残留
- *    尾段——只有整段才安全（复审/三审教训）。
+ *    （SENSITIVE_LOG_FIELD_NAMES → canonicalFieldName），且名称字符间
+ *    允许任意非字母数字、非换行填充——与 canonicalFieldName「移除全部
+ *    非字母数字」的语义对齐（`author.ization`/`auth/orization`/`api.key`
+ *    与常见写法同形）；名称与 `:`/`=` 之间的填充任意长（嵌套
+ *    JSON.stringify 每层使键关闭引号前的反斜杠序列翻倍再增一，
+ *    1→3→7→…，不能按固定层数枚举）；值**整段到行尾**替换——单词级
+ *    匹配在空格/分号/逗号/引号处停止，多片段值（多段 Cookie、未知
+ *    scheme、Digest auth-param、`credentials=alice s3cret…` 多词值）
+ *    必然残留尾段，只有整段才安全（复审/三审教训）。
  * 2. 裸 scheme 凭证（`Bearer/Basic/Digest…`，无键名前缀）：scheme 后
  *    整段到行尾替换——多片段 auth-param 同样只有整段才安全。
- * 与路径清理同一取舍：过度替换只损失可读性，绝不泄露原值。名称字符
- * 间隔只允许 `[ \t_-]`、其余间隔只允许 `[ \t]`——绝不跨行（`\n`/`\r`）
- * 拼接名称或吞并相邻日志行。
+ * 与路径清理同一取舍：过度替换只损失可读性，绝不泄露原值。名称内外的
+ * 填充绝不含换行（`\n`/`\r`）与字母数字——不跨行拼接名称、不吞并相邻
+ * 日志行、不跨单词拼名。
  */
 
-/** 规范名的文本形态：字符间仅允许行内空白/下划线/连字符，不跨行拼接。 */
+/** 规范名的文本形态：字符间允许任意非字母数字、非换行填充。 */
 function flexibleNamePattern(canonicalName: string): string {
-  return canonicalName.split("").join("[ \\t_-]*");
+  return canonicalName.split("").join("[^\\nA-Za-z0-9\\r]*");
 }
 
-/** 长名在前，避免带分隔符的短名（如 `token`）先匹配截断长名。 */
+/** 长名在前，避免带填充的短名（如 `token`）先匹配截断长名。 */
 function buildNameAlternation(canonicalNames: readonly string[]): string {
   return canonicalNames
     .toSorted((a, b) => b.length - a.length)
@@ -79,9 +81,12 @@ function buildNameAlternation(canonicalNames: readonly string[]): string {
 
 const SENSITIVE_TEXT_CANONICAL_NAMES: readonly string[] = [...SENSITIVE_CANONICAL_NAMES];
 
-// 值整段到行尾且不含 `\r`（保留 CRLF 行尾）；键名关闭引号允许 `\"` 转义。
+// 名称与 `:`/`=` 之间的填充同样允许任意非字母数字、非换行（吸收任意
+// 深度的转义引号/反斜杠序列），但必须**懒惰**锚定名称后的第一个分隔符：
+// 贪婪回溯会锚定到纯标点值内部的最后一个 `=`/`:`，把凭证保留进捕获组
+// （`token: -.___=` 反例）。值整段到行尾且不含 `\r`（保留 CRLF）。
 const SENSITIVE_KEY_VALUE_PATTERN = new RegExp(
-  `(\\b(?:${buildNameAlternation(SENSITIVE_TEXT_CANONICAL_NAMES)})[ \\t]*(?:\\\\?["'])?[ \\t]*[:=][ \\t]*)([^\\n\\r]*)`,
+  `(\\b(?:${buildNameAlternation(SENSITIVE_TEXT_CANONICAL_NAMES)})[^\\nA-Za-z0-9\\r]*?[:=][ \\t]*)([^\\n\\r]*)`,
   "gi",
 );
 

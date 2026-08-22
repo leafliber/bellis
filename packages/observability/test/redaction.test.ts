@@ -578,3 +578,104 @@ describe("content-level scrubbing round 3 (Gate 3 三审修复)", () => {
     );
   });
 });
+
+describe("content-level scrubbing round 4 (Gate 3 四审修复)", () => {
+  const CANARY = "CANARY_8c3e6a1d5f9b2740";
+
+  const PROBES: ReadonlyArray<[label: string, text: string]> = [
+    ["dottedAuthorization", `author.ization=${CANARY}`],
+    ["slashedAuthorization", `auth/orization=${CANARY}`],
+    ["dottedApiKey", `api.key=${CANARY}`],
+  ];
+
+  it("normalizes names like the field-level rule: any non-alphanumeric filler", () => {
+    // canonicalFieldName 移除全部非字母数字；自由文本匹配必须同语义，
+    // 否则 author.ization / auth/orization / api.key 绕过内容级清理。
+    for (const [label, text] of PROBES) {
+      const fieldOut = JSON.stringify(redactValue({ error: text }));
+      expect(fieldOut.includes(CANARY), label).toBe(false);
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(text)));
+      expect(errorOut.includes(CANARY), label).toBe(false);
+    }
+  });
+
+  it("scrubs keys behind arbitrarily long escape runs from nested stringify", () => {
+    // 每层 JSON.stringify 使键关闭引号前的反斜杠序列翻倍再增一（1→3→7→15），
+    // 固定层数的 \\? 枚举必然漏层；填充按字符类吸收任意长度。
+    let nested = JSON.stringify({ authorization: CANARY });
+    for (let depth = 1; depth <= 4; depth += 1) {
+      nested = JSON.stringify({ payload: nested });
+      const fieldOut = JSON.stringify(redactValue({ error: `probe ${nested}` }));
+      expect(fieldOut.includes(CANARY), `depth${depth}`).toBe(false);
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(`probe ${nested}`)));
+      expect(errorOut.includes(CANARY), `depth${depth}`).toBe(false);
+    }
+  });
+
+  it("property: names styled by the field-level canonicalization never leak", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: SENSITIVE_LOG_FIELD_NAMES.length - 1 }),
+        fc.array(fc.stringMatching(/^[^\n\rA-Za-z0-9]{1,3}$/), {
+          minLength: 17,
+          maxLength: 17,
+        }),
+        fc.constantFrom(":", "="),
+        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        fc.boolean(),
+        (nameIndex, fillers, sepChar, token, asError) => {
+          const baseName = SENSITIVE_LOG_FIELD_NAMES[nameIndex] ?? "token";
+          const canonical = baseName.toLowerCase().replace(/[^a-z0-9]/g, "");
+          let styled = "";
+          canonical.split("").forEach((ch, i) => {
+            styled += (i === 0 ? "" : (fillers[i] ?? ".")) + ch;
+          });
+          const text = `${styled}${sepChar} ${token}`;
+          const output = asError
+            ? JSON.stringify(serializeErrorForLog(new Error(`probe ${text}`)))
+            : JSON.stringify(redactValue({ error: text }));
+          expect(output.includes(token)).toBe(false);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("property: nested JSON.stringify depth 0-3 never leaks", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 3 }),
+        fc.constantFrom("authorization", "accessToken", "startupToken"),
+        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        fc.boolean(),
+        (depth, key, token, asError) => {
+          let payload = JSON.stringify({ [key]: token });
+          for (let level = 0; level < depth; level += 1) {
+            payload = JSON.stringify({ payload });
+          }
+          const output = asError
+            ? JSON.stringify(serializeErrorForLog(new Error(`body ${payload}`)))
+            : JSON.stringify(redactValue({ error: payload }));
+          expect(output.includes(token)).toBe(false);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it("anchors at the first separator and never keeps punctuation-only values in the preserved group", () => {
+    // 贪婪填充会锚定到纯标点值内部的最后一个 `=`/`:`，把凭证保留进
+    // 捕获组（四审实现期间由 round 2/3 性质测试的纯标点 token 捕获）。
+    const PUNCT_PROBES: ReadonlyArray<[label: string, text: string, value: string]> = [
+      ["colonRun", "authorization: -.___=", "-.___="],
+      ["eqRun", "token=+++===", "+++="],
+      ["dotRun", "secret:..::..", "..::.."],
+      ["escaped", `meta="{\\"authorization\\":\\"_++_+=\\"}"`, "_++_+="],
+    ];
+    for (const [label, text, value] of PUNCT_PROBES) {
+      const output = JSON.stringify(redactValue({ error: text }));
+      expect(output, label).toContain("[redacted]");
+      expect(output.includes(value), label).toBe(false);
+    }
+  });
+});
