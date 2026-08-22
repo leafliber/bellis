@@ -30,7 +30,10 @@ afterEach(() => {
   }
 });
 
-function forkHarness(dataDirectory: string): Promise<{
+function forkHarness(
+  dataDirectory: string,
+  mode: "armed" | "production" | "seq-delay" = "production",
+): Promise<{
   send: (message: Record<string, unknown>) => void;
   next: () => Promise<HarnessMessage>;
   exchangeToken: () => Promise<string>;
@@ -38,7 +41,7 @@ function forkHarness(dataDirectory: string): Promise<{
   closeGracefully: () => Promise<void>;
   port: number;
 }> {
-  const child = fork(HARNESS, [dataDirectory, "production"], {
+  const child = fork(HARNESS, [dataDirectory, mode], {
     execArgv: ["--import", RESOLVE_HOOK_URL],
     stdio: ["inherit", "inherit", "inherit", "ipc"],
   });
@@ -247,6 +250,111 @@ describe("跨重启 Control Seq 恢复（P4 修复 1）", () => {
       const pong = await resumed.waitForType("clock.pong");
       // resume 后 hello/ready 消耗 Seq：首条业务消息只需严格大于旧水位。
       expect(parseDecimalString(pong.seq)).toBeGreaterThan(lastSeq);
+      resumed.close();
+    } finally {
+      await second.closeGracefully();
+    }
+  });
+
+  it("跨重启 resume 未携带 lastAck：强制快照，绝不静默进入 active（二轮评审修复 3）", async () => {
+    const directory = createTempDataDirectory("bellis-p4-restart3-");
+    directories.push(directory);
+
+    const first = await forkHarness(directory);
+    const token1 = await first.exchangeToken();
+    const exchanged1 = await exchange(first.port, token1);
+    const sessionId = exchanged1.sessionId as string;
+    const client1 = controlClient(first.port, exchanged1.cookie as string, sessionId);
+    await client1.waitForType("server.ready");
+    client1.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "1" } }));
+    await client1.waitForType("clock.pong");
+    await first.kill();
+    client1.close();
+
+    const second = await forkHarness(directory);
+    try {
+      const token2 = await second.exchangeToken();
+      const exchanged2 = await exchange(second.port, token2, sessionId);
+      expect(exchanged2.status).toBe(200);
+      // 不携带 lastAck：客户端水位未知 → 必须先 session.snapshot 再 ready。
+      const resumed = controlClient(second.port, exchanged2.cookie as string, sessionId);
+      const snapshot = await resumed.waitForType("session.snapshot");
+      const ready = await resumed.waitForType("server.ready");
+      expect(resumed.received.findIndex((envelope) => envelope === snapshot)).toBeLessThan(
+        resumed.received.findIndex((envelope) => envelope === ready),
+      );
+      resumed.close();
+    } finally {
+      await second.closeGracefully();
+    }
+  });
+
+  it("落库延迟竞态 + SIGKILL：重连 Replay 被水位对账阻塞，重启后水位一致（二轮评审修复 2）", async () => {
+    const directory = createTempDataDirectory("bellis-p4-restart4-");
+    directories.push(directory);
+
+    // seq-delay 装配：advanceServerSeq 可经 IPC 动态注入延迟。
+    const instance = await forkHarness(directory, "seq-delay");
+    const token = await instance.exchangeToken();
+    const exchanged = await exchange(instance.port, token);
+    const sessionId = exchanged.sessionId as string;
+    const cookie = exchanged.cookie as string;
+    const client1 = controlClient(instance.port, cookie, sessionId);
+    await client1.waitForType("server.ready");
+    client1.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "1" } }));
+    await client1.waitForType("clock.pong");
+    // pong(3) 已落库；记录对照水位。
+    instance.send({ type: "recovery", sessionId });
+    const before = (await instance.next()) as HarnessMessage & { latestServerSeq: string };
+    expect(before.type).toBe("recovery");
+
+    // 注入 500ms 落库延迟 → 发送 pong(4) 后立即断线：Seq 4 已分配、
+    // 落库在途，导出状态包含它。
+    instance.send({ type: "set-seq-delay", delayMs: 500 });
+    await instance.next();
+    client1.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "race" } }));
+    client1.terminate();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    // 重连（同实例导出 resume）：水位对账 advanceServerSeq(4) 同样被
+    // 延迟——对账完成前不得有任何字节上线（含 server.hello）。
+    const client2 = controlClient(instance.port, cookie, sessionId, 0n);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(client2.received.length).toBe(0);
+
+    // 对账仍挂起时 SIGKILL（真实崩溃窗口）。
+    await instance.kill();
+    const replayBlockedAt = client2.received.length;
+
+    // 同一数据目录重启：水位必须覆盖崩溃前已上线的一切（≥3），且因为
+    // 阻塞期间零帧上线，不存在"已发送但未落库"的 Seq。
+    const second = await forkHarness(directory);
+    try {
+      const token2 = await second.exchangeToken();
+      const resumedExchange = await exchange(second.port, token2, sessionId);
+      expect(resumedExchange.status).toBe(200);
+      second.send({ type: "recovery", sessionId });
+      const after = (await second.next()) as HarnessMessage & { latestServerSeq: string };
+      expect(after.type).toBe("recovery");
+      // 崩溃时 pong(4) 的在途落库尚未完成（120+200ms < 500ms 延迟），
+      // 且水位对账阻塞期间零帧上线——客户端可观测的事实只到 Seq 3，
+      // 重启水位恰为 3：无"已发送但未落库"的 Seq，无跳号无回退。
+      expect(after.latestServerSeq).toBe("3");
+      expect(replayBlockedAt).toBe(0);
+
+      // 重启后新连接从水位 4 之后继续，不复用 Seq。
+      const resumed = controlClient(
+        second.port,
+        resumedExchange.cookie as string,
+        sessionId,
+        parseDecimalString(after.latestServerSeq),
+      );
+      await resumed.waitForType("server.ready");
+      resumed.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "2" } }));
+      const pong = await resumed.waitForType("clock.pong");
+      expect(parseDecimalString(pong.seq)).toBeGreaterThan(
+        parseDecimalString(after.latestServerSeq),
+      );
       resumed.close();
     } finally {
       await second.closeGracefully();

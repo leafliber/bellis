@@ -88,18 +88,44 @@ export function buildOpenApiDocument(options: {
           operationId: "authExchange",
           summary: "一次性启动 Token 换取本地 Session Cookie",
           description:
-            "Token 从请求 Body 或 Authorization: Bearer 头接收，绝不放 URL Query。成功设置 HttpOnly、SameSite=Strict Cookie。可选 resumeSessionId 跨重启重新挂载已存在的逻辑 Session（从持久化 Server Seq 水位恢复）。",
+            "Token 从请求 Body 或 Authorization: Bearer 头接收，绝不放 URL Query；两者提供其一即可（Header-only 请求合法）。成功设置 HttpOnly、SameSite=Strict Cookie。可选 resumeSessionId 跨重启重新挂载已存在的逻辑 Session（从持久化 Server Seq 水位恢复）。",
+          security: [{ startupToken: [] }, {}],
+          parameters: [
+            {
+              name: "Authorization",
+              in: "header",
+              required: false,
+              description:
+                "Bearer <startupToken> 或 StartupToken <token>；Body 已携带 startupToken 时可省略",
+              schema: { type: "string", minLength: 1, maxLength: 512 },
+            },
+          ],
           requestBody: {
-            required: true,
+            required: false,
             content: {
               "application/json": { schema: { $ref: "#/components/schemas/AuthExchangeRequest" } },
             },
           },
           responses: {
-            200: jsonResponse({ $ref: "#/components/schemas/AuthExchangeResponse" }),
+            200: {
+              description: "交换成功；Set-Cookie 设置 HttpOnly 会话 Cookie",
+              headers: {
+                "set-cookie": {
+                  description: "HttpOnly、SameSite=Strict 的会话 Cookie（浏览器自动处理）",
+                  schema: { type: "string" },
+                },
+              },
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AuthExchangeResponse" },
+                },
+              },
+            },
             400: jsonResponse(ERROR_REF),
             401: jsonResponse(ERROR_REF),
             503: jsonResponse(ERROR_REF),
+            504: jsonResponse(ERROR_REF),
+            500: jsonResponse(ERROR_REF),
           },
         },
       },
@@ -112,6 +138,14 @@ export function buildOpenApiDocument(options: {
       },
     },
     components: {
+      securitySchemes: {
+        startupToken: {
+          type: "apiKey",
+          description: "一次性启动 Token：Authorization: Bearer <token>（或 StartupToken <token>）",
+          name: "Authorization",
+          in: "header",
+        },
+      },
       schemas: {
         ErrorEnvelope: contractSchema("error-envelope"),
         AuthExchangeRequest: jsonSchemaOf(AuthExchangeRequestSchema),

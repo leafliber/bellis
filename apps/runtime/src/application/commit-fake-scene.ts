@@ -60,11 +60,18 @@ export interface FakeSceneCommitResult {
 
 export type BroadcastOutcome = "sent" | "no_connection" | "unsent";
 
+/** 广播回执：写出结果 + 承接连接的代际标识（二轮评审修复 4）。 */
+export interface BroadcastReceipt {
+  readonly outcome: BroadcastOutcome;
+  readonly connectionId: string | null;
+}
+
 /**
  * Control 广播 Port：向逻辑 Session 的活跃 Control 连接发布服务端消息。
  * `awaitSent` 时等到消息实际写入 Socket（或超时/丢弃）再返回，保证
  * prepared 在数据库事务开始前已上线（否则高优先级 committed 可能
- * 在线上反超 prepared 的因果顺序）。
+ * 在线上反超 prepared 的因果顺序）。`onlyConnectionId` 限制只发布到
+ * 指定代际的连接——prepared 与 committed 必须送达同一连接代际。
  */
 export type ControlBroadcast = (
   sessionId: string,
@@ -74,8 +81,8 @@ export type ControlBroadcast = (
     readonly traceId: string;
     readonly spanId?: string;
   },
-  options?: { readonly awaitSent?: boolean },
-) => Promise<BroadcastOutcome>;
+  options?: { readonly awaitSent?: boolean; readonly onlyConnectionId?: string },
+) => Promise<BroadcastReceipt>;
 
 /** 从 Cue Lane 集合确定性推导满足 SceneSchema 的同步组。 */
 function buildSceneGroups(sceneId: string, lanes: readonly CueLane[]): Scene["groups"] {
@@ -192,7 +199,9 @@ export class FakeSceneCommitService {
 
     // 1. scene.prepared：仅协议事件，先于数据库事务上线（等待写出，
     //    防止 P1 优先级队列让 committed 在线上反超 prepared）。
-    await this.#broadcast(
+    //    写出结果必须检查（二轮评审修复 4）：只有 prepared 确认送达的
+    //    那个连接代际才允许收到 committed。
+    const preparedReceipt = await this.#broadcast(
       parsed.sessionId,
       {
         type: "scene.prepared",
@@ -242,21 +251,33 @@ export class FakeSceneCommitService {
 
     // 3. 数据库 Commit 成功后才发布 scene.committed；幂等重放（duplicate）
     //    不发布第二条 committed——重连客户端经 session.snapshot 获取事实。
+    //    发布目标只能是**确认收到 prepared 的同一连接代际**（二轮评审
+    //    修复 4）：prepared 送达失败（无连接/写出失败/超时）时跳过
+    //    committed——内部提交照常完成，后续连接经 Snapshot 获得事实，
+    //    不能只收到无 prepared 因果的孤立 committed。
     if (!result.duplicate) {
-      await this.#broadcast(
-        parsed.sessionId,
-        {
-          type: "scene.committed",
-          payload: {
-            sceneId: parsed.sceneId,
-            cycleId: parsed.cycleId,
-            committedAtMs: result.committedAtMs,
+      if (preparedReceipt.outcome === "sent" && preparedReceipt.connectionId !== null) {
+        await this.#broadcast(
+          parsed.sessionId,
+          {
+            type: "scene.committed",
+            payload: {
+              sceneId: parsed.sceneId,
+              cycleId: parsed.cycleId,
+              committedAtMs: result.committedAtMs,
+            },
+            traceId: trace.traceId,
+            ...(trace.spanId === undefined ? {} : { spanId: trace.spanId }),
           },
-          traceId: trace.traceId,
-          ...(trace.spanId === undefined ? {} : { spanId: trace.spanId }),
-        },
-        { awaitSent: false },
-      );
+          { awaitSent: false, onlyConnectionId: preparedReceipt.connectionId },
+        );
+      } else {
+        this.#logger.log("info", "runtime_scene_committed_broadcast_skipped", {
+          sessionId: parsed.sessionId,
+          sceneId: parsed.sceneId,
+          preparedOutcome: preparedReceipt.outcome,
+        });
+      }
     }
     return {
       sceneId: result.sceneId,

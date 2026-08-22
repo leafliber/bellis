@@ -4,7 +4,7 @@ import type { TraceContext } from "@bellis/contracts";
 import type { CommitSceneInput, CommitSceneResult, PersistenceClient } from "@bellis/persistence";
 import { createInMemoryMetrics, createNoopLogger } from "@bellis/observability";
 import { SystemMonotonicClock } from "@bellis/transport";
-import type { BroadcastOutcome, ControlBroadcast } from "../../src/index.js";
+import type { BroadcastReceipt, ControlBroadcast } from "../../src/index.js";
 import { ApplicationError, FakeSceneCommitService } from "../../src/index.js";
 
 /** 记录调用顺序的假持久化客户端（恢复语义由真实 Worker 集成测试覆盖）。 */
@@ -73,6 +73,38 @@ class RecordingClient implements PersistenceClient {
 interface BroadcastEvent {
   readonly kind: "broadcast" | "commit";
   readonly type?: string;
+  readonly options?: { awaitSent?: boolean; onlyConnectionId?: string };
+}
+
+/** 可编程广播 stub：按消息类型返回预设回执（含代际），记录调用选项。 */
+class ScriptedBroadcast {
+  readonly events: Array<{
+    readonly type: string;
+    readonly options?: { readonly awaitSent?: boolean; readonly onlyConnectionId?: string };
+  }> = [];
+  readonly #receipts = new Map<string, BroadcastReceipt>();
+  #default: BroadcastReceipt = { outcome: "sent", connectionId: "conn-a" };
+
+  on(type: string, receipt: BroadcastReceipt): this {
+    this.#receipts.set(type, receipt);
+    return this;
+  }
+
+  default(receipt: BroadcastReceipt): this {
+    this.#default = receipt;
+    return this;
+  }
+
+  toBroadcast(): ControlBroadcast {
+    return async (_sessionId, message, options) => {
+      this.events.push(
+        options === undefined
+          ? { type: message.type }
+          : { type: message.type, options: { ...options } },
+      );
+      return this.#receipts.get(message.type) ?? this.#default;
+    };
+  }
 }
 
 function buildService(
@@ -81,7 +113,7 @@ function buildService(
 ): { service: FakeSceneCommitService; broadcast: ControlBroadcast } {
   const broadcast: ControlBroadcast = async (_sessionId, message) => {
     events.push({ kind: "broadcast", type: message.type });
-    return "sent" satisfies BroadcastOutcome;
+    return { outcome: "sent", connectionId: "conn-a" };
   };
   const wrappingClient: PersistenceClient = {
     ...client,
@@ -200,5 +232,79 @@ describe("FakeSceneCommitService", () => {
       service.commit({ ...INPUT, watermarks: [{ source: "x", watermark: -1n }] }),
     ).rejects.toThrow();
     await expect(service.commit({ ...INPUT, sessionId: "nope" })).rejects.toThrow();
+  });
+
+  it("prepared 确认送达同一代际后，committed 限定 onlyConnectionId（二轮评审修复 4）", async () => {
+    const client = new RecordingClient();
+    const script = new ScriptedBroadcast().on("scene.prepared", {
+      outcome: "sent",
+      connectionId: "conn-42",
+    });
+    const service = new FakeSceneCommitService({
+      client,
+      broadcast: script.toBroadcast(),
+      logger: createNoopLogger(),
+      metrics: createInMemoryMetrics(),
+      clock: new SystemMonotonicClock(),
+    });
+    await service.commit(INPUT);
+    expect(script.events.map((event) => event.type)).toEqual(["scene.prepared", "scene.committed"]);
+    const committed = script.events[1];
+    expect(committed?.options?.onlyConnectionId).toBe("conn-42");
+    expect(committed?.options?.awaitSent).toBe(false);
+  });
+
+  it("prepared 无连接：内部提交照常，绝不发布 committed", async () => {
+    const client = new RecordingClient();
+    const script = new ScriptedBroadcast().on("scene.prepared", {
+      outcome: "no_connection",
+      connectionId: null,
+    });
+    const service = new FakeSceneCommitService({
+      client,
+      broadcast: script.toBroadcast(),
+      logger: createNoopLogger(),
+      metrics: createInMemoryMetrics(),
+      clock: new SystemMonotonicClock(),
+    });
+    const result = await service.commit(INPUT);
+    expect(result.duplicate).toBe(false);
+    expect(client.commits.length).toBe(1);
+    expect(script.events.map((event) => event.type)).toEqual(["scene.prepared"]);
+  });
+
+  it("prepared 写出失败（unsent，如发送回调失败/超时）：提交照常，不发布 committed", async () => {
+    const client = new RecordingClient();
+    const script = new ScriptedBroadcast().on("scene.prepared", {
+      outcome: "unsent",
+      connectionId: "conn-a",
+    });
+    const service = new FakeSceneCommitService({
+      client,
+      broadcast: script.toBroadcast(),
+      logger: createNoopLogger(),
+      metrics: createInMemoryMetrics(),
+      clock: new SystemMonotonicClock(),
+    });
+    await service.commit(INPUT);
+    expect(client.commits.length).toBe(1);
+    expect(script.events.some((event) => event.type === "scene.committed")).toBe(false);
+  });
+
+  it("prepared 送达但无代际标识（防御）：不发布 committed", async () => {
+    const client = new RecordingClient();
+    const script = new ScriptedBroadcast().on("scene.prepared", {
+      outcome: "sent",
+      connectionId: null,
+    });
+    const service = new FakeSceneCommitService({
+      client,
+      broadcast: script.toBroadcast(),
+      logger: createNoopLogger(),
+      metrics: createInMemoryMetrics(),
+      clock: new SystemMonotonicClock(),
+    });
+    await service.commit(INPUT);
+    expect(script.events.some((event) => event.type === "scene.committed")).toBe(false);
   });
 });

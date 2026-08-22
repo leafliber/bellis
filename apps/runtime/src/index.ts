@@ -34,6 +34,7 @@ export {
 } from "./application/commit-fake-scene.js";
 export type {
   BroadcastOutcome,
+  BroadcastReceipt,
   ControlBroadcast,
   FakeSceneCommitInput,
   FakeSceneCommitResult,
@@ -53,4 +54,4 @@ export {
 } from "./errors/mapping.js";
 export type { MappedErrorEnvelope } from "./errors/mapping.js";
 export { StartupTokenService } from "./auth/startup-token.js";
-export type { IssuedStartupToken } from "./auth/startup-token.js";
+export type { IssuedStartupToken, StartupTokenReservation } from "./auth/startup-token.js";

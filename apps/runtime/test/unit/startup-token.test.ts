@@ -2,18 +2,53 @@ import { describe, expect, it } from "vitest";
 import { StartupTokenService } from "../../src/index.js";
 
 describe("StartupTokenService", () => {
-  it("签发的 Token 至少 256-bit 随机且可成功交换一次", () => {
+  it("签发的 Token 至少 256-bit 随机且可成功预留并消费一次", () => {
     const tokens = new StartupTokenService({ ttlMs: 60_000 });
     const issued = tokens.issue();
     expect(issued.token.length).toBeGreaterThanOrEqual(43);
-    expect(tokens.exchange(issued.token)).toEqual({ ok: true });
+    const reservation = tokens.reserve(issued.token);
+    expect(reservation).not.toBeNull();
+    reservation?.commit();
   });
 
-  it("同一 Token 第二次交换失败", () => {
+  it("同一 Token commit 后不可再次预留", () => {
     const tokens = new StartupTokenService({ ttlMs: 60_000 });
     const issued = tokens.issue();
-    expect(tokens.exchange(issued.token).ok).toBe(true);
-    expect(tokens.exchange(issued.token).ok).toBe(false);
+    tokens.reserve(issued.token)?.commit();
+    expect(tokens.reserve(issued.token)).toBeNull();
+  });
+
+  it("预留期间并发预留失败（独占持有，二轮评审修复 5）", () => {
+    const tokens = new StartupTokenService({ ttlMs: 60_000 });
+    const issued = tokens.issue();
+    const first = tokens.reserve(issued.token);
+    expect(first).not.toBeNull();
+    // 未 commit/release 前同 Token 的其它请求一律失败。
+    expect(tokens.reserve(issued.token)).toBeNull();
+    first?.release();
+    // 释放后可再次预留。
+    expect(tokens.reserve(issued.token)).not.toBeNull();
+  });
+
+  it("release 后同 Token 重试有效（可重试失败场景）", () => {
+    const tokens = new StartupTokenService({ ttlMs: 60_000 });
+    const issued = tokens.issue();
+    tokens.reserve(issued.token)?.release();
+    const second = tokens.reserve(issued.token);
+    expect(second).not.toBeNull();
+    second?.commit();
+    expect(tokens.reserve(issued.token)).toBeNull();
+  });
+
+  it("release 已过期的预留直接作废（不放回可用集）", () => {
+    let now = 1_000;
+    const tokens = new StartupTokenService({ ttlMs: 1_000, nowMs: () => now });
+    const issued = tokens.issue();
+    const reservation = tokens.reserve(issued.token);
+    expect(reservation).not.toBeNull();
+    now += 2_000;
+    reservation?.release();
+    expect(tokens.reserve(issued.token)).toBeNull();
   });
 
   it("过期 Token 失败（可注入时钟）", () => {
@@ -21,32 +56,33 @@ describe("StartupTokenService", () => {
     const tokens = new StartupTokenService({ ttlMs: 1_000, nowMs: () => now });
     const issued = tokens.issue();
     now += 1_001;
-    expect(tokens.exchange(issued.token).ok).toBe(false);
+    expect(tokens.reserve(issued.token)).toBeNull();
   });
 
   it("未知、非法类型输入统一失败", () => {
     const tokens = new StartupTokenService();
-    expect(tokens.exchange(undefined).ok).toBe(false);
-    expect(tokens.exchange(1234).ok).toBe(false);
-    expect(tokens.exchange("").ok).toBe(false);
-    expect(tokens.exchange("not-a-real-token").ok).toBe(false);
+    expect(tokens.reserve(undefined)).toBeNull();
+    expect(tokens.reserve(1234)).toBeNull();
+    expect(tokens.reserve("")).toBeNull();
+    expect(tokens.reserve("not-a-real-token")).toBeNull();
   });
 
-  it("并发交换同一 Token 只有一个成功", async () => {
-    const tokens = new StartupTokenService();
+  it("重复 settle（commit 后 release）幂等无副作用", () => {
+    const tokens = new StartupTokenService({ ttlMs: 60_000 });
     const issued = tokens.issue();
-    const results = await Promise.all(
-      Array.from({ length: 8 }, () => Promise.resolve(tokens.exchange(issued.token))),
-    );
-    expect(results.filter((result) => result.ok).length).toBe(1);
+    const reservation = tokens.reserve(issued.token);
+    reservation?.commit();
+    // 重复 release 不得把已消费 Token 放回可用集。
+    reservation?.release();
+    expect(tokens.reserve(issued.token)).toBeNull();
   });
 
   it("内部记录不保存原始 Token 值（P4 修复 10）", () => {
     const tokens = new StartupTokenService();
     const issued = tokens.issue();
     expect(tokens.containsRawValue(issued.token)).toBe(false);
-    // 交换成功后同样不保存原值。
-    expect(tokens.exchange(issued.token).ok).toBe(true);
+    // 消费成功后同样不保存原值。
+    tokens.reserve(issued.token)?.commit();
     expect(tokens.containsRawValue(issued.token)).toBe(false);
   });
 

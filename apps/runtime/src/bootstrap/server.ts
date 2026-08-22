@@ -3,7 +3,7 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import fastify from "fastify";
 import type { MonotonicClock } from "@bellis/contracts";
-import type { PersistenceClient, RecoveryState } from "@bellis/persistence";
+import type { PersistenceClient } from "@bellis/persistence";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import { mapErrorToEnvelope, toErrorEnvelopeJson } from "../errors/mapping.js";
 import { registerAuthRoute } from "../routes/auth.js";
@@ -49,8 +49,13 @@ const UNAUTHORIZED_CLOSE = 1008;
 const NOT_READY_CLOSE = 1013;
 
 export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> {
-  const maxWsPayload =
-    12 + ctx.config.limits.maxMediaHeaderBytes + ctx.config.limits.maxMediaPayloadBytes;
+  // WS 层总 maxPayload 必须同时覆盖 Media 帧上限与 Control 文本上限
+  // （二轮评审修复 7）：若可配置的 maxControlTextBytes 大于 Media 组合
+  // 上限，配置宣称允许的 Control 消息会先被 WS 层以 1009 拒绝。
+  const maxWsPayload = Math.max(
+    ctx.config.limits.maxControlTextBytes,
+    12 + ctx.config.limits.maxMediaHeaderBytes + ctx.config.limits.maxMediaPayloadBytes,
+  );
   const app = fastify({
     logger: false,
     forceCloseConnections: true,
@@ -170,11 +175,15 @@ function resolveWsSession(ctx: ServerContext, request: FastifyRequest): LogicalS
 }
 
 /**
- * 解析 Control 连接的 resume 与预加载恢复状态（P4 修复 1/3）：
+ * 解析 Control 连接的 resume 与预加载恢复状态（P4 修复 1/3 +
+ * 二轮评审修复 3）：
  * - 同进程导出状态优先（完整 Replay 内容）；
- * - restorable Session 从 P2 latestServerSeq 构造跨重启 resume
+ * - `restorable` Session 从 P2 latestServerSeq 构造跨重启 resume
  *   （Replay 内容不持久化，缺口走 Snapshot）；
  * - 新建 Session 无需 resume，也不会有 Replay Gap。
+ *
+ * 恢复读取失败必须**抛错**（调用方以 1011 失败关闭连接）：跨重启吞错
+ * 会退化为全新 Seq（复用已持久化 Seq），进程内吞错会让快照不可构造。
  */
 async function loadControlResume(
   ctx: ServerContext,
@@ -184,29 +193,20 @@ async function loadControlResume(
     // 原子消费：读取即清空，避免并发连接重复消费同一导出状态。
     const resume = logical.exportedControlState;
     logical.exportedControlState = null;
-    let recoveryState: RecoveryState | null = null;
-    try {
-      recoveryState = await ctx.persistence.readRecoveryState(logical.sessionId);
-    } catch {
-      recoveryState = null;
-    }
+    const recoveryState = await ctx.persistence.readRecoveryState(logical.sessionId);
     return { resume, recoveryState };
   }
   if (logical.restorable) {
-    try {
-      const state = await ctx.persistence.readRecoveryState(logical.sessionId);
-      if (state.latestServerSeq <= 0n) {
-        return { recoveryState: state };
-      }
-      const resume: ControlResumePlan["resume"] = {
-        nextSeq: state.latestServerSeq + 1n,
-        confirmedAck: state.latestServerSeq,
-        replay: [],
-      };
-      return { resume, recoveryState: state };
-    } catch {
-      return { recoveryState: null };
+    const state = await ctx.persistence.readRecoveryState(logical.sessionId);
+    if (state.latestServerSeq <= 0n) {
+      return { recoveryState: state };
     }
+    const resume: ControlResumePlan["resume"] = {
+      nextSeq: state.latestServerSeq + 1n,
+      confirmedAck: state.latestServerSeq,
+      replay: [],
+    };
+    return { resume, recoveryState: state };
   }
   return { recoveryState: null };
 }
@@ -245,6 +245,7 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
         maxControlTextBytes: ctx.config.limits.maxControlTextBytes,
         sendQueueMaxMessages: ctx.config.limits.sendQueue.maxMessages,
         sendQueueMaxBytes: ctx.config.limits.sendQueue.maxBytes,
+        sendFlushTimeoutMs: ctx.config.limits.sendFlushTimeoutMs,
       },
       loadResume: () => loadControlResume(ctx, logical),
     });

@@ -51,10 +51,19 @@ export interface TestRuntimeOptions {
   readonly replayWindowCapacity?: number;
   readonly maxTotalStreams?: number;
   readonly persistenceClient?: PersistenceClient;
+  /** limits 组覆盖（含嵌套 sendQueue；sendFlushTimeoutMs/sessionTtlMs 等）。 */
+  readonly limits?: Record<string, unknown>;
 }
 
 /** 启动测试 Runtime（随机空闲端口、TS Worker、无检查点观察器）。 */
 export async function startTestRuntime(options: TestRuntimeOptions): Promise<RuntimeHandle> {
+  const mergedLimits: Record<string, unknown> = {
+    ...(options.replayWindowCapacity === undefined
+      ? {}
+      : { replayWindowCapacity: options.replayWindowCapacity }),
+    ...(options.maxTotalStreams === undefined ? {} : { maxTotalStreams: options.maxTotalStreams }),
+    ...options.limits,
+  };
   return startRuntime({
     config: {
       dataDirectory: options.dataDirectory,
@@ -66,18 +75,7 @@ export async function startTestRuntime(options: TestRuntimeOptions): Promise<Run
       ...(options.startupTokenTtlMs === undefined
         ? {}
         : { startupTokenTtlMs: options.startupTokenTtlMs }),
-      ...(options.replayWindowCapacity === undefined && options.maxTotalStreams === undefined
-        ? {}
-        : {
-            limits: {
-              ...(options.replayWindowCapacity === undefined
-                ? {}
-                : { replayWindowCapacity: options.replayWindowCapacity }),
-              ...(options.maxTotalStreams === undefined
-                ? {}
-                : { maxTotalStreams: options.maxTotalStreams }),
-            },
-          }),
+      ...(Object.keys(mergedLimits).length === 0 ? {} : { limits: mergedLimits }),
     },
     persistenceWorker: WORKER_FIXTURE,
     ...(options.persistenceClient === undefined
@@ -115,7 +113,7 @@ export interface ExchangeResult {
 export async function exchangeToken(
   handle: RuntimeHandle,
   token: string,
-  options?: { origin?: string },
+  options?: { origin?: string; resumeSessionId?: string },
 ): Promise<{ status: number; body: unknown; cookie: string | null; sessionId: string | null }> {
   const response = await fetch(`http://127.0.0.1:${handle.status.port}/api/v1/auth/exchange`, {
     method: "POST",
@@ -124,7 +122,9 @@ export async function exchangeToken(
       origin: options?.origin ?? originFor(handle),
       authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify(
+      options?.resumeSessionId === undefined ? {} : { resumeSessionId: options.resumeSessionId },
+    ),
   });
   const setCookie = response.headers.get("set-cookie");
   const cookie = setCookie === null ? null : (/^([^=]+=[^;]+)/.exec(setCookie)?.[1] ?? null);

@@ -9,6 +9,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  *   记录永不包含原始值。
  * - 比较在摘要域进行 timing-safe 匹配；成功、过期、未知、已使用的交换
  *   返回统一结果，不泄露具体失败原因，原始 Token 永不进入日志。
+ * - 消费是**三阶段原子预留**（二轮评审修复 5）：reserve 独占持有（并发
+ *   请求只有一个持有者）→ commit 永久消费 / release 归还可用。持久化
+ *   可重试失败（database_busy 等）时 release，同 Token 重试有效；
+ *   客户端错误（非法 resume 目标等）时 commit，Token 不被探测重放。
  * - 开发/测试通过 Fixture 注入（issue()），生产装配不预置任何 Token。
  */
 
@@ -17,12 +21,16 @@ export interface IssuedStartupToken {
   readonly expiresAtMs: number;
 }
 
-export type StartupTokenExchange = { readonly ok: true } | { readonly ok: false };
+/** 已预留 Token 的消费句柄：commit 永久消费；release 归还可用。 */
+export interface StartupTokenReservation {
+  commit(): void;
+  release(): void;
+}
 
 interface TokenRecord {
   readonly digest: Uint8Array;
   readonly expiresAtMs: number;
-  used: boolean;
+  state: "available" | "reserved" | "used";
 }
 
 const TOKEN_BYTES = 32;
@@ -52,36 +60,54 @@ export class StartupTokenService {
     this.#records.set(Buffer.from(digest).toString("hex"), {
       digest,
       expiresAtMs,
-      used: false,
+      state: "available",
     });
     this.#sweep(now);
     return { token, expiresAtMs };
   }
 
   /**
-   * 交换校验：过期、未知、已使用、格式非法一律 `{ ok: false }`，
-   * 调用方对外返回统一 unauthorized，不区分原因。
-   * 成功立即标记已使用（同一 Token 第二次交换失败）。
+   * 独占预留一枚 Token：过期、未知、已使用、已预留、格式非法一律
+   * null（调用方对外返回统一 unauthorized，不区分原因）。同一时刻
+   * 每枚 Token 至多一个持有者；持有者必须 commit() 或 release()。
    */
-  exchange(token: unknown): StartupTokenExchange {
+  reserve(token: unknown): StartupTokenReservation | null {
     if (typeof token !== "string" || token.length === 0 || token.length > 256) {
-      return { ok: false };
+      return null;
     }
     const now = this.#nowMs();
     const digest = digestOf(token);
-    const record = this.#records.get(Buffer.from(digest).toString("hex"));
+    const key = Buffer.from(digest).toString("hex");
+    const record = this.#records.get(key);
     if (
       record === undefined ||
-      record.used ||
+      record.state !== "available" ||
       record.expiresAtMs <= now ||
       record.digest.length !== 32 ||
       !timingSafeEqual(record.digest, digest)
     ) {
       this.#sweep(now);
-      return { ok: false };
+      return null;
     }
-    record.used = true;
-    return { ok: true };
+    record.state = "reserved";
+    let settled = false;
+    return {
+      commit: () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        record.state = "used";
+      },
+      release: () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        // 已过期的预留直接作废，否则归还可用状态供同 Token 重试。
+        record.state = record.expiresAtMs <= this.#nowMs() ? "used" : "available";
+      },
+    };
   }
 
   /**

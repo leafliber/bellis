@@ -15,6 +15,16 @@ import type { ControlLogicalState, MediaStreamRegistryOptions } from "@bellis/tr
  * Media Registry 的所有权与 Media 连接生命周期一致（P4 修复 7）：
  * 同一 Session 同时只允许一条 Media 连接；该连接关闭时 Registry 整体重建
  * （P1 closeAll 不重置 totalStreams，重连必须拿到全新 Registry）。
+ *
+ * 同一 sessionId 的重复挂载（二轮评审修复 1）：create() 复用**同一**逻辑
+ * Session 对象并原子轮换 Cookie——撤销全部旧 Cookie、登记新 Cookie，
+ * 绝不创建第二个对象（否则双对象竞争同一 P2 Seq，关闭流程只回收其一）。
+ *
+ * 失效与容量边界（二轮评审修复 9）：
+ * - Session 自 createdAtMs 起 sessionTtlMs 后整体过期（全部 Cookie 一起
+ *   失效）；过期 Session 在解析/创建时惰性回收，活跃连接被强制关闭。
+ * - 超过 maxSessions 时按 createdAtMs 淘汰最旧（稳定 FIFO；被淘汰
+ *   Session 的连接同样强制关闭）。
  */
 
 /** Control 连接的最小结构契约（避免与适配器模块循环依赖）。 */
@@ -48,6 +58,8 @@ export class LogicalSession {
   control: ControlConnectionLike | null = null;
   readonly mediaConnections = new Set<MediaConnectionLike>();
   readonly mediaFrames: MediaFrameStats = { accepted: 0, rejected: 0 };
+  /** 该 Session 当前有效的 Cookie 令牌（令牌 → 绑定时间）。 */
+  readonly #cookies = new Map<string, number>();
   readonly #registryDefaults: Omit<MediaStreamRegistryOptions, "sessionId">;
 
   constructor(
@@ -67,6 +79,23 @@ export class LogicalSession {
     return this.#mediaStreams;
   }
 
+  /** 登记一枚 Cookie 令牌。 */
+  bindCookie(cookieToken: string, boundAtMs: number): void {
+    this.#cookies.set(cookieToken, boundAtMs);
+  }
+
+  /** 撤销全部 Cookie 令牌（轮换时调用；返回被撤销的令牌列表）。 */
+  revokeAllCookies(): string[] {
+    const revoked = [...this.#cookies.keys()];
+    this.#cookies.clear();
+    return revoked;
+  }
+
+  /** 当前有效 Cookie 令牌数。 */
+  get cookieCount(): number {
+    return this.#cookies.size;
+  }
+
   /**
    * 重建全新 Registry（关闭全部旧 Stream 且重置 totalStreams 计数）。
    * 仅在 Media 连接关闭/重连时调用——旧连接的总量配额不跨连接继承。
@@ -79,42 +108,133 @@ export class LogicalSession {
   }
 }
 
+export interface SessionStoreOptions {
+  /** 逻辑 Session 自创建起的存活时长（毫秒）。 */
+  readonly ttlMs: number;
+  /** 容量上限；超出按创建时间淘汰最旧。 */
+  readonly maxSessions: number;
+  readonly nowMs?: () => number;
+}
+
 export class SessionStore {
   readonly #byCookie = new Map<string, LogicalSession>();
   readonly #byId = new Map<string, LogicalSession>();
   readonly #registryDefaults: Omit<MediaStreamRegistryOptions, "sessionId">;
+  readonly #ttlMs: number;
+  readonly #maxSessions: number;
+  readonly #nowMs: () => number;
 
-  constructor(registryDefaults: Omit<MediaStreamRegistryOptions, "sessionId">) {
+  constructor(
+    registryDefaults: Omit<MediaStreamRegistryOptions, "sessionId">,
+    options: SessionStoreOptions,
+  ) {
     this.#registryDefaults = registryDefaults;
+    this.#ttlMs = options.ttlMs;
+    this.#maxSessions = options.maxSessions;
+    this.#nowMs = options.nowMs ?? Date.now;
   }
 
-  /** 创建逻辑 Session 并登记 Cookie 令牌。 */
+  /**
+   * 创建逻辑 Session 并登记 Cookie 令牌；sessionId 已存在时**复用同一
+   * 对象**并原子轮换 Cookie（撤销全部旧令牌，登记新令牌）。
+   */
   create(
     cookieToken: string,
     sessionId: string,
     createdAtMs: number,
     options?: LogicalSessionOptions,
   ): LogicalSession {
+    this.#sweepExpired();
+    const existing = this.#byId.get(sessionId);
+    if (existing !== undefined) {
+      // 轮换：同一对象、新 Cookie；旧 Cookie 立即失效，不存在双 Cookie 并存。
+      for (const revoked of existing.revokeAllCookies()) {
+        this.#byCookie.delete(revoked);
+      }
+      existing.bindCookie(cookieToken, createdAtMs);
+      this.#byCookie.set(cookieToken, existing);
+      return existing;
+    }
     const session = new LogicalSession(sessionId, createdAtMs, this.#registryDefaults, options);
+    session.bindCookie(cookieToken, createdAtMs);
     this.#byCookie.set(cookieToken, session);
     this.#byId.set(sessionId, session);
+    this.#enforceCapacity();
     return session;
   }
 
-  /** 按 Cookie 令牌解析逻辑 Session；未知/伪造返回 null。 */
+  /** 按 Cookie 令牌解析逻辑 Session；未知/伪造/所属 Session 已过期返回 null。 */
   resolveByCookie(cookieToken: unknown): LogicalSession | null {
     if (typeof cookieToken !== "string" || cookieToken.length === 0 || cookieToken.length > 256) {
       return null;
     }
-    return this.#byCookie.get(cookieToken) ?? null;
+    const session = this.#byCookie.get(cookieToken) ?? null;
+    if (session === null) {
+      return null;
+    }
+    if (this.#isExpired(session)) {
+      this.#remove(session, "session_expired");
+      return null;
+    }
+    return session;
   }
 
   resolveById(sessionId: string): LogicalSession | null {
-    return this.#byId.get(sessionId) ?? null;
+    const session = this.#byId.get(sessionId) ?? null;
+    if (session === null) {
+      return null;
+    }
+    if (this.#isExpired(session)) {
+      this.#remove(session, "session_expired");
+      return null;
+    }
+    return session;
   }
 
   get size(): number {
     return this.#byId.size;
+  }
+
+  #isExpired(session: LogicalSession): boolean {
+    return this.#nowMs() - session.createdAtMs >= this.#ttlMs;
+  }
+
+  /** 惰性回收全部过期 Session（含强关其连接）。 */
+  #sweepExpired(): void {
+    const nowMs = this.#nowMs();
+    for (const session of this.#byId.values()) {
+      if (nowMs - session.createdAtMs >= this.#ttlMs) {
+        this.#remove(session, "session_expired");
+      }
+    }
+  }
+
+  /** 容量边界：按 createdAtMs 淘汰最旧，直至回到上限内（稳定 FIFO）。 */
+  #enforceCapacity(): void {
+    while (this.#byId.size > this.#maxSessions) {
+      let oldest: LogicalSession | null = null;
+      for (const session of this.#byId.values()) {
+        if (oldest === null || session.createdAtMs < oldest.createdAtMs) {
+          oldest = session;
+        }
+      }
+      if (oldest === null) {
+        return;
+      }
+      this.#remove(oldest, "session_capacity_evicted");
+    }
+  }
+
+  /** 移除逻辑 Session：强关其连接并撤销全部 Cookie 映射。 */
+  #remove(session: LogicalSession, reason: string): void {
+    session.control?.forceClose();
+    for (const connection of session.mediaConnections) {
+      connection.forceClose(reason);
+    }
+    for (const revoked of session.revokeAllCookies()) {
+      this.#byCookie.delete(revoked);
+    }
+    this.#byId.delete(session.sessionId);
   }
 
   /** 是否仍有活跃 Control/Media 连接（优雅关闭排空判定）。 */

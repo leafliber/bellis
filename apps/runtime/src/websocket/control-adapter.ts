@@ -7,7 +7,7 @@ import { CONTROL_CLOSE_CODES, ControlSession, decodeControlMessage } from "@bell
 import type { ControlEffect, ControlLogicalState, ServerEnqueueResult } from "@bellis/transport";
 import type { WebSocket } from "ws";
 import { buildSessionSnapshot } from "../application/recovery.js";
-import type { BroadcastOutcome } from "../application/commit-fake-scene.js";
+import type { BroadcastOutcome, BroadcastReceipt } from "../application/commit-fake-scene.js";
 import type { ConnectionMetrics } from "./connection-metrics.js";
 import type { LogicalSession } from "./session-store.js";
 
@@ -18,21 +18,28 @@ import type { LogicalSession } from "./session-store.js";
  * `ControlSession.acceptClientMessage`（P1 完整校验，Route 中无
  * `JSON.parse as Type`）；出站 Effect 串行异步执行，顺序保证：
  *
+ * - resume 对账（二轮评审修复 2）：恢复连接在**任何** Replay/新消息上线
+ *   前，先把 `resume.nextSeq - 1` 与 P2 水位完成单调对账
+ *   （advanceServerSeq 幂等接受相等、拒绝回退）。P1 的 Replay backlog
+ *   只产生 send 不产生 seq_advanced——若 Socket 在上条连接
+ *   `await advanceServerSeq` 期间关闭，导出状态里已分配但未落库的 Seq
+ *   只能靠这次对账补齐，否则 Replay 会未经落库直接上线。
  * - `seq_advanced` → **先等待 P2 advanceServerSeq 成功落库**，才执行同一
  *   消息的 `send`（P4 修复 2）。落库失败不得发送，连接降级关闭（1011）。
  * - `send` → socket.send 的**成功回调**后才确认写出（P4 修复 11）；
- *   广播等待者据此得到真实写出结果。
+ *   广播等待者据此得到真实写出结果与连接代际（二轮评审修复 4）。
  * - `snapshot_required` → Replay Gap 快照用**预加载**的恢复状态同步入队，
  *   保证 `session.snapshot` 严格先于 `server.ready` 与后续业务消息
- *   （P4 修复 3）。
+ *   （P4 修复 3）。快照不可构造/不可入队，或 resume 连接未携带
+ *   lastAck（二轮评审修复 3）时强制快照，失败一律 1011 关闭——
+ *   绝不静默进入 active。
  * - `dropped` → 指标（类别+数量，不含 Payload）；`close` → socket.close。
  */
 
 const TICK_INTERVAL_US = 50_000n;
-/** 等待 prepared 实际写出的上限；超时降级关闭连接（防 committed 反超）。 */
-const SEND_FLUSH_TIMEOUT_MS = 5_000;
-/** Seq 水位落库失败时的降级关闭码（P1 关闭码之外的内部错误）。 */
+/** Seq 水位落库失败/恢复对账失败/快照不可用时的降级关闭码。 */
 const SEQ_PERSIST_FAILED_CLOSE = 1011;
+const SNAPSHOT_UNAVAILABLE_CLOSE = 1011;
 
 export interface ControlLimits {
   readonly heartbeatIntervalMs: number;
@@ -42,6 +49,7 @@ export interface ControlLimits {
   readonly maxControlTextBytes: number;
   readonly sendQueueMaxMessages: number;
   readonly sendQueueMaxBytes: number;
+  readonly sendFlushTimeoutMs: number;
 }
 
 export interface ControlResumePlan {
@@ -63,7 +71,8 @@ export interface ControlConnectionOptions {
   readonly limits: ControlLimits;
   /**
    * resume/恢复状态加载器（P4 修复 1/3）：同步挂接 Socket 监听后异步
-   * 解析；解析完成前入站消息进入有界缓冲，不丢失。
+   * 解析；解析完成前入站消息进入有界缓冲，不丢失。**读取失败必须
+   * 抛错**（连接以 1011 失败关闭），不得降级为全新 Session。
    */
   readonly loadResume: () => Promise<ControlResumePlan>;
 }
@@ -91,8 +100,12 @@ export class ControlConnection {
   readonly #resumeLoader: () => Promise<ControlResumePlan>;
   readonly #pumpAbort = new AbortController();
   readonly #sendWaiters = new Map<string, SendWaiter[]>();
+  /** 连接代际标识（二轮评审修复 4）：prepared/committed 必须同代际送达。 */
+  readonly connectionId = crypto.randomUUID();
   #session: ControlSession | null = null;
   #recoveryState: RecoveryState | null = null;
+  /** 本连接是否以 resume 恢复（决定无 lastAck 时是否强制快照）。 */
+  #resumedSession = false;
   /** resume 解析期间的入站缓冲（同步挂监听，零丢失）。 */
   readonly #inbox: BufferedMessage[] = [];
   #pumpRunning = false;
@@ -120,8 +133,8 @@ export class ControlConnection {
 
   /**
    * 同步挂接 Socket 监听（Upgrade 与异步 resume 解析之间的入站消息进入
-   * 有界缓冲，不丢失），然后异步解析 resume → 构造 P1 ControlSession →
-   * 发送 server.hello → 按序回放入站缓冲。
+   * 有界缓冲，不丢失），然后异步解析 resume → 恢复水位对账 → 构造 P1
+   * ControlSession → 发送 server.hello → 按序回放入站缓冲。
    */
   start(): void {
     this.#connections.acquire("control");
@@ -167,6 +180,25 @@ export class ControlConnection {
       return;
     }
     this.#recoveryState = plan.recoveryState;
+    this.#resumedSession = plan.resume !== undefined;
+    // 恢复水位对账（二轮评审修复 2）：任何 Replay/新消息上线前，先把
+    // 上条连接已分配的最大 Seq 补落库。advanceServerSeq 幂等接受相等。
+    if (plan.resume !== undefined && plan.resume.nextSeq > 1n) {
+      const watermark = plan.resume.nextSeq - 1n;
+      const reconciled = await this.#persistServerSeqAwait(watermark);
+      if (this.#finished) {
+        return;
+      }
+      if (!reconciled) {
+        this.#logger.log("error", "runtime_seq_reconcile_failed_close", {
+          sessionId: this.#logical.sessionId,
+          watermark: watermark.toString(),
+        });
+        this.#finish(SEQ_PERSIST_FAILED_CLOSE, "resume watermark reconcile failed");
+        return;
+      }
+      this.#lastPersistedSeq = watermark;
+    }
     this.#session = new ControlSession({
       sessionId: this.#logical.sessionId,
       runtimeVersion: this.#runtimeVersion,
@@ -242,7 +274,8 @@ export class ControlConnection {
   /**
    * Application 广播入口：enqueue + pump；`awaitSent` 时等到 Socket 发送
    * 回调成功（P4 修复 11）。等待超时降级关闭连接——committed（P1）不允许
-   * 在线上反超尚未写出的 prepared（P3）。
+   * 在线上反超尚未写出的 prepared（P3）。返回写出结果与**本连接代际**；
+   * `onlyConnectionId` 指定其它代际时拒绝发布（二轮评审修复 4）。
    */
   async broadcast(
     message: {
@@ -251,11 +284,14 @@ export class ControlConnection {
       readonly traceId: string;
       readonly spanId?: string;
     },
-    options?: { readonly awaitSent?: boolean },
-  ): Promise<BroadcastOutcome> {
+    options?: { readonly awaitSent?: boolean; readonly onlyConnectionId?: string },
+  ): Promise<BroadcastReceipt> {
     const session = this.#session;
     if (session === null || !this.acceptsBroadcast()) {
-      return "no_connection";
+      return { outcome: "no_connection", connectionId: null };
+    }
+    if (options?.onlyConnectionId !== undefined && options.onlyConnectionId !== this.connectionId) {
+      return { outcome: "no_connection", connectionId: null };
     }
     const messageId = crypto.randomUUID();
     const result: ServerEnqueueResult = session.enqueueServerMessage({
@@ -269,15 +305,15 @@ export class ControlConnection {
       sentAtUs: this.#clock.nowUs(),
     });
     if (result.status !== "queued") {
-      return "unsent";
+      return { outcome: "unsent", connectionId: this.connectionId };
     }
     if (options?.awaitSent !== true) {
       void this.#pump();
-      return "sent";
+      return { outcome: "sent", connectionId: this.connectionId };
     }
     const outcome = await this.#waitForSend(messageId);
     void this.#pump();
-    return outcome;
+    return { outcome, connectionId: this.connectionId };
   }
 
   /** 优雅排空：进入 draining，队列清空后按 4005 关闭。 */
@@ -297,27 +333,29 @@ export class ControlConnection {
   }
 
   /**
-   * Replay Gap 预判（P4 修复 3）：client.hello 携带 lastAck 且重放判定为
-   * snapshot_required 时，在 acceptClientMessage 之后、pump 排空之前
-   * **同步**入队 session.snapshot，随后才入队 server.ready——保证线上
-   * 顺序 replay（P1 先行缓冲）/ server.hello → session.snapshot →
-   * server.ready → 业务消息。
-   * （decodeControlMessage 是 P1 包根公开 API，非 Route 内裸 JSON.parse。）
+   * client.hello 的快照决策（P4 修复 3 + 二轮评审修复 3）：
+   * - lastAck 重放判定为 snapshot_required → Replay Gap 快照；
+   * - resume 连接未携带 lastAck（客户端水位未知）→ 强制快照，
+   *   绝不把空 Replay 当成已追平静默进入 active；
+   * - （decodeControlMessage 是 P1 包根公开 API，非 Route 内裸 JSON.parse。）
    */
-  #snapshotRequiredForHello(text: string): boolean {
+  #helloSnapshotDecision(text: string): { required: boolean; lastAckPresent: boolean } {
     const session = this.#session;
     if (session === null) {
-      return false;
+      return { required: false, lastAckPresent: false };
     }
     const decoded = decodeControlMessage(text);
     if (!decoded.ok || decoded.value.type !== "client.hello") {
-      return false;
+      return { required: false, lastAckPresent: false };
     }
     const lastAck = (decoded.value.payload as { lastAck?: unknown }).lastAck;
     if (typeof lastAck !== "string") {
-      return false;
+      return { required: this.#resumedSession, lastAckPresent: false };
     }
-    return session.replayAfter(parseDecimalString(lastAck)).status === "snapshot_required";
+    return {
+      required: session.replayAfter(parseDecimalString(lastAck)).status === "snapshot_required",
+      lastAckPresent: true,
+    };
   }
 
   async #acceptText(text: string): Promise<void> {
@@ -326,9 +364,9 @@ export class ControlConnection {
       return;
     }
     const nowUs = this.#clock.nowUs();
-    let needsSnapshot = false;
+    let snapshotDecision: { required: boolean; lastAckPresent: boolean } | null = null;
     if (!this.#helloHandled) {
-      needsSnapshot = this.#snapshotRequiredForHello(text);
+      snapshotDecision = this.#helloSnapshotDecision(text);
     }
     let accepted: ReturnType<ControlSession["acceptClientMessage"]>;
     try {
@@ -344,9 +382,17 @@ export class ControlConnection {
       try {
         if (accepted.envelope.type === "client.hello") {
           this.#helloHandled = true;
-          // 先快照后 ready（快照内容来自预加载状态，同步可用）。
-          if (needsSnapshot) {
-            this.#enqueueSnapshotFromPreloaded();
+          // 先快照后 ready（快照内容来自预加载状态，同步可用）；快照必须
+          // 成功入队，否则 1011 失败关闭（不得静默进入 active）。
+          if (snapshotDecision !== null && snapshotDecision.required) {
+            if (!this.#enqueueSnapshotFromPreloaded()) {
+              this.#logger.log("error", "runtime_snapshot_required_unavailable", {
+                sessionId: this.#logical.sessionId,
+                lastAckPresent: snapshotDecision.lastAckPresent,
+              });
+              this.#finish(SNAPSHOT_UNAVAILABLE_CLOSE, "session snapshot unavailable");
+              return;
+            }
           }
           session.enqueueServerMessage({
             type: "server.ready",
@@ -473,9 +519,8 @@ export class ControlConnection {
         const effects: readonly ControlEffect[] = this.#session.tick(this.#clock.nowUs());
         for (const effect of effects) {
           // 连接已关闭：立即停止处理（await 期间可能发生关闭）。已分配
-          // 但未发送的 Seq 保留在导出状态/replay 窗口中，由重连连接在
-          // 实际发送时落库——避免旧连接关闭后继续写入水位，与重连连接
-          // 的 advanceServerSeq 竞争触发 seq_regression。
+          // 但未落库的 Seq 保留在导出状态/replay 窗口中，由重连连接的
+          // 恢复水位对账在 Replay 上线前补齐（见 #initialize）。
           if (this.#finished) {
             return;
           }
@@ -507,11 +552,14 @@ export class ControlConnection {
             continue;
           }
           if (effect.kind === "snapshot_required") {
-            // 兜底路径：预判未覆盖时（不应发生）用预加载状态补发。
+            // 兜底路径：预判未覆盖时（不应发生）用预加载状态补发；
+            // 不可构造/不可入队同样 1011 失败关闭（二轮评审修复 3）。
             if (!this.#enqueueSnapshotFromPreloaded()) {
-              this.#logger.log("warn", "runtime_snapshot_unavailable", {
+              this.#logger.log("error", "runtime_snapshot_unavailable_close", {
                 sessionId: this.#logical.sessionId,
               });
+              this.#finish(SNAPSHOT_UNAVAILABLE_CLOSE, "session snapshot unavailable");
+              return;
             }
             await this.#pump();
             continue;
@@ -587,7 +635,7 @@ export class ControlConnection {
         });
         this.forceClose();
         resolve("unsent");
-      }, SEND_FLUSH_TIMEOUT_MS);
+      }, this.#limits.sendFlushTimeoutMs);
       const waiter: SendWaiter = (outcome) => {
         clearTimeout(timer);
         resolve(outcome);
@@ -655,8 +703,8 @@ export class ControlConnection {
     }
     this.#finished = true;
     this.#pumpAbort.abort();
-    // 导出逻辑状态供同进程重连 resume；最终水位已随每次发送落库
-    // （修复 2），此处无需额外补偿写。
+    // 导出逻辑状态供同进程重连 resume；上条连接已分配但未落库的 Seq
+    // 由重连连接的恢复水位对账补齐（#initialize），此处无需补偿写。
     if (this.#logical.control === this) {
       this.#logical.control = null;
       if (this.#session !== null) {

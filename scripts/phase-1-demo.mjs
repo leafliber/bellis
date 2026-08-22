@@ -14,6 +14,7 @@
  * 依赖已构建产物：先运行 `pnpm build`。
  */
 import { fork } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -138,11 +139,24 @@ class Harness {
       this.exitWaiters.push(resolve);
     });
     this.child.kill("SIGKILL");
-    const info = await Promise.race([
-      dead,
-      new Promise((_, reject) => setTimeout(() => reject(new DemoFailure(stage, "child did not exit after SIGKILL")), 10_000)),
-    ]);
-    void info;
+    let timer = null;
+    try {
+      const info = await Promise.race([
+        dead,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new DemoFailure(stage, "child did not exit after SIGKILL")),
+            10_000,
+          );
+        }),
+      ]);
+      void info;
+    } finally {
+      // 竞争失败的超时定时器必须清理，否则父进程被空定时器拖住延迟退出。
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    }
   }
 
   async closeGracefully(stage) {
@@ -157,10 +171,23 @@ class Harness {
       }
       this.exitWaiters.push(resolve);
     });
-    const info = await Promise.race([
-      closed,
-      new Promise((_, reject) => setTimeout(() => reject(new DemoFailure(stage, "graceful close timed out")), 30_000)),
-    ]);
+    let timer = null;
+    let info;
+    try {
+      info = await Promise.race([
+        closed,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new DemoFailure(stage, "graceful close timed out")),
+            30_000,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    }
     if (info.code !== 0) {
       throw new DemoFailure(stage, `graceful close exited with code=${info.code}`);
     }
@@ -270,22 +297,54 @@ function buildDemoMediaFrame(sessionId, streamId, frameId, sequence, traceId) {
   return Buffer.concat([prefix, headerBytes, Buffer.from(payload)]);
 }
 
-async function exchange(port, token, stage) {
-  const response = await fetch(`http://127.0.0.1:${port}/api/v1/auth/exchange`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: `http://127.0.0.1:${port}` },
-    body: JSON.stringify({ startupToken: token }),
+/**
+ * 一次性 Token 交换（node:http + connection: close，避免全局 fetch 的
+ * undici keep-alive Socket 在退出卫生断言时残留）。
+ */
+function exchange(port, token, stage) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ startupToken: token });
+    const request = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/api/v1/auth/exchange",
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: `http://127.0.0.1:${port}`,
+          "content-length": Buffer.byteLength(body),
+          connection: "close",
+        },
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => {
+          if (response.statusCode !== 200) {
+            reject(new DemoFailure(stage, `auth exchange failed with status ${response.statusCode}`));
+            return;
+          }
+          const setCookie = response.headers["set-cookie"]?.[0] ?? "";
+          const cookie = /^([^=]+=[^;]+)/.exec(setCookie)?.[1];
+          if (cookie === undefined) {
+            reject(new DemoFailure(stage, "auth exchange returned no session cookie"));
+            return;
+          }
+          try {
+            const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            resolve({ sessionId: parsed.sessionId, cookie });
+          } catch (error) {
+            reject(new DemoFailure(stage, `auth exchange body invalid: ${error.message}`));
+          }
+        });
+      },
+    );
+    request.on("error", (error) => {
+      reject(new DemoFailure(stage, `auth exchange failed: ${error.message}`));
+    });
+    request.end(body);
   });
-  if (response.status !== 200) {
-    throw new DemoFailure(stage, `auth exchange failed with status ${response.status}`);
-  }
-  const setCookie = response.headers.get("set-cookie") ?? "";
-  const cookie = /^([^=]+=[^;]+)/.exec(setCookie)?.[1];
-  if (cookie === undefined) {
-    throw new DemoFailure(stage, "auth exchange returned no session cookie");
-  }
-  const body = await response.json();
-  return { sessionId: body.sessionId, cookie };
 }
 
 async function pollDeliveries(harness, stage) {
@@ -308,6 +367,30 @@ function cleanup() {
   if (dataDirectory !== null) {
     rmSync(dataDirectory, { recursive: true, force: true });
     dataDirectory = null;
+  }
+}
+
+/**
+ * 断言父进程没有残留的子进程/TCP Socket/定时器句柄（stdio 除外）。
+ * 打印全部成功摘要后 Demo 必须及时以 0 退出，不允许被空定时器拖住。
+ */
+async function assertExitHygiene() {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const active = process._getActiveHandles?.() ?? [];
+  const leftover = active.filter((handle) => {
+    if (handle === process.stdin || handle === process.stdout || handle === process.stderr) {
+      return false;
+    }
+    const name = handle?.constructor?.name ?? "";
+    if (name === "Socket" && typeof handle.remoteAddress !== "string") {
+      // 无对端地址的是 stdio 管道，不是网络 Socket。
+      return false;
+    }
+    return name === "ChildProcess" || name === "Socket" || name === "Timeout";
+  });
+  if (leftover.length > 0) {
+    const names = leftover.map((handle) => handle.constructor?.name).join(", ");
+    throw new DemoFailure("exit-hygiene", `active handles remain: ${names}`);
   }
 }
 
@@ -503,6 +586,11 @@ async function main() {
 
     // 13. 正常关闭 + 清理。
     await instance2.closeGracefully("shutdown");
+
+    // 14. 退出卫生断言（二轮评审修复 10）：九项证据打印前不允许残留
+    //     子进程、TCP Socket 或待触发定时器——空超时定时器会把成功
+    //     Demo 拖住一段时间才退出。
+    await assertExitHygiene();
 
     console.log("protocolVersion=1");
     console.log("controlHandshake=ok");

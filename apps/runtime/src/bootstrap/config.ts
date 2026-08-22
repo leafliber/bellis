@@ -77,6 +77,8 @@ const RuntimeConfigSchema = z
         replayWindowCapacity: PositiveInt(100_000).default(512),
         dedupCapacity: PositiveInt(1_000_000).default(1024),
         maxControlTextBytes: PositiveInt(16 * 1024 * 1024).default(1_048_576),
+        /** 等待单条服务端消息实际写出 Socket 的上限；超时降级关闭连接。 */
+        sendFlushTimeoutMs: PositiveInt(120_000).default(5_000),
         sendQueue: z
           .object({
             maxMessages: PositiveInt(1_000_000).default(512),
@@ -88,6 +90,10 @@ const RuntimeConfigSchema = z
         maxOpenStreams: PositiveInt(1024).default(8),
         maxTotalStreams: PositiveInt(1_000_000).default(1024),
         maxFramesPerStream: PositiveInt(10_000_000).default(65_536),
+        /** 逻辑 Session 自创建起的存活时长；过期后 Cookie 解析失败。 */
+        sessionTtlMs: PositiveInt(86_400_000).default(3_600_000),
+        /** 逻辑 Session 容量上限；超出按创建时间淘汰最旧（含强关其连接）。 */
+        maxSessions: PositiveInt(100_000).default(1024),
       })
       .prefault({}),
     outbox: z
@@ -149,12 +155,22 @@ export function parseRuntimeConfig(input: unknown): ParseConfigResult {
   };
 }
 
+/** 合法端口：非空纯数字、值域 1..65535（Host 头里没有 0 端口）。 */
+function isValidPortSuffix(suffix: string): boolean {
+  if (!/^:\d{1,5}$/.test(suffix)) {
+    return false;
+  }
+  const port = Number(suffix.slice(1));
+  return Number.isInteger(port) && port >= 1 && port <= 65_535;
+}
+
 /**
  * 解析 Host 头的主机名（剥离端口；IPv6 [::1]:port 形式归一为 ::1）。
  * 返回 null 表示无法解析的欺骗值，一律拒绝：
- * - 方括号形式只允许 `[host]` 或 `[host]:port`（port 为纯数字），
- *   `[::1]evil` / `[::1]:17890evil` 等后缀欺骗返回 null；
- * - 非 bracket、非多冒号形式按最后一个冒号剥端口；
+ * - 方括号形式只允许 `[host]` 或 `[host]:port`（port 为纯数字且
+ *   1..65535），`[::1]evil` / `[::1]:65536` / `[::1]:99999` 返回 null；
+ * - 非 bracket、单冒号形式的端口必须非空纯数字且 1..65535，
+ *   `localhost:evil` / `127.0.0.1:` 返回 null；
  * - 多冒号裸 IPv6 字面量整体作为主机名（不在允许列表内即被拒）。
  */
 export function normalizeHostHeader(hostHeader: string): string | null {
@@ -167,9 +183,9 @@ export function normalizeHostHeader(hostHeader: string): string | null {
     if (end < 0) {
       return null;
     }
-    // ']' 之后只允许为空或 ":<纯数字端口>"。
+    // ']' 之后只允许为空或 ":<合法端口>"。
     const suffix = trimmed.slice(end + 1);
-    if (suffix !== "" && !/^:\d{1,5}$/.test(suffix)) {
+    if (suffix !== "" && !isValidPortSuffix(suffix)) {
       return null;
     }
     return trimmed.slice(1, end);
@@ -180,7 +196,11 @@ export function normalizeHostHeader(hostHeader: string): string | null {
     return trimmed;
   }
   if (colonCount === 1) {
-    return trimmed.slice(0, trimmed.lastIndexOf(":"));
+    const colonIndex = trimmed.lastIndexOf(":");
+    if (!isValidPortSuffix(trimmed.slice(colonIndex))) {
+      return null;
+    }
+    return trimmed.slice(0, colonIndex);
   }
   return trimmed;
 }

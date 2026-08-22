@@ -3,8 +3,10 @@ import { pathToFileURL } from "node:url";
 import type {
   PersistenceCheckpoint,
   PersistenceCheckpointObserver,
+  PersistenceClient,
   PersistenceWorkerOptions,
 } from "@bellis/persistence";
+import { createPersistenceClient } from "@bellis/persistence";
 import { startRuntime } from "../../src/index.js";
 import type { RuntimeHandle } from "../../src/index.js";
 
@@ -15,8 +17,10 @@ import type { RuntimeHandle } from "../../src/index.js";
  * `armed` 模式注入受控检查点观察器——到达目标检查点后通知父进程并
  * 永久阻塞，等待 SIGKILL（真正的 Crash Window，不是正常 close）。
  * `production` 模式不注入观察器，与生产装配一致。
+ * `seq-delay` 模式包装 advanceServerSeq（可经 IPC 动态调整延迟毫秒数），
+ * 用于构造"断线与 Seq 落库并发"的真实竞态（二轮评审修复 2 回归）。
  *
- * 用法：node --import <resolve-hook> runtime-crash-harness.ts <dataDirectory> <armed|production>
+ * 用法：node --import <resolve-hook> runtime-crash-harness.ts <dataDirectory> <armed|production|seq-delay>
  */
 
 function notify(message: Record<string, unknown>): void {
@@ -43,15 +47,20 @@ const WORKER: PersistenceWorkerOptions = {
 
 const [dataDirectory, mode] = process.argv.slice(2) as [string, string];
 
-if (dataDirectory === undefined || (mode !== "armed" && mode !== "production")) {
+if (
+  dataDirectory === undefined ||
+  (mode !== "armed" && mode !== "production" && mode !== "seq-delay")
+) {
   notify({
     type: "harness-error",
-    message: "usage: runtime-crash-harness.ts <dataDirectory> <armed|production>",
+    message: "usage: runtime-crash-harness.ts <dataDirectory> <armed|production|seq-delay>",
   });
   process.exit(2);
 }
 
 let armedCheckpoint: PersistenceCheckpoint | null = null;
+/** advanceServerSeq 注入延迟（毫秒）；仅 seq-delay 模式生效。 */
+let seqDelayMs = 0;
 
 const observer: PersistenceCheckpointObserver | undefined =
   mode === "armed"
@@ -73,6 +82,26 @@ const observer: PersistenceCheckpointObserver | undefined =
       }
     : undefined;
 
+let persistence: PersistenceClient | undefined;
+if (mode === "seq-delay") {
+  // 自建客户端（公开 API）并包装 advanceServerSeq：延迟在调用时读取。
+  const base = createPersistenceClient({ dataDirectory, worker: WORKER });
+  await base.migrate();
+  persistence = {
+    ...base,
+    advanceServerSeq: (input) => {
+      const delay = seqDelayMs;
+      return (
+        delay > 0
+          ? new Promise((resolve) => {
+              setTimeout(resolve, delay);
+            })
+          : Promise.resolve()
+      ).then(() => base.advanceServerSeq(input));
+    },
+  };
+}
+
 const runtime: RuntimeHandle = await startRuntime({
   config: {
     dataDirectory,
@@ -80,7 +109,9 @@ const runtime: RuntimeHandle = await startRuntime({
     port: 0,
   },
   ...(observer === undefined ? {} : { checkpointObserver: observer }),
-  persistenceWorker: WORKER,
+  ...(persistence === undefined
+    ? { persistenceWorker: WORKER }
+    : { persistenceClient: persistence }),
 });
 
 notify({ type: "ready", port: runtime.status.port, instanceId: runtime.instanceId });
@@ -94,6 +125,11 @@ process.on("message", (message: unknown) => {
   }
   if (event.type === "arm") {
     armedCheckpoint = event.checkpoint as PersistenceCheckpoint;
+    return;
+  }
+  if (event.type === "set-seq-delay") {
+    seqDelayMs = Number(event.delayMs);
+    notify({ type: "seq-delay", delayMs: seqDelayMs });
     return;
   }
   if (event.type === "commit") {

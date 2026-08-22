@@ -117,6 +117,22 @@ describe("normalizeHostHeader", () => {
     // 裸 IPv6 带欺骗后缀整体作为主机名（不在允许列表内即被拒）。
     expect(normalizeHostHeader("::1:17890evil")).toBe("::1:17890evil");
   });
+
+  it("端口必须非空纯数字且 1..65535（二轮评审修复 8）", () => {
+    // 非数字 / 空端口。
+    expect(normalizeHostHeader("localhost:evil")).toBeNull();
+    expect(normalizeHostHeader("127.0.0.1:")).toBeNull();
+    expect(normalizeHostHeader("localhost:17890a")).toBeNull();
+    // 超范围端口（含方括号形式）。
+    expect(normalizeHostHeader("[::1]:65536")).toBeNull();
+    expect(normalizeHostHeader("[::1]:99999")).toBeNull();
+    expect(normalizeHostHeader("localhost:65536")).toBeNull();
+    expect(normalizeHostHeader("localhost:0")).toBeNull();
+    // 合法边界端口。
+    expect(normalizeHostHeader("[::1]:65535")).toBe("::1");
+    expect(normalizeHostHeader("localhost:1")).toBe("localhost");
+    expect(normalizeHostHeader("localhost:00080")).toBe("localhost");
+  });
 });
 
 describe("resolveAllowedOrigins", () => {

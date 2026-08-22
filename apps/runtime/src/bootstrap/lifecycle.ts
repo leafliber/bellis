@@ -141,20 +141,38 @@ export interface RuntimeHandle {
   readonly closed: Promise<void>;
 }
 
-/** 合并多个 AbortSignal（任一触发即触发）。 */
-function mergeSignals(signals: readonly AbortSignal[]): AbortSignal {
+/**
+ * 合并多个 AbortSignal（任一触发即触发）。返回信号与显式 disposer：
+ * 正常完成的 Commit 必须调用 disposer 移除监听器——`{once:true}` 只在
+ * 真正 Abort 后清理，长期存活的 appAbort.signal 上的残留闭包会造成
+ * 无界增长（二轮评审修复 6）。
+ */
+function mergeSignals(signals: readonly AbortSignal[]): {
+  signal: AbortSignal;
+  dispose: () => void;
+} {
   const controller = new AbortController();
-  const relay = (signal: AbortSignal): void => {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      return;
+  const listeners: Array<{ signal: AbortSignal; listener: () => void }> = [];
+  for (const source of signals) {
+    if (source.aborted) {
+      controller.abort(source.reason);
+      continue;
     }
-    signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
-  };
-  for (const signal of signals) {
-    relay(signal);
+    const listener = (): void => {
+      controller.abort(source.reason);
+    };
+    source.addEventListener("abort", listener, { once: true });
+    listeners.push({ signal: source, listener });
   }
-  return controller.signal;
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      for (const entry of listeners) {
+        entry.signal.removeEventListener("abort", entry.listener);
+      }
+      listeners.length = 0;
+    },
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -211,11 +229,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
   const origins = createOriginAllowlist();
   const connections = new ConnectionMetrics(metrics);
   const tokens = new StartupTokenService({ ttlMs: config.startupTokenTtlMs });
-  const store = new SessionStore({
-    maxOpenStreams: config.limits.maxOpenStreams,
-    maxTotalStreams: config.limits.maxTotalStreams,
-    maxFramesPerStream: config.limits.maxFramesPerStream,
-  });
+  const store = new SessionStore(
+    {
+      maxOpenStreams: config.limits.maxOpenStreams,
+      maxTotalStreams: config.limits.maxTotalStreams,
+      maxFramesPerStream: config.limits.maxFramesPerStream,
+    },
+    {
+      ttlMs: config.limits.sessionTtlMs,
+      maxSessions: config.limits.maxSessions,
+    },
+  );
   const publisher = createRecordingOutboxPublisher({ logger });
   const appAbort = new AbortController();
   const ownsPersistence = options.persistenceClient === undefined;
@@ -246,7 +270,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     const logical = store.resolveById(sessionId);
     const control = logical?.control;
     if (control === null || control === undefined || !(control instanceof ControlConnection)) {
-      return "no_connection";
+      return { outcome: "no_connection", connectionId: null };
     }
     return control.broadcast(message, broadcastOptions);
   };
@@ -436,8 +460,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
         return Promise.reject(new ApplicationError("not_ready", "runtime is shutting down"));
       }
       const merged = mergeSignals([appAbort.signal, ...(signal === undefined ? [] : [signal])]);
-      const run = appService.commit(input, merged);
+      const run = appService.commit(input, merged.signal);
       const tracked = run.finally(() => {
+        // 正常完成也要移除合并监听器（二轮评审修复 6：防长期泄漏）。
+        merged.dispose();
         inflightCommits.delete(tracked);
       });
       inflightCommits.add(tracked);
