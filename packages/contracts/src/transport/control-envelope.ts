@@ -56,11 +56,25 @@ const controlEnvelopeBaseShape = {
   payload: JsonValueSchema,
 } as const;
 
+/**
+ * 服务端 Envelope 的 `seq`：从 1 开始严格递增（协议 §1/§5「从 1 开始」
+ * 与「禁止用 seq: "0" 伪装方向」此前只是文档约束）。Gate 3 重开评审
+ * 发现 Schema 沿用了允许 "0" 的通用 DecimalStringSchema——收紧为正数
+ * 规范十进制（≥1、无前导零）。纯收窄：真实服务端 Seq 恒 ≥ 1（nextSeq
+ * 从 1 起），无合法流量被拒绝；客户端 `ack` 维持非负（"0" 表示尚未
+ * 处理任何消息，语义合法）。
+ */
+const SERVER_SEQ_PATTERN = /^[1-9][0-9]{0,29}$/;
+
+const ServerSeqSchema = z.string().regex(SERVER_SEQ_PATTERN, {
+  message: "server seq must be a positive canonical decimal string (server seq starts at 1)",
+});
+
 export const ServerControlEnvelopeSchema = z.strictObject({
   ...controlEnvelopeBaseShape,
   direction: z.literal("server"),
-  /** 服务端消息序号：每个逻辑 Session 严格递增的非负十进制字符串。 */
-  seq: DecimalStringSchema,
+  /** 服务端消息序号：每个逻辑 Session 严格递增，从 1 开始。 */
+  seq: ServerSeqSchema,
 });
 
 export const ClientControlEnvelopeSchema = z.strictObject({
@@ -82,7 +96,7 @@ export function createServerControlEnvelopeSchema<P extends z.ZodType>(payloadSc
   return z.strictObject({
     ...controlEnvelopeBaseShape,
     direction: z.literal("server"),
-    seq: DecimalStringSchema,
+    seq: ServerSeqSchema,
     payload: payloadSchema,
   });
 }

@@ -234,3 +234,24 @@ describe("createPinoLogger", () => {
     expect(err.stack).toBe("[getter-error]");
   });
 });
+
+describe("credential content scrubbing (Gate 3 重开评审修复 1)", () => {
+  it("never emits credential values embedded in free-text fields or error objects", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0",
+      level: "info",
+      destination,
+    });
+    const canary = "CANARY_1f8e2d6b9a4c3770";
+    const error = new Error(`denied for Authorization: Bearer ${canary}`);
+    // Runtime 的常见日志形态：error 字段承载任意 error.message（普通字段名，
+    // 键级匹配不覆盖），以及直接序列化的 Error 对象。
+    logger.log("warn", "runtime_request_error_after_sent", { error: error.message });
+    logger.log("error", "runtime_unexpected_error", { errorObject: error });
+    const text = lines.join("\n");
+    expect(text).not.toContain(canary);
+    expect(text).toContain("[redacted]");
+  });
+});

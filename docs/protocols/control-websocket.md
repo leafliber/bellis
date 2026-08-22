@@ -20,7 +20,8 @@ Envelope。P1 交付框架无关核心（解码、状态机、Seq/ACK/Replay、�
 - 微秒时间、序号、ACK、水位在 Wire 上使用**非负十进制字符串**；Runtime 内部
   使用 `bigint`。Wire 上永远不出现裸 `bigint`（无法 JSON 序列化）。
 - `direction` 是判别字段：只有服务端 Envelope 携带 `seq`；只有客户端 Envelope
-  可以携带累计 `ack` 与业务 `idempotencyKey`。禁止用 `seq: "0"` 伪装方向。
+  可以携带累计 `ack` 与业务 `idempotencyKey`。禁止用 `seq: "0"` 伪装方向——
+  服务端 `seq` 从 1 开始严格递增，Schema 层以 `^[1-9][0-9]{0,29}$` 强制。
 - `messageId` 用于客户端消息去重；`seq/ack` 用于服务端消息排序与累计确认。
   三者不可互换。
 - 任何入站文本先经过：大小限制 → JSON 解析 → Envelope Schema →

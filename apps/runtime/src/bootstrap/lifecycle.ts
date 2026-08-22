@@ -45,10 +45,10 @@ import { buildServer } from "./server.js";
  *
  * 关闭（幂等，P4 修复 4）：ready=false → 停止接受新连接 → 通知 Control
  * draining → 停止接收新提交并 Abort/等待在途 Application 任务 →
- * Dispatcher 停止 Claim（Grace 内结束批次）→ 强制关闭残余连接 →
- * Persistence 关闭 → Fastify 关闭。每个步骤独立捕获错误并聚合：任一步
- * 抛错也保证剩余步骤执行、markClosed 与 closed 兑现；deadline 使用
- * 配置的 shutdownGraceMs 与单调时钟。
+ * Dispatcher 停止 Claim（Grace 内结束批次）→ 等待连接排空（Grace 上限）
+ * → 强制关闭残余连接 → Persistence 关闭 → Fastify 关闭。每个步骤独立捕获
+ * 错误并聚合：任一步抛错也保证剩余步骤执行、markClosed 与 closed 兑现；
+ * deadline 使用配置的 shutdownGraceMs 与单调时钟。
  */
 
 export type RuntimePhase = "starting" | "ready" | "draining" | "closed";
@@ -355,7 +355,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     closedResolve = resolve;
   });
 
-  /** 单步关闭：错误捕获并聚合，不阻断后续步骤（P4 修复 4）。 */
+  /** 单步关闭：错误捕获并聚合，不阻断后续步骤（P4 修复 4）。
+   *
+   * 顺序与 P4 文档 §6.2 一致（Gate 3 重开评审修复 3）：停止接入与
+   * draining 通知之后，**先** Abort 应用任务、停止 Outbox Claim，
+   * **再**花时间等待/排空连接——连接排空最长可等满 shutdownGraceMs，
+   * 期间既不得继续执行已有 Commit 任务，也不得继续领取/发布 Outbox。
+   */
   const closeSteps: Array<{ name: string; run: () => Promise<void> | void }> = [
     {
       name: "stop-listen",
@@ -367,13 +373,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       },
     },
     {
-      name: "drain-connections",
-      run: async () => {
+      name: "notify-draining",
+      run: () => {
+        // 通知 Control 连接 draining（4005 优雅排空）；实际等待在
+        // 应用任务与 Outbox 停止之后（drain-connections）。
         store.drainAll("server_shutdown");
-        const deadline = clock.nowUs() + graceUs;
-        while (store.anyOpenConnections() && clock.nowUs() < deadline) {
-          await sleep(25);
-        }
       },
     },
     {
@@ -395,6 +399,15 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     {
       name: "dispatcher-stop",
       run: () => dispatcherInstance.stop(),
+    },
+    {
+      name: "drain-connections",
+      run: async () => {
+        const deadline = clock.nowUs() + graceUs;
+        while (store.anyOpenConnections() && clock.nowUs() < deadline) {
+          await sleep(25);
+        }
+      },
     },
     {
       name: "force-close-connections",

@@ -740,7 +740,7 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
   },
   "server-control-envelope": {
     valid: [
-      envelope({ direction: "server", seq: "0" }),
+      envelope({ direction: "server", seq: "1" }),
       envelope({
         direction: "server",
         seq: MAX_U64,
@@ -750,27 +750,31 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
       // 单段 type（修订后的模式）：KNOWN_CONTROL_MESSAGE_TYPES 已冻结 "error"。
       envelope({
         direction: "server",
-        seq: "0",
+        seq: "2",
         type: "error",
         payload: {
           error: { code: "not_ready", message: "starting", retryable: true, traceId: TRACE_ID },
         },
       }),
       // 危险键 payload 经 Envelope 的 JsonValueSchema 字段三方一致接受。
-      envelope({ direction: "server", seq: "0", payload: JSON.parse('{"__proto__":null}') }),
+      envelope({ direction: "server", seq: "3", payload: JSON.parse('{"__proto__":null}') }),
     ],
     invalid: [
       envelope({ direction: "server" }),
       envelope({ direction: "server", seq: "-1" }),
       envelope({ direction: "server", seq: "1.5" }),
-      envelope({ direction: "server", seq: "0", version: 2 }),
-      envelope({ direction: "server", seq: "0", type: "clock_ping" }),
-      envelope({ direction: "server", seq: "0", type: "Clock.ping" }),
-      envelope({ direction: "server", seq: "0", trace: { traceId: "nope" } }),
-      envelope({ direction: "server", seq: "0", ack: "1" }),
-      envelope({ direction: "server", seq: "0", idempotencyKey: "k" }),
-      envelope({ direction: "server", seq: "0", "x-extra": 1 }),
-      envelope({ direction: "server", seq: "0", payload: BIGINT_PAYLOAD }),
+      // 服务端 Seq 从 1 开始（Gate 3 重开评审）：0 与前导零形态非法。
+      envelope({ direction: "server", seq: "0" }),
+      envelope({ direction: "server", seq: "00" }),
+      envelope({ direction: "server", seq: "01" }),
+      envelope({ direction: "server", seq: "1", version: 2 }),
+      envelope({ direction: "server", seq: "1", type: "clock_ping" }),
+      envelope({ direction: "server", seq: "1", type: "Clock.ping" }),
+      envelope({ direction: "server", seq: "1", trace: { traceId: "nope" } }),
+      envelope({ direction: "server", seq: "1", ack: "1" }),
+      envelope({ direction: "server", seq: "1", idempotencyKey: "k" }),
+      envelope({ direction: "server", seq: "1", "x-extra": 1 }),
+      envelope({ direction: "server", seq: "1", payload: BIGINT_PAYLOAD }),
     ],
   },
   "client-control-envelope": {

@@ -7,6 +7,7 @@ import type {
   Scene,
   TraceContext,
 } from "@bellis/contracts";
+import { PersistenceError } from "@bellis/persistence";
 import type { CommitSceneResult, PersistenceClient } from "@bellis/persistence";
 import { createTraceContext } from "@bellis/observability";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
@@ -31,6 +32,20 @@ import { ApplicationError, stableRequestFingerprint } from "../errors/mapping.js
 
 const HARD_LANES: readonly CueLane[] = ["audio", "subtitle"];
 const SOFT_LANES: readonly CueLane[] = ["avatar", "game", "overlay"];
+
+/**
+ * commitScene 失败中的"冲突族"稳定码（Gate 3 重开评审修复 4）：
+ * `bellis_scene_commit_total` 声明了 conflict/error 两种失败结果，
+ * 冲突族记 conflict，其余（校验失败、瞬态错误、未知异常）记 error。
+ */
+const SCENE_CONFLICT_CODES: ReadonlySet<string> = new Set([
+  "session_conflict",
+  "record_conflict",
+  "watermark_regression",
+  "seq_regression",
+  "idempotency_conflict",
+  "scene_conflict",
+]);
 
 export const FakeSceneCommitInputSchema = z.object({
   sessionId: UuidSchema,
@@ -231,6 +246,18 @@ export class FakeSceneCommitService {
         outbox,
         trace,
       });
+    } catch (error) {
+      // 失败结果同样计数：指标定义声明了 conflict/error，运行时不记录
+      // 则冲突/失败监控实际不存在；错误原样上抛，行为不变。
+      this.#metrics
+        .counter("bellis_scene_commit_total", {
+          result:
+            error instanceof PersistenceError && SCENE_CONFLICT_CODES.has(error.code)
+              ? "conflict"
+              : "error",
+        })
+        .inc();
+      throw error;
     } finally {
       this.#metrics
         .histogram("bellis_scene_commit_duration_ms")

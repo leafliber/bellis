@@ -54,7 +54,10 @@ const envelopeArb = fc
     messageId: fc.uuid(),
     sentAtUs: decimalStringArb,
     withDeadline: fc.boolean(),
-    seq: fc.bigInt({ min: 0n, max: 10n ** 20n }),
+    // 服务端 Seq 从 1 开始（Gate 3 重开评审）：deadlineUs 复用该值时
+    // 允许 0，seq 本身排除 0。
+    seqForDeadline: fc.bigInt({ min: 0n, max: 10n ** 20n }),
+    seq: fc.bigInt({ min: 1n, max: 10n ** 20n }),
     ack: fc.bigInt({ min: 0n, max: 10n ** 20n }),
     withAck: fc.boolean(),
   })
@@ -72,7 +75,7 @@ const envelopeArb = fc
       payload: VALID_PAYLOADS[fields.type],
     };
     if (fields.withDeadline) {
-      envelope.deadlineUs = formatDecimalString(fields.seq);
+      envelope.deadlineUs = formatDecimalString(fields.seqForDeadline);
     }
     if (direction === "server") {
       envelope.seq = formatDecimalString(fields.seq);

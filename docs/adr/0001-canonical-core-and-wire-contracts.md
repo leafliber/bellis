@@ -195,3 +195,17 @@ P1 Transport 实现错误分类时发现：`KNOWN_CONTROL_MESSAGE_TYPES` 与
 生成物与 Fixture 已同步更新（server/client/control envelope 三个 Schema
 的 pattern 与新增 `"error"` Envelope 合法 Fixture、`Clock.ping` 大小写
 非法 Fixture）。无并行任务需要同步（P2/P3 尚未开工）。
+
+### 2026-08-22 · 服务端 Envelope `seq` 收紧为 ≥ 1（Gate 3 重开评审发现的规范债务）
+
+冻结协议（control-websocket.md §1/§5）规定服务端 Seq 从 1 开始、
+「禁止用 seq: "0" 伪装方向」，但 `ServerControlEnvelopeSchema` 此前
+沿用了允许 "0" 的通用 `DecimalStringSchema`，`seq: "0"` 可通过校验，
+Schema 与协议文档矛盾。
+
+修正：seq pattern 收紧为 `^[1-9][0-9]{0,29}$`（正数规范十进制，无前导
+零）。属于纯收窄——真实服务端 Seq 恒 ≥ 1（nextSeq 从 1 起，Seq 在发送
+时分配），无合法流量被拒绝；客户端 `ack` 维持非负（"0" 表示尚未处理
+任何消息，语义合法）。双 dialect 生成物、语义 Fixture（合法样例改用
+seq ≥ 1，非法侧新增 "0"/"00"/"01"）与性质测试生成器已同步。消费者
+（P1 Transport / P4 Runtime）不产生 seq "0"，无需变更。

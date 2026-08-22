@@ -70,3 +70,28 @@ describe("stableRequestFingerprint", () => {
     expect(a).not.toBe(c);
   });
 });
+
+describe("credential scrubbing through the runtime logger (Gate 3 重开评审修复 1)", () => {
+  it("mapErrorToEnvelope 的本地诊断日志不泄露消息中嵌入的凭证", async () => {
+    const { createPinoLogger } = await import("@bellis/observability");
+    const lines: string[] = [];
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0-test",
+      level: "info",
+      destination: { write: (line) => lines.push(line) },
+    });
+    const canary = "CANARY_0d4c8b2e6f1a9355";
+    // Runtime 多处把任意 error.message 写入普通 error 字段；凭证一旦被
+    // 异常消息嵌入（如回显 Authorization 头），必须由日志管道内容级脱敏。
+    const mapped = mapErrorToEnvelope(
+      new Error(`upgrade rejected: Authorization: Bearer ${canary}`),
+      TRACE_ID,
+      logger,
+    );
+    expect(mapped.code).toBe("internal_error");
+    const text = lines.join("\n");
+    expect(text).not.toContain(canary);
+    expect(text).toContain("[redacted]");
+  });
+});

@@ -123,7 +123,7 @@ describe("可扩展对象危险扩展键无损", () => {
       "sessionId": "${SESSION_ID}",
       "trace": {"traceId": "${TRACE_ID}"},
       "sentAtUs": "42",
-      "seq": "0",
+      "seq": "1",
       "payload": {"__proto__":null,"nested":{"__proto__":1}}
     }`;
     const parsed = ServerControlEnvelopeSchema.parse(parseJson(wireText));

@@ -415,3 +415,46 @@ describe("redaction property: arbitrary JSON payloads", () => {
     );
   });
 });
+
+describe("content-level scrubbing (Gate 3 重开评审修复 1)", () => {
+  const CANARY = "CANARY_7a3f9d1c4e2b5860";
+
+  it("scrubs Authorization/Bearer credentials embedded in free text", () => {
+    const output = JSON.stringify(
+      redactValue({ error: `request rejected: Authorization: Bearer ${CANARY}` }),
+    );
+    expect(output).not.toContain(CANARY);
+    expect(output).toContain("[redacted]");
+  });
+
+  it("serializes Errors without leaking credentials in message or stack", () => {
+    const error = new Error(`exchange failed for Bearer ${CANARY}`);
+    error.stack = `Error: exchange failed for Bearer ${CANARY}\n    at /tmp/secret.js:1:1`;
+    const output = JSON.stringify(serializeErrorForLog(error));
+    expect(output).not.toContain(CANARY);
+    const parsed = JSON.parse(output) as { message: string; stack: string };
+    expect(parsed.message).toContain("[redacted]");
+    expect(parsed.stack).toContain("<path>");
+  });
+
+  it("scrubs token key-value forms in prose while keeping ordinary text intact", () => {
+    const scrubbed = JSON.stringify(redactValue({ detail: `startup token: ${CANARY}` }));
+    expect(scrubbed).not.toContain(CANARY);
+    expect(scrubbed).toContain("[redacted]");
+
+    const intact = { note: "request failed at boundary validation", seq: "42", ok: true };
+    expect(JSON.parse(JSON.stringify(redactValue(intact)))).toEqual(intact);
+  });
+
+  it("property: Bearer credentials with token-charset values never survive", () => {
+    fc.assert(
+      fc.property(fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{8,64}$/), (token) => {
+        const output = JSON.stringify(
+          serializeErrorForLog(new Error(`Authorization: Bearer ${token}`)),
+        );
+        expect(output.includes(token)).toBe(false);
+      }),
+      { numRuns: 100 },
+    );
+  });
+});

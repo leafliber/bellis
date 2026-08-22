@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { MonotonicClock } from "@bellis/contracts";
 import type { PersistenceClient, PersistenceWorkerOptions } from "@bellis/persistence";
 import { createPersistenceClient } from "@bellis/persistence";
+import type { LoggerPort } from "@bellis/observability";
 import type { RuntimeHandle } from "../src/index.js";
 import { startRuntime } from "../src/index.js";
 
@@ -53,6 +55,14 @@ export interface TestRuntimeOptions {
   readonly persistenceClient?: PersistenceClient;
   /** limits 组覆盖（含嵌套 sendQueue；sendFlushTimeoutMs/sessionTtlMs 等）。 */
   readonly limits?: Record<string, unknown>;
+  /** 注入时钟（如 VirtualClock）；默认 SystemMonotonicClock。 */
+  readonly clock?: MonotonicClock;
+  /** 注入 LoggerPort（记录事件时序等测试装配）。 */
+  readonly logger?: LoggerPort;
+  /** 根级 shutdownGraceMs 覆盖（优雅关闭排空上限）。 */
+  readonly shutdownGraceMs?: number;
+  /** outbox 组覆盖（pollIntervalMs/stopGraceMs 等）。 */
+  readonly outbox?: Record<string, unknown>;
 }
 
 /** 启动测试 Runtime（随机空闲端口、TS Worker、无检查点观察器）。 */
@@ -75,12 +85,18 @@ export async function startTestRuntime(options: TestRuntimeOptions): Promise<Run
       ...(options.startupTokenTtlMs === undefined
         ? {}
         : { startupTokenTtlMs: options.startupTokenTtlMs }),
+      ...(options.shutdownGraceMs === undefined
+        ? {}
+        : { shutdownGraceMs: options.shutdownGraceMs }),
+      ...(options.outbox === undefined ? {} : { outbox: options.outbox }),
       ...(Object.keys(mergedLimits).length === 0 ? {} : { limits: mergedLimits }),
     },
     persistenceWorker: WORKER_FIXTURE,
     ...(options.persistenceClient === undefined
       ? {}
       : { persistenceClient: options.persistenceClient }),
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
   });
 }
 

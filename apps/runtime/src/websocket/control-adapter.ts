@@ -339,8 +339,14 @@ export class ControlConnection {
       void this.#pump();
       return { outcome: "sent", connectionId: this.connectionId };
     }
-    const outcome = await this.#waitForSend(messageId);
+    // 先注册 waiter、立即 pump 触发发送，再等待写出结果（Gate 3 重开
+    // 评审修复 2）：若先等待，本消息只能依赖 50ms 周期循环偶然发送——
+    // VirtualClock 下 sleepUntil 永不触发，prepared 会一直未写出直到
+    // flush 超时降级断连。waiter 注册先于任何 await，不存在发送先于
+    // 注册的竞态（单线程内 enqueue 与注册之间无 interleaving）。
+    const sent = this.#waitForSend(messageId);
     void this.#pump();
+    const outcome = await sent;
     return { outcome, connectionId: this.connectionId };
   }
 

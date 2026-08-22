@@ -196,7 +196,12 @@ awaiting_client_hello → active → draining → closed
 
 规则：
 
-- 建连后先由 P4 发送 `server.hello`，然后只接受一次合法 `client.hello`。
+- **新建连接**建连后先由 P4 发送 `server.hello`，然后只接受一次合法
+  `client.hello`；**重连（resume）连接相反**——客户端直接发送
+  `client.hello`（携带 `lastAck`），不等待 `server.hello`，服务端先按
+  原 Seq 重放窗口内容、其后才发送本连接的 `server.hello`（详见
+  [Control WebSocket 协议 §2](../protocols/control-websocket.md)）。
+  客户端实现必须区分两条路径，resume 时不得等待 `server.hello`。
 - 协议主版本不匹配时返回 `unsupported_version` 并关闭。
 - Hello 前的业务消息、重复 Hello、关闭后的消息稳定拒绝。
 - Heartbeat Ping/Pong 和 Clock Ping/Pong 不写 Replay 持久记录。

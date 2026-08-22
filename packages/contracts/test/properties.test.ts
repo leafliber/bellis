@@ -14,6 +14,10 @@ import { MAX_U64, MESSAGE_ID, SESSION_ID, TRACE_ID } from "./fixtures.js";
  */
 
 const decimalArb = fc.bigInt({ min: 0n, max: 10n ** 30n - 1n }).map((value) => value.toString(10));
+// 服务端 Seq 从 1 开始（Gate 3 重开评审）：性质测试的 seq 生成器排除 0。
+const serverSeqArb = fc
+  .bigInt({ min: 1n, max: 10n ** 30n - 1n })
+  .map((value) => value.toString(10));
 
 function serverEnvelope(seq: string, sentAtUs: string): Record<string, unknown> {
   return {
@@ -46,7 +50,7 @@ function clientEnvelope(ack: string, sentAtUs: string): Record<string, unknown> 
 describe("envelope JSON round-trip", () => {
   it("server envelope survives JSON encode/decode with exact seq and sentAtUs", () => {
     fc.assert(
-      fc.property(decimalArb, decimalArb, (seq, sentAtUs) => {
+      fc.property(serverSeqArb, decimalArb, (seq, sentAtUs) => {
         const wire = JSON.parse(JSON.stringify(serverEnvelope(seq, sentAtUs)));
         const parsed = ServerControlEnvelopeSchema.parse(wire);
         expect(parseDecimalString(parsed.seq)).toBe(BigInt(seq));

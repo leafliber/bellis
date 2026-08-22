@@ -43,6 +43,34 @@ export function isSensitiveFieldName(key: string): boolean {
   return SENSITIVE_CANONICAL_NAMES.has(canonicalFieldName(key));
 }
 
+/**
+ * 内容级脱敏（Gate 3 重开评审修复 1）：Error.message/stack 与任意嵌入
+ * 字符串可能携带凭证原值（如异常消息回显 `Authorization: Bearer …` 头），
+ * 字段名匹配无法覆盖自由文本，必须在字符串内容层清理。覆盖两类语法：
+ * - 键值形态：敏感键（authorization/token/cookie…）后的值整体替换；
+ * - 凭证形态：任意位置出现的 RFC 7235 scheme 凭证（`Bearer <token>` 等），
+ *   无键名前缀也生效；scheme 先清理，键值形态才不会只截到第一个词。
+ * 与路径清理同一取舍：过度替换只损失可读性，绝不泄露原值。已知边界：
+ * 键值形态的值只匹配单个词（空格分隔的多段自定义凭证可能残留尾段），
+ * 常见的单段 Token/Bearer 值均被覆盖。
+ */
+const SCHEME_CREDENTIAL_PATTERN =
+  /(\b(?:bearer|basic|digest|hoba|mutual|negotiate|ntlm|startuptoken)\s+)[a-z0-9\-._~+/=]{4,}/gi;
+const SENSITIVE_KEY_VALUE_PATTERN =
+  /(\b(?:authorization|proxy-authorization|cookie|set-cookie|token|startup-token|session-token|access-token|refresh-token|api[_-]?key|password|secret)\s*[:=]\s*)(?:"[^"\n]*"|'[^'\n]*'|[^\s;"',<>]+)/gi;
+
+/** 优先应用 scheme 形态（见上）：`Bearer <值>` 整体替换后再做键值清理。 */
+function scrubSensitiveText(text: string): string {
+  return text
+    .replace(SCHEME_CREDENTIAL_PATTERN, "$1[redacted]")
+    .replace(SENSITIVE_KEY_VALUE_PATTERN, "$1[redacted]");
+}
+
+/** 所有进入日志输出的字符串的唯一出口：先截断（限定清理开销），再内容级脱敏。 */
+function sanitizeLogText(value: string): string {
+  return scrubSensitiveText(truncateString(value));
+}
+
 /** 绝对路径（含堆栈中的文件位置）替换为 `<path>`，本地日志保留脱敏 Stack。 */
 function scrubPaths(text: string): string {
   // 匹配绝对路径形态：Unix `/…`、Windows 盘符 `C:\…` 或 UNC `\\…`。
@@ -108,7 +136,7 @@ function redactNode(value: unknown, ancestors: WeakSet<object>, depth: number): 
     return null;
   }
   if (typeof value === "string") {
-    return truncateString(value);
+    return sanitizeLogText(value);
   }
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "undefined") {
     return value;
@@ -143,7 +171,7 @@ function redactNode(value: unknown, ancestors: WeakSet<object>, depth: number): 
   }
   if (node instanceof RegExp) {
     try {
-      return truncateString(node.toString());
+      return sanitizeLogText(node.toString());
     } catch {
       return "[regexp]";
     }
@@ -315,10 +343,10 @@ function safeReadString(
     return getterFallback;
   }
   if (typeof raw === "string") {
-    return truncateString(raw);
+    return sanitizeLogText(raw);
   }
   try {
-    return truncateString(String(raw));
+    return sanitizeLogText(String(raw));
   } catch {
     return stringFallback;
   }

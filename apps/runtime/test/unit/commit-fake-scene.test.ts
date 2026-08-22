@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { SceneSchema } from "@bellis/contracts";
 import type { TraceContext } from "@bellis/contracts";
 import type { CommitSceneInput, CommitSceneResult, PersistenceClient } from "@bellis/persistence";
+import { PersistenceError } from "@bellis/persistence";
+import type { InMemoryMetrics } from "@bellis/observability";
 import { createInMemoryMetrics, createNoopLogger } from "@bellis/observability";
 import { SystemMonotonicClock } from "@bellis/transport";
 import type { BroadcastReceipt, ControlBroadcast } from "../../src/index.js";
@@ -306,5 +308,67 @@ describe("FakeSceneCommitService", () => {
     });
     await service.commit(INPUT);
     expect(script.events.some((event) => event.type === "scene.committed")).toBe(false);
+  });
+});
+
+describe("失败结果指标（Gate 3 重开评审修复 4）", () => {
+  class RejectingClient extends RecordingClient {
+    readonly #error: unknown;
+
+    constructor(error: unknown) {
+      super();
+      this.#error = error;
+    }
+
+    override commitScene(): Promise<CommitSceneResult> {
+      return Promise.reject(this.#error);
+    }
+  }
+
+  function serviceWith(client: PersistenceClient): {
+    service: FakeSceneCommitService;
+    metrics: InMemoryMetrics;
+  } {
+    const metrics = createInMemoryMetrics();
+    const service = new FakeSceneCommitService({
+      client,
+      broadcast: new ScriptedBroadcast().toBroadcast(),
+      logger: createNoopLogger(),
+      metrics,
+      clock: new SystemMonotonicClock(),
+    });
+    return { service, metrics };
+  }
+
+  it("冲突族失败记录 result=conflict 并原样上抛", async () => {
+    const { service, metrics } = serviceWith(
+      new RejectingClient(new PersistenceError("idempotency_conflict", "conflicting replay")),
+    );
+    await expect(service.commit(INPUT)).rejects.toThrow(/conflicting replay/);
+    expect(metrics.snapshot().counters).toContainEqual({
+      name: "bellis_scene_commit_total",
+      labels: { result: "conflict" },
+      value: 1,
+    });
+  });
+
+  it("非冲突失败记录 result=error 并原样上抛", async () => {
+    const { service, metrics } = serviceWith(
+      new RejectingClient(new Error("worker exploded mid-transaction")),
+    );
+    await expect(service.commit(INPUT)).rejects.toThrow(/worker exploded/);
+    expect(metrics.snapshot().counters).toContainEqual({
+      name: "bellis_scene_commit_total",
+      labels: { result: "error" },
+      value: 1,
+    });
+  });
+
+  it("成功与重复路径的计数不受影响", async () => {
+    const { service, metrics } = serviceWith(new RecordingClient({ duplicate: true }));
+    await service.commit(INPUT);
+    expect(metrics.snapshot().counters).toEqual([
+      { name: "bellis_scene_commit_total", labels: { result: "duplicate" }, value: 1 },
+    ]);
   });
 });

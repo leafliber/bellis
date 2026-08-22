@@ -258,6 +258,23 @@ describe("Control Envelope 方向判别（ADR 0001）", () => {
     ).toBe(false);
   });
 
+  it("server seq starts at 1: zero and leading-zero forms are rejected (Gate 3 重开评审)", () => {
+    for (const seq of ["0", "00", "01"]) {
+      expect(
+        ServerControlEnvelopeSchema.safeParse(envelopeBase({ direction: "server", seq })).success,
+      ).toBe(false);
+    }
+    expect(
+      ServerControlEnvelopeSchema.safeParse(envelopeBase({ direction: "server", seq: "1" }))
+        .success,
+    ).toBe(true);
+    // 客户端 ack 仍允许 "0"（累计确认初始态，与服务端 Seq 起点无关）。
+    expect(
+      ClientControlEnvelopeSchema.safeParse(envelopeBase({ direction: "client", ack: "0" }))
+        .success,
+    ).toBe(true);
+  });
+
   it("client envelope may ack/idempotency but must not forge seq", () => {
     expect(
       ClientControlEnvelopeSchema.safeParse(envelopeBase({ direction: "client" })).success,

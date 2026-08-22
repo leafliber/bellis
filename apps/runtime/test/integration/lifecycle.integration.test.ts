@@ -2,13 +2,17 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseDecimalString } from "@bellis/contracts";
+import type { PersistenceClient } from "@bellis/persistence";
+import { VirtualClock } from "@bellis/testkit";
 import type { RuntimeHandle } from "../../src/index.js";
 import {
   cleanupTempDataDirectory,
+  createMigratedBaseClient,
   createTempDataDirectory,
   mustExchange,
   originFor,
   startTestRuntime,
+  wrapPersistenceClient,
 } from "../helpers.js";
 import { clientEnvelope, ControlWsClient } from "../ws-client.js";
 
@@ -224,5 +228,143 @@ describe("Fake Scene Commit 顺序与幂等", () => {
   it("Server Seq 水位随发送推进并持久化", async () => {
     const recovery = await handle.readSessionRecovery(sessionId);
     expect(recovery.latestServerSeq).toBeGreaterThan(0n);
+  });
+});
+
+describe("VirtualClock 下的 awaitSent 广播（Gate 3 重开评审修复 2）", () => {
+  it("prepared 不依赖 50ms 周期循环：注册 waiter 后立即 pump 发送", async () => {
+    const clock = new VirtualClock();
+    const dir = createTempDataDirectory("bellis-p4-vclock-");
+    const handle = await startTestRuntime({ dataDirectory: dir, clock });
+    try {
+      const { sessionId, cookie } = await mustExchange(handle, handle.issueStartupToken().token);
+      const client = new ControlWsClient({
+        port: handle.status.port,
+        path: "/ws/v1/control",
+        cookie,
+        origin: originFor(handle),
+      });
+      await client.opened();
+      // 握手的 server.hello 由 50ms 周期循环首发：推进一次虚拟时钟即可。
+      clock.advanceBy(60_000n);
+      await client.waitForType("server.hello");
+      client.send(
+        clientEnvelope({
+          sessionId,
+          type: "client.hello",
+          payload: { protocolVersion: 1, clientType: "test-client" },
+        }),
+      );
+      await client.waitForType("server.ready");
+
+      // 此后不再推进虚拟时钟：awaitSent 的 scene.prepared 必须由 broadcast
+      // 注册 waiter 后主动 pump 立即写出（回归：旧实现先等待再 pump，
+      // 只能依赖周期循环偶然发送，VirtualClock 下永不发送直至 flush 超时）。
+      const commitPromise = handle.commitFakeScene({
+        sessionId,
+        sceneId: "22222222-2222-4222-8222-444444444444",
+        cycleId: "33333333-3333-4333-8333-444444444444",
+        idempotencyKey: "vclock-key-1",
+        cues: [],
+        watermarks: [],
+      });
+      const prepared = await client.waitForType("scene.prepared", 2_000);
+      expect(prepared.type).toBe("scene.prepared");
+      const result = await commitPromise;
+      expect(result.duplicate).toBe(false);
+      const committed = await client.waitForType("scene.committed", 2_000);
+      expect((committed.payload as { sceneId: string }).sceneId).toBe(result.sceneId);
+      client.close();
+    } finally {
+      await handle.close();
+      cleanupTempDataDirectory(dir);
+    }
+  });
+});
+
+describe("关闭顺序：应用任务与 Outbox 先停、再等待连接排空（Gate 3 重开评审修复 3）", () => {
+  it("连接排空等待期间 Dispatcher 不再领取 Outbox", async () => {
+    const dir = createTempDataDirectory("bellis-p4-shutdown-order-");
+    const base = await createMigratedBaseClient(dir);
+    const claimTimes: number[] = [];
+    const claimOutbox: PersistenceClient["claimOutbox"] = (input) => {
+      claimTimes.push(Date.now());
+      return base.claimOutbox(input);
+    };
+    // 让 Seq 落库在关闭开始后挂起：Control pump 卡在 seq_advanced，
+    // 连接保持逻辑打开，排空等待撑满 shutdownGraceMs——等待窗口内
+    // Dispatcher 是否停止领取即新旧顺序的可观测判据。
+    let hangSeqPersist = false;
+    let releaseSeqPersist: (() => void) | undefined;
+    const seqGate = new Promise<void>((resolve) => {
+      releaseSeqPersist = resolve;
+    });
+    const advanceServerSeq: PersistenceClient["advanceServerSeq"] = (input) =>
+      hangSeqPersist
+        ? seqGate.then(() => base.advanceServerSeq(input))
+        : base.advanceServerSeq(input);
+    const handle = await startTestRuntime({
+      dataDirectory: dir,
+      persistenceClient: wrapPersistenceClient(base, { claimOutbox, advanceServerSeq }),
+      shutdownGraceMs: 1_500,
+    });
+    let client: ControlWsClient | null = null;
+    try {
+      const { sessionId, cookie } = await mustExchange(handle, handle.issueStartupToken().token);
+      // 正常提交一笔：Outbox 进入轮询交付（正控制：Dispatcher 活跃）。
+      await handle.commitFakeScene({ sessionId, ...SCENE_INPUT });
+      const deliveryDeadline = Date.now() + 3_000;
+      while (handle.outboxDeliveries().length === 0 && Date.now() < deliveryDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(handle.outboxDeliveries().length).toBeGreaterThan(0);
+
+      client = new ControlWsClient({
+        port: handle.status.port,
+        path: "/ws/v1/control",
+        cookie,
+        origin: originFor(handle),
+      });
+      await client.opened();
+      await client.waitForType("server.hello");
+      client.send(
+        clientEnvelope({
+          sessionId,
+          type: "client.hello",
+          payload: { protocolVersion: 1, clientType: "test-client" },
+        }),
+      );
+      await client.waitForType("server.ready");
+      // 等待 Pong 送达（Seq 正常落库），随后挂起 Seq 落库并再发一次
+      // Ping：Pong 的 seq_advanced 将卡住 pump，连接保持逻辑打开。
+      client.send(clientEnvelope({ sessionId, type: "heartbeat.ping", payload: {} }));
+      await client.waitForType("heartbeat.pong");
+      hangSeqPersist = true;
+      client.send(clientEnvelope({ sessionId, type: "heartbeat.ping", payload: {} }));
+      // 等待该 Ping 到达并让 pump 卡在挂起的 seq_advanced 上（此后
+      // close 的排空等待才会撑满 Grace——判据才真正生效）。
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const t0 = Date.now();
+      const closePromise = handle.close();
+      // 新顺序：abort 与 dispatcher-stop 在排空等待之前完成，t0+150ms
+      // 之后不应再有任何 claim_outbox（旧顺序排空等待先于 dispatcher-stop
+      // 撑满 Grace，100ms 轮询必然继续领取）。
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const claimsDuringDrainWait = claimTimes.filter((t) => t > t0 + 150);
+      await closePromise;
+      await handle.closed;
+      expect(handle.status.phase).toBe("closed");
+      expect(claimsDuringDrainWait).toEqual([]);
+      // 排空等待确实撑满了 Grace：关闭耗时接近 shutdownGraceMs（排队
+      // 的 Pong 卡在挂起的 Seq 落库上，连接直到 force-close 才消失）。
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(1_400);
+      client.close();
+    } finally {
+      releaseSeqPersist?.();
+      client?.close();
+      await handle.close();
+      cleanupTempDataDirectory(dir);
+    }
   });
 });
