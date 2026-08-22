@@ -4,8 +4,8 @@ import { PersistenceError } from "@bellis/persistence";
 import type { PersistenceClient } from "@bellis/persistence";
 import type { LoggerPort } from "@bellis/observability";
 import { ApplicationError } from "../errors/mapping.js";
-import { newSessionIdentity, SessionStore } from "../websocket/session-store.js";
-import type { StartupTokenService } from "./startup-token.js";
+import { newCookieToken, SessionStore } from "../websocket/session-store.js";
+import type { StartupTokenReservation, StartupTokenService } from "./startup-token.js";
 
 /**
  * 本地 Session 服务（P4 文档 §7.4/§8）。
@@ -27,6 +27,12 @@ import type { StartupTokenService } from "./startup-token.js";
  *   commit（客户端错误，Token 不被探测重放）；
  * - resume 分支的其它持久化错误原样上抛，由集中错误映射返回
  *   503/504，而不是吞成 unauthorized。
+ *
+ * 重试的持久化身份稳定（三轮评审修复 3）：`ensureSession` 已提交但
+ * 响应失败（Worker 崩溃等）时，同 Token 重试必须复用首次预留固定的
+ * `sessionId`/`createdAtMs`（P2 ensureSession 相同输入幂等命中既有行），
+ * 绝不创建另一个 Session 造成孤儿身份。Cookie 在持久化确认后生成，
+ * 不属于持久化身份。
  */
 
 /** 持久化层瞬态错误码：释放 Token 预留，允许同 Token 重试。 */
@@ -81,7 +87,7 @@ export class LocalSessionService {
       throw new ApplicationError("unauthorized", "startup token exchange rejected");
     }
     try {
-      const result = await this.#exchangeReserved(trace, resumeSessionId);
+      const result = await this.#exchangeReserved(reservation, trace, resumeSessionId);
       reservation.commit();
       return result;
     } catch (error) {
@@ -102,6 +108,7 @@ export class LocalSessionService {
   }
 
   async #exchangeReserved(
+    reservation: StartupTokenReservation,
     trace: TraceContext,
     resumeSessionId: string | undefined,
   ): Promise<ExchangeSuccess> {
@@ -116,7 +123,7 @@ export class LocalSessionService {
         // 其它持久化错误原样上抛（503/504 可重试），不吞成 unauthorized。
         throw error;
       }
-      const { cookieToken } = newSessionIdentity();
+      const cookieToken = newCookieToken();
       const boundAtMs = Date.now();
       // 同进程重复挂载：store 复用同一逻辑对象并原子轮换 Cookie。
       this.#store.create(cookieToken, resumeSessionId, boundAtMs, { restorable: true });
@@ -126,13 +133,16 @@ export class LocalSessionService {
       });
       return { sessionId: resumeSessionId, cookieToken, createdAtMs: boundAtMs, resumed: true };
     }
-    const { sessionId, cookieToken } = newSessionIdentity();
-    const createdAtMs = Date.now();
+    // 持久化身份来自 Token 记录的首次预留（三轮评审修复 3）：重试复用
+    // 完全相同的 ensureSession 输入，幂等命中首次已提交的行。
+    const { sessionId, createdAtMs } = reservation.sessionIdentity;
     await this.#persistence.ensureSession({
       sessionId,
       createdAtMs,
       trace: TraceContextSchema.parse({ ...trace, sessionId }),
     });
+    // Cookie 在持久化确认后生成（每次尝试独立），不属于持久化身份。
+    const cookieToken = newCookieToken();
     this.#store.create(cookieToken, sessionId, createdAtMs);
     this.#logger.log("info", "runtime_session_created", {
       sessionId,

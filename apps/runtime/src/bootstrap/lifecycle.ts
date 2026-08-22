@@ -338,6 +338,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     if (dispatcher !== null) {
       await dispatcher.stop().catch(() => undefined);
     }
+    store.close();
     await persistence.close().catch(() => undefined);
     systemClock?.close();
     status.markClosed();
@@ -400,6 +401,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       run: () => {
         store.forceCloseAll("server_shutdown");
       },
+    },
+    {
+      // 取消 TTL 到期调度器（三轮评审修复 2）：不留任何调度句柄。
+      name: "session-store-close",
+      run: () => store.close(),
     },
     {
       name: "persistence-close",

@@ -88,18 +88,27 @@ export function buildOpenApiDocument(options: {
           operationId: "authExchange",
           summary: "一次性启动 Token 换取本地 Session Cookie",
           description:
-            "Token 从请求 Body 或 Authorization: Bearer 头接收，绝不放 URL Query；两者提供其一即可（Header-only 请求合法）。成功设置 HttpOnly、SameSite=Strict Cookie。可选 resumeSessionId 跨重启重新挂载已存在的逻辑 Session（从持久化 Server Seq 水位恢复）。",
-          security: [{ startupToken: [] }, {}],
-          parameters: [
-            {
-              name: "Authorization",
-              in: "header",
-              required: false,
-              description:
-                "Bearer <startupToken> 或 StartupToken <token>；Body 已携带 startupToken 时可省略",
-              schema: { type: "string", minLength: 1, maxLength: 512 },
-            },
-          ],
+            "Token 从请求 Body 或 Authorization 头接收，绝不放 URL Query；成功设置 HttpOnly、SameSite=Strict Cookie。可选 resumeSessionId 跨重启重新挂载已存在的逻辑 Session（从持久化 Server Seq 水位恢复）。凭据来源见 x-bellis-auth（不存在无凭据的合法请求）。",
+          security: [{ startupToken: [] }],
+          "x-bellis-auth": {
+            credentialSources: [
+              {
+                scheme: "startupToken",
+                description:
+                  "Authorization: Bearer <startupToken>——标准 HTTP Bearer，OpenAPI 安全方案客户端可直接使用",
+              },
+              {
+                scheme: "x-bellis-startup-token-prefix",
+                description:
+                  "Authorization: StartupToken <startupToken>（扩展前缀，等价于 Bearer）",
+              },
+              {
+                source: "requestBody",
+                description: "JSON Body 的 startupToken 字段（与 Header 提供其一即可）",
+              },
+            ],
+            note: "三种来源提供其一即可；缺失 Token 返回 400 invalid_message。无凭据请求不合法。",
+          },
           requestBody: {
             required: false,
             content: {
@@ -140,10 +149,10 @@ export function buildOpenApiDocument(options: {
     components: {
       securitySchemes: {
         startupToken: {
-          type: "apiKey",
-          description: "一次性启动 Token：Authorization: Bearer <token>（或 StartupToken <token>）",
-          name: "Authorization",
-          in: "header",
+          type: "http",
+          scheme: "bearer",
+          description:
+            "一次性启动 Token：Authorization: Bearer <startupToken>（StartupToken 前缀与 Body 来源见 x-bellis-auth）",
         },
       },
       schemas: {

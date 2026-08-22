@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ControlLogicalState } from "@bellis/transport";
 import {
   LogicalSession,
   newSessionIdentity,
@@ -24,21 +25,80 @@ class FakeMediaConnection {
   }
 }
 
+interface ScheduledEntry {
+  fireAtMs: number;
+  onFire: () => void;
+  cancelled: boolean;
+}
+
+/** 手动调度器：与生产 unref setTimeout 同语义（按延迟触发、可取消）。 */
+class ManualScheduler {
+  #now: number;
+  readonly #entries: ScheduledEntry[] = [];
+
+  constructor(startMs = 1_000) {
+    this.#now = startMs;
+  }
+
+  readonly nowMs = (): number => this.#now;
+
+  readonly scheduleTimer = (delayMs: number, onFire: () => void): (() => void) => {
+    const entry: ScheduledEntry = {
+      fireAtMs: this.#now + Math.max(0, delayMs),
+      onFire,
+      cancelled: false,
+    };
+    this.#entries.push(entry);
+    return () => {
+      entry.cancelled = true;
+    };
+  };
+
+  get pendingCount(): number {
+    return this.#entries.filter((entry) => !entry.cancelled).length;
+  }
+
+  /** 推进时钟：按到期顺序逐个触发（触发回调可再注册新调度）。 */
+  advanceTo(targetMs: number): void {
+    for (;;) {
+      let next: ScheduledEntry | undefined;
+      for (const entry of this.#entries) {
+        if (entry.cancelled || entry.fireAtMs > targetMs) {
+          continue;
+        }
+        if (next === undefined || entry.fireAtMs < next.fireAtMs) {
+          next = entry;
+        }
+      }
+      if (next === undefined) {
+        this.#now = Math.max(this.#now, targetMs);
+        return;
+      }
+      this.#now = next.fireAtMs;
+      next.cancelled = true;
+      next.onFire();
+    }
+  }
+}
+
+const REGISTRY_DEFAULTS = { maxOpenStreams: 8, maxTotalStreams: 16, maxFramesPerStream: 64 };
+
 function buildStore(options?: {
   ttlMs?: number;
   maxSessions?: number;
   nowMs?: () => number;
+  scheduleTimer?: (delayMs: number, onFire: () => void) => () => void;
 }): SessionStore {
-  // 测试时间基线固定（默认 nowMs 为真实 Date.now，会把小时间戳判为过期）。
+  // 测试时间基线固定（默认 nowMs 为真实 Date.now，会把小时间戳判为过期）；
+  // 调度默认走手动队列（不在测试进程留下真实 OS 定时器）。
   let now = 1_000;
-  return new SessionStore(
-    { maxOpenStreams: 8, maxTotalStreams: 16, maxFramesPerStream: 64 },
-    {
-      ttlMs: options?.ttlMs ?? 3_600_000,
-      maxSessions: options?.maxSessions ?? 1024,
-      nowMs: options?.nowMs ?? (() => now),
-    },
-  );
+  const fallbackScheduler = new ManualScheduler();
+  return new SessionStore(REGISTRY_DEFAULTS, {
+    ttlMs: options?.ttlMs ?? 3_600_000,
+    maxSessions: options?.maxSessions ?? 1024,
+    nowMs: options?.nowMs ?? (() => now),
+    scheduleTimer: options?.scheduleTimer ?? fallbackScheduler.scheduleTimer,
+  });
 }
 
 describe("SessionStore 同进程重复挂载（二轮评审修复 1）", () => {
@@ -134,6 +194,147 @@ describe("SessionStore 过期与容量（二轮评审修复 9）", () => {
     store.create("cookie-b", "22222222-2222-4222-8222-222222222222", now);
     expect(store.size).toBe(1);
     expect(store.resolveByCookie("cookie-a")).toBeNull();
+  });
+});
+
+describe("TTL 最近到期调度器（三轮评审修复 2）", () => {
+  it("已建立连接的 Session 无任何 Store 查询时按 TTL 主动关闭", () => {
+    const scheduler = new ManualScheduler();
+    const store = buildStore({
+      ttlMs: 5_000,
+      nowMs: scheduler.nowMs,
+      scheduleTimer: scheduler.scheduleTimer,
+    });
+    const session = store.create("cookie-a", "11111111-1111-4111-8111-111111111111", 1_000);
+    const control = new FakeControlConnection();
+    const media = new FakeMediaConnection();
+    session.control = control;
+    session.mediaConnections.add(media);
+
+    // 全程不触发 create/resolve——纯靠调度器到点主动回收（强关连接+撤销 Cookie）。
+    scheduler.advanceTo(6_000);
+    expect(control.forceClosed).toBe(1);
+    expect(media.forceClosed).toEqual(["session_expired"]);
+    expect(store.size).toBe(0);
+    expect(store.resolveByCookie("cookie-a")).toBeNull();
+  });
+
+  it("调度点取最近到期：先到期先回收，随后自动重排到下一个", () => {
+    const scheduler = new ManualScheduler();
+    const store = buildStore({
+      ttlMs: 5_000,
+      nowMs: scheduler.nowMs,
+      scheduleTimer: scheduler.scheduleTimer,
+    });
+    // A createdAt=3_000（到期 8_000）后创建，但 B createdAt=2_000（到期 7_000）
+    // 更早到期：调度点必须选 B（createdAtMs 由调用方给定，与插入顺序无关）。
+    const late = store.create("cookie-late", "11111111-1111-4111-8111-111111111111", 3_000);
+    store.create("cookie-early", "22222222-2222-4222-8222-222222222222", 2_000);
+
+    scheduler.advanceTo(7_000);
+    expect(store.resolveById("22222222-2222-4222-8222-222222222222")).toBeNull();
+    expect(store.resolveById("11111111-1111-4111-8111-111111111111")).toBe(late);
+
+    // 回收后重排：剩余 Session 到点同样被主动回收。
+    scheduler.advanceTo(8_000);
+    expect(store.size).toBe(0);
+  });
+
+  it("close() 取消调度：跨过 TTL 不再移除、不再强关，无残留调度", () => {
+    const scheduler = new ManualScheduler();
+    const store = buildStore({
+      ttlMs: 5_000,
+      nowMs: scheduler.nowMs,
+      scheduleTimer: scheduler.scheduleTimer,
+    });
+    const session = store.create("cookie-a", "11111111-1111-4111-8111-111111111111", 1_000);
+    const control = new FakeControlConnection();
+    session.control = control;
+    expect(scheduler.pendingCount).toBe(1);
+
+    store.close();
+    expect(scheduler.pendingCount).toBe(0);
+    scheduler.advanceTo(10_000);
+    expect(store.size).toBe(1);
+    expect(control.forceClosed).toBe(0);
+  });
+});
+
+describe("导出状态事务式消费（三轮评审修复 1）", () => {
+  const STATE: ControlLogicalState = { nextSeq: 4n, confirmedAck: 3n, replay: [] };
+
+  function buildSession(): LogicalSession {
+    return new LogicalSession("11111111-1111-4111-8111-111111111111", 1_000, REGISTRY_DEFAULTS);
+  }
+
+  it("commit 永久消费：后续 claim 拿不到状态", async () => {
+    const session = buildSession();
+    session.exportedControlState = STATE;
+    const claim = await session.claimExportedControlState();
+    expect(claim.state).toBe(STATE);
+    claim.commit();
+    const second = await session.claimExportedControlState();
+    expect(second.state).toBeNull();
+  });
+
+  it("rollback 原样归还：后续重连仍能获得同一状态", async () => {
+    const session = buildSession();
+    session.exportedControlState = STATE;
+    const claim = await session.claimExportedControlState();
+    claim.rollback();
+    expect(session.exportedControlState).toBe(STATE);
+    const second = await session.claimExportedControlState();
+    expect(second.state).toBe(STATE);
+  });
+
+  it("并发 claim 至多一个获得状态：等待者在 rollback 后获得归还状态", async () => {
+    const session = buildSession();
+    session.exportedControlState = STATE;
+    const firstPromise = session.claimExportedControlState();
+    const secondPromise = session.claimExportedControlState();
+    const first = await firstPromise;
+    expect(first.state).toBe(STATE);
+
+    // 第二个 claim 在第一个 settle 前必须等待（并发初始化不重复消费）。
+    let secondDone = false;
+    void secondPromise.then(() => {
+      secondDone = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondDone).toBe(false);
+
+    first.rollback();
+    const second = await secondPromise;
+    expect(second.state).toBe(STATE);
+  });
+
+  it("并发 claim：commit 后等待者拿到 null（不重复消费）", async () => {
+    const session = buildSession();
+    session.exportedControlState = STATE;
+    const first = await session.claimExportedControlState();
+    const secondPromise = session.claimExportedControlState();
+    first.commit();
+    const second = await secondPromise;
+    expect(second.state).toBeNull();
+  });
+
+  it("无导出状态时不设独占点：并发 claim 均立即拿到 null", async () => {
+    const session = buildSession();
+    const [a, b] = await Promise.all([
+      session.claimExportedControlState(),
+      session.claimExportedControlState(),
+    ]);
+    expect(a.state).toBeNull();
+    expect(b.state).toBeNull();
+  });
+
+  it("重复 settle 幂等：commit 后 rollback 不归还", async () => {
+    const session = buildSession();
+    session.exportedControlState = STATE;
+    const claim = await session.claimExportedControlState();
+    claim.commit();
+    claim.rollback();
+    expect(session.exportedControlState).toBeNull();
   });
 });
 

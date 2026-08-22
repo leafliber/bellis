@@ -176,25 +176,32 @@ function resolveWsSession(ctx: ServerContext, request: FastifyRequest): LogicalS
 
 /**
  * 解析 Control 连接的 resume 与预加载恢复状态（P4 修复 1/3 +
- * 二轮评审修复 3）：
- * - 同进程导出状态优先（完整 Replay 内容）；
+ * 二轮评审修复 3 + 三轮评审修复 1）：
+ * - 同进程导出状态优先（完整 Replay 内容），以**事务式 claim** 独占
+ *   消费：恢复读取、水位对账与 ControlSession 构造全部成功才 commit；
+ *   读取失败在 loader 内 rollback 后抛错，其余失败点由适配器 rollback；
  * - `restorable` Session 从 P2 latestServerSeq 构造跨重启 resume
  *   （Replay 内容不持久化，缺口走 Snapshot）；
  * - 新建 Session 无需 resume，也不会有 Replay Gap。
  *
  * 恢复读取失败必须**抛错**（调用方以 1011 失败关闭连接）：跨重启吞错
  * 会退化为全新 Seq（复用已持久化 Seq），进程内吞错会让快照不可构造。
+ * 读取失败只是**回滚**导出状态的 claim——故障解除后的下一次重连仍能
+ * 正常恢复，绝不能让一次瞬态失败把同进程导出状态不可逆消费掉。
  */
 async function loadControlResume(
   ctx: ServerContext,
   logical: LogicalSession,
 ): Promise<ControlResumePlan> {
-  if (logical.exportedControlState !== null) {
-    // 原子消费：读取即清空，避免并发连接重复消费同一导出状态。
-    const resume = logical.exportedControlState;
-    logical.exportedControlState = null;
-    const recoveryState = await ctx.persistence.readRecoveryState(logical.sessionId);
-    return { resume, recoveryState };
+  const claim = await logical.claimExportedControlState();
+  if (claim.state !== null) {
+    try {
+      const recoveryState = await ctx.persistence.readRecoveryState(logical.sessionId);
+      return { resume: claim.state, recoveryState, claim };
+    } catch (error) {
+      claim.rollback();
+      throw error;
+    }
   }
   if (logical.restorable) {
     const state = await ctx.persistence.readRecoveryState(logical.sessionId);

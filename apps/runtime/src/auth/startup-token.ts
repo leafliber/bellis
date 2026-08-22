@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 /**
  * 一次性启动 Token（P4 文档 §7.4）。
@@ -13,6 +13,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  *   请求只有一个持有者）→ commit 永久消费 / release 归还可用。持久化
  *   可重试失败（database_busy 等）时 release，同 Token 重试有效；
  *   客户端错误（非法 resume 目标等）时 commit，Token 不被探测重放。
+ * - 持久化身份固定（三轮评审修复 3）：首次预留时把 `sessionId` 与
+ *   `createdAtMs` 固定到 Token 记录（记录在 release 后仍存在）；瞬态
+ *   失败释放 Token 后，同 Token 重试复用**完全相同**的 ensureSession
+ *   输入，幂等命中首次已提交的行，绝不产生第二个 Session 身份。
  * - 开发/测试通过 Fixture 注入（issue()），生产装配不预置任何 Token。
  */
 
@@ -21,8 +25,16 @@ export interface IssuedStartupToken {
   readonly expiresAtMs: number;
 }
 
+/** 首次预留时固定的持久化 Session 身份（同 Token 重试必须复用）。 */
+export interface PinnedSessionIdentity {
+  readonly sessionId: string;
+  readonly createdAtMs: number;
+}
+
 /** 已预留 Token 的消费句柄：commit 永久消费；release 归还可用。 */
 export interface StartupTokenReservation {
+  /** 固定的持久化身份：跨重试稳定，Cookie 不在此列。 */
+  readonly sessionIdentity: PinnedSessionIdentity;
   commit(): void;
   release(): void;
 }
@@ -31,6 +43,7 @@ interface TokenRecord {
   readonly digest: Uint8Array;
   readonly expiresAtMs: number;
   state: "available" | "reserved" | "used";
+  sessionIdentity?: PinnedSessionIdentity;
 }
 
 const TOKEN_BYTES = 32;
@@ -90,8 +103,15 @@ export class StartupTokenService {
       return null;
     }
     record.state = "reserved";
+    // 持久化身份在首次预留时固定到记录：release 后同 Token 重试复用
+    // 相同输入（createdAtMs 即首次尝试时间，语义正确）。
+    if (record.sessionIdentity === undefined) {
+      record.sessionIdentity = { sessionId: randomUUID(), createdAtMs: now };
+    }
+    const identity = record.sessionIdentity;
     let settled = false;
     return {
+      sessionIdentity: identity,
       commit: () => {
         if (settled) {
           return;

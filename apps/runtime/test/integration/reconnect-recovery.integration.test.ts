@@ -144,7 +144,7 @@ describe("断线与 Seq 落库并发（二轮评审修复 2）", () => {
     }
   });
 
-  it("恢复水位对账失败：1011 失败关闭，无任何 Replay 上线", async () => {
+  it("恢复水位对账失败：1011 失败关闭，无任何 Replay 上线；故障解除后重连恢复（三轮修复 1）", async () => {
     const directory = tempDirectory("bellis-p4-rr2-recon-");
     const base = await createMigratedBaseClient(directory);
     baseClients.push(base);
@@ -182,6 +182,156 @@ describe("断线与 Seq 落库并发（二轮评审修复 2）", () => {
       const closeCode = await second.closed();
       expect(closeCode).toBe(1011);
       expect(second.received.length).toBe(0);
+
+      // 对账失败已回滚导出状态：故障解除后再次重连必须正常恢复，
+      // 而不是退化成全新 Seq 的 Session（seq_regression 死循环 1011）。
+      // 注意重放窗口会先回放旧消息（hello/pong 的 Seq 1-3）——连续性
+      // 以**新分配**的 Seq（≥4）为准。
+      failReconcile = false;
+      const third = await connectedClient(handle, cookie, sessionId, { lastAck: 0n });
+      await third.waitFor(
+        (envelope) => envelope.type === "server.hello" && Number(envelope.seq) >= 4,
+      );
+      await third.waitForType("server.ready");
+      third.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "3" } }));
+      const pong = await third.waitFor(
+        (envelope) => envelope.type === "clock.pong" && Number(envelope.seq) >= 4,
+      );
+      expect(Number(pong.seq)).toBeGreaterThanOrEqual(4);
+      third.close();
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+describe("导出状态事务式消费（三轮评审修复 1）", () => {
+  async function exchangeSession(
+    handle: RuntimeHandle,
+  ): Promise<{ sessionId: string; cookie: string }> {
+    const token = handle.issueStartupToken().token;
+    const exchange = await fetch(`http://127.0.0.1:${handle.status.port}/api/v1/auth/exchange`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: originFor(handle) },
+      body: JSON.stringify({ startupToken: token }),
+    });
+    const { sessionId } = (await exchange.json()) as { sessionId: string };
+    return { sessionId, cookie: cookieFrom(exchange) };
+  }
+
+  it("readRecoveryState 首次失败、第二次成功：第二次重连正常恢复", async () => {
+    const directory = tempDirectory("bellis-p4-r5-retry-");
+    const base = await createMigratedBaseClient(directory);
+    baseClients.push(base);
+    let failReads = 0;
+    const handle = await startTestRuntime({
+      dataDirectory: directory,
+      persistenceClient: wrapPersistenceClient(base, {
+        readRecoveryState: (sessionId: string) => {
+          if (failReads > 0) {
+            failReads -= 1;
+            return Promise.reject(new PersistenceError("database_busy", "injected busy"));
+          }
+          return base.readRecoveryState(sessionId);
+        },
+      }),
+    });
+    try {
+      const { sessionId, cookie } = await exchangeSession(handle);
+      const first = await connectedClient(handle, cookie, sessionId);
+      await first.waitForType("server.ready");
+      first.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "1" } }));
+      await first.waitForType("clock.pong");
+      first.terminate();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // 第一次重连：恢复读取失败 → 1011；导出状态必须回滚而非被消费。
+      failReads = 1;
+      const second = await connectedClient(handle, cookie, sessionId, { lastAck: 0n });
+      expect(await second.closed()).toBe(1011);
+
+      // 故障解除后第二次重连：必须正常恢复（而非从 Seq 1 新建被
+      // seq_regression 卡死，Session 在本进程内无法自行恢复）。重放窗口
+      // 会先回放旧消息（Seq 1-3）——连续性以新分配的 Seq（≥4）为准。
+      const third = await connectedClient(handle, cookie, sessionId, { lastAck: 0n });
+      await third.waitFor(
+        (envelope) => envelope.type === "server.hello" && Number(envelope.seq) >= 4,
+      );
+      await third.waitForType("server.ready");
+      third.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "3" } }));
+      const pong = await third.waitFor(
+        (envelope) => envelope.type === "clock.pong" && Number(envelope.seq) >= 4,
+      );
+      expect(Number(pong.seq)).toBeGreaterThanOrEqual(4);
+      third.close();
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("恢复读取延迟期间连接断开：再次重连等待 claim 回滚后仍能恢复", async () => {
+    const directory = tempDirectory("bellis-p4-r5-disconnect-");
+    const base = await createMigratedBaseClient(directory);
+    baseClients.push(base);
+    let delayFirstRead = true;
+    const handle = await startTestRuntime({
+      dataDirectory: directory,
+      persistenceClient: wrapPersistenceClient(base, {
+        readRecoveryState: (sessionId: string) => {
+          if (delayFirstRead) {
+            delayFirstRead = false;
+            return new Promise((resolve) => setTimeout(resolve, 500)).then(() =>
+              base.readRecoveryState(sessionId),
+            );
+          }
+          return base.readRecoveryState(sessionId);
+        },
+      }),
+    });
+    try {
+      const { sessionId, cookie } = await exchangeSession(handle);
+      const first = await connectedClient(handle, cookie, sessionId);
+      await first.waitForType("server.ready");
+      first.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "1" } }));
+      await first.waitForType("clock.pong");
+      first.terminate();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // 连接 A：loader 挂起（延迟 500ms）；其 Socket 立即断开（初始化在途）。
+      const pending = new ControlWsClient({
+        port: handle.status.port,
+        path: "/ws/v1/control",
+        cookie,
+        origin: originFor(handle),
+      });
+      await pending.opened();
+      pending.send(
+        clientEnvelope({
+          sessionId,
+          type: "client.hello",
+          payload: { protocolVersion: 1, clientType: "test-client", lastAck: "0" },
+        }),
+      );
+      pending.terminate();
+      // 等服务端处理完 A 的 close（claim 仍被 A 的 500ms 延迟读取持有，
+      // settle 远未发生）；否则 B 的 Upgrade 可能先于 close 事件到达而被
+      // 1008 拒绝（连接槽位仍归 A）。
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // 连接 B 立即重连：A 的 claim 未 settle，B 必须等待——A 回滚后 B
+      // 获得导出状态并正常恢复（并发重连至多一个获得状态）。重放窗口
+      // 会先回放旧消息（Seq 1-3）——连续性以新分配的 Seq（≥4）为准。
+      const recovered = await connectedClient(handle, cookie, sessionId, { lastAck: 0n });
+      await recovered.waitFor(
+        (envelope) => envelope.type === "server.hello" && Number(envelope.seq) >= 4,
+      );
+      await recovered.waitForType("server.ready");
+      recovered.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "2" } }));
+      const pong = await recovered.waitFor(
+        (envelope) => envelope.type === "clock.pong" && Number(envelope.seq) >= 4,
+      );
+      expect(Number(pong.seq)).toBeGreaterThanOrEqual(4);
+      recovered.close();
     } finally {
       await handle.close();
     }

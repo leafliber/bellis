@@ -9,7 +9,7 @@ import type { WebSocket } from "ws";
 import { buildSessionSnapshot } from "../application/recovery.js";
 import type { BroadcastOutcome, BroadcastReceipt } from "../application/commit-fake-scene.js";
 import type { ConnectionMetrics } from "./connection-metrics.js";
-import type { LogicalSession } from "./session-store.js";
+import type { ExportedControlClaim, LogicalSession } from "./session-store.js";
 
 /**
  * Control WebSocket 适配器（P4 文档 §9；control-websocket.md §12）。
@@ -24,6 +24,10 @@ import type { LogicalSession } from "./session-store.js";
  *   只产生 send 不产生 seq_advanced——若 Socket 在上条连接
  *   `await advanceServerSeq` 期间关闭，导出状态里已分配但未落库的 Seq
  *   只能靠这次对账补齐，否则 Replay 会未经落库直接上线。
+ * - 导出状态事务式消费（三轮评审修复 1）：claim → 恢复读取 → 对账 →
+ *   ControlSession 构造全部成功才 commit；读取失败、对账失败、初始化
+ *   期间连接关闭或意外异常一律 rollback 原样归还——一次瞬态失败绝不
+ *   把同进程导出状态不可逆消费掉（否则 Session 在本进程内无法恢复）。
  * - `seq_advanced` → **先等待 P2 advanceServerSeq 成功落库**，才执行同一
  *   消息的 `send`（P4 修复 2）。落库失败不得发送，连接降级关闭（1011）。
  * - `send` → socket.send 的**成功回调**后才确认写出（P4 修复 11）；
@@ -57,6 +61,12 @@ export interface ControlResumePlan {
   readonly resume?: ControlLogicalState;
   /** 预加载的 P2 恢复状态（Replay Gap 快照内容；可能为 null）。 */
   readonly recoveryState: RecoveryState | null;
+  /**
+   * 导出状态的事务式消费句柄（三轮评审修复 1）：恢复读取、水位对账
+   * 与 ControlSession 构造全部成功后 commit；任何失败或初始化期间连接
+   * 关闭必须 rollback（原样归还，后续重连仍可恢复）。
+   */
+  readonly claim?: ExportedControlClaim;
 }
 
 export interface ControlConnectionOptions {
@@ -169,6 +179,7 @@ export class ControlConnection {
     try {
       plan = await this.#resumeLoader();
     } catch (error) {
+      // 读取失败：loader 已回滚 claim，导出状态留给故障解除后的重连。
       this.#logger.log("warn", "runtime_control_resume_failed", {
         sessionId: this.#logical.sessionId,
         error: error instanceof Error ? error.message : "unknown",
@@ -176,63 +187,80 @@ export class ControlConnection {
       this.#finish(RESUME_FAILED_CLOSE, "session resume failed");
       return;
     }
-    if (this.#finished) {
-      return;
-    }
-    this.#recoveryState = plan.recoveryState;
-    this.#resumedSession = plan.resume !== undefined;
-    // 恢复水位对账（二轮评审修复 2）：任何 Replay/新消息上线前，先把
-    // 上条连接已分配的最大 Seq 补落库。advanceServerSeq 幂等接受相等。
-    if (plan.resume !== undefined && plan.resume.nextSeq > 1n) {
-      const watermark = plan.resume.nextSeq - 1n;
-      const reconciled = await this.#persistServerSeqAwait(watermark);
+    try {
       if (this.#finished) {
+        plan.claim?.rollback();
         return;
       }
-      if (!reconciled) {
-        this.#logger.log("error", "runtime_seq_reconcile_failed_close", {
-          sessionId: this.#logical.sessionId,
-          watermark: watermark.toString(),
-        });
-        this.#finish(SEQ_PERSIST_FAILED_CLOSE, "resume watermark reconcile failed");
-        return;
+      this.#recoveryState = plan.recoveryState;
+      this.#resumedSession = plan.resume !== undefined;
+      // 恢复水位对账（二轮评审修复 2）：任何 Replay/新消息上线前，先把
+      // 上条连接已分配的最大 Seq 补落库。advanceServerSeq 幂等接受相等。
+      if (plan.resume !== undefined && plan.resume.nextSeq > 1n) {
+        const watermark = plan.resume.nextSeq - 1n;
+        const reconciled = await this.#persistServerSeqAwait(watermark);
+        if (this.#finished) {
+          plan.claim?.rollback();
+          return;
+        }
+        if (!reconciled) {
+          plan.claim?.rollback();
+          this.#logger.log("error", "runtime_seq_reconcile_failed_close", {
+            sessionId: this.#logical.sessionId,
+            watermark: watermark.toString(),
+          });
+          this.#finish(SEQ_PERSIST_FAILED_CLOSE, "resume watermark reconcile failed");
+          return;
+        }
+        this.#lastPersistedSeq = watermark;
       }
-      this.#lastPersistedSeq = watermark;
-    }
-    this.#session = new ControlSession({
-      sessionId: this.#logical.sessionId,
-      runtimeVersion: this.#runtimeVersion,
-      clock: this.#clock,
-      heartbeat: { intervalMs: this.#limits.heartbeatIntervalMs },
-      helloTimeoutUs: BigInt(this.#limits.helloTimeoutMs) * 1000n,
-      replayWindowCapacity: this.#limits.replayWindowCapacity,
-      dedupCapacity: this.#limits.dedupCapacity,
-      maxTextBytes: this.#limits.maxControlTextBytes,
-      sendQueue: {
-        maxMessages: this.#limits.sendQueueMaxMessages,
-        maxBytes: this.#limits.sendQueueMaxBytes,
-      },
-      ...(plan.resume === undefined ? {} : { resume: plan.resume }),
-      logger: this.#logger,
-    });
-    const hello = this.#session.enqueueServerMessage({
-      type: "server.hello",
-      payload: this.#session.helloPayload(),
-      sentAtUs: this.#clock.nowUs(),
-    });
-    if (hello.status !== "queued") {
-      this.#logger.log("warn", "runtime_control_hello_rejected", {
+      this.#session = new ControlSession({
         sessionId: this.#logical.sessionId,
-        status: hello.status,
+        runtimeVersion: this.#runtimeVersion,
+        clock: this.#clock,
+        heartbeat: { intervalMs: this.#limits.heartbeatIntervalMs },
+        helloTimeoutUs: BigInt(this.#limits.helloTimeoutMs) * 1000n,
+        replayWindowCapacity: this.#limits.replayWindowCapacity,
+        dedupCapacity: this.#limits.dedupCapacity,
+        maxTextBytes: this.#limits.maxControlTextBytes,
+        sendQueue: {
+          maxMessages: this.#limits.sendQueueMaxMessages,
+          maxBytes: this.#limits.sendQueueMaxBytes,
+        },
+        ...(plan.resume === undefined ? {} : { resume: plan.resume }),
+        logger: this.#logger,
       });
-    }
-    void this.#pumpLoop();
-    const buffered = this.#inbox.splice(0, this.#inbox.length);
-    for (const message of buffered) {
-      if (this.#finished) {
-        return;
+      // 构造成功：导出状态已转移到活跃会话，claim 永久提交（此后关闭
+      // 会重新导出更新后的状态，与本次 claim 无关）。
+      plan.claim?.commit();
+      const hello = this.#session.enqueueServerMessage({
+        type: "server.hello",
+        payload: this.#session.helloPayload(),
+        sentAtUs: this.#clock.nowUs(),
+      });
+      if (hello.status !== "queued") {
+        this.#logger.log("warn", "runtime_control_hello_rejected", {
+          sessionId: this.#logical.sessionId,
+          status: hello.status,
+        });
       }
-      this.#handleSocketMessage(message.data, message.isBinary);
+      void this.#pumpLoop();
+      const buffered = this.#inbox.splice(0, this.#inbox.length);
+      for (const message of buffered) {
+        if (this.#finished) {
+          return;
+        }
+        this.#handleSocketMessage(message.data, message.isBinary);
+      }
+    } catch (error) {
+      // 兜底：claim 结算前的意外异常同样回滚（未结算的 claim 会阻塞
+      // 后续重连的预留等待），并以 1011 失败关闭。
+      plan.claim?.rollback();
+      this.#logger.log("error", "runtime_control_init_failed", {
+        sessionId: this.#logical.sessionId,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+      this.#finish(RESUME_FAILED_CLOSE, "session initialization failed");
     }
   }
 

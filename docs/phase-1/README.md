@@ -8,10 +8,11 @@
 ## 1. 当前状态
 
 Phase 1 的 P0 / Gate 1 已合入；P1、P2、P3 已通过 Gate 2 合入；P4（Runtime 集成、
-故障验证与 Demo）已交付并完成两轮评审修复（第一轮 11 项：跨重启 Seq 恢复、
+故障验证与 Demo）已交付并完成三轮评审修复（第一轮 11 项：跨重启 Seq 恢复、
 发送顺序与关闭鲁棒性等；第二轮 11 项：恢复水位对账、Token 原子消费、
-Session 轮换/过期/容量、连接代际广播与 Demo 退出卫生），等待 Gate 3 人工核查。
-当前仓库已经具备：
+Session 轮换/过期/容量、连接代际广播与 Demo 退出卫生；第三轮 4 项：导出状态
+事务式消费、TTL 主动关闭活跃连接、Token 重试的持久化身份稳定、OpenAPI 标准
+Bearer Scheme），等待 Gate 3 人工核查。当前仓库已经具备：
 
 - pnpm Monorepo、Node.js 26.5、TypeScript 7、ESM 与双平台 CI 基线。
 - `@bellis/contracts`、双 dialect JSON Schema、ADR 0001。

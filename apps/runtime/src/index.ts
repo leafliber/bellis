@@ -54,4 +54,9 @@ export {
 } from "./errors/mapping.js";
 export type { MappedErrorEnvelope } from "./errors/mapping.js";
 export { StartupTokenService } from "./auth/startup-token.js";
-export type { IssuedStartupToken, StartupTokenReservation } from "./auth/startup-token.js";
+export type {
+  IssuedStartupToken,
+  PinnedSessionIdentity,
+  StartupTokenReservation,
+} from "./auth/startup-token.js";
+export type { ExportedControlClaim } from "./websocket/session-store.js";

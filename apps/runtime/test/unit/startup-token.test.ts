@@ -92,4 +92,32 @@ describe("StartupTokenService", () => {
     const second = tokens.issue().token;
     expect(first).not.toBe(second);
   });
+
+  it("同 Token 重试复用首次预留固定的持久化身份（三轮评审修复 3）", () => {
+    const tokens = new StartupTokenService({ ttlMs: 60_000 });
+    const issued = tokens.issue();
+    const first = tokens.reserve(issued.token);
+    expect(first).not.toBeNull();
+    if (first === null) {
+      return;
+    }
+    // 可重试失败：release 归还；同 Token 再次预留必须拿到相同身份。
+    first.release();
+    const second = tokens.reserve(issued.token);
+    expect(second).not.toBeNull();
+    if (second === null) {
+      return;
+    }
+    expect(second.sessionIdentity.sessionId).toBe(first.sessionIdentity.sessionId);
+    expect(second.sessionIdentity.createdAtMs).toBe(first.sessionIdentity.createdAtMs);
+    // 身份为合法 UUID。
+    expect(first.sessionIdentity.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("不同 Token 的持久化身份互不相同", () => {
+    const tokens = new StartupTokenService({ ttlMs: 60_000 });
+    const first = tokens.reserve(tokens.issue().token);
+    const second = tokens.reserve(tokens.issue().token);
+    expect(first?.sessionIdentity.sessionId).not.toBe(second?.sessionIdentity.sessionId);
+  });
 });

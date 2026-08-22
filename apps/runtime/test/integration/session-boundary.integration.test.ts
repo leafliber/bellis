@@ -13,7 +13,7 @@ import {
   wrapPersistenceClient,
 } from "../helpers.js";
 import { ControlWsClient } from "../ws-client.js";
-import { clientEnvelope } from "../ws-client.js";
+import { buildMediaFrame, clientEnvelope, mediaSocket } from "../ws-client.js";
 
 /**
  * Session/认证边界回归（P4 二轮评审修复 1/5/8/9/11）：
@@ -223,6 +223,152 @@ describe("Startup Token 原子消费（二轮评审修复 5）", () => {
   });
 });
 
+describe("Token 重试的持久化身份稳定（三轮评审修复 3）", () => {
+  it("ensureSession 提交成功但响应失败：同 Token 重试复用相同身份且仅一个逻辑 Session", async () => {
+    const directory = tempDirectory("bellis-p4-identity-");
+    const base = await createMigratedBaseClient(directory);
+    baseClients.push(base);
+    const ensureInputs: Array<{ sessionId: string; createdAtMs: number }> = [];
+    let failAfterCommit = true;
+    const handle = await startTestRuntime({
+      dataDirectory: directory,
+      persistenceClient: wrapPersistenceClient(base, {
+        ensureSession: async (input) => {
+          // 先执行真实提交，再人为失败（模拟 Worker 在提交后、响应前崩溃）。
+          await base.ensureSession(input);
+          ensureInputs.push({ sessionId: input.sessionId, createdAtMs: input.createdAtMs });
+          if (failAfterCommit) {
+            failAfterCommit = false;
+            throw new PersistenceError("unavailable", "worker died after commit");
+          }
+        },
+      }),
+    });
+    try {
+      const token = handle.issueStartupToken().token;
+      const first = await exchangeToken(handle, token);
+      expect(first.status).toBe(503);
+      // 同 Token 重试成功：幂等命中首次已提交的行，而非第二个 Session。
+      const retry = await exchangeToken(handle, token);
+      expect(retry.status).toBe(200);
+      expect(ensureInputs).toHaveLength(2);
+      expect(ensureInputs[1]).toEqual(ensureInputs[0]);
+      expect(retry.sessionId).toBe(ensureInputs[0]?.sessionId);
+      // Token 最终成功后即失效。
+      const third = await exchangeToken(handle, token);
+      expect(third.status).toBe(401);
+      // P2 单行（相同 sessionId 幂等命中）：恢复状态可读。
+      const recovery = await handle.readSessionRecovery(retry.sessionId ?? "");
+      expect(recovery.latestServerSeq).toBe(0n);
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+describe("TTL 主动关闭活跃连接（三轮评审修复 2）", () => {
+  it("Control/Media 保持连接且无其它请求：跨过 TTL 后被主动关闭，Cookie 撤销", async () => {
+    const handle = await startTestRuntime({
+      dataDirectory: tempDirectory("bellis-p4-ttl-active-"),
+      limits: { sessionTtlMs: 800 },
+    });
+    try {
+      const { sessionId, cookie } = await mustExchangeOk(handle, handle.issueStartupToken().token);
+
+      const control = new ControlWsClient({
+        port: handle.status.port,
+        path: "/ws/v1/control",
+        cookie,
+        origin: originFor(handle),
+      });
+      await control.opened();
+      control.send(
+        clientEnvelope({
+          sessionId,
+          type: "client.hello",
+          payload: { protocolVersion: 1, clientType: "test-client" },
+        }),
+      );
+      await control.waitForType("server.ready");
+      // TTL 内心跳正常（Pong 可达）。
+      control.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "1" } }));
+      await control.waitForType("clock.pong");
+
+      const media = mediaSocket({
+        port: handle.status.port,
+        path: "/ws/v1/media",
+        cookie,
+        origin: originFor(handle),
+      });
+      await new Promise<void>((resolve, reject) => {
+        media.once("open", () => resolve());
+        media.once("error", (error: Error) => reject(error));
+      });
+      // 过期前媒体帧已被接收（帧计数可见，无论接受/拒绝）。
+      media.send(
+        buildMediaFrame({
+          streamId: "77777777-7777-4777-8777-777777777777",
+          frameId: "88888888-8888-4888-8888-888888888888",
+          sessionId,
+          sequence: 1,
+          traceId: "0123456789abcdef0123456789abcdef",
+        }),
+      );
+      const deadline = Date.now() + 2_000;
+      for (;;) {
+        const stats = handle.mediaFrameStats(sessionId);
+        if (stats !== null && stats.accepted + stats.rejected >= 1) {
+          break;
+        }
+        if (Date.now() > deadline) {
+          throw new Error("media frame not observed before TTL");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      // 在等待前登记关闭 Promise：跨过 TTL（期间无任何请求/Store 查询）。
+      const controlClosed = control.closed();
+      const mediaClosed = new Promise<number>((resolve) => {
+        media.once("close", (code: number) => resolve(code));
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1_400));
+
+      // 调度器主动关闭两条连接：Control forceClose=terminate（异常关闭
+      // 1006）；Media forceClose=close(1000, reason)（优雅关闭）。
+      expect(await controlClosed).toBe(1006);
+      expect(await mediaClosed).toBe(1000);
+
+      // 过期后：旧 Cookie 不可再建立 Control/Media 连接（无 Pong、无帧接收）。
+      const staleControl = new ControlWsClient({
+        port: handle.status.port,
+        path: "/ws/v1/control",
+        cookie,
+        origin: originFor(handle),
+      });
+      await staleControl.opened();
+      expect(await staleControl.closed()).toBe(1008);
+      const staleMedia = mediaSocket({
+        port: handle.status.port,
+        path: "/ws/v1/media",
+        cookie,
+        origin: originFor(handle),
+      });
+      await new Promise<void>((resolve, reject) => {
+        staleMedia.once("open", () => resolve());
+        staleMedia.once("error", (error: Error) => reject(error));
+      });
+      const staleMediaClosed = new Promise<number>((resolve) => {
+        staleMedia.once("close", (code: number) => resolve(code));
+      });
+      expect(await staleMediaClosed).toBe(1008);
+      // Session 已被移除：媒体帧计数不再可见（帧不再被接收）。
+      expect(handle.mediaFrameStats(sessionId)).toBeNull();
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
 describe("Host 头端口非法值（二轮评审修复 8）", () => {
   it("非数字/空端口/超范围端口一律 403（REST）", async () => {
     const handle = await startTestRuntime({ dataDirectory: tempDirectory("bellis-p4-hostport-") });
@@ -359,8 +505,8 @@ describe("Session 过期与容量（二轮评审修复 9）", () => {
   });
 });
 
-describe("OpenAPI 与 Auth 实际边界一致（二轮评审修复 11）", () => {
-  it("auth/exchange 文档：Header 参数、可选 Body、实际状态码", async () => {
+describe("OpenAPI 与 Auth 实际边界一致（二轮修复 11 + 三轮修复 4）", () => {
+  it("auth/exchange 文档：标准 Bearer Scheme、可选 Body、实际状态码、不宣称无凭据合法", async () => {
     const handle = await startTestRuntime({ dataDirectory: tempDirectory("bellis-p4-oapi-") });
     try {
       const response = await fetch(`http://127.0.0.1:${handle.status.port}/api/v1/openapi.json`, {
@@ -371,39 +517,45 @@ describe("OpenAPI 与 Auth 实际边界一致（二轮评审修复 11）", () =>
           string,
           {
             post?: {
-              parameters?: unknown[];
+              security?: Array<Record<string, unknown>>;
+              parameters?: Array<{ name?: string }>;
+              "x-bellis-auth"?: { credentialSources?: unknown[] };
               requestBody?: { required?: boolean };
               responses?: Record<string, unknown>;
             };
           }
         >;
-        components: { securitySchemes?: Record<string, unknown> };
+        components: { securitySchemes?: Record<string, Record<string, unknown>> };
       };
       const operation = doc.paths["/api/v1/auth/exchange"]?.post;
       expect(operation).toBeDefined();
-      // Header-only 请求合法：Body 可选 + Authorization Header 参数。
+      // 标准 HTTP Bearer Scheme：apiKey 会让客户端把 Token 原值直接写入
+      // Authorization 头（无 Bearer 前缀），与服务端真实解析不一致。
+      const scheme = doc.components.securitySchemes?.startupToken;
+      expect(scheme?.type).toBe("http");
+      expect(scheme?.scheme).toBe("bearer");
+      expect(scheme?.name).toBeUndefined();
+      // security 只声明 Bearer 一种方式：不得出现 `{}`（宣称无凭据请求合法）。
+      expect(operation?.security).toEqual([{ startupToken: [] }]);
+      // Authorization 头只由 Security Scheme 定义，不再同时声明普通参数。
+      expect(operation?.parameters).toBeUndefined();
+      // Header-only 请求合法：Body 可选；扩展说明三种凭据来源。
       expect(operation?.requestBody?.required).toBe(false);
-      const authHeader = operation?.parameters?.find(
-        (parameter) =>
-          typeof parameter === "object" &&
-          parameter !== null &&
-          (parameter as { name?: string }).name === "Authorization",
-      );
-      expect(authHeader).toBeDefined();
+      expect(operation?.["x-bellis-auth"]?.credentialSources?.length).toBeGreaterThanOrEqual(2);
       // 实际可能返回的状态码全部列出（含 500/504）。
       const responses = Object.keys(operation?.responses ?? {});
       for (const status of ["200", "400", "401", "500", "503", "504"]) {
         expect(responses).toContain(status);
       }
-      expect(doc.components.securitySchemes?.startupToken).toBeDefined();
     } finally {
       await handle.close();
     }
   });
 
-  it("Header-only 交换（无 Body）端到端成功", async () => {
+  it("按文档构造的 Bearer 请求被真实路由接受；StartupToken 前缀等价", async () => {
     const handle = await startTestRuntime({ dataDirectory: tempDirectory("bellis-p4-oapi2-") });
     try {
+      // 文档声明的标准方式：Authorization: Bearer <token>（无 Body）。
       const token = handle.issueStartupToken().token;
       const response = await fetch(`http://127.0.0.1:${handle.status.port}/api/v1/auth/exchange`, {
         method: "POST",
@@ -413,6 +565,32 @@ describe("OpenAPI 与 Auth 实际边界一致（二轮评审修复 11）", () =>
       expect(response.headers.get("set-cookie")).toContain("HttpOnly");
       const body = (await response.json()) as { sessionId: string };
       expect(body.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+
+      // 扩展声明的 StartupToken 前缀同样被接受。
+      const prefixed = handle.issueStartupToken().token;
+      const prefixResponse = await fetch(
+        `http://127.0.0.1:${handle.status.port}/api/v1/auth/exchange`,
+        {
+          method: "POST",
+          headers: { origin: originFor(handle), authorization: `StartupToken ${prefixed}` },
+        },
+      );
+      expect(prefixResponse.status).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("无凭据请求（文档未宣称合法）被真实路由拒绝", async () => {
+    const handle = await startTestRuntime({ dataDirectory: tempDirectory("bellis-p4-oapi3-") });
+    try {
+      const response = await fetch(`http://127.0.0.1:${handle.status.port}/api/v1/auth/exchange`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: originFor(handle) },
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(400);
+      expect(((await response.json()) as { code: string }).code).toBe("invalid_message");
     } finally {
       await handle.close();
     }
