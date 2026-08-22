@@ -458,3 +458,60 @@ describe("content-level scrubbing (Gate 3 重开评审修复 1)", () => {
     );
   });
 });
+
+describe("content-level scrubbing round 2 (Gate 3 复审修复)", () => {
+  const CANARY = "CANARY_2e6b9d4a1f8c3750";
+
+  const PROBES: ReadonlyArray<[label: string, text: string]> = [
+    ["multiCookie", `Cookie: benign=1; bellis_session=${CANARY}`],
+    ["customAuthorization", `Authorization: Custom ${CANARY}`],
+    ["camelStartupToken", `startupToken=${CANARY}`],
+    ["underscoreAccessToken", `access_token=${CANARY}`],
+    ["credentials", `credentials=${CANARY}`],
+    ["digest", `Authorization: Digest username="alice", response="${CANARY}"`],
+  ];
+
+  it("scrubs all six probe forms in string fields and Error messages", () => {
+    for (const [label, text] of PROBES) {
+      const fieldOut = JSON.stringify(redactValue({ error: text }));
+      expect(fieldOut.includes(CANARY), label).toBe(false);
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(text)));
+      expect(errorOut.includes(CANARY), label).toBe(false);
+    }
+  });
+
+  it("header values are consumed to end of line without touching the next line", () => {
+    const input = `exchange failed\nCookie: a=1; b=${CANARY}\nnext line stays readable`;
+    const output = JSON.stringify(redactValue({ detail: input })) as string;
+    expect(output.includes(CANARY)).toBe(false);
+    expect(output).toContain("next line stays readable");
+    expect(output).toContain("exchange failed");
+  });
+
+  it("property: sensitive key names in any naming style never leak values", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: SENSITIVE_LOG_FIELD_NAMES.length - 1 }),
+        fc.integer({ min: 1, max: 20 }),
+        fc.constantFrom("", "_", "-", " "),
+        fc.constantFrom(":", "="),
+        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        fc.boolean(),
+        fc.boolean(),
+        (nameIndex, splitAt, separator, sepChar, token, upperCase, asError) => {
+          const baseName = SENSITIVE_LOG_FIELD_NAMES[nameIndex] ?? "token";
+          const canonical = baseName.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const clamped = Math.min(Math.max(splitAt, 1), canonical.length - 1);
+          const styled = canonical.slice(0, clamped) + separator + canonical.slice(clamped);
+          const name = upperCase ? styled.toUpperCase() : styled;
+          const text = `${name}${sepChar} ${token}`;
+          const output = asError
+            ? JSON.stringify(serializeErrorForLog(new Error(`probe ${text}`)))
+            : JSON.stringify(redactValue({ detail: text }));
+          expect(output.includes(token)).toBe(false);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+});

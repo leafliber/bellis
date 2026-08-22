@@ -347,18 +347,19 @@ describe("关闭顺序：应用任务与 Outbox 先停、再等待连接排空�
 
       const t0 = Date.now();
       const closePromise = handle.close();
-      // 新顺序：abort 与 dispatcher-stop 在排空等待之前完成，t0+150ms
-      // 之后不应再有任何 claim_outbox（旧顺序排空等待先于 dispatcher-stop
-      // 撑满 Grace，100ms 轮询必然继续领取）。
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      const claimsDuringDrainWait = claimTimes.filter((t) => t > t0 + 150);
       await closePromise;
       await handle.closed;
+      const closeEnd = Date.now();
       expect(handle.status.phase).toBe("closed");
-      expect(claimsDuringDrainWait).toEqual([]);
-      // 排空等待确实撑满了 Grace：关闭耗时接近 shutdownGraceMs（排队
-      // 的 Pong 卡在挂起的 Seq 落库上，连接直到 force-close 才消失）。
-      expect(Date.now() - t0).toBeGreaterThanOrEqual(1_400);
+      // 取样必须在 close 完成后从**完整**时间序列计算（复审修复：此前
+      // 150ms 处提前冻结数组，旧实现 200ms/300ms 后的继续领取不会进入
+      // 断言）。新顺序：abort 与 dispatcher-stop 在排空等待之前完成，
+      // (t0+150, closeEnd] 内不应有任何 claim_outbox；旧顺序：排空等待
+      // 先于 dispatcher-stop 撑满 Grace，100ms 轮询在窗口内必然继续领取。
+      expect(claimTimes.filter((t) => t > t0 + 150 && t <= closeEnd)).toEqual([]);
+      // 观察窗口确实成立：排空等待撑满 Grace（排队的 Pong 卡在挂起的
+      // Seq 落库上，连接直到 force-close 才消失）。
+      expect(closeEnd - t0).toBeGreaterThanOrEqual(1_400);
       client.close();
     } finally {
       releaseSeqPersist?.();

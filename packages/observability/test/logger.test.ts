@@ -255,3 +255,33 @@ describe("credential content scrubbing (Gate 3 重开评审修复 1)", () => {
     expect(text).toContain("[redacted]");
   });
 });
+
+describe("free-text credential scrubbing round 2 (Gate 3 复审修复)", () => {
+  it("scrubs the six leaked forms from the previous round on the real Pino assembly", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0",
+      level: "info",
+      destination,
+    });
+    const canary = "CANARY_3c8f1e5b7a2d9046";
+    const probes: ReadonlyArray<[label: string, text: string]> = [
+      ["multiCookie", `Cookie: benign=1; bellis_session=${canary}`],
+      ["customAuthorization", `Authorization: Custom ${canary}`],
+      ["camelStartupToken", `startupToken=${canary}`],
+      ["underscoreAccessToken", `access_token=${canary}`],
+      ["credentials", `credentials=${canary}`],
+      ["digest", `Authorization: Digest username="alice", response="${canary}"`],
+    ];
+    for (const [label, text] of probes) {
+      // Runtime 的常见形态：error 字段承载任意 error.message，以及直接
+      // 序列化的 Error 对象（message/stack 走同一内容级清理）。
+      logger.log("warn", `probe_field_${label}`, { error: text });
+      logger.log("error", `probe_object_${label}`, { errorObject: new Error(text) });
+    }
+    const text = lines.join("\n");
+    expect(text).not.toContain(canary);
+    expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(12);
+  });
+});
