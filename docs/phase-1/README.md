@@ -7,12 +7,14 @@
 
 ## 1. 当前状态
 
-Phase 1 的 P0 / Gate 1 已合入；P1、P2、P3 已通过 Gate 2 合入；P4（Runtime 集成、
-故障验证与 Demo）已交付并完成三轮评审修复（第一轮 11 项：跨重启 Seq 恢复、
-发送顺序与关闭鲁棒性等；第二轮 11 项：恢复水位对账、Token 原子消费、
-Session 轮换/过期/容量、连接代际广播与 Demo 退出卫生；第三轮 4 项：导出状态
-事务式消费、TTL 主动关闭活跃连接、Token 重试的持久化身份稳定、OpenAPI 标准
-Bearer Scheme），等待 Gate 3 人工核查。当前仓库已经具备：
+Phase 1 已完成（2026-08-22 关闭）。P0 / Gate 1 已合入；P1、P2、P3 已通过
+Gate 2 合入；P4（Runtime 集成、故障验证与 Demo）已交付并完成三轮评审修复
+（第一轮 11 项：跨重启 Seq 恢复、发送顺序与关闭鲁棒性等，`e81d1aa`；
+第二轮 11 项：恢复水位对账、Token 原子消费、Session 轮换/过期/容量、
+连接代际广播与 Demo 退出卫生，`592d577`；第三轮 4 项：导出状态事务式消费、
+TTL 主动关闭活跃连接、Token 重试的持久化身份稳定、OpenAPI 标准 Bearer
+Scheme，`92f2619`）。最终 P4 Commit 为 `92f2619`（分支 `phase1`），Gate 3
+人工核查已通过（验证记录见第 8.1 节）。当前仓库已经具备：
 
 - pnpm Monorepo、Node.js 26.5、TypeScript 7、ESM 与双平台 CI 基线。
 - `@bellis/contracts`、双 dialect JSON Schema、ADR 0001。
@@ -27,7 +29,7 @@ Bearer Scheme），等待 Gate 3 人工核查。当前仓库已经具备：
 | P1 | 已交付（Gate 2 通过） | [P1 Transport](./p1-transport.md) |
 | P2 | 已交付（Gate 2 通过） | [P2 Persistence](./p2-persistence.md) |
 | P3 | 已交付（Gate 2 通过） | [P3 Observability/Testkit](./p3-observability-testkit.md) |
-| P4 | 已交付（等待 Gate 3） | [P4 Runtime Integration](./p4-runtime-integration.md) |
+| P4 | 已交付（Gate 3 通过） | [P4 Runtime Integration](./p4-runtime-integration.md) |
 
 ## 2. 执行顺序
 
@@ -178,6 +180,22 @@ traceContinuity=ok
 
 同时人工确认 Runtime 只绑定 loopback、OpenAPI 与实现一致、数据库只出现在临时目录、崩溃恢复证据真实、工作树没有数据库/日志/密钥/生成漂移。
 
+### 8.1 Gate 3 结果（2026-08-22）
+
+P4 最终 Commit：`92f2619`（分支 `phase1`）。验证记录：
+
+- Runtime 单元测试 62 项全部通过；
+- Runtime 集成测试 86 项全部通过；
+- `pnpm check` 通过；
+- `pnpm build` 通过；
+- `pnpm demo:phase1` 九项证据全部通过（protocolVersion / controlHandshake /
+  clockSync / mediaFrame / sceneCommit / watermark / outboxRecovery /
+  idempotency / traceContinuity）；
+- 工作树干净（无数据库、日志、密钥或生成漂移残留）。
+
+Phase 1 就此关闭。第二阶段移交入口见第 10 节与
+[构建指导 §19](../phase-1-build-guide.md)。
+
 ## 9. Agent 统一交付格式
 
 每个 Agent 必须按以下格式交付：
@@ -215,3 +233,39 @@ Git：
 ```
 
 部分完成时必须列出剩余项和可复现阻塞条件。占位实现、跳过测试或只报告“已完成”不算交付。
+
+## 10. Phase 2 移交清单
+
+Phase 2（演出纵向链路，见 [技术选型 §20](../technology-selection.md)、
+[架构设计 §20 Milestone 1](../architecture-plan.md) 与
+[构建指导 §19](../phase-1-build-guide.md)）只能通过以下 Phase 1 冻结入口
+继续建设：
+
+- **Contracts**（`@bellis/contracts`）：`SignalSchema`、`ActionFrameSchema`、
+  `DecisionPacketSchema`、`SceneSchema`、`CueSchema`、`SyncPolicySchema`、
+  `SessionRecordSchema` 等第一阶段 Schema 与 2020-12 / Draft 7 双 dialect
+  生成物。Fake Signal、ActionFrame、Scene、Cue 直接用这些入口构造。
+- **Transport**（`@bellis/transport`）：`SystemMonotonicClock`、
+  `ClockOffsetEstimator`（时钟同步采样与偏移估计）、`ControlSession`
+  （`exportLogicalState` / resume、`ReplayWindow`、`BoundedSendQueue`、
+  `ControlEffect`）、`MediaFrameParser`、`MediaStreamRegistry`、
+  `encodeMediaFrame` / `decodeControlMessage` 等编解码入口。
+- **Persistence**（`@bellis/persistence`）：`createPersistenceClient`
+  （migrate / ensureSession / appendRecord / commitScene / advanceServerSeq /
+  readRecoveryState / listRecords / claimOutbox / completeOutbox /
+  retryOutbox）、`createOutboxDispatcher`、`PersistenceError` 与稳定错误码、
+  `PersistenceCheckpointObserver`（仅测试装配）。
+- **Observability**（`@bellis/observability`）：`createTraceContext` /
+  `parseTraceparent` / `formatTraceparent` / `createTraceContextManager`、
+  `createPinoLogger` 与字段级 Redaction、`createInMemoryMetrics` 与
+  `PHASE_1_METRIC_DEFINITIONS`。
+- **Runtime**（`@bellis/runtime`）：`startRuntime` / `RuntimeHandle` /
+  `parseRuntimeConfig`；Application Service 位于
+  `apps/runtime/src/application/**`（`FakeSceneCommitService`、
+  `buildSessionSnapshot`、`createRecordingOutboxPublisher`），Phase 2 的
+  Action Compiler 与 Scene Director 在该层接入，不下沉到 Route Handler。
+- **固定限制**：Phase 1 `session.snapshot` 的 `activeScene` 恒为 `null`、
+  `openMediaStreams` 恒为空；Media Stream 重连后必须重新注册，不恢复。
+- **仍需新增/版本化**（未在 Phase 1 预实现）：Scene Prepare/Ready/Commit
+  扩展消息、Stage 连接与真实 TTS / 字幕 / Live2D 协议——按 Contracts/ADR
+  变更流程先改 Schema、双 dialect 生成物与协议文档，再改消费者。

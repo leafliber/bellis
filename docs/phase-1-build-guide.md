@@ -1326,19 +1326,24 @@ Git：
 
 最终仓库应具备：
 
-- [ ] 可复现的 Monorepo 与 lockfile。
-- [ ] `@bellis/contracts` 及生成的 JSON Schema 2020-12 / Draft 7。
-- [ ] ADR 0001：Canonical Core and Wire Contracts。
-- [ ] `@bellis/transport` 的 Clock、Control 和 Media 协议实现。
-- [ ] `@bellis/persistence` 的 DB Worker、Migration、Records、事务和 Outbox。
-- [ ] `@bellis/observability` 的 Trace、日志和指标基线。
-- [ ] `@bellis/testkit` 的 Virtual Clock 与确定性测试设施。
-- [ ] `@bellis/runtime` 的本地安全边缘和生命周期编排。
-- [ ] 三份基础协议文档。
-- [ ] Windows/macOS CI。
-- [ ] 单元、性质、集成和真实恢复测试。
-- [ ] `pnpm demo:phase1`。
-- [ ] Phase 2 可直接依赖的公开接口清单。
+- [x] 可复现的 Monorepo 与 lockfile。
+- [x] `@bellis/contracts` 及生成的 JSON Schema 2020-12 / Draft 7。
+- [x] ADR 0001：Canonical Core and Wire Contracts。
+- [x] `@bellis/transport` 的 Clock、Control 和 Media 协议实现。
+- [x] `@bellis/persistence` 的 DB Worker、Migration、Records、事务和 Outbox。
+- [x] `@bellis/observability` 的 Trace、日志和指标基线。
+- [x] `@bellis/testkit` 的 Virtual Clock 与确定性测试设施。
+- [x] `@bellis/runtime` 的本地安全边缘和生命周期编排。
+- [x] 三份基础协议文档。
+- [x] Windows/macOS CI。
+- [x] 单元、性质、集成和真实恢复测试。
+- [x] `pnpm demo:phase1`。
+- [x] Phase 2 可直接依赖的公开接口清单。
+
+以上清单已随 Phase 1 关闭（2026-08-22）逐项核验：P1/P2/P3 通过 Gate 2，
+P4 最终 Commit `92f2619` 通过 Gate 3（验证记录见
+[任务索引 §8.1](./phase-1/README.md)）；Phase 2 公开接口清单落在
+[任务索引 §10](./phase-1/README.md)。
 
 ## 19. 向第二阶段移交的边界
 
