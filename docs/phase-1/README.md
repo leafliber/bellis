@@ -8,13 +8,16 @@
 ## 1. 当前状态
 
 Phase 1 已完成（2026-08-22 关闭）。P0 / Gate 1 已合入；P1、P2、P3 已通过
-Gate 2 合入；P4（Runtime 集成、故障验证与 Demo）已交付并完成三轮评审修复
+Gate 2 合入；P4（Runtime 集成、故障验证与 Demo）已交付并完成四轮评审修复
 （第一轮 11 项：跨重启 Seq 恢复、发送顺序与关闭鲁棒性等，`e81d1aa`；
 第二轮 11 项：恢复水位对账、Token 原子消费、Session 轮换/过期/容量、
 连接代际广播与 Demo 退出卫生，`592d577`；第三轮 4 项：导出状态事务式消费、
 TTL 主动关闭活跃连接、Token 重试的持久化身份稳定、OpenAPI 标准 Bearer
-Scheme，`92f2619`）。最终 P4 Commit 为 `92f2619`（分支 `phase1`），Gate 3
-人工核查已通过（验证记录见第 8.1 节）。当前仓库已经具备：
+Scheme，`92f2619`；第四轮（Gate 3 重开）4 项 + 2 项规范债务：Error 文本
+内容级脱敏、awaitSent 先泵后等、关闭顺序对齐 P4 §6.2、Scene Commit 失败
+指标补记、服务端 Envelope seq ≥ 1、握手顺序文档限定，`f41cadb`）。最终
+P4 Commit 为 `f41cadb`（分支 `phase1`），Gate 3 人工核查已通过（验证记录
+见第 8.1 节）。当前仓库已经具备：
 
 - pnpm Monorepo、Node.js 26.5、TypeScript 7、ESM 与双平台 CI 基线。
 - `@bellis/contracts`、双 dialect JSON Schema、ADR 0001。
@@ -182,11 +185,17 @@ traceContinuity=ok
 
 ### 8.1 Gate 3 结果（2026-08-22）
 
-P4 最终 Commit：`92f2619`（分支 `phase1`）。验证记录：
+P4 最终 Commit：`f41cadb`（分支 `phase1`）。首轮 Gate 3 于 `92f2619` 后
+被重开评审推翻（4 项主要问题：Error 文本泄露敏感信息、awaitSent 等待先于
+发送、关闭顺序与冻结设计相反、Scene Commit 失败指标缺失；另有两项规范
+债务：服务端 Envelope `seq` 接受 "0"、握手顺序文档冲突），全部修复于
+`f41cadb` 并复验。验证记录：
 
-- Runtime 单元测试 62 项全部通过；
-- Runtime 集成测试 86 项全部通过；
-- `pnpm check` 通过；
+- Runtime 单元测试 66 项全部通过（含 canary 脱敏探针、失败结果指标与
+  性质测试）；
+- Runtime 集成测试 88 项全部通过（含 VirtualClock 下 awaitSent 立即发送、
+  关闭排空期间 Outbox 零领取两项时序回归）；
+- `pnpm check` 通过（含 contracts:check 双 dialect 生成物一致）；
 - `pnpm build` 通过；
 - `pnpm demo:phase1` 九项证据全部通过（protocolVersion / controlHandshake /
   clockSync / mediaFrame / sceneCommit / watermark / outboxRecovery /

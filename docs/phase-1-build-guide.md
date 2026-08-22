@@ -1341,9 +1341,9 @@ Git：
 - [x] Phase 2 可直接依赖的公开接口清单。
 
 以上清单已随 Phase 1 关闭（2026-08-22）逐项核验：P1/P2/P3 通过 Gate 2，
-P4 最终 Commit `92f2619` 通过 Gate 3（验证记录见
-[任务索引 §8.1](./phase-1/README.md)）；Phase 2 公开接口清单落在
-[任务索引 §10](./phase-1/README.md)。
+P4 最终 Commit `f41cadb` 通过 Gate 3（首轮 `92f2619` 后经重开评审修复
+复验；验证记录见 [任务索引 §8.1](./phase-1/README.md)）；Phase 2 公开
+接口清单落在 [任务索引 §10](./phase-1/README.md)。
 
 ## 19. 向第二阶段移交的边界
 
