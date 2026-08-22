@@ -15,9 +15,11 @@ Gate 2 合入；P4（Runtime 集成、故障验证与 Demo）已交付并完成�
 TTL 主动关闭活跃连接、Token 重试的持久化身份稳定、OpenAPI 标准 Bearer
 Scheme，`92f2619`；第四轮（Gate 3 重开）4 项 + 2 项规范债务：Error 文本
 内容级脱敏、awaitSent 先泵后等、关闭顺序对齐 P4 §6.2、Scene Commit 失败
-指标补记、服务端 Envelope seq ≥ 1、握手顺序文档限定，`f41cadb`）。最终
-P4 Commit 为 `f41cadb`（分支 `phase1`），Gate 3 人工核查已通过（验证记录
-见第 8.1 节）。当前仓库已经具备：
+指标补记、服务端 Envelope seq ≥ 1、握手顺序文档限定，`f41cadb`；第五轮
+（重开复审）2 项：自由文本脱敏改三级规则（头形态整段到行尾 + 裸 scheme
+整段 + 键值匹配复用规范化敏感名称集合，六项 canary 探针全清）与关闭
+顺序回归测试取样修复，`6d5f164`）。最终 P4 Commit 为 `6d5f164`（分支
+`phase1`），Gate 3 人工核查已通过（验证记录见第 8.1 节）。当前仓库已经具备：
 
 - pnpm Monorepo、Node.js 26.5、TypeScript 7、ESM 与双平台 CI 基线。
 - `@bellis/contracts`、双 dialect JSON Schema、ADR 0001。
@@ -185,21 +187,21 @@ traceContinuity=ok
 
 ### 8.1 Gate 3 结果（2026-08-22）
 
-P4 最终 Commit：`f41cadb`（分支 `phase1`）。首轮 Gate 3 于 `92f2619` 后
-被重开评审推翻（4 项主要问题：Error 文本泄露敏感信息、awaitSent 等待先于
-发送、关闭顺序与冻结设计相反、Scene Commit 失败指标缺失；另有两项规范
-债务：服务端 Envelope `seq` 接受 "0"、握手顺序文档冲突），全部修复于
-`f41cadb` 并复验。验证记录：
+P4 最终 Commit：`6d5f164`（分支 `phase1`）。Gate 3 经两轮重开评审：
+首轮 `92f2619` 后重开（4 项主要问题 + 2 项规范债务，修复于 `f41cadb`）；
+`f41cadb` 复审再发现 2 项——自由文本脱敏存在头形态值只换单词、scheme
+枚举不覆盖未知形态、键值名称未复用规范化敏感名称集合三个结构缺口
+（六项 canary 探针泄露），以及关闭顺序回归测试取样过早冻结（未观察
+完整排空窗口）——修复于 `6d5f164` 并复验。验证记录：
 
-- Runtime 单元测试 66 项全部通过（含 canary 脱敏探针、失败结果指标与
-  性质测试）；
-- Runtime 集成测试 88 项全部通过（含 VirtualClock 下 awaitSent 立即发送、
-  关闭排空期间 Outbox 零领取两项时序回归）；
+- 全仓库 682 项测试通过（单元/性质 521 项 + 集成 161 项；其中 Runtime
+  单元 66 项、集成 88 项，Observability 80 项含六项 Pino canary 探针
+  与命名变体性质测试）；
 - `pnpm check` 通过（含 contracts:check 双 dialect 生成物一致）；
 - `pnpm build` 通过；
 - `pnpm demo:phase1` 九项证据全部通过（protocolVersion / controlHandshake /
   clockSync / mediaFrame / sceneCommit / watermark / outboxRecovery /
-  idempotency / traceContinuity）；
+  idempotency / traceContinuity），连续两遍干净退出；
 - 工作树干净（无数据库、日志、密钥或生成漂移残留）。
 
 Phase 1 就此关闭。第二阶段移交入口见第 10 节与
