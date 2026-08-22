@@ -24,7 +24,9 @@ Phase 1 的 P0 / Gate 1 已合入，当前仓库已经具备：
 | P3 | Trace、Pino、Metrics、Testkit | Observability 只有 No-op | [P3 Observability/Testkit](./p3-observability-testkit.md) |
 | P4 | Runtime 集成、故障验证、Demo | `apps/runtime` 空壳，Demo 显式失败 | [P4 Runtime Integration](./p4-runtime-integration.md) |
 
-当前 `scripts/phase-1-demo.mjs` 的失败是有意设计：在 P4 真正交付恢复演示前，不允许占位输出伪装为验收成功。
+P4 已交付：`apps/runtime` 完成 Fastify 边缘、Control/Media WS 适配、
+Fake Scene Commit、崩溃恢复与 `pnpm demo:phase1`（提交 → 检查点强制终止
+→ 重启恢复）。
 
 ## 2. 执行顺序
 

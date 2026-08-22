@@ -1,10 +1,56 @@
-/* oxlint-disable no-empty-file -- Gate 1 空壳占位，P4 交付实际入口 */
 /**
- * @bellis/runtime — Gate 1 空壳。
+ * @bellis/runtime — Phase 1 本地 Runtime（P4 交付）。
  *
- * P4 将在此组装（phase-1-build-guide.md §13.5）：Fastify Bootstrap、REST、
- * Auth Exchange、Control/Media WS 适配、Migration/ready、优雅关闭与
- * Fake Scene Commit。只通过各包公开入口组装，领域逻辑不进入 Route Handler。
+ * 通过 @bellis/transport、@bellis/persistence、@bellis/observability 的
+ * 包根公开 API 组装：loopback Fastify 边缘、一次性本地 Auth、
+ * Control/Media WebSocket 适配、Migration/Ready 生命周期、仅用于协议
+ * 验证的 Fake Scene Commit、先数据库 Commit 后发布的顺序保证、
+ * Outbox 编排与优雅关闭。
  *
- * 空壳阶段只保证包可编译、依赖方向正确。
+ * 领域逻辑不进入 Route Handler；不导入其他包的 src 私有路径；
+ * 不接入真实 LLM/TTS/Live2D/Game。
  */
+export {
+  parseRuntimeConfig,
+  resolveAllowedOrigins,
+  normalizeHostHeader,
+} from "./bootstrap/config.js";
+export type {
+  RuntimeConfig,
+  RuntimeConfigInput,
+  RuntimeConfigIssue,
+  ParseConfigResult,
+} from "./bootstrap/config.js";
+export { startRuntime } from "./bootstrap/lifecycle.js";
+export type {
+  RuntimeHandle,
+  RuntimeOptions,
+  RuntimePhase,
+  RuntimeStatus,
+} from "./bootstrap/lifecycle.js";
+export {
+  FakeSceneCommitInputSchema,
+  FakeSceneCommitService,
+} from "./application/commit-fake-scene.js";
+export type {
+  BroadcastOutcome,
+  ControlBroadcast,
+  FakeSceneCommitInput,
+  FakeSceneCommitResult,
+} from "./application/commit-fake-scene.js";
+export { buildSessionSnapshot } from "./application/recovery.js";
+export type { SnapshotReason } from "./application/recovery.js";
+export { createRecordingOutboxPublisher } from "./application/outbox-publisher.js";
+export type {
+  OutboxDeliveryRecord,
+  RecordingOutboxPublisher,
+} from "./application/outbox-publisher.js";
+export {
+  ApplicationError,
+  mapErrorToEnvelope,
+  stableRequestFingerprint,
+  toErrorEnvelopeJson,
+} from "./errors/mapping.js";
+export type { MappedErrorEnvelope } from "./errors/mapping.js";
+export { StartupTokenService } from "./auth/startup-token.js";
+export type { IssuedStartupToken } from "./auth/startup-token.js";

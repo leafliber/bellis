@@ -37,3 +37,20 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      # Phase 1 Demo（build-guide §14.3/§15）：提交 → 检查点强制终止 →
+      # 重启恢复。依赖构建产物，不跳过 Crash 恢复。
+      - name: Phase 1 Demo (commit → SIGKILL → restart → recovery)
+        run: pnpm demo:phase1
+
+      - name: Upload demo diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-diagnostics-${{ matrix.os }}
+          # 仅上传 CI 自身日志（数据库只在临时目录且已被 Demo 清理，
+          # 不上传任何本地 Payload）。
+          path: |
+            pnpm-debug.log
+          if-no-files-found: ignore
+          retention-days: 3
