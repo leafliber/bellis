@@ -515,3 +515,66 @@ describe("content-level scrubbing round 2 (Gate 3 复审修复)", () => {
     );
   });
 });
+
+describe("content-level scrubbing round 3 (Gate 3 三审修复)", () => {
+  const CANARY = "CANARY_9d4a2f7e5c1b8360";
+
+  const PROBES: ReadonlyArray<[label: string, text: string]> = [
+    ["escaped_field", `payload="{\\"authorization\\":\\"${CANARY}\\"}"`],
+    ["escaped_object", `detail='{\\"access_token\\": \\"${CANARY}\\"}'`],
+    ["multiwordCredentials", `credentials=alice ${CANARY}`],
+    ["multiwordPassword", `password=correct horse ${CANARY}`],
+  ];
+
+  it("scrubs escaped-JSON keys and multi-word values in string fields and Errors", () => {
+    for (const [label, text] of PROBES) {
+      const fieldOut = JSON.stringify(redactValue({ error: text }));
+      expect(fieldOut.includes(CANARY), label).toBe(false);
+      expect(fieldOut.includes("[redacted]"), label).toBe(true);
+      // Error 对象：message 与 stack 走同一内容级清理（stack 经
+      // safeReadString → sanitizeLogText 之后再 scrubPaths）。
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(text)));
+      expect(errorOut.includes(CANARY), label).toBe(false);
+      expect(errorOut.includes("[redacted]"), label).toBe(true);
+    }
+  });
+
+  it("never assembles sensitive names across line breaks (三审 P2)", () => {
+    // 名称字符间隔只允许行内空白/下划线/连字符：`t` + 换行 + `oken`
+    // 不得拼成 `token` 去修改第二行——第二行不是敏感键，必须原样保留。
+    for (const lineBreak of ["\n", "\r\n", "\r"]) {
+      const text = `first line ends t${lineBreak}oken: ${CANARY}`;
+      const output = JSON.stringify(redactValue({ detail: text }));
+      expect(output).toContain(`oken: ${CANARY}`);
+      expect(output).not.toContain("[redacted]");
+    }
+  });
+
+  it("property: escaped-JSON keys and canary-in-later-word values never leak", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: SENSITIVE_LOG_FIELD_NAMES.length - 1 }),
+        fc.constantFrom(":", "="),
+        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        fc.integer({ min: 0, max: 3 }),
+        fc.boolean(),
+        (nameIndex, sepChar, token, canaryAt, asError) => {
+          const baseName = SENSITIVE_LOG_FIELD_NAMES[nameIndex] ?? "token";
+          const canonical = baseName.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const filler = ["alpha", "beta", "gamma"];
+          // 凭证位于多词值的第 1~4 个词（上一轮的反例正在第二个词起）。
+          const words = [...filler.slice(0, canaryAt), token, ...filler.slice(canaryAt)];
+          const escaped = `meta="{\\"${canonical}\\":\\"${words.join(" ")}\\"}"`;
+          const plain = `${canonical}${sepChar} ${words.join(" ")}`;
+          for (const text of [escaped, plain]) {
+            const output = asError
+              ? JSON.stringify(serializeErrorForLog(new Error(`probe ${text}`)))
+              : JSON.stringify(redactValue({ error: text }));
+            expect(output.includes(token)).toBe(false);
+          }
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+});

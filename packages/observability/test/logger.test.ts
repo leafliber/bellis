@@ -285,3 +285,31 @@ describe("free-text credential scrubbing round 2 (Gate 3 复审修复)", () => {
     expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(12);
   });
 });
+
+describe("free-text credential scrubbing round 3 (Gate 3 三审修复)", () => {
+  it("scrubs escaped-JSON keys and multi-word values on the real Pino assembly", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0",
+      level: "info",
+      destination,
+    });
+    const canary = "CANARY_6b0e9d3a7f5c2148";
+    const probes: ReadonlyArray<[label: string, text: string]> = [
+      ["escaped_field", `payload="{\\"authorization\\":\\"${canary}\\"}"`],
+      ["escaped_object", `detail='{\\"access_token\\": \\"${canary}\\"}'`],
+      ["multiwordCredentials", `credentials=alice ${canary}`],
+      ["multiwordPassword", `password=correct horse ${canary}`],
+    ];
+    for (const [label, text] of probes) {
+      // 与上一轮相同的两条路径：error 字段承载任意自由文本，以及直接
+      // 序列化的 Error 对象（message/stack 走同一内容级清理）。
+      logger.log("warn", `probe_field_${label}`, { error: text });
+      logger.log("error", `probe_object_${label}`, { errorObject: new Error(text) });
+    }
+    const text = lines.join("\n");
+    expect(text).not.toContain(canary);
+    expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(8);
+  });
+});

@@ -44,36 +44,29 @@ export function isSensitiveFieldName(key: string): boolean {
 }
 
 /**
- * 内容级脱敏（Gate 3 重开评审修复 1 + 复审修复）：Error.message/stack 与
- * 任意嵌入字符串可能携带凭证原值（如异常消息回显 `Authorization: …` 头），
- * 字段名匹配无法覆盖自由文本，必须在字符串内容层清理。三级规则：
+ * 内容级脱敏（Gate 3 重开评审修复 1 + 复审修复 + 三审修复）：
+ * Error.message/stack 与任意嵌入字符串可能携带凭证原值（如异常消息回显
+ * `Authorization: …` 头、嵌套序列化的转义 JSON 片段），字段名匹配无法
+ * 覆盖自由文本，必须在字符串内容层清理。两条规则：
  *
- * 1. 头形态（authorization/proxy-authorization/cookie/set-cookie）：值
- *    **整段到行尾**替换。值内可含分号、逗号、引号与多个片段（多段
- *    Cookie、未知 scheme、Digest auth-param 形如 `username="a",
- *    response="b"`），单词级匹配必然残留尾段（复审教训）。
+ * 1. 敏感键值：名称匹配**复用字段级的同一份规范化敏感名称集合**
+ *    （SENSITIVE_LOG_FIELD_NAMES → canonicalFieldName），camelCase、
+ *    snake_case、kebab-case 与大小写变体视为同一名称；键名后的关闭引号
+ *    允许转义形态（`\"`——嵌套序列化文本里的 JSON 键形如
+ *    `"{\"authorization\":\"…"}`）；值**整段到行尾**替换。单词级匹配在
+ *    空格/分号/逗号/引号处停止，多片段值（多段 Cookie、未知 scheme、
+ *    Digest auth-param、`credentials=alice s3cret…` 多词值）必然残留
+ *    尾段——只有整段才安全（复审/三审教训）。
  * 2. 裸 scheme 凭证（`Bearer/Basic/Digest…`，无键名前缀）：scheme 后
  *    整段到行尾替换——多片段 auth-param 同样只有整段才安全。
- * 3. 普通敏感键值（token/startupToken/access_token/credentials/…）：
- *    名称匹配**复用字段级的同一份规范化敏感名称集合**
- *    （SENSITIVE_LOG_FIELD_NAMES → canonicalFieldName），camelCase、
- *    snake_case、kebab-case 与大小写变体视为同一名称；值替换为引号串
- *    或单个非空白词。
- * 与路径清理同一取舍：过度替换只损失可读性，绝不泄露原值。所有间隔
- * 只允许行内空白（`[ \t]`），不跨行吞并相邻日志行。
+ * 与路径清理同一取舍：过度替换只损失可读性，绝不泄露原值。名称字符
+ * 间隔只允许 `[ \t_-]`、其余间隔只允许 `[ \t]`——绝不跨行（`\n`/`\r`）
+ * 拼接名称或吞并相邻日志行。
  */
 
-/** 值需要整段到行尾清理的头形态键（canonical 形式）。 */
-const WHOLE_LINE_VALUE_CANONICAL_NAMES: ReadonlySet<string> = new Set([
-  "authorization",
-  "proxyauthorization",
-  "cookie",
-  "setcookie",
-]);
-
-/** 规范名的文本形态：字符间允许可选空白/下划线/连字符。 */
+/** 规范名的文本形态：字符间仅允许行内空白/下划线/连字符，不跨行拼接。 */
 function flexibleNamePattern(canonicalName: string): string {
-  return canonicalName.split("").join("[\\s_-]*");
+  return canonicalName.split("").join("[ \\t_-]*");
 }
 
 /** 长名在前，避免带分隔符的短名（如 `token`）先匹配截断长名。 */
@@ -86,29 +79,20 @@ function buildNameAlternation(canonicalNames: readonly string[]): string {
 
 const SENSITIVE_TEXT_CANONICAL_NAMES: readonly string[] = [...SENSITIVE_CANONICAL_NAMES];
 
-const WHOLE_LINE_VALUE_PATTERN = new RegExp(
-  `(\\b(?:${buildNameAlternation(
-    SENSITIVE_TEXT_CANONICAL_NAMES.filter((name) => WHOLE_LINE_VALUE_CANONICAL_NAMES.has(name)),
-  )})[ \\t]*["']?[ \\t]*[:=][ \\t]*)([^\\n]*)`,
-  "gi",
-);
-
-const GENERIC_KEY_VALUE_PATTERN = new RegExp(
-  `(\\b(?:${buildNameAlternation(
-    SENSITIVE_TEXT_CANONICAL_NAMES.filter((name) => !WHOLE_LINE_VALUE_CANONICAL_NAMES.has(name)),
-  )})[ \\t]*["']?[ \\t]*[:=][ \\t]*)(?:"[^"\\n]*"|'[^'\\n]*'|[^\\s;"',<>]+)`,
+// 值整段到行尾且不含 `\r`（保留 CRLF 行尾）；键名关闭引号允许 `\"` 转义。
+const SENSITIVE_KEY_VALUE_PATTERN = new RegExp(
+  `(\\b(?:${buildNameAlternation(SENSITIVE_TEXT_CANONICAL_NAMES)})[ \\t]*(?:\\\\?["'])?[ \\t]*[:=][ \\t]*)([^\\n\\r]*)`,
   "gi",
 );
 
 const SCHEME_CREDENTIAL_PATTERN =
-  /(\b(?:bearer|basic|digest|hoba|mutual|negotiate|ntlm|startuptoken)[ \t]+)[^\n]*/gi;
+  /(\b(?:bearer|basic|digest|hoba|mutual|negotiate|ntlm|startuptoken)[ \t]+)[^\n\r]*/gi;
 
-/** 优先级：头形态整段 → 裸 scheme 整段 → 普通键值（见上方注释）。 */
+/** 优先级：敏感键值整段 → 裸 scheme 整段（见上方注释）。 */
 function scrubSensitiveText(text: string): string {
   return text
-    .replace(WHOLE_LINE_VALUE_PATTERN, "$1[redacted]")
-    .replace(SCHEME_CREDENTIAL_PATTERN, "$1[redacted]")
-    .replace(GENERIC_KEY_VALUE_PATTERN, "$1[redacted]");
+    .replace(SENSITIVE_KEY_VALUE_PATTERN, "$1[redacted]")
+    .replace(SCHEME_CREDENTIAL_PATTERN, "$1[redacted]");
 }
 
 /** 所有进入日志输出的字符串的唯一出口：先截断（限定清理开销），再内容级脱敏。 */
