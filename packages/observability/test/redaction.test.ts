@@ -878,3 +878,43 @@ describe("content-level scrubbing round 6 (Gate 3 六审修复)", () => {
     );
   });
 });
+
+describe("content-level scrubbing round 7 (Gate 3 七审修复)", () => {
+  const CANARY = "CANARY_9c2f6a4e8b1d7350";
+
+  it("treats short scheme gaps and their Unicode equivalents identically", () => {
+    const EQUIVALENT_GAPS = [
+      ["backspace", "\\b", "\\u0008"],
+      ["tab", "\\t", "\\u0009"],
+      ["formfeed", "\\f", "\\u000c"],
+    ] as const;
+    for (const [label, shortGap, unicodeGap] of EQUIVALENT_GAPS) {
+      for (const [form, gap] of [
+        ["short", shortGap],
+        ["unicode", unicodeGap],
+      ] as const) {
+        let text = `Bearer${gap}${CANARY}`;
+        for (let depth = 0; depth <= 3; depth += 1) {
+          const fieldOut = JSON.stringify(redactValue({ error: text }));
+          expect(fieldOut.includes(CANARY), `${label}/${form}/field/depth${depth}`).toBe(false);
+          const errorOut = JSON.stringify(serializeErrorForLog(new Error(text)));
+          expect(errorOut.includes(CANARY), `${label}/${form}/error/depth${depth}`).toBe(false);
+          text = JSON.stringify({ payload: text });
+        }
+      }
+    }
+  });
+
+  it("keeps repeated short escapes linear at the 4K log-text limit", () => {
+    const adversarialInputs = ["\\t".repeat(2048), "\\b".repeat(2048)] as const;
+    const startedAt = performance.now();
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      for (const input of adversarialInputs) {
+        expect(redactValue(input)).toBe(input);
+      }
+    }
+    // 旧实现每个短转义字母都启动一次余串扫描，本机约需 0.9s；修复后
+    // 通常低于 20ms。250ms 预算为并行 CI 留足余量，同时能稳定钉住退化。
+    expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+});

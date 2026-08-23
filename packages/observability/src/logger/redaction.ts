@@ -72,16 +72,25 @@ function hexCode(char: string): string {
   return char.charCodeAt(0).toString(16).padStart(4, "0");
 }
 
+/** JSON 短转义的字母码；紧跟反斜杠时不应再作为名称明文字符匹配。 */
+const JSON_SHORT_ESCAPE_CODE_LETTERS = new Set(["b", "f", "n", "r", "t"]);
+
 /**
  * 规范名单个字符的文本形态：明文字符，或其 JSON `\uXXXX` 转义（小写
  * 与大写两个码位都接受——`\u0069`/`\u0049` 均可代表 i；转义反斜杠
  * 序列任意长）。转义分支带 (?<!\\) 起点守卫：反斜杠串内部 O(1) 失败。
  */
-function nameCharPattern(char: string): string {
+function nameCharPattern(char: string, isFirstCharacter: boolean): string {
   const lower = hexCode(char);
   const upper = hexCode(char.toUpperCase());
   const codes = lower === upper ? [lower] : [lower, upper];
-  return `(?:${char}|${codes.map((code) => `(?<!\\\\)\\\\+u${code}`).join("|")})`;
+  // `\\t\\t…` 中每个 t 都紧跟反斜杠；若把它当成 token 的候选起点，
+  // 后续 FILLER_ELEMENT* 会在每个起点扫描余串，重新形成 O(n²)。仅首字符
+  // 需要此守卫：内部反斜杠仍须保持字段级「任意非字母数字均为分隔符」
+  // 的语义（如 auth\\orization），且不会产生新的全模式搜索起点。
+  const literal =
+    isFirstCharacter && JSON_SHORT_ESCAPE_CODE_LETTERS.has(char) ? `(?<!\\\\)${char}` : char;
+  return `(?:${literal}|${codes.map((code) => `(?<!\\\\)\\\\+u${code}`).join("|")})`;
 }
 
 /**
@@ -100,7 +109,10 @@ const FILLER_ELEMENT =
 
 /** 规范名的文本形态：字符可为明文或其转义，字符间为任意填充。 */
 function flexibleNamePattern(canonicalName: string): string {
-  return canonicalName.split("").map(nameCharPattern).join(`${FILLER_ELEMENT}*`);
+  return canonicalName
+    .split("")
+    .map((char, index) => nameCharPattern(char, index === 0))
+    .join(`${FILLER_ELEMENT}*`);
 }
 
 /** 长名在前，避免带填充的短名（如 `token`）先匹配截断长名。 */
@@ -144,11 +156,12 @@ const SCHEME_WORDS: readonly string[] = [
 ];
 
 // 裸 scheme 词复用同一名称形态（含转义写法与起点锚）；scheme 与凭证
-// 的间隔还接受转义空白——短转义 `\t` 与 `\u0009`/`\u000b`/`\u000c`/
-// `\u0020`（排除 `\u000a`/`\u000d` 与短转义 `\n`/`\r`：换行不拼值）。
+// 的间隔还接受转义空白——短转义 `\b`/`\t`/`\f` 与对应的 `\u0008`/
+// `\u0009`/`\u000c`，并保守接受 `\u000b`/`\u0020`（排除 `\u000a`/
+// `\u000d` 与短转义 `\n`/`\r`：换行不拼值）。
 // scheme 后整段到行尾且不含 `\r`。
 const SCHEME_CREDENTIAL_PATTERN = new RegExp(
-  `(${NAME_START_ANCHOR}(?:${buildNameAlternation(SCHEME_WORDS)})(?:[ \\t]|(?<!\\\\)\\\\+(?:[bft]|u000[9bc]|u0020))+)[^\\n\\r]*`,
+  `(${NAME_START_ANCHOR}(?:${buildNameAlternation(SCHEME_WORDS)})(?:[ \\t]|(?<!\\\\)\\\\+(?:[bft]|u000[89bc]|u0020))+)[^\\n\\r]*`,
   "gi",
 );
 

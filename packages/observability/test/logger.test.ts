@@ -404,3 +404,31 @@ describe("free-text credential scrubbing round 6 (Gate 3 六审修复)", () => {
     expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(10);
   });
 });
+
+describe("free-text credential scrubbing round 7 (Gate 3 七审修复)", () => {
+  it("scrubs all short scheme gaps and Unicode equivalents on the real Pino assembly", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0",
+      level: "info",
+      destination,
+    });
+    const canary = "CANARY_8e3b5d1a7f9c2460";
+    const probes: ReadonlyArray<[label: string, text: string]> = [
+      ["schemeShortBackspace", `Bearer\\b${canary}`],
+      ["schemeUnicodeBackspace", `Bearer\\u0008${canary}`],
+      ["schemeShortTab", `Bearer\\t${canary}`],
+      ["schemeUnicodeTab", `Bearer\\u0009${canary}`],
+      ["schemeShortFormfeed", `Bearer\\f${canary}`],
+      ["schemeUnicodeFormfeed", `Bearer\\u000c${canary}`],
+    ];
+    for (const [label, text] of probes) {
+      logger.log("warn", `probe_field_${label}`, { error: text });
+      logger.log("error", `probe_object_${label}`, { errorObject: new Error(text) });
+    }
+    const text = lines.join("\n");
+    expect(text).not.toContain(canary);
+    expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(12);
+  });
+});
