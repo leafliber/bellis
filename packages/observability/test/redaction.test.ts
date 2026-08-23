@@ -27,6 +27,15 @@ function escapeCode(char: string): string {
   return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
 }
 
+/**
+ * 性质测试的 canary 生成器：固定高熵前缀 + 随机片段。裸随机片段可能与
+ * Error stack/路径/框架文本偶然重合（如 `operty` 命中 fast-check 的
+ * `Property.predicate`），造成随机假失败（六审 P2）。
+ */
+const canaryTokenArb = fc
+  .stringMatching(/^[A-Za-z0-9_\-.=+/]{6,42}$/)
+  .map((suffix) => `CANARY_${suffix}`);
+
 describe("field name matching", () => {
   it("covers the full sensitive list case-insensitively", () => {
     for (const name of SENSITIVE_LOG_FIELD_NAMES) {
@@ -453,7 +462,7 @@ describe("content-level scrubbing (Gate 3 重开评审修复 1)", () => {
 
   it("property: Bearer credentials with token-charset values never survive", () => {
     fc.assert(
-      fc.property(fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{8,64}$/), (token) => {
+      fc.property(canaryTokenArb, (token) => {
         const output = JSON.stringify(
           serializeErrorForLog(new Error(`Authorization: Bearer ${token}`)),
         );
@@ -500,7 +509,7 @@ describe("content-level scrubbing round 2 (Gate 3 复审修复)", () => {
         fc.integer({ min: 1, max: 20 }),
         fc.constantFrom("", "_", "-", " "),
         fc.constantFrom(":", "="),
-        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        canaryTokenArb,
         fc.boolean(),
         fc.boolean(),
         (nameIndex, splitAt, separator, sepChar, token, upperCase, asError) => {
@@ -560,7 +569,7 @@ describe("content-level scrubbing round 3 (Gate 3 三审修复)", () => {
       fc.property(
         fc.integer({ min: 0, max: SENSITIVE_LOG_FIELD_NAMES.length - 1 }),
         fc.constantFrom(":", "="),
-        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        canaryTokenArb,
         fc.integer({ min: 0, max: 3 }),
         fc.boolean(),
         (nameIndex, sepChar, token, canaryAt, asError) => {
@@ -626,7 +635,7 @@ describe("content-level scrubbing round 4 (Gate 3 四审修复)", () => {
           maxLength: 17,
         }),
         fc.constantFrom(":", "="),
-        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        canaryTokenArb,
         fc.boolean(),
         (nameIndex, fillers, sepChar, token, asError) => {
           const baseName = SENSITIVE_LOG_FIELD_NAMES[nameIndex] ?? "token";
@@ -651,7 +660,7 @@ describe("content-level scrubbing round 4 (Gate 3 四审修复)", () => {
       fc.property(
         fc.integer({ min: 0, max: 3 }),
         fc.constantFrom("authorization", "accessToken", "startupToken"),
-        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        canaryTokenArb,
         fc.boolean(),
         (depth, key, token, asError) => {
           let payload = JSON.stringify({ [key]: token });
@@ -744,7 +753,7 @@ describe("content-level scrubbing round 5 (Gate 3 五审修复)", () => {
         }),
         fc.boolean(),
         fc.constantFrom(":", "="),
-        fc.stringMatching(/^[A-Za-z0-9_\-.=+/]{6,48}$/),
+        canaryTokenArb,
         fc.integer({ min: 0, max: 3 }),
         fc.boolean(),
         (
@@ -769,6 +778,93 @@ describe("content-level scrubbing round 5 (Gate 3 五审修复)", () => {
           });
           const separator = escapeSep ? escapeCode(sepChar) : sepChar;
           let payload = `{${key}${separator}"${token}"}`;
+          for (let level = 0; level < depth; level += 1) {
+            payload = JSON.stringify({ payload });
+          }
+          const output = asError
+            ? JSON.stringify(serializeErrorForLog(new Error(`body ${payload}`)))
+            : JSON.stringify(redactValue({ error: payload }));
+          expect(output.includes(token)).toBe(false);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+});
+
+describe("content-level scrubbing round 6 (Gate 3 六审修复)", () => {
+  const CANARY = "CANARY_7b4e1d9a3f6c8520";
+
+  it("decodes JSON short escapes (\\t/\\b/\\f) in names, anchors and scheme gaps", () => {
+    // JSON.stringify 会把键中的控制字符写成短转义：\t/\b/\f 的字母部分
+    // 若被当作单词边界拆散，名称无法拼装（六审探针，含评审者的
+    // stringify 构造与裸 scheme 间隔）。
+    const PROBES: ReadonlyArray<[label: string, text: string]> = [
+      ["stringifyTabKey", JSON.stringify({ ["auth\torization"]: CANARY })],
+      ["stringifyBackspaceKey", JSON.stringify({ ["auth\borization"]: CANARY })],
+      ["stringifyFormfeedKey", JSON.stringify({ ["auth\forization"]: CANARY })],
+      ["stringifyTabLeadKey", JSON.stringify({ ["\tauthorization"]: CANARY })],
+      ["rawTabGap", `{"auth\\torization":"${CANARY}"}`],
+      ["rawBackspaceGap", `auth\\borization=${CANARY}`],
+      ["rawFormfeedGap", `auth\\forization=${CANARY}`],
+      ["rawTabLeadAnchor", `{"\\ttoken":"${CANARY}"}`],
+      ["schemeShortTab", `Bearer\\t${CANARY}`],
+      ["schemeEscapedTab", `Bearer\\u0009${CANARY}`],
+      ["schemeEscapedFormfeed", `Bearer\\u000c${CANARY}`],
+    ];
+    for (const [label, text] of PROBES) {
+      const fieldOut = JSON.stringify(redactValue({ error: text }));
+      expect(fieldOut.includes(CANARY), label).toBe(false);
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(text)));
+      expect(errorOut.includes(CANARY), label).toBe(false);
+    }
+  });
+
+  it("short-escape forms survive nested stringify (backslash doubling per layer)", () => {
+    let nested = JSON.stringify({ ["auth\torization"]: CANARY });
+    for (let depth = 1; depth <= 3; depth += 1) {
+      nested = JSON.stringify({ payload: nested });
+      const fieldOut = JSON.stringify(redactValue({ error: nested }));
+      expect(fieldOut.includes(CANARY), `depth${depth}`).toBe(false);
+      const errorOut = JSON.stringify(serializeErrorForLog(new Error(nested)));
+      expect(errorOut.includes(CANARY), `depth${depth}`).toBe(false);
+    }
+  });
+
+  it("short escapes of newlines (\\n/\\r) do not join names or scheme values", () => {
+    for (const [label, text] of [
+      ["nameJoin", `first line ends t\\noken: ${CANARY}`],
+      ["nameJoinCr", `first line ends t\\roken: ${CANARY}`],
+      ["schemeGap", `Bearer\\n${CANARY}`],
+    ] as const) {
+      const output = JSON.stringify(redactValue({ detail: text }));
+      expect(output, label).not.toContain("[redacted]");
+    }
+    expect(
+      JSON.stringify(redactValue({ detail: `first line ends t\\noken: ${CANARY}` })),
+    ).toContain(`oken: ${CANARY}`);
+  });
+
+  it("property: short-escaped gaps across all names at stringify depth 0-3 never leak", () => {
+    const SHORT_ESCAPES = ["\\t", "\\b", "\\f"] as const;
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: SENSITIVE_LOG_FIELD_NAMES.length - 1 }),
+        fc.array(fc.constantFrom(...SHORT_ESCAPES), { minLength: 18, maxLength: 18 }),
+        canaryTokenArb,
+        fc.integer({ min: 0, max: 3 }),
+        fc.boolean(),
+        (nameIndex, gapEscapes, token, depth, asError) => {
+          const baseName = SENSITIVE_LOG_FIELD_NAMES[nameIndex] ?? "token";
+          const canonicalName = baseName.toLowerCase().replace(/[^a-z0-9]/g, "");
+          let key = "";
+          canonicalName.split("").forEach((char, i) => {
+            if (i > 0) {
+              key += gapEscapes[i] ?? "\\t";
+            }
+            key += char;
+          });
+          let payload = `{${key}:"${token}"}`;
           for (let level = 0; level < depth; level += 1) {
             payload = JSON.stringify({ payload });
           }

@@ -375,3 +375,32 @@ describe("free-text credential scrubbing round 5 (Gate 3 五审修复)", () => {
     expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(8);
   });
 });
+
+describe("free-text credential scrubbing round 6 (Gate 3 六审修复)", () => {
+  it("scrubs JSON short-escape forms on the real Pino assembly", () => {
+    const { lines, destination } = createMemoryDestination();
+    const logger = createPinoLogger({
+      service: "bellis-runtime",
+      version: "0.1.0",
+      level: "info",
+      destination,
+    });
+    const canary = "CANARY_1e8a6d4b9f3c7205";
+    let nested = JSON.stringify({ ["auth\torization"]: canary });
+    nested = JSON.stringify({ payload: nested });
+    const probes: ReadonlyArray<[label: string, text: string]> = [
+      ["stringifyTabKey", JSON.stringify({ ["auth\torization"]: canary })],
+      ["stringifyBackspaceKey", JSON.stringify({ ["auth\borization"]: canary })],
+      ["schemeShortTab", `Bearer\\t${canary}`],
+      ["schemeEscapedTab", `Bearer\\u0009${canary}`],
+      ["nestedShortEscape", nested],
+    ];
+    for (const [label, text] of probes) {
+      logger.log("warn", `probe_field_${label}`, { error: text });
+      logger.log("error", `probe_object_${label}`, { errorObject: new Error(text) });
+    }
+    const text = lines.join("\n");
+    expect(text).not.toContain(canary);
+    expect((text.match(/\[redacted\]/g) ?? []).length).toBeGreaterThanOrEqual(10);
+  });
+});
