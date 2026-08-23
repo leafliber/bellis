@@ -1341,10 +1341,10 @@ Git：
 - [x] Phase 2 可直接依赖的公开接口清单。
 
 以上清单已随 Phase 1 关闭（2026-08-22）逐项核验：P1/P2/P3 通过 Gate 2，
-P4 最终 Commit `be8bec0` 通过 Gate 3（经 `92f2619` → `f41cadb` →
-`6d5f164` → `d793d37` → `fa53c93` 五轮重开评审修复后复验；验证记录见
-[任务索引 §8.1](./phase-1/README.md)）；Phase 2 公开接口清单落在
-[任务索引 §10](./phase-1/README.md)。
+P4 最终 Commit `c1976f2` 通过 Gate 3（经 `92f2619` → `f41cadb` →
+`6d5f164` → `d793d37` → `fa53c93` → `be8bec0` 六轮重开评审修复后复验；
+验证记录见 [任务索引 §8.1](./phase-1/README.md)）；Phase 2 公开接口
+清单落在 [任务索引 §10](./phase-1/README.md)。
 
 ## 19. 向第二阶段移交的边界
 
