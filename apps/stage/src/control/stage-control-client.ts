@@ -115,6 +115,11 @@ export class StageControlClient {
     socket.onopen = () => {
       this.#setState("hello_wait");
       this.#armHelloTimeout();
+      // client.hello 必须在 open 后立即发送，不等 server.hello：resume
+      // 连接在收到 client.hello 前保留一切出站（含 server.hello，P1
+      // ControlSession holdNewSends），先等 server.hello 会与 Runtime
+      // 互相等待直至 hello 超时（4004）。
+      this.#sendHello();
     };
     socket.onmessage = (data) => this.#onSocketMessage(data);
     socket.onclose = (code, reason) => {
@@ -203,6 +208,25 @@ export class StageControlClient {
 
   #sessionTraceId: string | null = null;
 
+  #sendHello(): void {
+    const hello = {
+      version: 1,
+      direction: "client",
+      type: "client.hello",
+      messageId: this.#options.nextMessageId(),
+      sessionId: this.#options.sessionId,
+      trace: { traceId: this.#traceId() },
+      sentAtUs: this.#options.clock.nowUs().toString(),
+      ...(this.#lastProcessedSeq === 0n ? {} : { ack: this.#lastProcessedSeq.toString() }),
+      payload: { protocolVersion: 1, clientType: "stage" },
+    } as never;
+    try {
+      this.#socket?.send(encodeControlMessage(hello));
+    } catch {
+      this.#reconnect("hello_send_failed");
+    }
+  }
+
   #armHelloTimeout(): void {
     const timeout = new AbortController();
     void this.#options.clock
@@ -263,24 +287,7 @@ export class StageControlClient {
       case "server.hello": {
         this.#helloTimeoutController?.abort(new Error("hello_received"));
         this.#helloTimeoutController = null;
-        // resume：携带 lastAck 让服务端重放窗口。
-        const hello = {
-          version: 1,
-          direction: "client",
-          type: "client.hello",
-          messageId: this.#options.nextMessageId(),
-          sessionId: this.#options.sessionId,
-          trace: { traceId: this.#traceId() },
-          sentAtUs: this.#options.clock.nowUs().toString(),
-          ...(this.#lastProcessedSeq === 0n ? {} : { ack: this.#lastProcessedSeq.toString() }),
-          payload: { protocolVersion: 1, clientType: "stage" },
-        } as never;
-        try {
-          this.#socket?.send(encodeControlMessage(hello));
-        } catch {
-          this.#reconnect("hello_send_failed");
-          return;
-        }
+        // client.hello 已在 open 时发出（resume 语义，见 connect）。
         this.#setState("active");
         this.#startLoops();
         this.sendClient("stage.capabilities", { capabilities: this.#options.capabilities });

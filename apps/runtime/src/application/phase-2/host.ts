@@ -6,7 +6,11 @@ import type {
 } from "@bellis/contracts";
 import { buildPhase2SessionSnapshot } from "../recovery.js";
 import type { RecoveryState } from "@bellis/persistence";
-import type { CompileIdSource, SceneRepositoryPort } from "@bellis/scene-runtime";
+import type {
+  CompileIdSource,
+  DirectorFaultPoint,
+  SceneRepositoryPort,
+} from "@bellis/scene-runtime";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import type { ControlConnection } from "../../websocket/control-adapter.js";
 import type { MediaConnection } from "../../websocket/media-adapter.js";
@@ -45,6 +49,8 @@ export interface Phase2HostOptions {
   /** SessionId 解析成功（Stage 连接出现）时回调（审计 Record 绑定会话）。 */
   readonly onSessionIdResolved?: (sessionId: string) => void;
   readonly runtimeVersion?: string;
+  /** Director 故障注入钩子（开发/Demo 崩溃窗口测试；缺省零开销）。 */
+  readonly directorFaultHook?: (point: DirectorFaultPoint) => void;
 }
 
 export class Phase2RuntimeHost {
@@ -97,6 +103,9 @@ export class Phase2RuntimeHost {
       ...(options.onSessionIdResolved === undefined
         ? {}
         : { onSessionIdResolved: options.onSessionIdResolved }),
+      ...(options.directorFaultHook === undefined
+        ? {}
+        : { directorFaultHook: options.directorFaultHook }),
     });
   }
 
@@ -169,7 +178,9 @@ export class Phase2RuntimeHost {
         cycleId: view.cycleId,
         executionState: view.executionState as never,
         outcomeCertain: view.outcomeCertain,
-        requiresReprepare: this.#connection === null,
+        // uncertain = Stage 侧结果不可知（旧连接已丢失）：对账后必须重新
+        // Prepare 才能重播；未完成且连接健在的 Scene 无需重新准备。
+        requiresReprepare: view.executionState === "uncertain" || this.#connection === null,
       },
     });
   }

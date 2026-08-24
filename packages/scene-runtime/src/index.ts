@@ -47,6 +47,7 @@ export type {
 } from "./director/ports.js";
 export { DEFAULT_DIRECTOR_POLICY, SceneDirector } from "./director/scene-director.js";
 export type {
+  DirectorFaultPoint,
   DirectorInternalState,
   DirectorPolicy,
   LaneFinishReport,

@@ -172,7 +172,12 @@ class StageClient {
       this.ws = new WebSocket(`ws://127.0.0.1:${this.port}/ws/v1/control`, {
         headers: { cookie: this.cookie, origin: `http://127.0.0.1:${this.port}` },
       });
-      this.ws.on("open", resolve);
+      this.ws.on("open", () => {
+        // client.hello 在 open 后立即发送：resume 连接在收到 client.hello 前
+        // 保留一切出站（含 server.hello），先等 server.hello 会死锁到 4004。
+        this.send("client.hello", { protocolVersion: 1, clientType: "stage" });
+        resolve();
+      });
       this.ws.on("error", (error) => reject(new DemoFailure("stage-connect", error.message)));
       this.ws.on("message", (data) => {
         const envelope = JSON.parse(data.toString("utf8"));
@@ -376,7 +381,6 @@ async function run() {
     await stage.connect();
     await stage.connectMedia();
     await stage.waitFor("server.hello");
-    stage.send("client.hello", { protocolVersion: 1, clientType: "stage" });
     stage.send("stage.capabilities", {
       capabilities: {
         schemaVersion: 1,
@@ -586,7 +590,6 @@ async function run() {
     const stage2 = new StageClient(ready2.port, exchange2.cookie, session2.sessionId);
     await stage2.connect();
     await stage2.waitFor("server.hello");
-    stage2.send("client.hello", { protocolVersion: 1, clientType: "stage" });
     stage2.send("stage.capabilities", {
       capabilities: {
         schemaVersion: 1,

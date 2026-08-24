@@ -18,6 +18,7 @@ import {
   compileActionFrame,
   type CompileIdSource,
   type CompileResult,
+  type DirectorFaultPoint,
   type DirectorPolicy,
   type LaneFinishReport,
   type LaneStartReport,
@@ -81,6 +82,8 @@ export interface Phase2PerformanceServiceOptions {
   readonly channel: ControlChannel;
   readonly repository: SceneRepositoryPort;
   readonly directorPolicy?: Partial<DirectorPolicy>;
+  /** Director 故障注入钩子（开发/Demo 崩溃窗口测试；缺省零开销）。 */
+  readonly directorFaultHook?: (point: DirectorFaultPoint) => void;
   /** 媒体出站通道（缺省不编排 PCM 流，纯 Control 链路仍可用）。 */
   readonly mediaChannel?: MediaOutboundChannel;
   readonly mediaStartLeadUs?: bigint;
@@ -144,6 +147,7 @@ export class Phase2PerformanceService {
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
       ...(options.directorPolicy === undefined ? {} : { policy: options.directorPolicy }),
+      ...(options.directorFaultHook === undefined ? {} : { faultHook: options.directorFaultHook }),
     });
     this.#mediaSender = new RuntimeMediaSender({
       clock: options.clock,

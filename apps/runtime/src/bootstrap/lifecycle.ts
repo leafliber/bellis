@@ -321,6 +321,29 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       logger,
       metrics,
       runtimeVersion: config.runtimeVersion,
+      ...(config.phase2.faultPoint === undefined
+        ? {}
+        : {
+            directorFaultHook: (point) => {
+              if (point === config.phase2.faultPoint) {
+                // 崩溃窗口注入：before/after durable 窗口必须同步死亡
+                // （DB 写入竞态决定落库事实）；stage 出站窗口（commit/
+                // cancel 已入队）延迟 50ms 让消息先写出到达 Stage，命中
+                // 「已发出」语义；随后制造无清理路径的硬崩溃现场。
+                logger.log("info", "phase2_fault_window_injected", { point });
+                const flushDelayMs =
+                  point === "after_stage_commit" || point === "after_cancel_sent" ? 50 : 0;
+                if (flushDelayMs === 0) {
+                  process.kill(process.pid, "SIGKILL");
+                  return;
+                }
+                const timer = setTimeout(() => {
+                  process.kill(process.pid, "SIGKILL");
+                }, flushDelayMs);
+                timer.unref?.();
+              }
+            },
+          }),
       // 版本化审计 Record（Signal 接受/决策包/编译结果；不含发言全文）。
       audit: {
         append: async (record) => {

@@ -124,6 +124,19 @@ const RuntimeConfigSchema = z
          * /stage/* 挂载（SPA 回退 index.html），形成可启动产品链路。
          */
         stageDistDir: z.string().min(1).optional(),
+        /**
+         * 崩溃窗口故障注入（仅开发/Demo 崩溃测试装配，docs/phase-2-
+         * development-guide.md §10.2）：Director 到达指定窗口时 SIGKILL
+         * 自身。生产配置禁止出现该字段。
+         */
+        faultPoint: z
+          .enum([
+            "before_durable_commit",
+            "after_durable_commit",
+            "after_stage_commit",
+            "after_cancel_sent",
+          ])
+          .optional(),
       })
       .prefault({}),
   })

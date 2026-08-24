@@ -115,7 +115,19 @@ export interface SceneDirectorOptions {
   readonly logger?: LoggerPort;
   readonly metrics?: MetricsPort;
   readonly policy?: Partial<DirectorPolicy>;
+  /**
+   * 故障注入钩子（仅开发/Demo 崩溃窗口测试装配；缺省零开销）：
+   * 在四个关键窗口同步调用，钩子内可 SIGKILL 自身以制造崩溃现场。
+   */
+  readonly faultHook?: (point: DirectorFaultPoint) => void;
 }
+
+/** 崩溃窗口注入点（docs/phase-2-development-guide.md §10.2 四个关键窗口）。 */
+export type DirectorFaultPoint =
+  | "before_durable_commit"
+  | "after_durable_commit"
+  | "after_stage_commit"
+  | "after_cancel_sent";
 
 export interface SubmitOptions {
   readonly sessionId: string;
@@ -220,6 +232,7 @@ export class SceneDirector {
   readonly #logger: LoggerPort;
   readonly #metrics: MetricsPort;
   readonly #policy: DirectorPolicy;
+  readonly #faultHook: ((point: DirectorFaultPoint) => void) | null;
   readonly #executions = new Map<string, SceneExecution>();
   #closed = false;
   #closeWaiters: (() => void)[] = [];
@@ -232,6 +245,7 @@ export class SceneDirector {
     this.#logger = options.logger ?? createNoopLogger();
     this.#metrics = options.metrics ?? createNoopMetrics();
     this.#policy = { ...DEFAULT_DIRECTOR_POLICY, ...options.policy };
+    this.#faultHook = options.faultHook ?? null;
   }
 
   get closed(): boolean {
@@ -544,6 +558,7 @@ export class SceneDirector {
 
       let durable;
       try {
+        this.#fireFaultHook("before_durable_commit");
         durable = await this.#repository.commit(
           {
             sessionId: exec.sessionId,
@@ -567,6 +582,7 @@ export class SceneDirector {
         committedAtMs: durable.committedAtMs,
         duplicate: durable.duplicate,
       });
+      this.#fireFaultHook("after_durable_commit");
       if (exec.cancelRequested) {
         await this.#cancelViaStage(exec, exec.cancelReason ?? "cancelled_after_durable");
         return;
@@ -586,6 +602,7 @@ export class SceneDirector {
         return;
       }
       this.#transition(exec, "scheduled", "stage_commit_sent");
+      this.#fireFaultHook("after_stage_commit");
       if (exec.startedReported) {
         // started 回执先于 commit ack 到达（适配器语义差异）：立即转 running。
         this.#transition(exec, "running", "stage_started_late_ack");
@@ -650,8 +667,10 @@ export class SceneDirector {
     }
     const timeout = timeoutSignal(this.#clock, this.#policy.cancelTimeoutMs);
     let outcome: CancelOutcome;
+    const cancelDelivery = this.#stage.cancel(exec.plan.scene.sceneId, reason, timeout.signal);
+    this.#fireFaultHook("after_cancel_sent");
     try {
-      outcome = await this.#stage.cancel(exec.plan.scene.sceneId, reason, timeout.signal);
+      outcome = await cancelDelivery;
     } catch {
       outcome = { status: "ambiguous", reason: "cancel_delivery_failed" };
     } finally {
@@ -727,6 +746,10 @@ export class SceneDirector {
     }
     this.#transition(exec, "failed", `internal_error:${String(error)}`);
     this.#finish(exec, "failed", "internal_error");
+  }
+
+  #fireFaultHook(point: DirectorFaultPoint): void {
+    this.#faultHook?.(point);
   }
 
   #transition(

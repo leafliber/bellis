@@ -14,18 +14,30 @@ function notify(message) {
   process.send?.(message);
 }
 
-const [dataDirectory] = process.argv.slice(2);
+const [dataDirectory, faultPointArg] = process.argv.slice(2);
 if (dataDirectory === undefined) {
-  notify({ type: "harness-error", message: "usage: phase-2-demo-child.mjs <dataDirectory>" });
+  notify({ type: "harness-error", message: "usage: phase-2-demo-child.mjs <dataDirectory> [faultPoint]" });
   process.exit(2);
 }
+
+const FAULT_POINTS = new Set([
+  "before_durable_commit",
+  "after_durable_commit",
+  "after_stage_commit",
+  "after_cancel_sent",
+]);
 
 const runtime = await startRuntime({
   config: {
     dataDirectory,
     runtimeVersion: "0.1.0-phase2-demo",
     port: 0,
-    phase2: { enabled: true },
+    phase2: {
+      enabled: true,
+      ...(faultPointArg !== undefined && FAULT_POINTS.has(faultPointArg)
+        ? { faultPoint: faultPointArg }
+        : {}),
+    },
   },
 });
 
