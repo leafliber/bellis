@@ -35,6 +35,8 @@ import type { MediaFrame, MediaFrameLimits } from "./frame-codec.js";
 
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
+const EMPTY_BUFFER = new Uint8Array(0);
+
 export interface MediaFrameParserOptions extends MediaFrameLimits {}
 
 interface PrefixFields {
@@ -47,7 +49,9 @@ export class MediaFrameParser {
   readonly #maxPayloadBytes: number;
   /** 任何合法消息的字节数硬上限；也是缓冲容量的增长上界。 */
   readonly #absoluteMaxBytes: number;
-  #buffer: Buffer = Buffer.alloc(0);
+  // Uint8Array（无 Buffer 依赖）：同一实现同时服务 Node 与浏览器 Stage
+  // （Phase 2 Browser Bundle Spike，ADR 0003）。
+  #buffer: Uint8Array = EMPTY_BUFFER;
   #length = 0;
   #prefix: PrefixFields | null = null;
   #header: MediaFrameHeader | null = null;
@@ -167,7 +171,9 @@ export class MediaFrameParser {
     while (next < size) {
       next *= 2;
     }
-    const grown = Buffer.allocUnsafe(Math.min(next, this.#absoluteMaxBytes));
+    // new Uint8Array 零初始化；已复制区间由 set() 覆写，读取只发生在
+    // [0, #length) 内，语义与原 Buffer.allocUnsafe 路径一致。
+    const grown = new Uint8Array(Math.min(next, this.#absoluteMaxBytes));
     grown.set(this.#buffer.subarray(0, this.#length), 0);
     this.#buffer = grown;
   }
@@ -194,7 +200,12 @@ export class MediaFrameParser {
       }
     }
     if (this.#prefix === null && length >= MEDIA_FRAME_PREFIX_BYTES) {
-      const headerLength = buffer.readUInt32LE(8);
+      const headerLength =
+        ((buffer[8] ?? 0) |
+          ((buffer[9] ?? 0) << 8) |
+          ((buffer[10] ?? 0) << 16) |
+          ((buffer[11] ?? 0) << 24)) >>>
+        0;
       if (headerLength > this.#maxHeaderBytes) {
         this.#fail("header_too_large", "header length exceeds the configured limit");
       }

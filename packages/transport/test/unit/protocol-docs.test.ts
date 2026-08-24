@@ -51,6 +51,25 @@ describe("协议文档示例与实现一致", () => {
     }
   });
 
+  it("scene-execution.md：全部 control-envelope 示例按标注语义通过/失败（Phase 2）", () => {
+    const blocks = readDoc("scene-execution.md").filter((block) =>
+      block.info.includes("control-envelope"),
+    );
+    expect(blocks.length).toBeGreaterThanOrEqual(4);
+    for (const block of blocks) {
+      const expectValid = block.info.includes("valid") && !block.info.includes("invalid");
+      const result = decodeControlMessage(block.body);
+      expect(
+        result.ok,
+        `${block.info}: ${result.ok ? "" : JSON.stringify(result.ok ? null : (result as { failure: unknown }).failure)}`,
+      ).toBe(expectValid);
+      if (result.ok) {
+        // Phase 2 文档示例覆盖命令（runtime→stage=server）与回执（stage→runtime=client）。
+        expect(["server", "client"]).toContain(result.value.direction);
+      }
+    }
+  });
+
   it("binary-media-websocket.md：全部 media-frame 十六进制示例按标注语义解析", () => {
     const blocks = readDoc("binary-media-websocket.md").filter((block) =>
       block.info.includes("media-frame"),
@@ -58,6 +77,8 @@ describe("协议文档示例与实现一致", () => {
     expect(blocks.length).toBeGreaterThanOrEqual(3);
     for (const block of blocks) {
       const expectValid = block.info.includes("valid") && !block.info.includes("invalid");
+      // 标注后缀声明期望的 media kind（缺省 binary-test；Phase 2 音频帧标注 audio）。
+      const expectedKind = block.info.includes("audio") ? "audio" : "binary-test";
       const bytes = Buffer.from(block.body.replace(/\s+/g, ""), "hex");
       const parser = new MediaFrameParser();
       try {
@@ -69,7 +90,7 @@ describe("协议文档示例与实现一致", () => {
         }
         const frame = frames[0];
         expect(frame?.header.schemaVersion).toBe(1);
-        expect(frame?.mediaKind).toBe("binary-test");
+        expect(frame?.mediaKind).toBe(expectedKind);
       } catch (error) {
         if (expectValid) {
           throw error;
@@ -79,8 +100,12 @@ describe("协议文档示例与实现一致", () => {
     }
   });
 
-  it("两份文档都存在且非空", () => {
-    for (const name of ["control-websocket.md", "binary-media-websocket.md"]) {
+  it("三份文档都存在且非空", () => {
+    for (const name of [
+      "control-websocket.md",
+      "binary-media-websocket.md",
+      "scene-execution.md",
+    ]) {
       expect(readDoc(name).length).toBeGreaterThan(0);
     }
   });

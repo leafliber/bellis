@@ -1,8 +1,8 @@
 # Control WebSocket 协议（/ws/v1/control）
 
-> 状态：Phase 1 冻结 v1（实现：`@bellis/transport` P1）
+> 状态：Phase 1 冻结 v1 + Phase 2 兼容扩展（实现：`@bellis/transport`）
 > 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
-> 姊妹文档：[Binary Media WebSocket](./binary-media-websocket.md)
+> 姊妹文档：[Binary Media WebSocket](./binary-media-websocket.md) · [Scene Execution](./scene-execution.md)
 >
 > 本文档中的全部 `json control-envelope` 代码块由
 > `packages/transport/test/unit/protocol-docs.test.ts` 自动验证，
@@ -68,13 +68,27 @@ HTTP Upgrade + Session 校验（P4）
 | `heartbeat.pong` | server → client | 空 |
 | `clock.ping` | client → server | `c0`（客户端发出时刻） |
 | `clock.pong` | server → client | `c0`、`r1`（服务端收到）、`r2`（服务端发出） |
-| `session.snapshot` | server → client | `Phase1SessionSnapshot` |
+| `session.snapshot` | server → client | 版本化快照联合（Phase 1 v1 / Phase 2 v2，见 scene-execution.md §8） |
 | `scene.prepared` | server → client | `sceneId`、`cycleId`、`cues[]`（≤64） |
 | `scene.committed` | server → client | `sceneId`、`cycleId`、`committedAtMs` |
 | `scene.cancelled` | server → client | `sceneId`、`cycleId`、`reason` |
 | `media.stream.open` | client → server | `streamId`、`mediaKind`、`contentType` |
 | `media.stream.closed` | 双向 | `streamId`、`reason` |
 | `error` | server → client | `ErrorEnvelope` |
+| `stage.capabilities` | client → server | Stage 能力声明（Phase 2） |
+| `scene.prepare` | server → client | `ScenePlan` + `prepareDeadlineUs`（Phase 2） |
+| `scene.ready` | client → server | 逐 Lane Ready/不可用 + `preparedAtStageUs`（Phase 2） |
+| `scene.commit` | server → client | `commitAtRuntimeUs`（Phase 2） |
+| `scene.started` | client → server | 逐 Lane 实际起始时刻（Phase 2） |
+| `scene.finished` | client → server | 逐 Lane 完成/失败（Phase 2） |
+| `scene.cancel` | server → client | 取消 preparing/scheduled/running Scene（Phase 2） |
+| `scene.cancel.ack` | client → server | 逐 Lane 已停止并释放（Phase 2） |
+| `media.stream.announce` | server → client | Runtime → Stage Stream 声明（Phase 2） |
+| `media.stream.ready` | client → server | Stage 有界缓冲已建立（Phase 2） |
+
+Phase 2 演出消息的语义、时间字段与 reason 码见
+[Scene Execution 协议](./scene-execution.md)；Phase 1 的
+`scene.prepared/committed/cancelled` 仍是对普通订阅客户端的事实通知。
 
 未知 `type` 返回 `invalid_message`，不会使 Runtime 崩溃。消息 `type` 为小写
 点分 segments（允许单段，如 `error`）。
@@ -272,8 +286,8 @@ Client 收到时记录 c3
 
 | 优先级 | 类别 | 示例 |
 | --- | --- | --- |
-| 1 | 安全、取消、Scene Commit、协议错误 | `error`、`scene.committed`、`scene.cancelled` |
-| 2 | 媒体控制与 Session 状态 | `server.hello`、`server.ready`、`session.snapshot`、`heartbeat.pong`、`clock.pong`、`media.stream.closed` |
+| 1 | 安全、取消、Scene Commit、协议错误 | `error`、`scene.committed`、`scene.cancelled`、`scene.commit`、`scene.cancel` |
+| 2 | 媒体控制与 Session 状态 | `server.hello`、`server.ready`、`session.snapshot`、`heartbeat.pong`、`clock.pong`、`media.stream.closed`、`scene.prepare`、`media.stream.announce` |
 | 3 | 快照增量（默认优先级） | `scene.prepared` 及未来 world delta |
 | 4 | 调试 Trace 与可丢弃遥测 | Phase 1 未使用，预留给扩展 |
 

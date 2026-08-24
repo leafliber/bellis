@@ -94,6 +94,62 @@ const actionFrame = {
   sync: syncPolicy,
 };
 
+const scene = {
+  schemaVersion: 1,
+  sceneId: SCENE_ID,
+  cycleId: CYCLE_ID,
+  groups: [
+    {
+      schemaVersion: 1,
+      groupId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      lanes: ["audio", "subtitle", "avatar"],
+      level: "hard",
+    },
+  ],
+  deadlineMs: 250,
+  interruptPolicy: "fade",
+};
+
+const audioCue = {
+  schemaVersion: 1,
+  cueId: CUE_ID,
+  lane: "audio",
+  anchor: "scene_start",
+  offsetMs: 0,
+  intent: { speechRef: "primary", lane: "tts" },
+};
+
+const subtitleCue = {
+  schemaVersion: 1,
+  cueId: "55555555-5555-4555-8555-555555555556",
+  lane: "subtitle",
+  anchor: "scene_start",
+  offsetMs: 0,
+  intent: { speechRef: "primary", lane: "caption" },
+};
+
+const avatarCue = {
+  schemaVersion: 1,
+  cueId: "55555555-5555-4555-8555-555555555557",
+  lane: "avatar",
+  anchor: "speech_start",
+  offsetMs: 0,
+  intent: { motion: "nod_agree", speechRef: "primary" },
+};
+
+const scenePlan = {
+  schemaVersion: 1,
+  scene,
+  cues: [audioCue, subtitleCue, avatarCue],
+};
+
+const stageCapabilities = {
+  schemaVersion: 1,
+  audio: { contentTypes: ["audio/pcm-s16le-48000-mono"], maxBufferedUs: "2000000" },
+  subtitle: { supported: true },
+  avatar: { adapter: "fake-recording", motions: ["nod_agree"], expressions: ["happy"] },
+};
+
 const snapshotBase = {
   schemaVersion: 1,
   reason: "initial",
@@ -596,6 +652,55 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
       },
     ],
   },
+  "scene-plan": {
+    valid: [
+      scenePlan,
+      // 单 Cue 计划（avatar-only Scene）与扩展键。
+      { ...scenePlan, cues: [avatarCue], extensionHint: "扩展键必须是 JSON 值" },
+    ],
+    invalid: [
+      // 空 Cue 计划不构成可执行 Scene。
+      { ...scenePlan, cues: [] },
+      { ...scenePlan, schemaVersion: 2 },
+      { ...scenePlan, scene: { ...scene, sceneId: "nope" } },
+      // 未知 Cue 结构（缺 anchor）整体拒绝。
+      { ...scenePlan, cues: [{ ...audioCue, anchor: undefined }] },
+      { ...scenePlan, cues: [{ ...audioCue, intent: BIGINT_PAYLOAD }] },
+      { ...scenePlan, cues: [{ ...audioCue }], extensionProbe: BIGINT_PAYLOAD },
+    ],
+  },
+  "scene-execution-state": {
+    valid: ["preparing", "ready", "scheduled", "running", "uncertain"],
+    invalid: [
+      // Director 内部过渡态不进入 Wire。
+      "committing",
+      "cancelling",
+      "created",
+      "Completed",
+      "",
+      1,
+      null,
+    ],
+  },
+  "stage-capabilities": {
+    valid: [
+      stageCapabilities,
+      {
+        schemaVersion: 1,
+        audio: { contentTypes: ["audio/pcm-s16le-48000-mono"], maxBufferedUs: "0" },
+        subtitle: { supported: false },
+        avatar: { adapter: "none", motions: [], expressions: [] },
+      },
+    ],
+    invalid: [
+      // maxBufferedUs 必须是十进制字符串，不能是 JSON number。
+      { ...stageCapabilities, audio: { ...stageCapabilities.audio, maxBufferedUs: 2_000_000 } },
+      { ...stageCapabilities, audio: { contentTypes: [], maxBufferedUs: "1" } },
+      { ...stageCapabilities, subtitle: { supported: "yes" } },
+      { ...stageCapabilities, avatar: { ...stageCapabilities.avatar, adapter: "" } },
+      { ...stageCapabilities, avatar: { ...stageCapabilities.avatar, motions: [""] } },
+    ],
+  },
   "session-record": {
     valid: [
       {
@@ -698,6 +803,79 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
           committedAtMs: 0,
         },
       },
+    ],
+  },
+  "phase2-session-snapshot": {
+    valid: [
+      { ...snapshotBase, schemaVersion: 2 },
+      {
+        ...snapshotBase,
+        schemaVersion: 2,
+        reason: "replay_gap",
+        activeScene: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          executionState: "running",
+          outcomeCertain: true,
+          requiresReprepare: false,
+        },
+      },
+      {
+        ...snapshotBase,
+        schemaVersion: 2,
+        activeScene: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          executionState: "uncertain",
+          outcomeCertain: false,
+          requiresReprepare: true,
+        },
+      },
+    ],
+    invalid: [
+      { ...snapshotBase, schemaVersion: 2, reason: "sync" },
+      // Director 内部过渡态不是公开执行状态。
+      {
+        ...snapshotBase,
+        schemaVersion: 2,
+        activeScene: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          executionState: "committing",
+          outcomeCertain: true,
+          requiresReprepare: false,
+        },
+      },
+      {
+        ...snapshotBase,
+        schemaVersion: 2,
+        activeScene: { sceneId: SCENE_ID, cycleId: CYCLE_ID, executionState: "running" },
+      },
+      // Media Stream 是连接级资源：任何版本的 Snapshot 都不得声称恢复旧 Stream。
+      { ...snapshotBase, schemaVersion: 2, openMediaStreams: [{ streamId: STREAM_ID }] },
+    ],
+  },
+  "session-snapshot-union": {
+    valid: [
+      // 版本判别：schemaVersion 1 → Phase 1 形态；2 → Phase 2 形态。
+      snapshotBase,
+      {
+        ...snapshotBase,
+        schemaVersion: 2,
+        activeScene: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          executionState: "completed",
+          outcomeCertain: true,
+          requiresReprepare: false,
+        },
+      },
+    ],
+    invalid: [
+      // 未知版本既不匹配 Phase 1 也不匹配 Phase 2，必须整体拒绝。
+      { ...snapshotBase, schemaVersion: 3 },
+      { ...snapshotBase, schemaVersion: 2, latestServerSeq: "-1" },
+      { ...snapshotBase, latestServerSeq: Number(MAX_U64) },
     ],
   },
   "outbox-message": {
@@ -832,6 +1010,23 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
         payload: { protocolVersion: 1, clientType: "test-client", lastAck: "9" },
       },
       { type: "session.snapshot", payload: { snapshot: snapshotBase } },
+      // 版本化快照联合：Phase 2 形态同样通过 session.snapshot。
+      {
+        type: "session.snapshot",
+        payload: {
+          snapshot: {
+            ...snapshotBase,
+            schemaVersion: 2,
+            activeScene: {
+              sceneId: SCENE_ID,
+              cycleId: CYCLE_ID,
+              executionState: "scheduled",
+              outcomeCertain: true,
+              requiresReprepare: false,
+            },
+          },
+        },
+      },
       {
         type: "scene.committed",
         payload: { sceneId: SCENE_ID, cycleId: CYCLE_ID, committedAtMs: 1 },
@@ -850,6 +1045,88 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
           error: { code: "not_ready", message: "starting", retryable: true, traceId: TRACE_ID },
         },
       },
+      // ---- Phase 2 演出消息（成功样本）----
+      { type: "stage.capabilities", payload: { capabilities: stageCapabilities } },
+      {
+        type: "scene.prepare",
+        payload: { plan: scenePlan, prepareDeadlineUs: "123456789012345" },
+      },
+      {
+        type: "scene.ready",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [
+            { lane: "audio", status: "ready", cueIds: [CUE_ID] },
+            {
+              lane: "avatar",
+              status: "unavailable",
+              reason: "adapter_error",
+              cueIds: [],
+            },
+          ],
+          preparedAtStageUs: "987654321098765",
+        },
+      },
+      {
+        type: "scene.commit",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          commitAtRuntimeUs: MAX_U64,
+        },
+      },
+      {
+        type: "scene.started",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [{ lane: "audio", startedAtStageUs: "100", startedAtRuntimeUs: MAX_U64 }],
+        },
+      },
+      {
+        type: "scene.finished",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [
+            { lane: "audio", outcome: "completed", finishedAtStageUs: "200" },
+            {
+              lane: "subtitle",
+              outcome: "failed",
+              reason: "late_commit",
+              finishedAtStageUs: "200",
+            },
+          ],
+        },
+      },
+      {
+        type: "scene.cancel",
+        payload: { sceneId: SCENE_ID, cycleId: CYCLE_ID, reason: "urgent_interrupt" },
+      },
+      {
+        type: "scene.cancel.ack",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [
+            { lane: "audio", stopped: true },
+            { lane: "avatar", stopped: false, reason: "lane_error" },
+          ],
+          stoppedAtStageUs: "300",
+        },
+      },
+      {
+        type: "media.stream.announce",
+        payload: {
+          streamId: STREAM_ID,
+          mediaKind: "audio",
+          contentType: "audio/pcm-s16le-48000-mono",
+          sceneId: SCENE_ID,
+          cueId: CUE_ID,
+        },
+      },
+      { type: "media.stream.ready", payload: { streamId: STREAM_ID } },
     ],
     invalid: [
       { type: "clock.unknown", payload: {} },
@@ -857,7 +1134,104 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
       { type: "clock.pong", payload: { c0: "1" } },
       { type: "server.hello", payload: { protocolVersion: 2 } },
       { type: "session.snapshot", payload: { snapshot: { ...snapshotBase, reason: "sync" } } },
+      // 未知快照版本：联合入口必须拒绝，不允许静默当作已知语义。
+      {
+        type: "session.snapshot",
+        payload: { snapshot: { ...snapshotBase, schemaVersion: 3 } },
+      },
+      // Phase 1 快照形态不得携带活动 Scene。
+      {
+        type: "session.snapshot",
+        payload: {
+          snapshot: {
+            ...snapshotBase,
+            activeScene: { sceneId: SCENE_ID, executionState: "running" },
+          },
+        },
+      },
       { type: "error", payload: {} },
+      // ---- Phase 2 演出消息（失败样本）----
+      // 能力声明缺 audio 结构。
+      {
+        type: "stage.capabilities",
+        payload: { capabilities: { schemaVersion: 1, subtitle: { supported: true } } },
+      },
+      // prepare 缺 Deadline 或计划为空 Cue。
+      { type: "scene.prepare", payload: { plan: scenePlan } },
+      {
+        type: "scene.prepare",
+        payload: { plan: { ...scenePlan, cues: [] }, prepareDeadlineUs: "1" },
+      },
+      // ready 空 Lane 集合 / 时间字段非十进制字符串。
+      {
+        type: "scene.ready",
+        payload: { sceneId: SCENE_ID, cycleId: CYCLE_ID, lanes: [], preparedAtStageUs: "1" },
+      },
+      {
+        type: "scene.ready",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [{ lane: "audio", status: "ready", cueIds: [] }],
+          preparedAtStageUs: 12.5,
+        },
+      },
+      // unavailable 必须携带原因码（判别由生产者保证时 Schema 仍接受空 cueIds，
+      // 但 reason 为空字符串的结构性失败必须拒绝）。
+      {
+        type: "scene.ready",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [{ lane: "audio", status: "unavailable", reason: "", cueIds: [] }],
+          preparedAtStageUs: "1",
+        },
+      },
+      // commit 时间必须是十进制字符串。
+      {
+        type: "scene.commit",
+        payload: { sceneId: SCENE_ID, cycleId: CYCLE_ID, commitAtRuntimeUs: 12345 },
+      },
+      // started 缺 Runtime 域估算时刻。
+      {
+        type: "scene.started",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [{ lane: "audio", startedAtStageUs: "100" }],
+        },
+      },
+      // finished outcome 伪造成功以外的枚举值。
+      {
+        type: "scene.finished",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [{ lane: "audio", outcome: "partial", finishedAtStageUs: "1" }],
+        },
+      },
+      { type: "scene.cancel", payload: { sceneId: SCENE_ID, cycleId: CYCLE_ID, reason: "" } },
+      // cancel.ack 缺停止时刻。
+      {
+        type: "scene.cancel.ack",
+        payload: {
+          sceneId: SCENE_ID,
+          cycleId: CYCLE_ID,
+          lanes: [{ lane: "audio", stopped: true }],
+        },
+      },
+      // binary-test 是 client → server 测试专用 kind，不允许出现在 announce。
+      {
+        type: "media.stream.announce",
+        payload: { streamId: STREAM_ID, mediaKind: "binary-test", contentType: "x" },
+      },
+      {
+        type: "media.stream.announce",
+        payload: { streamId: "no", mediaKind: "audio", contentType: "audio/pcm-s16le-48000-mono" },
+      },
+      { type: "media.stream.ready", payload: {} },
+      // 未知 Phase 2 类型。
+      { type: "scene.prepare.nack", payload: {} },
     ],
   },
   "media-frame-header": {

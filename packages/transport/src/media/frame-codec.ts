@@ -81,28 +81,43 @@ export function validateMediaFrameHeader(header: unknown): MediaFrameHeader {
 }
 
 /**
+ * 共享 UTF-8 编码器：Node 与浏览器都可用的全局 TextEncoder
+ * （WHATWG 标准；Node ≥ 11 内置）。编码算法不做环境分支。
+ */
+const UTF8_ENCODER = new TextEncoder();
+
+/**
  * 编码一帧：Header 语义校验 → 紧凑 JSON → UTF-8 → 冻结布局。
  * Header/Payload 超限与 Header 非法都以稳定错误拒绝。
+ *
+ * 字节写入使用 Uint8Array/DataView（无 Buffer 依赖），同一实现同时服务
+ * Node Runtime 与浏览器 Stage（Phase 2 Browser Bundle Spike，ADR 0003）。
  */
 export function encodeMediaFrame(frame: MediaFrame, limits: MediaFrameLimits = {}): Uint8Array {
   const maxHeaderBytes = limits.maxHeaderBytes ?? DEFAULT_MAX_MEDIA_HEADER_BYTES;
   const maxPayloadBytes = limits.maxPayloadBytes ?? DEFAULT_MAX_MEDIA_PAYLOAD_BYTES;
   const header = validateMediaFrameHeader(frame.header);
-  const headerBytes = Buffer.from(JSON.stringify(header), "utf8");
+  const headerBytes = UTF8_ENCODER.encode(JSON.stringify(header));
   if (headerBytes.byteLength > maxHeaderBytes) {
     throw new MediaFrameError("header_too_large", "encoded header exceeds the configured limit");
   }
   if (frame.payload.byteLength > maxPayloadBytes) {
     throw new MediaFrameError("payload_too_large", "payload exceeds the configured limit");
   }
-  const buffer = Buffer.alloc(
+  const buffer = new Uint8Array(
     MEDIA_FRAME_PREFIX_BYTES + headerBytes.byteLength + frame.payload.byteLength,
   );
   buffer.set(MEDIA_MAGIC, 0);
-  buffer.writeUInt8(MEDIA_FRAME_PROTOCOL_VERSION, 4);
-  buffer.writeUInt8(mediaKindToCode(frame.mediaKind), 5);
-  buffer.writeUInt16LE(0, 6);
-  buffer.writeUInt32LE(headerBytes.byteLength, 8);
+  buffer[4] = MEDIA_FRAME_PROTOCOL_VERSION;
+  buffer[5] = mediaKindToCode(frame.mediaKind);
+  // flags v1 恒为 0（LE16），此处即两个零字节。
+  buffer[6] = 0;
+  buffer[7] = 0;
+  const headerLength = headerBytes.byteLength;
+  buffer[8] = headerLength & 0xff;
+  buffer[9] = (headerLength >>> 8) & 0xff;
+  buffer[10] = (headerLength >>> 16) & 0xff;
+  buffer[11] = (headerLength >>> 24) & 0xff;
   buffer.set(headerBytes, MEDIA_FRAME_PREFIX_BYTES);
   buffer.set(frame.payload, MEDIA_FRAME_PREFIX_BYTES + headerBytes.byteLength);
   return buffer;

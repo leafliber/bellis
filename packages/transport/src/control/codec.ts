@@ -38,6 +38,31 @@ export interface ControlDecodeOptions {
 
 type Direction = "server" | "client";
 
+/**
+ * 可移植 UTF-8 字节数计算（与 Node Buffer.byteLength / WHATWG 编码一致）：
+ * 按码点累加；lone surrogate 按 U+FFFD 计 3 字节。不分配中间数组，
+ * 供 Node 与浏览器共用（Phase 2 Browser Bundle Spike，ADR 0003）。
+ */
+function utf8ByteLength(input: string): number {
+  let bytes = 0;
+  for (let index = 0; index < input.length;) {
+    const code = input.codePointAt(index) ?? input.charCodeAt(index);
+    if (code >= 0x10000) {
+      bytes += 4;
+      index += 2;
+    } else if (code >= 0x80) {
+      // 0x80..0x7FF 为 2 字节；lone surrogate（0xD800..0xDFFF）落入本区间，
+      // 编码时被替换为 U+FFFD（3 字节），与 Buffer.byteLength 行为一致。
+      bytes += code >= 0x800 ? 3 : 2;
+      index += 1;
+    } else {
+      bytes += 1;
+      index += 1;
+    }
+  }
+  return bytes;
+}
+
 function failure(
   code: TransportFailure["code"],
   message: string,
@@ -124,7 +149,7 @@ export function decodeControlMessage(
   if (typeof input !== "string") {
     return failure("invalid_message", "control message must be UTF-8 text");
   }
-  if (Buffer.byteLength(input, "utf8") > maxTextBytes) {
+  if (utf8ByteLength(input) > maxTextBytes) {
     return failure("invalid_message", "control message exceeds the text size limit");
   }
   let parsed: unknown;

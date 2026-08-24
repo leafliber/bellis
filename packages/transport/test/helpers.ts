@@ -20,9 +20,49 @@ export const FRAME_ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 export const FRAME_ID_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 export const SCENE_ID = "44444444-4444-4444-8444-444444444444";
 export const CYCLE_ID = "33333333-3333-4333-8333-333333333333";
+export const CUE_ID = "55555555-5555-4555-8555-555555555555";
+export const GROUP_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 export const RUNTIME_VERSION = "0.1.0-phase1-test";
 
-/** 全部 14 种消息类型的合法 Payload（与 Contracts Schema 对齐）。 */
+/** Phase 2 演出链路的最小合法 ScenePlan（与 Contracts Schema 对齐）。 */
+export const SCENE_PLAN: JsonValue = {
+  schemaVersion: 1,
+  scene: {
+    schemaVersion: 1,
+    sceneId: SCENE_ID,
+    cycleId: CYCLE_ID,
+    groups: [
+      {
+        schemaVersion: 1,
+        groupId: GROUP_ID,
+        lanes: ["audio", "subtitle", "avatar"],
+        level: "hard",
+      },
+    ],
+    deadlineMs: 500,
+    interruptPolicy: "fade",
+  },
+  cues: [
+    {
+      schemaVersion: 1,
+      cueId: CUE_ID,
+      lane: "audio",
+      anchor: "scene_start",
+      offsetMs: 0,
+      intent: { speechRef: "primary" },
+    },
+    {
+      schemaVersion: 1,
+      cueId: "55555555-5555-4555-8555-555555555556",
+      lane: "subtitle",
+      anchor: "scene_start",
+      offsetMs: 0,
+      intent: { speechRef: "primary" },
+    },
+  ],
+};
+
+/** 全部消息类型的合法 Payload（与 Contracts Schema 对齐；Phase 2 扩展见 scene-execution.md）。 */
 export const VALID_PAYLOADS: Readonly<Record<string, JsonValue>> = {
   "server.hello": {
     protocolVersion: 1,
@@ -67,6 +107,48 @@ export const VALID_PAYLOADS: Readonly<Record<string, JsonValue>> = {
       traceId: TRACE_ID,
     },
   },
+  // ---- Phase 2 演出消息 ----
+  "stage.capabilities": {
+    capabilities: {
+      schemaVersion: 1,
+      audio: { contentTypes: ["audio/pcm-s16le-48000-mono"], maxBufferedUs: "2000000" },
+      subtitle: { supported: true },
+      avatar: { adapter: "fake-recording", motions: ["nod_agree"], expressions: ["happy"] },
+    },
+  },
+  "scene.prepare": { plan: SCENE_PLAN, prepareDeadlineUs: "123456789012345" },
+  "scene.ready": {
+    sceneId: SCENE_ID,
+    cycleId: CYCLE_ID,
+    lanes: [{ lane: "audio", status: "ready", cueIds: [CUE_ID] }],
+    preparedAtStageUs: "123456789012345",
+  },
+  "scene.commit": { sceneId: SCENE_ID, cycleId: CYCLE_ID, commitAtRuntimeUs: "123456789099999" },
+  "scene.started": {
+    sceneId: SCENE_ID,
+    cycleId: CYCLE_ID,
+    lanes: [{ lane: "audio", startedAtStageUs: "100", startedAtRuntimeUs: "200" }],
+  },
+  "scene.finished": {
+    sceneId: SCENE_ID,
+    cycleId: CYCLE_ID,
+    lanes: [{ lane: "audio", outcome: "completed", finishedAtStageUs: "300" }],
+  },
+  "scene.cancel": { sceneId: SCENE_ID, cycleId: CYCLE_ID, reason: "urgent_interrupt" },
+  "scene.cancel.ack": {
+    sceneId: SCENE_ID,
+    cycleId: CYCLE_ID,
+    lanes: [{ lane: "audio", stopped: true }],
+    stoppedAtStageUs: "400",
+  },
+  "media.stream.announce": {
+    streamId: STREAM_ID,
+    mediaKind: "audio",
+    contentType: "audio/pcm-s16le-48000-mono",
+    sceneId: SCENE_ID,
+    cueId: CUE_ID,
+  },
+  "media.stream.ready": { streamId: STREAM_ID },
 };
 
 export interface EnvelopeOverrides {

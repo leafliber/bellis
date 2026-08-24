@@ -69,11 +69,25 @@ export { CueLaneSchema, CueSchema } from "./scene/cue.js";
 export type { Cue, CueLane } from "./scene/cue.js";
 export { SceneSchema, SyncGroupSchema, SyncLevelSchema } from "./scene/scene.js";
 export type { Scene, SyncGroup, SyncLevel } from "./scene/scene.js";
+export { SceneExecutionStateSchema, ScenePlanSchema } from "./scene/scene-plan.js";
+export type { SceneExecutionState, ScenePlan } from "./scene/scene-plan.js";
+export { StageCapabilitiesSchema } from "./stage/stage-capabilities.js";
+export type { StageCapabilities } from "./stage/stage-capabilities.js";
 
 export { OutboxMessageSchema } from "./session/outbox-message.js";
 export type { OutboxMessage } from "./session/outbox-message.js";
 export { Phase1SessionSnapshotSchema } from "./session/session-snapshot.js";
 export type { Phase1SessionSnapshot } from "./session/session-snapshot.js";
+export {
+  ActiveSceneStateSchema,
+  Phase2SessionSnapshotSchema,
+  SessionSnapshotUnionSchema,
+} from "./session/session-snapshot.js";
+export type {
+  ActiveSceneState,
+  Phase2SessionSnapshot,
+  SessionSnapshot,
+} from "./session/session-snapshot.js";
 export { SessionRecordSchema } from "./session/session-record.js";
 export type { SessionRecord } from "./session/session-record.js";
 
@@ -103,20 +117,43 @@ export {
   HeartbeatPingPayloadSchema,
   HeartbeatPongPayloadSchema,
   KNOWN_CONTROL_MESSAGE_TYPES,
+  MediaStreamAnnouncePayloadSchema,
   MediaStreamClosedPayloadSchema,
   MediaStreamOpenPayloadSchema,
+  MediaStreamReadyPayloadSchema,
+  SceneCancelAckLaneSchema,
+  SceneCancelAckPayloadSchema,
+  SceneCancelPayloadSchema,
   SceneCancelledPayloadSchema,
+  SceneCommitPayloadSchema,
   SceneCommittedPayloadSchema,
+  SceneFinishedLaneSchema,
+  SceneFinishedPayloadSchema,
   ScenePreparedPayloadSchema,
+  ScenePreparePayloadSchema,
+  SceneReadyLaneSchema,
+  SceneReadyPayloadSchema,
+  SceneStartedLaneSchema,
+  SceneStartedPayloadSchema,
   SERVER_TO_CLIENT_MESSAGE_TYPES,
   ServerHelloPayloadSchema,
   ServerReadyPayloadSchema,
   SessionSnapshotPayloadSchema,
+  StageCapabilitiesPayloadSchema,
   ClientHelloPayloadSchema,
 } from "./transport/control-payload.js";
 export type { ControlPayload, KnownControlMessageType } from "./transport/control-payload.js";
 export { MediaFrameHeaderSchema } from "./transport/media-frame-header.js";
 export type { MediaFrameHeader } from "./transport/media-frame-header.js";
+export {
+  PHASE_2_PCM_BYTES_PER_SAMPLE,
+  PHASE_2_PCM_CHANNELS,
+  PHASE_2_PCM_CONTENT_TYPE,
+  PHASE_2_PCM_FRAME_BYTES,
+  PHASE_2_PCM_FRAME_DURATION_US,
+  PHASE_2_PCM_SAMPLES_PER_FRAME,
+  PHASE_2_PCM_SAMPLE_RATE_HZ,
+} from "./transport/media-baseline.js";
 
 export { CONTRACT_SCHEMA_ENTRIES, generateJsonSchemaFiles } from "./json-schema.js";
 export type { ContractSchemaKey, GeneratedSchemaFile } from "./json-schema.js";

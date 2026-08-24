@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "audio": {
+      "type": "object",
+      "properties": {
+        "contentTypes": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "maxBufferedUs": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+        }
+      },
+      "required": [
+        "contentTypes",
+        "maxBufferedUs"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "subtitle": {
+      "type": "object",
+      "properties": {
+        "supported": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "supported"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "avatar": {
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "motions": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "expressions": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "required": [
+        "adapter",
+        "motions",
+        "expressions"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "audio",
+    "subtitle",
+    "avatar"
+  ],
+  "additionalProperties": {
+    "$ref": "#/$defs/__schema0"
+  },
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}
