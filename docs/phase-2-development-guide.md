@@ -1,10 +1,10 @@
 # Bellis Phase 2 开发指南：演出纵向链路
 
-> 文档状态：待实施基线 v1  
-> 阶段状态：未开始  
+> 文档状态：完成态 v1（Gate 2 通过；实现事实见 [Phase 2 完成态参考](./phase-2-reference.md)）  
+> 阶段状态：完成  
 > 上游基线：[Phase 1 完成态参考](./phase-1-reference.md)  
 > 上位设计：[系统架构设计](./architecture-plan.md) · [技术选型基线](./technology-selection.md)  
-> 决策约束：[ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md) · [ADR 0002](./adr/0002-node-26-baseline.md)
+> 决策约束：[ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md) · [ADR 0002](./adr/0002-node-26-baseline.md) · [ADR 0003](./adr/0003-phase-2-scene-wire-and-browser-boundary.md)
 
 ## 0. 如何使用本文
 
@@ -520,53 +520,76 @@ Crash Window：
 
 确定性逻辑测试使用 `VirtualClock`。浏览器真实 API 无法完全虚拟化的部分使用短时、有明确容差的 Smoke，不能把长业务等待塞进常规测试。
 
-### 10.2 Phase 2 Demo
+### 10.2 Phase 2 Demo 与故障验证（完成态分工）
 
-`pnpm demo:phase2` 必须自动完成：
+Phase 2 验收由三个互补命令承担（全部自动、无公网、失败非零退出、
+成功/失败均清理临时资源）：
 
-1. 创建临时数据目录并启动 Runtime；
-2. 启动本地 Stage 测试宿主和 Chromium；
-3. 完成本地 Auth、Control/Media 握手、Audio Arm 和至少三次合格 Clock Sample；
-4. 注入一条 Fake Signal，Fake Model 返回带 Speech + Avatar 的 ActionFrame；
-5. Compiler 生成 audio/subtitle/avatar Cue；
-6. Stage Prepare，Fake PCM 进入 Worklet 缓冲，所有 Hard Lane Ready；
-7. Runtime 原子提交 Scene 并发送未来 Commit；
-8. 收集 Audio/Subtitle/Avatar 实际开始时刻，确认最大偏差 ≤ 50 ms；
-9. 注入第二条紧急 Signal，确认旧 Scene 在 100 ms 内停止且新 Scene 可继续；
-10. 在一个定义的 Crash Window 重启 Runtime，确认不会重复播放已提交 Scene；
-11. 正常关闭 Chromium、Stage、Runtime、Worker 并清理临时目录。
+- `pnpm demo:phase2`——协议级纵向链路（真实 Runtime 子进程 + 真实
+  Control/Media WebSocket + 真实 DB Worker；协议客户端扮演 Stage）：
+  握手/时钟校准、announce → ready → 真实 PCM 帧流（BELL v1 解析、
+  sequence 严格连续、20ms 等差、RMS > 0、预缓冲达标才宣告 audio
+  ready）、durable Commit、三 Lane 回执、紧急打断（取消时延 +
+  停流）、Crash 后同目录重启不重复执行、真实 Trace 连续性
+  （announce/prepare/commit/cancel 共用同一根）；
+- `pnpm demo:phase2:crash`——四个关键 Crash Window 定向覆盖 +
+  同进程断连的 Snapshot v2（uncertain + requiresReprepare）：
+  W1 Prepare 后/DB Commit 前（未落库、无重放）、W2 DB Commit 后/
+  Stage Commit 前（durable 落库、commit 不外泄、不补发）、W3 Stage
+  已收到 Commit/started 前（无重放）、W4 Cancel 已入队/Ack 前
+  （cancel 至多重放一次）；
+- `pnpm test:browser`——真实 Chromium E2E（真实用户手势 Arm、真实
+  AudioContext/AudioWorklet、Vite dev 源路径）：认证 → 时钟校准 →
+  预缓冲 ≥6 帧 → 三 Lane 到点生效 → 浏览器级偏差 ≤50ms（实测
+  ~3ms）→ MutationObserver 打断时延（实测 ~2ms）→ 打断后停流。
 
-成功输出至少包含：
+`pnpm demo:phase2` 成功输出至少包含：
 
 ```text
 protocolVersion=1
-stageHandshake=ok
+stageHandshake=ok(control+media)
 clockCalibration=ok
 actionFrame=validated
+mediaAnnounce=ok
+mediaPrebuffer=ok
 scenePlan=compiled
-prepareBarrier=ready
+prepareBarrier=ready(audio=prebuffered6)
 sceneCommit=durable
-audioWorklet=started
-subtitle=started
-avatarAdapter=started
-hardLaneSkewMs=<number <= 50>
+sceneOutcome=completed(audio+subtitle+avatar)
+hardLaneSkewMs=<number <= 50>(protocol)
+mediaFrames=<N>(sequence=strict,pacing=20ms,rms>0)
 interruptLatencyMs=<number <= 100>
-recoveryDuplicateEffects=0
+mediaStopOnCancel=ok
 traceContinuity=ok
+recoveryDuplicateEffects=0
+watermarkRestored=ok
 shutdownClean=ok
+```
+
+`pnpm test:browser` 成功输出至少包含：
+
+```text
+audioWorklet=started(frames=<N>)
+subtitle=visible(textNodes,releasedOnFinish)
+avatarAdapter=started(commands=<N>)
+hardLaneSkewMs=<number <= 50>(browser)
+underruns=<bounded>
+interruptLatencyMs=<number <= 100 + 观测余量>(browser)
 ```
 
 ### 10.3 阶段完成命令
 
-以下根脚本是 P5 必须新增并接入 CI 的交付项：
+以下根脚本是 Phase 2 交付并接入 CI 的验收命令（均已存在并通过）：
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm check
+pnpm check          # typecheck + lint + format + 全部单测/集成/性质测试
 pnpm build
-pnpm test:browser
-pnpm demo:phase1
-pnpm demo:phase2
+pnpm contracts:check
+pnpm test:browser   # 真实 Chromium E2E
+pnpm demo:phase1    # Phase 1 行为回归（必须持续通过）
+pnpm demo:phase2    # 协议级纵向链路 + 真实媒体帧流
+pnpm demo:phase2:crash  # 四个 Crash Window + Snapshot v2
 ```
 
 Phase 1 Demo 必须继续通过，证明兼容扩展没有破坏基础协议和恢复语义。
@@ -635,20 +658,24 @@ flowchart LR
 - 浏览器、Runtime、Worker、Socket、AudioContext、Worklet、Timer 和临时目录干净关闭；
 - 稳定协议文档已经从“规划”更新为“实现事实”，Phase 2 完成态参考可由本文压缩生成。
 
-## 13. Metrics 与 Trace
+## 13. Metrics 与 Trace（完成态）
 
-建议新增 Phase 2 指标定义，不重命名 Phase 1 指标：
+Phase 2 指标定义（不重命名 Phase 1 指标）。Runtime 侧五项已注册于
+`@bellis/observability` 指标目录并由 Director/PerformanceService 发射；
+`bellis_stage_*` 为 Stage 侧指标，Phase 2 以浏览器 E2E 证据行
+（underruns/skew/interruptLatency）承载，Stage 指标上报通道属后续阶段：
 
-- `bellis_scene_prepare_duration_ms{result}`；
-- `bellis_scene_barrier_wait_ms{level,result}`；
-- `bellis_scene_start_skew_ms{lane}`；
-- `bellis_scene_cancel_latency_ms{lane,result}`；
-- `bellis_stage_clock_rtt_us{result}`；
-- `bellis_stage_clock_offset_jitter_us`；
-- `bellis_stage_audio_buffer_us`；
-- `bellis_stage_audio_underrun_total`；
-- `bellis_stage_reconnect_total{reason}`；
-- `bellis_scene_execution_total{result}`。
+- `bellis_scene_prepare_duration_ms{result}`（已注册/已发射）；
+- `bellis_scene_barrier_wait_ms{level,result}`（已注册/已发射）；
+- `bellis_scene_start_skew_ms{lane}`（已注册/已发射）；
+- `bellis_scene_cancel_latency_ms{lane,result}`（已注册；取消链路时延
+  现由 Demo/E2E 证据行验证，Lane 维度发射随 Stage 回执细化接入）；
+- `bellis_stage_clock_rtt_us{result}`（Stage 侧，后续阶段）；
+- `bellis_stage_clock_offset_jitter_us`（Stage 侧，后续阶段）；
+- `bellis_stage_audio_buffer_us`（Stage 侧；E2E 以 bufferedFrames 断言）；
+- `bellis_stage_audio_underrun_total`（Stage 侧；E2E 以 underruns 断言）；
+- `bellis_stage_reconnect_total{reason}`（Stage 侧，后续阶段）；
+- `bellis_scene_execution_total{result}`（已注册/已发射）。
 
 允许的 Label 必须是闭合集合；禁止 `sessionId/turnId/cycleId/sceneId/cueId/traceId` 作为 Label。这些身份只进入 Trace/结构化日志字段。
 

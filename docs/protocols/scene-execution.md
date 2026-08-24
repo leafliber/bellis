@@ -1,6 +1,9 @@
 # Scene Execution 协议（Phase 2：Runtime ↔ Stage 演出链路）
 
-> 状态：Phase 2 P0 冻结 v1（Contracts：`@bellis/contracts`；编解码：`@bellis/transport`）
+> 状态：Phase 2 完成态 v1（冻结于 P0；已由实现与验收覆盖：协议级 Demo
+> `pnpm demo:phase2`、四个 Crash Window `pnpm demo:phase2:crash`、
+> 真实 Chromium E2E `pnpm test:browser`。Contracts：`@bellis/contracts`；
+> 编解码：`@bellis/transport`）
 > 上位规范：[Phase 2 开发指南](../phase-2-development-guide.md) · [ADR 0003](../adr/0003-phase-2-scene-wire-and-browser-boundary.md)
 > 姊妹文档：[Control WebSocket](./control-websocket.md) · [Binary Media WebSocket](./binary-media-websocket.md)
 >

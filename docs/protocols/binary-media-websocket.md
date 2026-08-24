@@ -188,7 +188,9 @@ onMediaClose / onControlClose:
 
 Phase 2 的音频主要是 Runtime → Stage 方向。控制流程（announce → ready →
 帧发送 → 取消）与三重发送限制见 [Scene Execution §7](./scene-execution.md)；
-本节冻结帧层事实：
+本节冻结帧层事实（已由真实 Chromium E2E 验证：`MediaConnection.sendFrame`
+编码 BELL v1 出站、浏览器 `StageMediaClient` 入站校验后送入
+AudioWorklet 有界缓冲，实测 26 帧 / 0 下越）：
 
 - 布局与 §2 完全一致（magic/version/kind=0x01/flags=0/长度/Header/Payload），
   不因方向变化新增字段。
