@@ -1,0 +1,33 @@
+{
+  "name": "@bellis/stage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "浏览器演出端：Stage Shell、Control/Media 客户端、时钟校准与 Cue Timeline（Phase 2 / P2）",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src test",
+    "format:check": "oxfmt --check src test"
+  },
+  "dependencies": {
+    "@bellis/contracts": "workspace:*",
+    "@bellis/transport": "workspace:*",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@bellis/testkit": "workspace:*",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.0",
+    "fast-check": "4.9.0",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}
