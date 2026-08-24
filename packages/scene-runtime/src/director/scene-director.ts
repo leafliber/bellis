@@ -714,8 +714,16 @@ export class SceneDirector {
       ...(note === undefined ? {} : { reason: `${reason}|${note}` }),
       occurredAtMs: this.#wallClockMs(),
     };
-    // 生命周期追加是审计事实：失败只记录，不阻塞状态机。
-    void this.#repository.appendLifecycle(record, new AbortController().signal).catch(() => {});
+    // 生命周期追加是审计事实：失败必须留下显式日志（不阻塞状态机，
+    // 但绝不静默丢失——恢复对账与事后审计依赖这些记录的可观测性）。
+    void this.#repository.appendLifecycle(record, new AbortController().signal).catch((error) => {
+      this.#logger.log("warn", "scene_lifecycle_record_failed", {
+        sceneId: record.sceneId,
+        from,
+        to,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+    });
     this.#logger.log("debug", "scene_state_changed", {
       sceneId: exec.plan.scene.sceneId,
       from,

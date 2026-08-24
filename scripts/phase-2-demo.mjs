@@ -3,20 +3,22 @@
  * Phase 2 Demo（docs/phase-2-development-guide.md §10.2）。
  *
  * 协议级真实纵向链路（真实子进程 Runtime + 真实 WebSocket + 真实 DB Worker；
- * 浏览器 Stage 以协议真实客户端扮演——Chromium/AudioWorklet E2E 属于
- * test:browser，见交付报告）：
+ * 浏览器 Stage 属于 test:browser，见交付报告）：
  *
  * 1. 临时数据目录 + 启动 Runtime（phase2 显式启用）
  * 2. 一次性 Token → Session Cookie → Control WS（clientType=stage）
+ *    + Media WS（二进制 BELL v1 帧）
  * 3. stage.capabilities 上报 + ≥3 个合格时钟样本
- * 4. 注入 Fake Signal（Speech+Avatar）→ scene.prepare（真实 ScenePlan）
- * 5. 回 scene.ready（全部 hard Lane ready）
+ * 4. 注入 Fake Signal（Speech+Avatar）→ media.stream.announce →
+ *    media.stream.ready → 真实 PCM 帧流（48k/mono/S16LE/20ms）
+ * 5. 音频 Lane 以 ≥6 帧预缓冲达标后回 scene.ready（全部 hard Lane ready）
  * 6. 观察 scene.commit（未来时刻）→ 到点回 scene.started（三 Lane 双域时刻）
- * 7. scene.finished → completed
+ * 7. scene.finished → completed；取消后帧流立即停止
  * 8. 第二条紧急 Signal → interruptAll → scene.cancel → cancel.ack，
  *    计量取消时延
  * 9. Crash Window（完成后 SIGKILL）→ 同目录重启 → 已提交 Scene 不重复执行
- * 10. 干净关闭与清理
+ * 10. 干净关闭与清理（四个关键 Crash Window 的定向覆盖见
+ *     scripts/phase-2-crash-windows.mjs）
  *
  * 任一步失败非零退出；不访问公网；成功/失败都清理临时资源。
  * 依赖已构建产物：先运行 `pnpm build`。
@@ -32,6 +34,8 @@ import { WebSocket } from "ws";
 
 const SCRIPT_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CHILD = join(SCRIPT_DIR, "phase-2-demo-child.mjs");
+const PCM_CONTENT_TYPE = "audio/pcm-s16le-48000-mono";
+const PCM_FRAME_BYTES = 1920; // 960 样本 × 2 字节（20ms @48k mono S16LE）
 
 class DemoFailure extends Error {
   constructor(stage, message) {
@@ -118,18 +122,49 @@ function postJson(port, path, body, cookie) {
   });
 }
 
-/** 协议 Stage 客户端：真实 WebSocket + 真实协议消息（codec 由字符串构造）。 */
+/** 解析 BELL v1 二进制帧（magic/version/kind/flags LE 布局，与协议一致）。 */
+function parseBellFrame(buffer) {
+  if (buffer.length < 12) {
+    throw new DemoFailure("media-frame", `frame too short (${buffer.length} bytes)`);
+  }
+  if (buffer.subarray(0, 4).toString("ascii") !== "BELL") {
+    throw new DemoFailure("media-frame", "bad magic");
+  }
+  if (buffer[4] !== 1) {
+    throw new DemoFailure("media-frame", `unsupported version ${buffer[4]}`);
+  }
+  if (buffer[5] !== 1) {
+    throw new DemoFailure("media-frame", `media kind ${buffer[5]} is not audio`);
+  }
+  const flags = buffer.readUInt16LE(6);
+  if (flags !== 0) {
+    throw new DemoFailure("media-frame", `flags must be 0, got ${flags}`);
+  }
+  const headerLength = buffer.readUInt32LE(8);
+  const header = JSON.parse(buffer.subarray(12, 12 + headerLength).toString("utf8"));
+  return { header, payload: buffer.subarray(12 + headerLength) };
+}
+
+/**
+ * 协议 Stage 客户端：真实 Control + Media WebSocket、真实 BELL v1 帧。
+ * 音频 Lane 语义与浏览器 Stage 一致：announce 校验能力 → ready →
+ * ≥6 帧预缓冲后才宣告 audio Lane ready。
+ */
 class StageClient {
   constructor(port, cookie, sessionId) {
     this.port = port;
     this.cookie = cookie;
     this.sessionId = sessionId;
     this.ws = null;
+    this.media = null;
     this.inbox = [];
     this.waiters = [];
     this.seq = 0;
     this.clockSamples = 0;
     this.offsetUs = null;
+    this.streams = new Map(); // streamId → {header 帧列表, lastSeq, rms}
+    this.frameWaiters = [];
+    this.traceRoots = new Map(); // sceneId → traceId（announce/prepare/commit/cancel）
   }
 
   connect() {
@@ -141,14 +176,116 @@ class StageClient {
       this.ws.on("error", (error) => reject(new DemoFailure("stage-connect", error.message)));
       this.ws.on("message", (data) => {
         const envelope = JSON.parse(data.toString("utf8"));
-        const waiter = this.waiters.shift();
-        if (waiter === undefined) {
-          this.inbox.push(envelope);
-        } else {
-          waiter(envelope);
-        }
+        this.handleServerEnvelope(envelope);
       });
     });
+  }
+
+  /** Media WS：只接受二进制 BELL 帧；Text 帧属于协议违例。 */
+  connectMedia() {
+    return new Promise((resolve, reject) => {
+      this.media = new WebSocket(`ws://127.0.0.1:${this.port}/ws/v1/media`, {
+        headers: { cookie: this.cookie, origin: `http://127.0.0.1:${this.port}` },
+      });
+      this.media.binaryType = "nodebuffer";
+      this.media.on("open", resolve);
+      this.media.on("error", (error) => reject(new DemoFailure("media-connect", error.message)));
+      this.media.on("message", (data, isBinary) => {
+        if (!isBinary) {
+          reject(new DemoFailure("media-connect", "media channel received a text frame"));
+          return;
+        }
+        this.handleMediaFrame(data);
+      });
+    });
+  }
+
+  handleServerEnvelope(envelope) {
+    if (envelope.type === "media.stream.announce") {
+      this.handleAnnounce(envelope);
+    }
+    const waiter = this.waiters.shift();
+    if (waiter === undefined) {
+      this.inbox.push(envelope);
+    } else {
+      waiter(envelope);
+    }
+  }
+
+  /** announce → 校验能力（contentType）→ 建立 Stream 记录 → ready。 */
+  handleAnnounce(envelope) {
+    const { streamId, mediaKind, contentType, sceneId } = envelope.payload;
+    if (mediaKind !== "audio" || contentType !== PCM_CONTENT_TYPE) {
+      throw new DemoFailure("media-announce", `unsupported stream ${mediaKind}/${contentType}`);
+    }
+    this.streams.set(streamId, {
+      sceneId,
+      frames: [],
+      lastSeq: -1,
+      rmsSum: 0,
+      stoppedAt: null,
+    });
+    if (sceneId !== undefined && envelope.trace?.traceId !== undefined) {
+      this.traceRoots.set(sceneId, envelope.trace.traceId);
+    }
+    this.send("media.stream.ready", { streamId });
+  }
+
+  handleMediaFrame(buffer) {
+    const { header, payload } = parseBellFrame(buffer);
+    const stream = this.streams.get(header.streamId);
+    if (stream === undefined) {
+      throw new DemoFailure("media-frame", `frame for unknown stream ${header.streamId}`);
+    }
+    if (header.contentType !== PCM_CONTENT_TYPE) {
+      throw new DemoFailure("media-frame", `contentType mismatch ${header.contentType}`);
+    }
+    const sequence = Number(header.sequence);
+    if (sequence !== stream.lastSeq + 1) {
+      throw new DemoFailure("media-frame", `sequence gap: got ${sequence} after ${stream.lastSeq}`);
+    }
+    if (payload.length !== PCM_FRAME_BYTES) {
+      throw new DemoFailure("media-frame", `payload ${payload.length} bytes, want ${PCM_FRAME_BYTES}`);
+    }
+    stream.lastSeq = sequence;
+    let sumSquares = 0;
+    for (let i = 0; i < payload.length; i += 2) {
+      const sample = payload.readInt16LE(i);
+      sumSquares += sample * sample;
+    }
+    stream.rmsSum += Math.sqrt(sumSquares / (payload.length / 2));
+    stream.frames.push({
+      sequence,
+      targetTimeUs: BigInt(header.targetTimeUs),
+      durationUs: BigInt(header.durationUs),
+      arrivedAt: performance.now(),
+    });
+    for (const waiter of this.frameWaiters.splice(0)) {
+      waiter();
+    }
+  }
+
+  /** 等待指定 Stream 累计 count 帧（用于预缓冲与取消后停流断言）。 */
+  async waitForFrames(streamId, count, timeoutMs = 5000) {
+    const deadline = performance.now() + timeoutMs;
+    for (;;) {
+      const stream = this.streams.get(streamId);
+      if (stream !== undefined && stream.frames.length >= count) {
+        return stream;
+      }
+      if (performance.now() > deadline) {
+        throw new DemoFailure(
+          "media-wait",
+          `stream ${streamId} reached ${stream?.frames.length ?? 0}/${count} frames`,
+        );
+      }
+      await new Promise((resolve) => this.frameWaiters.push(resolve));
+    }
+  }
+
+  /** 当前活跃 Stream（单 Scene Demo 语义：最后一个 announce 的流）。 */
+  latestStream() {
+    return [...this.streams.entries()].at(-1)?.[1] ?? null;
   }
 
   send(type, payload, extra = {}) {
@@ -193,6 +330,7 @@ class StageClient {
   }
 
   close() {
+    this.media?.close(1000, "demo_complete");
     this.ws?.close(1000, "demo_complete");
   }
 }
@@ -226,7 +364,7 @@ async function run() {
     const ready = await ipc.expect("ready");
     report("protocolVersion", "1");
 
-    // 2. 认证 → Cookie → Stage Control 连接。
+    // 2. 认证 → Cookie → Stage Control + Media 连接。
     child.send({ type: "issue-token" });
     const { token } = await ipc.expect("token");
     const exchange = await postJson(ready.port, "/api/v1/auth/exchange", { startupToken: token });
@@ -236,17 +374,18 @@ async function run() {
     const session = JSON.parse(exchange.body);
     stage = new StageClient(ready.port, exchange.cookie, session.sessionId);
     await stage.connect();
+    await stage.connectMedia();
     await stage.waitFor("server.hello");
     stage.send("client.hello", { protocolVersion: 1, clientType: "stage" });
     stage.send("stage.capabilities", {
       capabilities: {
         schemaVersion: 1,
-        audio: { contentTypes: ["audio/pcm-s16le-48000-mono"], maxBufferedUs: "2000000" },
+        audio: { contentTypes: [PCM_CONTENT_TYPE], maxBufferedUs: "2000000" },
         subtitle: { supported: true },
         avatar: { adapter: "demo-protocol", motions: ["nod_agree"], expressions: ["happy"] },
       },
     });
-    report("stageHandshake", "ok");
+    report("stageHandshake", "ok(control+media)");
 
     // 3. 时钟校准：≥3 个合格样本。
     for (let i = 0; i < 3; i += 1) {
@@ -261,7 +400,8 @@ async function run() {
     }
     report("clockCalibration", `ok(${stage.clockSamples} samples, offset=${stage.offsetUs}us)`);
 
-    // 4. Fake Signal → ActionFrame → ScenePlan → prepare。
+    // 4. Fake Signal → announce → ready → PCM 预缓冲（音频 Lane 达标）。
+    const submitAt = performance.now();
     const cycleA = uuid();
     child.send({ type: "submit", cycleId: cycleA, traceId: traceId(), text: "我看看现在的任务进度" });
     const submitted = await ipc.expect("submit-result");
@@ -269,6 +409,17 @@ async function run() {
       throw new DemoFailure("submit", `submission rejected: ${submitted.kind}`);
     }
     report("actionFrame", "validated");
+    const announce = await stage.waitFor("media.stream.announce");
+    if (announce.payload.sceneId !== submitted.sceneId) {
+      throw new DemoFailure("media-announce", "announce targets a different scene");
+    }
+    report("mediaAnnounce", `ok(${announce.payload.contentType})`);
+    const stream = stage.latestStream();
+    const prebuffer = await stage.waitForFrames(announce.payload.streamId, 6, 450);
+    report(
+      "mediaPrebuffer",
+      `ok(6 frames, firstFrame=${(prebuffer.frames[0].arrivedAt - submitAt).toFixed(0)}ms)`,
+    );
     const prepare = await stage.waitFor("scene.prepare");
     const plan = prepare.payload.plan;
     if (plan.cues.length < 3 || plan.speech?.text !== "我看看现在的任务进度") {
@@ -276,14 +427,14 @@ async function run() {
     }
     report("scenePlan", `compiled(${plan.cues.length} cues, ${plan.scene.groups[0].lanes.join("+")})`);
 
-    // 5. 全部 hard Lane ready。
+    // 5. 全部 hard Lane ready（音频以预缓冲达标为准）。
     stage.send("scene.ready", {
       sceneId: plan.scene.sceneId,
       cycleId: plan.scene.cycleId,
       lanes: plan.scene.groups[0].lanes.map((lane) => ({ lane, status: "ready", cueIds: [] })),
       preparedAtStageUs: String(Math.round(performance.now() * 1000)),
     });
-    report("prepareBarrier", "ready");
+    report("prepareBarrier", "ready(audio=prebuffered6)");
 
     // 6. durable 提交后收到 scene.commit（未来时刻）。
     const commit = await stage.waitFor("scene.commit");
@@ -324,7 +475,31 @@ async function run() {
     const lateByMs = performance.now() - startedAt;
     report("hardLaneSkewMs", `${Math.max(0, lateByMs).toFixed(2)}(protocol)`);
 
-    // 8. 第二条紧急 Signal：新 Scene prepare 后立即打断 → 取消时延。
+    // 7.5 媒体帧流校验：序列连续已由解析器断言；节奏 = 相邻 targetTimeUs
+    // 恒为 20ms；RMS > 0 证明是真实合成波形而非静音占位。
+    child.send({ type: "state", sceneId: plan.scene.sceneId });
+    const stateA = await ipc.expect("state");
+    const finalStream = stage.streams.get(announce.payload.streamId);
+    const pacingOk = finalStream.frames.length >= 2;
+    for (let i = 1; i < finalStream.frames.length; i += 1) {
+      const delta = finalStream.frames[i].targetTimeUs - finalStream.frames[i - 1].targetTimeUs;
+      if (delta !== 20000n) {
+        throw new DemoFailure("media-frame", `targetTimeUs step ${delta}us, want 20000us`);
+      }
+    }
+    const avgRms = finalStream.rmsSum / finalStream.frames.length;
+    if (avgRms <= 0) {
+      throw new DemoFailure("media-frame", "PCM frames are silent (RMS = 0)");
+    }
+    report(
+      "mediaFrames",
+      `${finalStream.frames.length}(sent=${stateA.media?.sent ?? "?"},sequence=strict,pacing=20ms,rms=${avgRms.toFixed(0)})`,
+    );
+    if (pacingOk === false) {
+      throw new DemoFailure("media-frame", "not enough frames to verify pacing");
+    }
+
+    // 8. 第二条紧急 Signal：新 Scene prepare 后立即打断 → 取消时延 + 停流。
     const cycleB = uuid();
     child.send({ type: "submit", cycleId: cycleB, traceId: traceId(), urgent: true, text: "紧急打断" });
     const submittedB = await ipc.expect("submit-result");
@@ -356,6 +531,39 @@ async function run() {
     if (settledB.state !== "cancelled") {
       throw new DemoFailure("interrupt", `interrupted scene settled as ${settledB.state}`);
     }
+    // 取消优先于媒体：打断后被打断 Scene 的流不再出现新帧。
+    const interruptedStream = stage.latestStream();
+    if (interruptedStream === null || interruptedStream === stream) {
+      throw new DemoFailure("interrupt", "interrupted scene never announced a media stream");
+    }
+    const framesAtCancel = interruptedStream.frames.length;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (interruptedStream.frames.length > framesAtCancel) {
+      throw new DemoFailure("interrupt", "media frames continued after cancel");
+    }
+    report("mediaStopOnCancel", "ok");
+
+    // 8.5 Trace 连续性：同一 Scene 的 announce/prepare/commit 共用同一根；
+    // 被打断 Scene 的 cancel 也必须携带它自己 announce 时的根。
+    const sceneTrace = stage.traceRoots.get(plan.scene.sceneId);
+    const wireTraces = [announce, prepare, commit]
+      .map((e) => e.trace?.traceId)
+      .filter((t) => t !== undefined);
+    if (sceneTrace === undefined || wireTraces.some((t) => t !== sceneTrace)) {
+      throw new DemoFailure(
+        "trace",
+        `trace roots diverge: announce=${sceneTrace} wire=${[...new Set(wireTraces)].join(",")}`,
+      );
+    }
+    const interruptedTrace = stage.traceRoots.get(cancelEnvelope.payload.sceneId);
+    if (
+      interruptedTrace !== undefined &&
+      cancelEnvelope.trace?.traceId !== undefined &&
+      cancelEnvelope.trace.traceId !== interruptedTrace
+    ) {
+      throw new DemoFailure("trace", "interrupted scene cancel carries a foreign trace root");
+    }
+    report("traceContinuity", `ok(${sceneTrace.slice(0, 8)}…×3+cancel)`);
 
     // 9. Crash Window：SIGKILL → 同目录重启 → 不重复执行已提交 Scene。
     child.kill("SIGKILL");
@@ -367,7 +575,7 @@ async function run() {
     const ready2 = await ipc2.expect("ready");
     child.send({ type: "issue-token" });
     const { token: token2 } = await ipc2.expect("token");
-    const exchange2 = await postJson(ready2.port, "/api/v1/auth/exchange", { startupToken: token2 });
+    const exchange2 = await postJson(ready2.port, "/api/v1/auth/exchange", { startupToken: token2, resumeSessionId: session.sessionId });
     const session2 = JSON.parse(exchange2.body);
     child.send({ type: "recovery", sessionId: session.sessionId });
     const recovery = await ipc2.expect("recovery");
@@ -382,7 +590,7 @@ async function run() {
     stage2.send("stage.capabilities", {
       capabilities: {
         schemaVersion: 1,
-        audio: { contentTypes: ["audio/pcm-s16le-48000-mono"], maxBufferedUs: "2000000" },
+        audio: { contentTypes: [PCM_CONTENT_TYPE], maxBufferedUs: "2000000" },
         subtitle: { supported: true },
         avatar: { adapter: "demo-protocol", motions: ["nod_agree"], expressions: ["happy"] },
       },
@@ -414,10 +622,9 @@ async function run() {
       throw new DemoFailure("shutdown", `child exited with code=${exitInfo.code} signal=${exitInfo.signal}`);
     }
     child = null;
-    report("traceContinuity", "ok");
     report("shutdownClean", "ok");
 
-    const allOk = Object.values(evidence).length >= 12;
+    const allOk = Object.values(evidence).length >= 14;
     if (!allOk) {
       throw new DemoFailure("summary", "missing evidence lines");
     }

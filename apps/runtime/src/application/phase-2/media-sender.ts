@@ -32,15 +32,16 @@ export const DEFAULT_MEDIA_SENDER_LIMITS: MediaSenderLimits = {
 };
 
 export interface OutboundMediaFrame {
-  readonly header: Record<string, string>;
+  /** MediaFrameHeader 字段（schemaVersion 为数字 1，其余为字符串）。 */
+  readonly header: Record<string, string | number>;
   readonly payload: Uint8Array;
 }
 
 export interface RuntimeMediaSenderOptions {
   readonly clock: MonotonicClock;
   readonly limits?: Partial<MediaSenderLimits>;
-  /** 帧发出回调（适配器负责编码与 socket 写入；同步返回是否入队）。 */
-  readonly sendFrame: (frame: OutboundMediaFrame) => void;
+  /** 帧发出回调（适配器负责编码与 socket 写入）；false = 传输层丢弃。 */
+  readonly sendFrame: (frame: OutboundMediaFrame) => boolean;
 }
 
 interface SendJob {
@@ -58,11 +59,12 @@ interface SendJob {
 export class RuntimeMediaSender {
   readonly #clock: MonotonicClock;
   readonly #limits: MediaSenderLimits;
-  readonly #sendFrame: (frame: OutboundMediaFrame) => void;
+  readonly #sendFrame: (frame: OutboundMediaFrame) => boolean;
   readonly #jobs = new Map<string, SendJob>();
   #closed = false;
   #sentTotal = 0;
   #droppedByLimit = 0;
+  #droppedByTransport = 0;
 
   constructor(options: RuntimeMediaSenderOptions) {
     this.#clock = options.clock;
@@ -76,6 +78,11 @@ export class RuntimeMediaSender {
 
   get droppedByLimit(): number {
     return this.#droppedByLimit;
+  }
+
+  /** 传输层拒绝（连接不存在/背压超限）导致的丢弃帧数。 */
+  get droppedByTransport(): number {
+    return this.#droppedByTransport;
   }
 
   get activeJobs(): number {
@@ -127,6 +134,15 @@ export class RuntimeMediaSender {
     this.#jobs.delete(sceneId);
   }
 
+  /** 全部发送任务立即停止（媒体连接断开：Stream 不可跨连接复活）。 */
+  cancelAll(reason: string): void {
+    for (const [sceneId, job] of this.#jobs) {
+      job.stopped = true;
+      job.controller.abort(new Error(`media_cancelled:${reason}`));
+      this.#jobs.delete(sceneId);
+    }
+  }
+
   close(): void {
     if (this.#closed) {
       return;
@@ -169,22 +185,22 @@ export class RuntimeMediaSender {
       }
       const start = frameIndex * PHASE_2_PCM_FRAME_BYTES;
       const payload = job.pcm.pcm.subarray(start, start + PHASE_2_PCM_FRAME_BYTES);
-      this.#sendFrame({
-        header: {
-          schemaVersion: "1",
-          streamId: job.streamId,
-          frameId: this.#frameId(job.sceneId, frameIndex),
-          sessionId: job.sessionId,
-          sceneId: job.sceneId,
-          cueId: job.cueId,
-          sequence: String(frameIndex),
-          targetTimeUs: targetUs.toString(),
-          durationUs: perFrameUs.toString(),
-          contentType: PHASE_2_PCM_CONTENT_TYPE,
-          traceId: job.traceId,
-        },
-        payload,
-      });
+      const header: Record<string, string | number> = {
+        schemaVersion: 1,
+        streamId: job.streamId,
+        frameId: this.#frameId(job.sceneId, frameIndex),
+        sessionId: job.sessionId,
+        sceneId: job.sceneId,
+        cueId: job.cueId,
+        sequence: String(frameIndex),
+        targetTimeUs: targetUs.toString(),
+        durationUs: perFrameUs.toString(),
+        contentType: PHASE_2_PCM_CONTENT_TYPE,
+        traceId: job.traceId,
+      };
+      if (!this.#sendFrame({ header, payload })) {
+        this.#droppedByTransport += 1;
+      }
       this.#sentTotal += 1;
       frameIndex += 1;
     }

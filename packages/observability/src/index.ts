@@ -26,6 +26,8 @@ export {
   BLOCKED_METRIC_LABEL_NAMES,
   METRIC_NAME_PATTERN,
   PHASE_1_METRIC_DEFINITIONS,
+  PHASE_2_METRIC_DEFINITIONS,
+  METRIC_DEFINITIONS,
 } from "./metrics/definitions.js";
 export type { MetricDefinition, MetricKind } from "./metrics/definitions.js";
 export { createInMemoryMetrics } from "./metrics/in-memory-registry.js";

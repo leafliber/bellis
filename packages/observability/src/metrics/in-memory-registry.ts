@@ -8,14 +8,14 @@ import type {
 import {
   BLOCKED_METRIC_LABEL_NAMES,
   METRIC_NAME_PATTERN,
-  PHASE_1_METRIC_DEFINITIONS,
+  METRIC_DEFINITIONS,
 } from "./definitions.js";
 import type { MetricDefinition, MetricKind } from "./definitions.js";
 
 /**
  * 内存 Metrics Registry（docs/phase-1-reference.md）。
  *
- * - 只接受 PHASE_1_METRIC_DEFINITIONS 中声明的指标：未知指标名、类型不匹配、
+ * - 只接受 METRIC_DEFINITIONS（Phase 1 + Phase 2）中声明的指标：未知指标名、类型不匹配、
  *   未允许 Label、非法 Label 值、非有限数值与负 Counter 增量都被稳定拒绝
  *   （丢弃本次操作、计数并回调 onError），绝不抛错阻塞业务路径。
  *   敌意 Label 对象（抛错 Getter、Proxy 陷阱）同样被拒绝而不是抛出。
@@ -142,7 +142,7 @@ export function createInMemoryMetrics(options?: MetricsOptions): InMemoryMetrics
 
   const states = new Map<string, MetricState>();
   const blockedLabels = new Set(BLOCKED_METRIC_LABEL_NAMES);
-  for (const definition of PHASE_1_METRIC_DEFINITIONS) {
+  for (const definition of METRIC_DEFINITIONS) {
     if (!METRIC_NAME_PATTERN.test(definition.name)) {
       throw new RangeError(`invalid metric name in definitions: ${definition.name}`);
     }

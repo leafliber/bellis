@@ -75,10 +75,13 @@ describe("fake TTS", () => {
 describe("RuntimeMediaSender", () => {
   it("按目标时刻发送完整流；sequence 连续、targetTime 等差", async () => {
     const clock = new VirtualClock();
-    const sent: { header: Record<string, string>; payload: Uint8Array }[] = [];
+    const sent: { header: Record<string, string | number>; payload: Uint8Array }[] = [];
     const sender = new RuntimeMediaSender({
       clock,
-      sendFrame: (frame) => sent.push(frame),
+      sendFrame: (frame) => {
+        sent.push(frame);
+        return true;
+      },
     });
     const tts = synthesizeSpeech(SPEECH);
     sender.startSpeechStream({
@@ -107,7 +110,13 @@ describe("RuntimeMediaSender", () => {
   it("取消优先：cancel 后立即停止产生新帧", async () => {
     const clock = new VirtualClock();
     const sent: unknown[] = [];
-    const sender = new RuntimeMediaSender({ clock, sendFrame: () => sent.push(1) });
+    const sender = new RuntimeMediaSender({
+      clock,
+      sendFrame: () => {
+        sent.push(1);
+        return true;
+      },
+    });
     const tts = synthesizeSpeech(SPEECH);
     sender.startSpeechStream({
       plan: PLAN,
@@ -140,7 +149,10 @@ describe("RuntimeMediaSender", () => {
     const sender = new RuntimeMediaSender({
       clock,
       limits: { maxFutureUs: 100_000n, maxQueuedFrames: 128, maxQueuedBytes: 1 << 20 },
-      sendFrame: () => sent.push(1),
+      sendFrame: () => {
+        sent.push(1);
+        return true;
+      },
     });
     const tts = synthesizeSpeech(SPEECH);
     sender.startSpeechStream({

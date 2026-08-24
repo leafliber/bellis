@@ -52,6 +52,7 @@ export class ControlStagePortAdapter implements StagePort {
   readonly #prepareWaiters = new Map<string, PendingWaiter<StageReady>>();
   readonly #cancelWaiters = new Map<string, PendingWaiter<CancelOutcome>>();
   readonly #disconnectHandlers: (() => void)[] = [];
+  #latestCapabilities: unknown = null;
 
   constructor(options: {
     readonly channel: ControlChannel;
@@ -79,9 +80,11 @@ export class ControlStagePortAdapter implements StagePort {
   handleStageMessage(type: string, payload: unknown, nowUs: bigint): void {
     switch (type) {
       case "stage.capabilities": {
-        // 能力快照由应用层在编译输入侧使用；这里仅校验可解析性。
+        // 能力快照留存：应用层编译输入由此读取（Schema 校验可解析才接收）。
         const parsed = StageCapabilitiesPayloadSchema.safeParse(payload);
-        void parsed;
+        if (parsed.success) {
+          this.#latestCapabilities = parsed.data;
+        }
         return;
       }
       case "scene.ready": {
@@ -139,6 +142,11 @@ export class ControlStagePortAdapter implements StagePort {
     // 应用层显式声明（例如多连接装配区分 Stage 与普通订阅者）。
   }
 
+  /** 最近一次 stage.capabilities 快照（未上报或校验失败为 null）。 */
+  get latestStageCapabilities(): unknown {
+    return this.#latestCapabilities;
+  }
+
   prepare(plan: ScenePlan, deadlineUs: bigint, signal: AbortSignal): Promise<StageReady> {
     if (!this.#channel.hasStageConnection()) {
       return Promise.resolve({
@@ -160,7 +168,7 @@ export class ControlStagePortAdapter implements StagePort {
         plan: plan as unknown as JsonValue,
         prepareDeadlineUs: deadlineUs.toString(),
       },
-      trace: { traceId: this.#traceId() },
+      trace: { traceId: this.#traceIdFor(sceneId) },
     });
     if (!sent) {
       return Promise.resolve({
@@ -223,7 +231,7 @@ export class ControlStagePortAdapter implements StagePort {
     const sent = this.#channel.enqueueServerMessage({
       type: "scene.commit",
       payload: parsed.data as unknown as JsonValue,
-      trace: { traceId: this.#traceId() },
+      trace: { traceId: this.#traceIdFor(sceneId) },
     });
     if (!sent) {
       // 入队失败 = 确定性失败（消息从未写出）。
@@ -239,7 +247,7 @@ export class ControlStagePortAdapter implements StagePort {
     const sent = this.#channel.enqueueServerMessage({
       type: "scene.cancel",
       payload: { sceneId, cycleId: this.#cycleIdOf(sceneId), reason },
-      trace: { traceId: this.#traceId() },
+      trace: { traceId: this.#traceIdFor(sceneId) },
     });
     if (!sent) {
       return Promise.resolve({ status: "ambiguous", reason: "cancel_send_failed" });
@@ -288,15 +296,38 @@ export class ControlStagePortAdapter implements StagePort {
     return new StageCommitAmbiguousError(sceneId, cause);
   }
 
+  /** sceneId→cycleId/traceId 索引（submit 登记；容量 64，按登记顺序淘汰）。 */
   readonly #cycleIds = new Map<string, string>();
+  readonly #sceneTraces = new Map<string, string>();
+  #cycleOrder: string[] = [];
 
-  /** 记录 sceneId→cycleId（submit 时由应用层登记，commit/cancel 复用）。 */
-  registerScene(sceneId: string, cycleId: string): void {
+  /** 记录 sceneId→cycleId/traceId（submit 时由应用层登记，commit/cancel 复用）。 */
+  registerScene(sceneId: string, cycleId: string, traceId?: string): void {
     this.#cycleIds.set(sceneId, cycleId);
+    this.#cycleOrder.push(sceneId);
+    if (traceId !== undefined) {
+      this.#sceneTraces.set(sceneId, traceId);
+    }
+    // 容量上限：淘汰最旧登记（活跃 Scene 数由 Director 限幅，正常不会触达）。
+    while (this.#cycleOrder.length > 64) {
+      const oldest = this.#cycleOrder.shift();
+      if (oldest !== undefined && oldest !== sceneId) {
+        this.#cycleIds.delete(oldest);
+        this.#sceneTraces.delete(oldest);
+      } else {
+        break;
+      }
+    }
   }
 
   #cycleIdOf(sceneId: string): string {
     return this.#cycleIds.get(sceneId) ?? "00000000-0000-4000-8000-000000000000";
+  }
+
+  /** Scene 级稳定 trace（submit 生成；prepare/commit/cancel 共用同一根）。 */
+  #traceIdFor(sceneId?: string): string {
+    const bound = sceneId === undefined ? null : this.#sceneTraces.get(sceneId);
+    return bound ?? this.#traceId();
   }
 
   #traceId(): string {
@@ -312,6 +343,7 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
   };
   readonly #trace: { readonly traceId: string };
   readonly #newRecordId: () => string;
+  #sessionId: string | null = null;
 
   constructor(options: {
     readonly client: {
@@ -324,6 +356,15 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
     this.#client = options.client;
     this.#trace = { traceId: options.traceId };
     this.#newRecordId = options.newRecordId;
+  }
+
+  /**
+   * 绑定当前逻辑 Session（Stage 连接出现时由应用层调用）：生命周期
+   * Record 必须携带真实 sessionId（Record Schema 要求 UUID，占位值会被
+   * 持久化层拒绝——审计事实不允许静默丢失）。
+   */
+  bindSessionId(sessionId: string): void {
+    this.#sessionId = sessionId;
   }
 
   async commit(
@@ -361,11 +402,16 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
     },
     _signal: AbortSignal,
   ): Promise<void> {
+    const sessionId = this.#sessionId;
+    if (sessionId === null) {
+      // 未解析到真实 Session 前不写假会话：显式失败由 Director 记录日志。
+      throw new Error("scene_repository_session_unbound");
+    }
     await this.#client.appendRecord({
       record: {
         schemaVersion: 1,
         recordId: this.#newRecordId(),
-        sessionId: "unknown",
+        sessionId,
         recordType: "scene_lifecycle",
         aggregateId: `scene-lifecycle:${record.sceneId}`,
         traceId: this.#trace.traceId,
@@ -378,6 +424,7 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
           ...(record.reason === undefined ? {} : { reason: record.reason }),
         },
       },
+      trace: this.#trace,
     });
   }
 }

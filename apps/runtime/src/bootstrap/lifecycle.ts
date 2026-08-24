@@ -291,7 +291,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
   // Phase 2 演出宿主（显式启用的开发/Demo 装配；生产默认不创建）。
   const startupTraceId = crypto.randomUUID().replaceAll("-", "").slice(0, 31) + "0";
   let phase2Host: Phase2RuntimeHost | null = null;
+  // Phase 2 当前逻辑 Session（审计 Record 的 sessionId；Stage 连接后更新）。
+  let phase2SessionId = config.phase2.sessionId ?? "00000000-0000-4000-8000-000000000000";
   if (config.phase2.enabled) {
+    const phase2Repository = new PersistenceSceneRepository({
+      client: {
+        commitScene: async (input) => persistence.commitScene(input as never),
+        appendRecord: async (input) => persistence.appendRecord(input as never),
+      },
+      traceId: startupTraceId,
+      newRecordId: () => crypto.randomUUID(),
+    });
     phase2Host = new Phase2RuntimeHost({
       sessionId: config.phase2.sessionId ?? "00000000-0000-4000-8000-000000000000",
       capabilities: {
@@ -307,15 +317,37 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       wallClockMs: () => Date.now(),
       compileIds: { nextId: () => crypto.randomUUID() },
       recordId: () => crypto.randomUUID(),
-      repository: new PersistenceSceneRepository({
-        client: {
-          commitScene: async (input) => persistence.commitScene(input as never),
-          appendRecord: async (input) => persistence.appendRecord(input as never),
+      repository: phase2Repository,
+      logger,
+      metrics,
+      // 版本化审计 Record（Signal 接受/决策包/编译结果；不含发言全文）。
+      audit: {
+        append: async (record) => {
+          await persistence.appendRecord({
+            record: {
+              schemaVersion: 1,
+              recordId: crypto.randomUUID(),
+              sessionId: phase2SessionId,
+              recordType: record.recordType,
+              aggregateId: record.aggregateId,
+              traceId: startupTraceId,
+              occurredAtMs: Date.now(),
+              payload: record.payload,
+            },
+            trace: { traceId: startupTraceId },
+          });
         },
-        traceId: startupTraceId,
-        newRecordId: () => crypto.randomUUID(),
-      }),
+      },
+      // Stage 连接出现即绑定真实逻辑 Session：生命周期/审计 Record 携带
+      // 真实 sessionId（Record Schema 要求 UUID，占位值会被持久化层拒绝）。
+      onSessionIdResolved: (sessionId) => {
+        phase2SessionId = sessionId;
+        phase2Repository.bindSessionId(sessionId);
+      },
     });
+    if (config.phase2.sessionId !== undefined) {
+      phase2Repository.bindSessionId(config.phase2.sessionId);
+    }
   }
 
   let app: Awaited<ReturnType<typeof buildServer>> | null = null;

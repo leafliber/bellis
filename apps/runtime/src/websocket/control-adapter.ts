@@ -92,6 +92,12 @@ export interface ControlConnectionOptions {
    * 这些消息按未知业务类型静默忽略（不影响 Phase 1 行为）。
    */
   readonly onStageMessage?: (envelope: ClientControlEnvelope, nowUs: bigint) => void;
+  /**
+   * client.hello 回调（Phase 2 连接归属）：hello 通过校验后以 payload 的
+   * clientType 调用；应用层据此只把 clientType=stage 的连接绑定为演出
+   * Stage（Phase 1 观察者连接不进入 Phase 2 装配）。
+   */
+  readonly onStageHello?: (clientType: unknown) => void;
 }
 
 type SendWaiter = (outcome: BroadcastOutcome) => void;
@@ -116,6 +122,7 @@ export class ControlConnection {
   readonly #limits: ControlLimits;
   readonly #resumeLoader: () => Promise<ControlResumePlan>;
   readonly #stageMessageHandler: ((envelope: ClientControlEnvelope, nowUs: bigint) => void) | null;
+  readonly #stageHelloHandler: ((clientType: unknown) => void) | null;
   readonly #pumpAbort = new AbortController();
   readonly #sendWaiters = new Map<string, SendWaiter[]>();
   /** 连接代际标识（二轮评审修复 4）：prepared/committed 必须同代际送达。 */
@@ -145,6 +152,7 @@ export class ControlConnection {
     this.#limits = options.limits;
     this.#resumeLoader = options.loadResume;
     this.#stageMessageHandler = options.onStageMessage ?? null;
+    this.#stageHelloHandler = options.onStageHello ?? null;
     // 注意：不在构造器清空 exportedControlState——loader 稍后读取它
     // （构造先于异步加载执行，提前清空会丢失同进程 resume 状态）。
     options.logical.control = this;
@@ -453,6 +461,11 @@ export class ControlConnection {
       try {
         if (accepted.envelope.type === "client.hello") {
           this.#helloHandled = true;
+          // 连接归属（Phase 2）：hello 通过校验后按 clientType 交给应用层
+          // 决定是否绑定为演出 Stage（观察者连接不进入 Phase 2）。
+          this.#stageHelloHandler?.(
+            (accepted.envelope.payload as { clientType?: unknown }).clientType,
+          );
           // 先快照后 ready（快照内容来自预加载状态，同步可用）；快照必须
           // 成功入队，否则 1011 失败关闭（不得静默进入 active）。
           if (snapshotDecision !== null && snapshotDecision.required) {

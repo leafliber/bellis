@@ -87,11 +87,16 @@ class FakePersistence {
   };
 }
 
-function createService() {
+function createService(options?: {
+  readonly media?: {
+    sendFrame: (frame: { header: Record<string, string | number>; payload: Uint8Array }) => boolean;
+  };
+}) {
   const clock = new VirtualClock();
   const channel = new EchoControlChannel();
   const persistence = new FakePersistence();
   const ids = createDeterministicIdSource("phase2-service");
+  const mediaDisconnectHandlers: (() => void)[] = [];
   const repository = {
     commit: async (input: {
       plan: { scene: { sceneId: string; cycleId?: string } };
@@ -129,6 +134,16 @@ function createService() {
     recordId: () => ids.uuid("record"),
     channel,
     repository,
+    ...(options?.media === undefined
+      ? {}
+      : {
+          mediaChannel: {
+            sendFrame: options.media.sendFrame,
+            onDisconnected: (handler: () => void) => {
+              mediaDisconnectHandlers.push(handler);
+            },
+          },
+        }),
     directorPolicy: {
       commitLeadMs: 400,
       cancelTimeoutMs: 500,
@@ -137,7 +152,17 @@ function createService() {
       closeTimeoutMs: 1000,
     },
   });
-  return { service, clock, channel, persistence };
+  return {
+    service,
+    clock,
+    channel,
+    persistence,
+    disconnectMedia: () => {
+      for (const handler of mediaDisconnectHandlers) {
+        handler();
+      }
+    },
+  };
 }
 
 const FIXTURE_CYCLE = "33333333-3333-4333-8333-333333333333";
@@ -276,5 +301,170 @@ describe("Phase2PerformanceService", () => {
     });
     expect(outcome.kind).toBe("noop");
     expect(h.channel.sent).toHaveLength(0);
+  });
+});
+
+describe("Phase2PerformanceService 媒体编排", () => {
+  it("announce 先于 scene.prepare；ready 后按 lead 节奏发帧；取消即停流", async () => {
+    const frames: { header: Record<string, string | number>; payload: Uint8Array }[] = [];
+    const h = createService({
+      media: {
+        sendFrame: (frame) => {
+          frames.push(frame);
+          return true;
+        },
+      },
+    });
+    const submission = h.service.submit({ signal: SIGNAL, fixture: FIXTURE });
+    if (submission.kind !== "submitted") {
+      throw new Error("expected submitted");
+    }
+    await flush();
+    // announce 在 scene.prepare 之前发出（音频 Lane prepare 依赖预缓冲）。
+    const types = h.channel.sent.map((m) => m.type);
+    expect(types.indexOf("media.stream.announce")).toBeGreaterThanOrEqual(0);
+    expect(types.indexOf("media.stream.announce")).toBeLessThan(types.indexOf("scene.prepare"));
+    const announce = h.channel.sent.find((m) => m.type === "media.stream.announce");
+    const payload = announce?.payload as {
+      streamId: string;
+      mediaKind: string;
+      contentType: string;
+      sceneId: string;
+    };
+    expect(payload.mediaKind).toBe("audio");
+    expect(payload.contentType).toBe("audio/pcm-s16le-48000-mono");
+    expect(payload.sceneId).toBe(submission.sceneId);
+    // ready 之前不发帧。
+    expect(frames).toHaveLength(0);
+    h.service.handleStageMessage(
+      "media.stream.ready",
+      { streamId: payload.streamId },
+      h.clock.nowUs(),
+    );
+    await flush();
+    // 首帧目标 = ready 时刻 + lead（150ms）；未到 lead 前静默。
+    expect(frames).toHaveLength(0);
+    h.clock.advanceBy(150_000n);
+    await flush();
+    expect(frames.length).toBeGreaterThanOrEqual(1);
+    expect(frames[0]?.header.schemaVersion).toBe(1);
+    expect(frames[0]?.header.sequence).toBe("0");
+    expect(frames[0]?.header.streamId).toBe(payload.streamId);
+    expect(frames[0]?.payload.byteLength).toBe(1920);
+    // 取消优先于媒体：打断后帧不再增长。
+    const beforeCancel = frames.length;
+    const cancelPromise = h.service.interruptAll("urgent_interrupt");
+    await flush();
+    h.service.handleStageMessage(
+      "scene.cancel.ack",
+      {
+        sceneId: submission.sceneId,
+        cycleId: FIXTURE.cycleId,
+        lanes: [{ lane: "audio", stopped: true }],
+        stoppedAtStageUs: "2",
+      },
+      h.clock.nowUs(),
+    );
+    await cancelPromise;
+    await submission.handle.done;
+    h.clock.advanceBy(5_000_000n);
+    await flush(20);
+    expect(frames.length).toBe(beforeCancel);
+    expect(h.service.mediaStats.sent).toBe(beforeCancel);
+    await h.service.close();
+  });
+
+  it("媒体连接断开：全部帧任务立即停止（Stream 不跨连接复活）", async () => {
+    const frames: unknown[] = [];
+    const h = createService({
+      media: {
+        sendFrame: () => {
+          frames.push(1);
+          return true;
+        },
+      },
+    });
+    const submission = h.service.submit({ signal: SIGNAL, fixture: FIXTURE });
+    if (submission.kind !== "submitted") {
+      throw new Error("expected submitted");
+    }
+    await flush();
+    const announce = h.channel.sent.find((m) => m.type === "media.stream.announce");
+    if (announce === undefined) {
+      throw new Error("expected media.stream.announce");
+    }
+    const streamId = (announce.payload as { streamId: string }).streamId;
+    h.service.handleStageMessage("media.stream.ready", { streamId }, h.clock.nowUs());
+    h.clock.advanceBy(200_000n);
+    await flush();
+    expect(frames.length).toBeGreaterThan(0);
+    h.disconnectMedia();
+    h.clock.advanceBy(5_000_000n);
+    await flush(20);
+    const afterDisconnect = frames.length;
+    h.clock.advanceBy(5_000_000n);
+    await flush(20);
+    expect(frames.length).toBe(afterDisconnect);
+    await h.service.interruptAll("stage_lost");
+    h.service.handleStageMessage(
+      "scene.cancel.ack",
+      {
+        sceneId: submission.sceneId,
+        cycleId: FIXTURE.cycleId,
+        lanes: [{ lane: "audio", stopped: true }],
+        stoppedAtStageUs: "3",
+      },
+      h.clock.nowUs(),
+    );
+    await submission.handle.done;
+    await h.service.close();
+  });
+
+  it("审计 Record：signal 接受 / 决策包 / 编译结果（不含发言全文）", async () => {
+    const records: { recordType: string; payload: JsonValue }[] = [];
+    const clock = new VirtualClock();
+    const channel = new EchoControlChannel();
+    const ids = createDeterministicIdSource("phase2-audit");
+    const repository = {
+      commit: async () => ({ sceneId: "s", committedAtMs: 1, duplicate: false }),
+      appendLifecycle: async () => {},
+    };
+    const service = new Phase2PerformanceService({
+      sessionId: "11111111-1111-4111-8111-111111111111",
+      capabilities: CAPABILITIES,
+      clock,
+      wallClockMs: () => 1_755_600_000_000,
+      compileIds: { nextId: () => ids.uuid("compile") },
+      recordId: () => ids.uuid("record"),
+      channel,
+      repository,
+      audit: {
+        append: async (record) => {
+          records.push(record);
+        },
+      },
+      directorPolicy: {
+        commitLeadMs: 400,
+        cancelTimeoutMs: 500,
+        commitSendTimeoutMs: 500,
+        maxActiveScenes: 8,
+        closeTimeoutMs: 1000,
+      },
+    });
+    service.submit({ signal: SIGNAL, fixture: FIXTURE });
+    await flush();
+    const types = records.map((record) => record.recordType);
+    expect(types).toContain("phase2_signal_accepted");
+    expect(types).toContain("phase2_decision_packet");
+    expect(types).toContain("phase2_scene_plan_compiled");
+    // 隐私约束：审计 payload 不携带 Signal/发言全文。
+    const serialized = JSON.stringify(records);
+    expect(serialized.includes("冲")).toBe(false);
+    // 关闭排空：closeTimeout 预算由虚拟时钟推进兑现。
+    const closing = service.close();
+    await flush();
+    clock.advanceBy(3_000_000n);
+    await flush(20);
+    await closing;
   });
 });

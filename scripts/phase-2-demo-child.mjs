@@ -83,7 +83,11 @@ process.on("message", (event) => {
     return;
   }
   if (event.type === "state") {
-    notify({ type: "state", state: runtime.phase2?.getExecutionState(event.sceneId) ?? null });
+    notify({
+      type: "state",
+      state: runtime.phase2?.service.getExecutionState(event.sceneId) ?? null,
+      media: runtime.phase2?.service.mediaStats ?? null,
+    });
     return;
   }
   if (event.type === "recovery") {

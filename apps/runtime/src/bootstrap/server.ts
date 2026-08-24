@@ -223,6 +223,7 @@ async function loadControlResume(
 }
 
 function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void {
+  const phase2 = ctx.phase2;
   app.get("/ws/v1/control", { websocket: true }, (socket, request) => {
     if (!ctx.status.ready) {
       socket.close(NOT_READY_CLOSE, "not_ready");
@@ -237,9 +238,8 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
       socket.close(UNAUTHORIZED_CLOSE, "session already has a control connection");
       return;
     }
-    // ControlConnection 同步挂接 Socket 监听并内部缓冲 resume 解析期间的
-    // 入站消息（Upgrade 与异步加载之间零丢失）。
-    const phase2 = ctx.phase2;
+    // Phase 2 演出宿主（clientType=stage 的连接在 hello 后绑定，见
+    // ControlConnection；Media 出站在 MediaConnection 创建后立即绑定）。
     const connection = new ControlConnection({
       socket,
       logical,
@@ -266,10 +266,14 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
             onStageMessage: (envelope: ClientControlEnvelope, nowUs: bigint) => {
               phase2.handleStageMessage(envelope, nowUs);
             },
+            onStageHello: (clientType: unknown) => {
+              if (clientType === "stage") {
+                phase2.attachConnection(connection, logical.sessionId);
+              }
+            },
           }),
     });
     if (phase2 !== undefined) {
-      phase2.attachConnection(connection, logical.sessionId);
       socket.on("close", () => {
         phase2.detachConnection(connection);
       });
@@ -304,6 +308,12 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
         maxPayloadBytes: ctx.config.limits.maxMediaPayloadBytes,
       },
     });
+    if (phase2 !== undefined) {
+      phase2.attachMediaConnection(connection);
+      socket.on("close", () => {
+        phase2.detachMediaConnection(connection);
+      });
+    }
     connection.start();
   });
 }

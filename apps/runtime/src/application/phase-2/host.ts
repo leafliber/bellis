@@ -1,8 +1,15 @@
 import type { MonotonicClock, StageCapabilities } from "@bellis/contracts";
 import type { CompileIdSource, SceneRepositoryPort } from "@bellis/scene-runtime";
+import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import type { ControlConnection } from "../../websocket/control-adapter.js";
+import type { MediaConnection } from "../../websocket/media-adapter.js";
 import type { ControlChannel } from "./stage-port-adapter.js";
-import { Phase2PerformanceService, type SubmissionOutcome } from "./performance-service.js";
+import {
+  Phase2PerformanceService,
+  type MediaOutboundChannel,
+  type Phase2AuditPort,
+  type SubmissionOutcome,
+} from "./performance-service.js";
 import type { FakeModelFixture } from "./fake-model.js";
 
 /**
@@ -10,6 +17,8 @@ import type { FakeModelFixture } from "./fake-model.js";
  *
  * - 把 Phase2PerformanceService 绑定到当前 Stage 类型的 ControlConnection：
  *   出站走 sendPhase2Message（协议优先级入队），入站经 onStageMessage 钩子；
+ * - 媒体出站绑定当前 Session 的 MediaConnection（sendFrame 编码 BELL v1），
+ *   连接关闭即解绑并停止全部帧任务（Stream 不跨连接复活）；
  * - 只在显式启用（development/test 配置）时由 startRuntime 装配；生产
  *   默认路径不创建本对象；
  * - 同一时刻只绑定一条 Stage 连接：新连接取代旧连接（旧连接关闭即解绑）。
@@ -23,11 +32,18 @@ export interface Phase2HostOptions {
   readonly compileIds: CompileIdSource;
   readonly recordId: () => string;
   readonly repository: SceneRepositoryPort;
+  readonly logger?: LoggerPort;
+  readonly metrics?: MetricsPort;
+  readonly audit?: Phase2AuditPort;
+  /** SessionId 解析成功（Stage 连接出现）时回调（审计 Record 绑定会话）。 */
+  readonly onSessionIdResolved?: (sessionId: string) => void;
 }
 
 export class Phase2RuntimeHost {
   readonly #service: Phase2PerformanceService;
   #connection: ControlConnection | null = null;
+  #mediaConnection: MediaConnection | null = null;
+  readonly #mediaDisconnectHandlers: (() => void)[] = [];
   readonly #disconnectHandlers: (() => void)[] = [];
   #closed = false;
 
@@ -44,15 +60,33 @@ export class Phase2RuntimeHost {
         this.#disconnectHandlers.push(handler);
       },
     };
+    const mediaChannel: MediaOutboundChannel = {
+      sendFrame: (frame) =>
+        this.#mediaConnection?.sendFrame({
+          header: frame.header as never,
+          payload: frame.payload,
+          mediaKind: "audio",
+        }) ?? false,
+      onDisconnected: (handler) => {
+        this.#mediaDisconnectHandlers.push(handler);
+      },
+    };
     this.#service = new Phase2PerformanceService({
       sessionId: options.sessionId,
       capabilities: options.capabilities,
       clock: options.clock,
       wallClockMs: options.wallClockMs,
+      ...(options.logger === undefined ? {} : { logger: options.logger }),
+      ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
       compileIds: options.compileIds,
       recordId: options.recordId,
       channel,
       repository: options.repository,
+      mediaChannel,
+      ...(options.audit === undefined ? {} : { audit: options.audit }),
+      ...(options.onSessionIdResolved === undefined
+        ? {}
+        : { onSessionIdResolved: options.onSessionIdResolved }),
     });
   }
 
@@ -76,6 +110,21 @@ export class Phase2RuntimeHost {
     }
   }
 
+  /** Media 连接建立（server 装配在 MediaConnection 创建后调用）。 */
+  attachMediaConnection(connection: MediaConnection): void {
+    this.#mediaConnection = connection;
+  }
+
+  /** Media 连接关闭：解绑并通知发送器停止全部帧任务。 */
+  detachMediaConnection(connection: MediaConnection): void {
+    if (this.#mediaConnection === connection) {
+      this.#mediaConnection = null;
+      for (const handler of Array.from(this.#mediaDisconnectHandlers)) {
+        handler();
+      }
+    }
+  }
+
   /** ControlConnection.onStageMessage 入口。 */
   handleStageMessage(envelope: { type: string; payload: unknown }, nowUs: bigint): void {
     this.#service.handleStageMessage(envelope.type, envelope.payload, nowUs);
@@ -91,6 +140,7 @@ export class Phase2RuntimeHost {
 
   async close(): Promise<void> {
     this.#closed = true;
+    this.#mediaConnection = null;
     await this.#service.close();
   }
 }

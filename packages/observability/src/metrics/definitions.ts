@@ -123,6 +123,48 @@ const RAW_PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
   },
 ];
 
+/**
+ * Phase 2 指标定义（docs/phase-2-development-guide.md §13 Runtime 侧名单）。
+ * bellis_stage_*（Stage 侧时钟/音频缓冲/重连）由 Stage 上报路径承载，
+ * 不在 Runtime Registry 注册。
+ */
+const RAW_PHASE_2_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
+  {
+    name: "bellis_scene_prepare_duration_ms",
+    kind: "histogram",
+    help: "Scene Prepare（含 Stage 往返）耗时（毫秒，result=ready|unavailable）。",
+    labels: ["result"],
+    buckets: [1, 2.5, 5, 10, 25, 50, 100, 250, 500],
+  },
+  {
+    name: "bellis_scene_barrier_wait_ms",
+    kind: "histogram",
+    help: "Prepare Barrier 等待耗时（毫秒，level=hard|soft，result=ready|unavailable）。",
+    labels: ["level", "result"],
+    buckets: [1, 2.5, 5, 10, 25, 50, 100, 250, 500],
+  },
+  {
+    name: "bellis_scene_start_skew_ms",
+    kind: "histogram",
+    help: "同 Scene 各 Lane 起始时刻相对首 Lane 的偏差（毫秒，lane 为 Lane 名）。",
+    labels: ["lane"],
+    buckets: [0.5, 1, 2.5, 5, 10, 25, 50, 100],
+  },
+  {
+    name: "bellis_scene_cancel_latency_ms",
+    kind: "histogram",
+    help: "取消链路时延（毫秒，lane/result 为取消结算视图）。",
+    labels: ["lane", "result"],
+    buckets: [1, 2.5, 5, 10, 25, 50, 100, 250],
+  },
+  {
+    name: "bellis_scene_execution_total",
+    kind: "counter",
+    help: "Scene 执行终态计数（result=completed|cancelled|failed|uncertain）。",
+    labels: ["result"],
+  },
+];
+
 function freezeDefinition(definition: MetricDefinition): MetricDefinition {
   const frozen: MetricDefinition = Object.freeze({
     ...definition,
@@ -138,3 +180,14 @@ function freezeDefinition(definition: MetricDefinition): MetricDefinition {
 export const PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = Object.freeze(
   RAW_PHASE_1_METRIC_DEFINITIONS.map(freezeDefinition),
 );
+
+/** Phase 2 指标定义（同上冻结）。 */
+export const PHASE_2_METRIC_DEFINITIONS: readonly MetricDefinition[] = Object.freeze(
+  RAW_PHASE_2_METRIC_DEFINITIONS.map(freezeDefinition),
+);
+
+/** Registry 接受的完整指标目录（Phase 1 + Phase 2）。 */
+export const METRIC_DEFINITIONS: readonly MetricDefinition[] = Object.freeze([
+  ...PHASE_1_METRIC_DEFINITIONS,
+  ...PHASE_2_METRIC_DEFINITIONS,
+]);
