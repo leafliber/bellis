@@ -349,6 +349,28 @@ describe("SceneDirector 断连与关闭", () => {
     expect(h.director.getActiveSceneView()).toBeNull();
   });
 
+  it("终态保留窗有界：大量完成后 executions 不超过 128 + 活跃", async () => {
+    const h = createHarness();
+    for (let i = 0; i < 140; i += 1) {
+      const sceneId = `44444444-4444-4444-8444-${i.toString(16).padStart(12, "0")}`;
+      const handle = submit(h, hardPlan(sceneId));
+      await flush();
+      h.stage.settlePrepare(sceneId, readyFor(hardPlan(sceneId)));
+      await flush();
+      h.director.notifyStarted(sceneId, []);
+      h.director.notifyFinished(sceneId, [
+        { lane: "audio", outcome: "completed", finishedAtStageUs: 1n },
+        { lane: "subtitle", outcome: "completed", finishedAtStageUs: 1n },
+      ]);
+      await handle.done;
+    }
+    expect(h.director.activeCount).toBe(0);
+    expect(h.director.executionCount).toBeLessThanOrEqual(128);
+    // 最近完成的 Scene 仍可查询（保留窗内的对账事实不丢失）。
+    const latest = `44444444-4444-4444-8444-${(139).toString(16).padStart(12, "0")}`;
+    expect(h.director.getExecutionState(latest)).toBe("completed");
+  });
+
   it("准备中断连 → cancelled；running 断连 → uncertain（不自动重播）", async () => {
     const h = createHarness();
     const preparingHandle = submit(h, hardPlan("44444444-4444-4444-8444-4444444444a1"));

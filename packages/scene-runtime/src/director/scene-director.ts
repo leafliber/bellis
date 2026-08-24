@@ -224,6 +224,10 @@ function laneLevelMap(groups: readonly SyncGroup[]): Map<string, "hard" | "soft"
   return map;
 }
 
+/** 终态 Scene 的保留上限：超出按终态顺序淘汰（快照对账与迟到回执
+ * 只关心最近的执行；无限保留会造成无界状态增长）。 */
+const MAX_RETAINED_TERMINAL = 128;
+
 export class SceneDirector {
   readonly #stage: StagePort;
   readonly #repository: SceneRepositoryPort;
@@ -234,6 +238,7 @@ export class SceneDirector {
   readonly #policy: DirectorPolicy;
   readonly #faultHook: ((point: DirectorFaultPoint) => void) | null;
   readonly #executions = new Map<string, SceneExecution>();
+  readonly #terminalOrder: string[] = [];
   #closed = false;
   #closeWaiters: (() => void)[] = [];
 
@@ -250,6 +255,11 @@ export class SceneDirector {
 
   get closed(): boolean {
     return this.#closed;
+  }
+
+  /** 当前保留的执行记录数（活跃 + 终态保留窗），用于有界性断言。 */
+  get executionCount(): number {
+    return this.#executions.size;
   }
 
   /** 活跃（未终态）Scene 数，用于有界性断言。 */
@@ -794,6 +804,15 @@ export class SceneDirector {
       state,
       ...(reason === undefined ? {} : { reason }),
     });
+    // 终态保留窗（有界）：最旧的终态记录被淘汰后，其迟到回执按未知
+    // Scene 忽略（notifyStarted/notifyFinished 返回 false），不复活结果。
+    this.#terminalOrder.push(exec.plan.scene.sceneId);
+    while (this.#terminalOrder.length > MAX_RETAINED_TERMINAL) {
+      const oldest = this.#terminalOrder.shift();
+      if (oldest !== undefined) {
+        this.#executions.delete(oldest);
+      }
+    }
     this.#wakeCloseWaiters();
   }
 }

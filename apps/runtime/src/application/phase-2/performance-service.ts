@@ -11,6 +11,7 @@ import {
   PHASE_2_PCM_CONTENT_TYPE,
   SignalSchema,
   SpeechIntentSchema,
+  StageCapabilitiesSchema,
 } from "@bellis/contracts";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import {
@@ -211,7 +212,9 @@ export class Phase2PerformanceService {
     const compile: CompileResult = compileActionFrame({
       frame: packet.action,
       cycleId: packet.cycleId,
-      capabilities: this.#options.capabilities,
+      // 编译能力以 Stage 上报快照优先（真实 Stage 声明），未上报或
+      // 不含 PCM 基线时回落装配默认。
+      capabilities: this.#compileCapabilities(),
       ids: this.#options.compileIds,
     });
     if (compile.kind === "noop") {
@@ -403,6 +406,18 @@ export class Phase2PerformanceService {
 
   getExecutionState(sceneId: string): string | null {
     return this.#director.getExecutionState(sceneId);
+  }
+
+  /** 编译能力：stage.capabilities 快照（Schema 校验通过且含 PCM 基线）。 */
+  #compileCapabilities(): StageCapabilities {
+    const reported = this.#stagePort.latestStageCapabilities as { capabilities?: unknown } | null;
+    if (reported !== null) {
+      const check = StageCapabilitiesSchema.safeParse(reported.capabilities);
+      if (check.success && check.data.audio.contentTypes.includes(PHASE_2_PCM_CONTENT_TYPE)) {
+        return check.data;
+      }
+    }
+    return this.#options.capabilities;
   }
 
   /** Snapshot v2 对账视图（§7.3/scene-execution.md §8）。 */

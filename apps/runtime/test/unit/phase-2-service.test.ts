@@ -420,6 +420,39 @@ describe("Phase2PerformanceService 媒体编排", () => {
     await h.service.close();
   });
 
+  it("编译能力使用 stage.capabilities 快照（上报缺失动作 → 编译拒绝）", async () => {
+    const h = createService();
+    // Stage 上报不含 nod_agree：默认 Fixture 的 avatar 动作编译应被拒。
+    h.service.handleStageMessage(
+      "stage.capabilities",
+      {
+        capabilities: {
+          schemaVersion: 1,
+          audio: { contentTypes: ["audio/pcm-s16le-48000-mono"], maxBufferedUs: "2000000" },
+          subtitle: { supported: true },
+          avatar: { adapter: "reporting", motions: ["wave"], expressions: ["happy"] },
+        },
+      },
+      h.clock.nowUs(),
+    );
+    const outcome = h.service.submit({ signal: SIGNAL, fixture: FIXTURE });
+    expect(outcome.kind).toBe("rejected");
+    if (outcome.kind === "rejected") {
+      // hard 同步组的 Lane 缺能力 → 整组不可满足（保守拒绝，不降级）。
+      expect(outcome.issues.some((issue) => issue.code === "hard_lane_unsatisfiable")).toBe(true);
+    }
+    // 未上报时以默认能力编译：同样输入提交成功（回落路径）。
+    const h2 = createService();
+    expect(h2.service.submit({ signal: SIGNAL, fixture: FIXTURE }).kind).toBe("submitted");
+    for (const harness of [h, h2]) {
+      const closing = harness.service.close();
+      await flush();
+      harness.clock.advanceBy(3_000_000n);
+      await flush(20);
+      await closing;
+    }
+  });
+
   it("审计 Record：signal 接受 / 决策包 / 编译结果（不含发言全文）", async () => {
     const records: { recordType: string; payload: JsonValue }[] = [];
     const clock = new VirtualClock();
