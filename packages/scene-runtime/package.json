@@ -1,0 +1,37 @@
+{
+  "name": "@bellis/scene-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Action Compiler、Prepare Barrier 与 Scene Director（Phase 2 / P1 交付）",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src test",
+    "format:check": "oxfmt --check src test"
+  },
+  "dependencies": {
+    "@bellis/contracts": "workspace:*",
+    "@bellis/observability": "workspace:*"
+  },
+  "devDependencies": {
+    "@bellis/testkit": "workspace:*",
+    "fast-check": "4.9.0",
+    "vitest": "4.1.11"
+  }
+}
