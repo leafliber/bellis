@@ -20,7 +20,7 @@ import {
 } from "../helpers.js";
 
 /**
- * 真实 Worker 全链路集成测试（P2 文档 §12.3）。
+ * 真实 Worker 全链路集成测试（docs/protocols/persistence-and-recovery.md）。
  * 每个测试文件使用独立临时数据目录；成功/失败后都清理。
  */
 

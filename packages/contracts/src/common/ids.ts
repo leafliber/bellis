@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * 实体 ID 使用 UUID，不从时间推断顺序（phase-1-build-guide.md §6.2）。
+ * 实体 ID 使用 UUID，不从时间推断顺序（docs/phase-1-reference.md）。
  * 接受任意大小写（输入宽松），Runtime 自身只产生小写规范形式。
  * 模式必须保持可映射到 JSON Schema `pattern`（ECMA-262，无 flags），
  * 因此大小写用显式字符类而不是 /i 标志表达。

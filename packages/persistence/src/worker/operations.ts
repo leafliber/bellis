@@ -41,7 +41,7 @@ import type {
 } from "../rpc/operations.js";
 
 /**
- * Worker 侧操作实现（P2 文档 §7-§10）。
+ * Worker 侧操作实现（docs/protocols/persistence-and-recovery.md）。
  *
  * - 操作按到达顺序串行执行（单连接、单事务语义）。
  * - Deadline 在事务开始前检查；事务一旦开始按原子性策略完成或回滚。

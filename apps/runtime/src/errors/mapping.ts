@@ -7,7 +7,7 @@ import { TransportProtocolViolationError } from "@bellis/transport";
 import { ZodError } from "zod";
 
 /**
- * 集中错误映射（P4 文档 §13）：把 Auth/Transport/Persistence/Application
+ * 集中错误映射（docs/phase-1-reference.md）：把 Auth/Transport/Persistence/Application
  * 错误转换为 Contracts `ErrorEnvelope`，并为 REST 选择稳定状态码。
  *
  * 规则：

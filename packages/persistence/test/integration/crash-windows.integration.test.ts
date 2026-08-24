@@ -21,7 +21,7 @@ import {
 import { fileURLToPath } from "node:url";
 
 /**
- * Crash Window 集成测试（P2 文档 §11、§12.3-4~7）：
+ * Crash Window 集成测试（docs/protocols/persistence-and-recovery.md）：
  * 真实子进程 + 真实临时 SQLite + SIGKILL 强制终止。
  * 普通 close() 不算 Crash Window；父进程在子进程报告到达检查点后执行
  * 真正的强制终止，再以同一数据目录重启验证恢复结果。

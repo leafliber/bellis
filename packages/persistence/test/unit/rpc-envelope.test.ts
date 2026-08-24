@@ -13,7 +13,7 @@ import {
 } from "../../src/errors.js";
 import { SESSION_ID, TRACE } from "../helpers.js";
 
-/** Envelope 与错误模型单元测试（P2 文档 §12.1）。 */
+/** Envelope 与错误模型单元测试（docs/protocols/persistence-and-recovery.md）。 */
 
 describe("PersistenceRpcRequestSchema", () => {
   it("接受合法请求", () => {

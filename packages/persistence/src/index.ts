@@ -3,7 +3,7 @@
  * 原子提交与 Outbox（P2 交付）。
  *
  * `node:sqlite` 只能在 src/worker/database.ts 导入；主线程通过版本化
- * 类型化 RPC 操作（phase-1-build-guide.md §9.1），不允许任意 SQL 穿过
+ * 类型化 RPC 操作（docs/phase-1-reference.md），不允许任意 SQL 穿过
  * Worker 边界。公开装配：createPersistenceClient / createOutboxDispatcher。
  */
 

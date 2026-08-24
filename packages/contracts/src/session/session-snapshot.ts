@@ -4,7 +4,7 @@ import { UuidSchema } from "../common/ids.js";
 import { extensibleJsonObject } from "../common/json-value.js";
 
 /**
- * Phase 1 的 session.snapshot 固定形态（phase-1-build-guide.md §8.2）。
+ * Phase 1 的 session.snapshot 固定形态（docs/phase-1-reference.md）。
  *
  * - Phase 1 不执行真实 Scene，activeScene 恒为 null。
  * - Media Stream 是连接级资源，重连后必须重新打开，Snapshot 不声称恢复旧 Stream。

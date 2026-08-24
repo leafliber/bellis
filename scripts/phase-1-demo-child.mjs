@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 1 Demo 子进程 harness（P4 文档 §15；仅测试装配）。
+ * Phase 1 Demo 子进程 harness（docs/phase-1-reference.md；仅测试装配）。
  *
  * - 使用**已构建**的 `@bellis/runtime` dist 与默认 DB Worker（先 `pnpm build`）。
  * - 通过 fork 继承的私有 IPC（process.send）与父进程协作：

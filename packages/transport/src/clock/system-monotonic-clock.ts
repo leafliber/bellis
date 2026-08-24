@@ -1,7 +1,7 @@
 import type { MonotonicClock } from "@bellis/contracts";
 
 /**
- * 生产单调时钟（phase-1-build-guide.md §7.1，P1 交付）。
+ * 生产单调时钟（docs/phase-1-reference.md，P1 交付）。
  *
  * - nowUs 基于 process.hrtime.bigint() 从纳秒整除到微秒（bigint 域，无浮点）。
  * - 等待只依赖单调时间：setTimeout 仅作唤醒 hints，到期后以 hrtime 复核，

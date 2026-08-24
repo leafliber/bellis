@@ -3,7 +3,7 @@ import { SpanIdSchema, TraceIdSchema, UuidSchema } from "./ids.js";
 import { extensibleJsonObject } from "./json-value.js";
 
 /**
- * 跨边界传播的统一 Trace 上下文（phase-1-build-guide.md §10.1）。
+ * 跨边界传播的统一 Trace 上下文（docs/phase-1-reference.md）。
  * 业务标识（sessionId/turnId/cycleId/sceneId/cueId/toolRunId）按需携带；
  * spanId 是可选传播字段，不替代业务 ID。
  */

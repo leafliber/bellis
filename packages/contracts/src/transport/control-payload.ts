@@ -12,7 +12,7 @@ import { CueLaneSchema } from "../scene/cue.js";
 import { Phase1SessionSnapshotSchema } from "../session/session-snapshot.js";
 
 /**
- * Phase 1 Control WebSocket 支持的全部消息类型（phase-1-build-guide.md §8.2）。
+ * Phase 1 Control WebSocket 支持的全部消息类型（docs/phase-1-reference.md）。
  * Scene 消息只用于协议与持久化集成测试，不执行真实 TTS、Avatar 或游戏动作。
  *
  * Payload 对象一律 extensibleJsonObject：未知扩展键以 JsonValueSchema

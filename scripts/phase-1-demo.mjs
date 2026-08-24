@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 1 Demo（phase-1-build-guide.md §15；P4 文档 §15）。
+ * Phase 1 Demo（docs/phase-1-reference.md）。
  *
  * 流程：临时数据目录 → 启动 Runtime（子进程）→ 一次性 Token 交换 →
  * Control Hello + Clock Sync → 注册 binary-test Media Stream 并发送合法

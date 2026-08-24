@@ -15,7 +15,7 @@ import {
 } from "../helpers.js";
 
 /**
- * SQLite Busy/Locked 集成测试（P2 文档 §12.3-2）。
+ * SQLite Busy/Locked 集成测试（docs/protocols/persistence-and-recovery.md）。
  *
  * 同目录只允许一个 DB Worker（worker-lock 独占，见 worker-lock 测试），
  * 锁竞争改由外部连接制造：测试进程持有 state.db 的 EXCLUSIVE 锁，

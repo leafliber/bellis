@@ -9,7 +9,7 @@ import { PERSISTENCE_ERROR_CODES } from "../errors.js";
 import { z } from "zod";
 
 /**
- * Worker RPC Envelope（P2 文档 §5.1）。
+ * Worker RPC Envelope（docs/protocols/persistence-and-recovery.md）。
  * Client 与 Worker 两侧都用这些 Schema 校验；Operation 是闭合集合，
  * 不接受任意方法名，更不存在 SQL 通道。
  */

@@ -4,7 +4,7 @@ import { HealthLiveResponseSchema, HealthReadyResponseSchema } from "./schemas.j
 import type { RouteContext } from "./context.js";
 
 /**
- * Health 路由（P4 文档 §7.1/§7.2）。
+ * Health 路由（docs/phase-1-reference.md）。
  *
  * - `live` 只证明进程可响应：不访问数据库、不执行昂贵检查。
  * - `ready` 只在 Migration、DB Worker、恢复与协议注册完成后返回 200；

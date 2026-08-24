@@ -9,7 +9,7 @@ import { WorkerOperationRuntime } from "./operations.js";
 import { startRouter } from "./rpc-router.js";
 
 /**
- * DB Worker 入口（P2 文档 §4、§5）。
+ * DB Worker 入口（docs/protocols/persistence-and-recovery.md）。
  *
  * workerData（由 createPersistenceClient 传入）：
  * - dataDirectory: string            数据目录绝对路径

@@ -9,7 +9,7 @@ import type { MigrationDefinition } from "../../src/migrations/definition.js";
 import { WORKER_FIXTURE, cleanupTempDataDirectory, createTempDataDirectory } from "../helpers.js";
 
 /**
- * 真实 Worker + 真实临时 SQLite 文件的 Migration 集成测试（P2 文档 §12.3-1）：
+ * 真实 Worker + 真实临时 SQLite 文件的 Migration 集成测试（docs/protocols/persistence-and-recovery.md）：
  * 重复幂等、checksum 篡改拒绝、注册表外版本拒绝、失败注册表回滚与续跑。
  */
 

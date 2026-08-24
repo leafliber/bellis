@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { VirtualClock } from "../src/virtual-clock.js";
 
 /**
- * Gate 1 VirtualClock 契约测试（phase-1-build-guide.md §7.1、§11）：
+ * Gate 1 VirtualClock 契约测试（docs/phase-1-reference.md）：
  * - 目标已过立即完成。
  * - Abort 以取消原因拒绝，等待者被移出队列。
  * - 多个等待者按目标时间升序释放；相同目标按注册顺序。

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 漂移检查（phase-1-build-guide.md §5.1 contracts:check）：
+ * 漂移检查（docs/phase-1-reference.md；contracts:check）：
  * 1. 重新构建 @bellis/contracts（tsc -b 增量，保证 dist 与 src 一致）。
  * 2. 在临时目录重新生成两套 JSON Schema 目标。
  * 3. 与提交入库的生成物逐字节比对；任何漂移即失败。

@@ -3,7 +3,7 @@ import type { OutboxPublishResult, OutboxPublisher } from "@bellis/persistence";
 import type { LoggerPort } from "@bellis/observability";
 
 /**
- * Phase 1 测试发布者（P4 文档 §12）：按 Topic 白名单分发，只记录已脱敏、
+ * Phase 1 测试发布者（docs/phase-1-reference.md）：按 Topic 白名单分发，只记录已脱敏、
  * 可审计的内存结果，不访问公网、不产生外部副作用。
  *
  * - 白名单外 Topic 返回不可重试失败 → Dispatcher 进入 Dead 策略。

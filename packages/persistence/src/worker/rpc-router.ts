@@ -17,7 +17,7 @@ import { mapSqliteError } from "./operations.js";
 import type { OperationContext, WorkerOperationRuntime } from "./operations.js";
 
 /**
- * Worker RPC Router（P2 文档 §5.1）。
+ * Worker RPC Router（docs/protocols/persistence-and-recovery.md）。
  *
  * - Envelope 与 Operation Payload 双侧校验后才分发；未知操作稳定拒绝。
  * - 操作串行执行：单连接 SQLite 的事务不交错。

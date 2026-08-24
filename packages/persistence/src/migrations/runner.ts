@@ -4,7 +4,7 @@ import type { SqliteDatabase } from "../repositories/sqlite-port.js";
 import type { MigrationDefinition } from "./definition.js";
 
 /**
- * 有 checksum 的前向 Migration Runner（P2 文档 §6.2）。
+ * 有 checksum 的前向 Migration Runner（docs/protocols/persistence-and-recovery.md）。
  *
  * - schema_migrations 是唯一的 bootstrap 表（CREATE IF NOT EXISTS，
  *   在版本化 Migration 之外，仅这一处允许 IF NOT EXISTS）。

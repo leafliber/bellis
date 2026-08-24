@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * 静态边界扫描（P2 文档 §5.2）：packages/persistence/src 中
+ * 静态边界扫描（docs/protocols/persistence-and-recovery.md）：packages/persistence/src 中
  * worker/ 目录外不允许出现 node:sqlite 导入；client/ 与 outbox/
  * 不允许依赖 worker/ 内部模块（会把 node:sqlite 拖进主线程）。
  */

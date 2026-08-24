@@ -1,5 +1,5 @@
 /**
- * 最小 Metrics Port（Gate 1 空壳，phase-1-build-guide.md §6.3、§10.3）。
+ * 最小 Metrics Port（Gate 1 空壳，docs/phase-1-reference.md）。
  * Phase 1 指标名单见 §10.3（bellis_ws_* / bellis_clock_* / bellis_db_* /
  * bellis_outbox_* / bellis_scene_*）；本阶段只要求本地内存聚合与可选
  * OTLP Exporter 接口，由 P3 交付。高基数字段必须受到限制。

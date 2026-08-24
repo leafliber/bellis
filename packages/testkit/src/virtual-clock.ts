@@ -1,7 +1,7 @@
 import type { MonotonicClock } from "@bellis/contracts";
 
 /**
- * 确定性虚拟单调时钟（phase-1-build-guide.md §7.1，Gate 1 交付）。
+ * 确定性虚拟单调时钟（docs/phase-1-reference.md，Gate 1 交付）。
  *
  * - 测试手动推进时间，不调用真实 setTimeout 等待业务时长。
  * - nowUs 永不倒退；advance 到更早时间会抛错。

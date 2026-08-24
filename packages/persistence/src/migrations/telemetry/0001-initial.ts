@@ -1,7 +1,7 @@
 import type { MigrationDefinition } from "../definition.js";
 
 /**
- * telemetry.db 0001：最小底座（P2 文档 §7“只建立最小 Migration/索引底座”）。
+ * telemetry.db 0001：最小底座（docs/protocols/persistence-and-recovery.md，原任务要求“只建立最小 Migration/索引底座”）。
  * schema_migrations 由 Runner bootstrap 独占创建。遥测写入不参与
  * state.db 事务，也不影响 Ready 判定的核心恢复事实。
  */

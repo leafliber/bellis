@@ -3,7 +3,7 @@ import { TraceContextSchema } from "@bellis/contracts";
 import type { TraceContext } from "@bellis/contracts";
 
 /**
- * TraceContext 的创建与派生（p3-observability-testkit.md §6.2）。
+ * TraceContext 的创建与派生（docs/phase-1-reference.md）。
  *
  * - 业务上下文字段（sessionId/turnId/cycleId/sceneId/cueId/toolRunId）按需携带，
  *   通过显式参数传播，不以 Trace ID 替代业务 ID。

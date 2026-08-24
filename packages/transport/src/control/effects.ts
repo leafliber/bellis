@@ -2,7 +2,7 @@ import type { ServerControlEnvelope } from "@bellis/contracts";
 
 /**
  * 框架无关的 Control Effect：核心不持有 Socket/Timer，网络写入由 P4
- * 适配器消费 Effect 完成（phase-1-build-guide.md §8；P1 文档 §5）。
+ * 适配器消费 Effect 完成（docs/phase-1-reference.md）。
  */
 
 /** WebSocket 关闭码（IANA 私用区 4000–4999 留给 Bellis）。 */

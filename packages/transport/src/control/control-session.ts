@@ -25,7 +25,7 @@ import type { ReplayMessage, ReplayOutcome } from "./replay-window.js";
 import type { TransportFailure } from "../errors.js";
 
 /**
- * Control WebSocket 的服务端会话核心（phase-1-build-guide.md §8.2；P1 文档 §7）。
+ * Control WebSocket 的服务端会话核心（docs/phase-1-reference.md）。
  *
  * 职责：一条客户端连接的完整入站/出站协议处理——分层解码、连接状态机、
  * 服务端 Seq 分配、ACK 推进、Replay、messageId 去重、幂等键要求、心跳与
@@ -46,11 +46,11 @@ import type { TransportFailure } from "../errors.js";
  * 瞬时消息：同样消耗 Seq、同样占用 Replay Window（排除会造成虚假缺口），
  * 但 P4 不为其持久化 Replay 内容。注意：**最新分配水位（nextSeq）必须为
  * 包括瞬时消息在内的一切 Seq 推进持久化**，否则进程重启后会复用 Seq
- * （P1 文档 §7.2/§7.3）。
+ * （docs/phase-1-reference.md）。
  */
 const TRANSIENT_SERVER_TYPES: ReadonlySet<string> = new Set(["heartbeat.pong", "clock.pong"]);
 
-/** 服务端消息类型的默认优先级（phase-1-build-guide.md §8.3）。 */
+/** 服务端消息类型的默认优先级（docs/phase-1-reference.md）。 */
 const DEFAULT_SERVER_PRIORITIES: Readonly<Record<string, SendPriority>> = {
   error: 1,
   "scene.committed": 1,
@@ -352,7 +352,7 @@ export class ControlSession {
     );
     if (!decoded.ok) {
       if (decoded.failure.code === "unsupported_version") {
-        // 主版本不匹配：返回错误并关闭（phase-1-build-guide.md §8.2）。
+        // 主版本不匹配：返回错误并关闭（docs/phase-1-reference.md）。
         this.#enqueueError(nowUs, "unsupported_version", decoded.failure.message, null);
         this.#initiateClose(CONTROL_CLOSE_CODES.protocol_error, "unsupported_version");
         return this.#reject("unsupported_version", decoded.failure.message, null, null, true);

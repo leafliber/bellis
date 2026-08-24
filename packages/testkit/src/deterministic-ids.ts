@@ -1,5 +1,5 @@
 /**
- * 确定性 ID 源（p3-observability-testkit.md §9.1）。
+ * 确定性 ID 源（docs/phase-1-reference.md）。
  *
  * - 同一种子 + 同一命名空间 + 相同调用顺序 ⇒ 完全相同的 ID 序列；
  * - 不同命名空间拥有独立随机流（种子按命名空间散列），互不串扰；

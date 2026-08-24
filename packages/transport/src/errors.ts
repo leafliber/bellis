@@ -1,7 +1,7 @@
 import type { ErrorCode } from "@bellis/contracts";
 
 /**
- * 稳定传输失败：只有机器码与安全静态文案（phase-1-build-guide.md §6.5）。
+ * 稳定传输失败：只有机器码与安全静态文案（docs/phase-1-reference.md）。
  * 绝不携带原始 Payload、Cookie、Token、SQL 或堆栈；文案面向日志与测试，
  * 不承诺客户端可解析（客户端只允许依赖 code）。
  */

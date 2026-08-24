@@ -12,7 +12,7 @@ import type {
 import { STATE_MIGRATIONS } from "../../src/migrations/registry.js";
 
 /**
- * Migration Runner 单元测试（P2 文档 §12.1）。
+ * Migration Runner 单元测试（docs/protocols/persistence-and-recovery.md）。
  * SQL 真实执行行为由集成测试覆盖；这里用内存假库验证排序、checksum、
  * 幂等、篡改拒绝与失败回滚的事务边界。
  */

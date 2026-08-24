@@ -22,7 +22,7 @@ import type { ControlResumePlan } from "../websocket/control-adapter.js";
 import type { LogicalSession } from "../websocket/session-store.js";
 
 /**
- * Fastify 装配（P4 文档 §6/§7/§9/§10）：只承担 Host/Origin/Session/Schema
+ * Fastify 装配（docs/phase-1-reference.md）：只承担 Host/Origin/Session/Schema
  * 边界、协议转换、调用 Application Service 与响应映射；领域事务顺序
  * 全部在 application/**。
  *
@@ -67,7 +67,7 @@ export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> 
 
   const allowedHosts = new Set<string>(ctx.config.allowedHosts);
 
-  // Host / Origin 边界：REST 与 WS Upgrade 一律执行（P4 文档 §8）。
+  // Host / Origin 边界：REST 与 WS Upgrade 一律执行（docs/phase-1-reference.md）。
   // 注意：放行路径必须返回 undefined（未发送响应时返回 reply 会让
   // Fastify 等待一个永远不会发生的发送）。
   app.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {

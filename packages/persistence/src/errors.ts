@@ -1,5 +1,5 @@
 /**
- * Persistence 稳定错误模型（phase-1-build-guide.md §9.1；P2 文档 §5.1）。
+ * Persistence 稳定错误模型（docs/phase-1-reference.md；docs/protocols/persistence-and-recovery.md）。
  *
  * 跨 Worker RPC 边界只传播安全码 + 稳定消息 + 可重试性；
  * SQL 文本、数据库绝对路径和原始 Payload 绝不进入错误对象或日志。
@@ -64,7 +64,7 @@ export function isRetryableCode(code: PersistenceErrorCode): boolean {
   return RETRYABLE_CODES.has(code);
 }
 
-/** 跨 RPC 边界的安全错误形态（P2 文档 §5.1 PersistenceRpcResponse.error）。 */
+/** 跨 RPC 边界的安全错误形态（docs/protocols/persistence-and-recovery.md 中的 PersistenceRpcResponse.error）。 */
 export interface SafePersistenceError {
   readonly code: PersistenceErrorCode;
   readonly message: string;

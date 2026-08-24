@@ -12,7 +12,7 @@ import type { ConnectionMetrics } from "./connection-metrics.js";
 import type { ExportedControlClaim, LogicalSession } from "./session-store.js";
 
 /**
- * Control WebSocket 适配器（P4 文档 §9；control-websocket.md §12）。
+ * Control WebSocket 适配器（docs/phase-1-reference.md；control-websocket.md §12）。
  *
  * 只负责 Socket 边界与 P1 Effect 映射：入站文本全部交给
  * `ControlSession.acceptClientMessage`（P1 完整校验，Route 中无

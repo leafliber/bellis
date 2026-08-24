@@ -10,7 +10,7 @@ import {
 import type { LoggerDestination, TraceRandomSource } from "../src/index.js";
 
 /**
- * 使用示例（p3-observability-testkit.md §1）：P1/P2/P4 以 Gate 1 Port 的方式
+ * 使用示例（docs/phase-1-reference.md）：P1/P2/P4 以 Gate 1 Port 的方式
  * 装配 Trace + Logger + Metrics。本测试即文档：不依赖任何实现内部状态。
  */
 

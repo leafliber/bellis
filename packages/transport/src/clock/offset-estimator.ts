@@ -1,5 +1,5 @@
 /**
- * 客户端时钟偏移估计（phase-1-build-guide.md §7.2，P1 交付）。
+ * 客户端时钟偏移估计（docs/phase-1-reference.md，P1 交付）。
  *
  * 对每个通过 clock.ping/clock.pong 采得的样本 c0/r1/r2/c3（均为单调微秒）：
  *

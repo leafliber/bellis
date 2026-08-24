@@ -11,7 +11,7 @@ import {
 } from "../helpers.js";
 
 /**
- * 事件循环隔离测试（P2 文档 §5.2、§12.3-9）：
+ * 事件循环隔离测试（docs/protocols/persistence-and-recovery.md）：
  * Worker 执行批量写入时持续采样主线程定时器漂移，
  * 证明主事件循环没有同步执行 SQLite。
  *

@@ -8,7 +8,7 @@ import type { ConnectionMetrics } from "./connection-metrics.js";
 import type { LogicalSession } from "./session-store.js";
 
 /**
- * Binary Media WebSocket 适配器（P4 文档 §10；binary-media-websocket.md §9）。
+ * Binary Media WebSocket 适配器（docs/phase-1-reference.md；binary-media-websocket.md §9）。
  *
  * - 只接受 Binary；Text Frame 明确拒绝（关闭 1003）。
  * - 二进制内容完全交给 P1 增量 Parser + Stream Registry，适配器不重写协议。

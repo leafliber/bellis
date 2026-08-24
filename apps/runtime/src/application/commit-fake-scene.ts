@@ -15,7 +15,7 @@ import { z } from "zod";
 import { ApplicationError, stableRequestFingerprint } from "../errors/mapping.js";
 
 /**
- * Fake Scene Commit 应用服务（P4 文档 §11）。
+ * Fake Scene Commit 应用服务（docs/phase-1-reference.md）。
  *
  * 仅用于 Phase 1 协议验证的最小用例：不建立真实模型循环，不产生
  * TTS/Avatar/Game 副作用。输入来自受认证的内部 Application Port

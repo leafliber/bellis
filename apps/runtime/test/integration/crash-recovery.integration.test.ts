@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanupTempDataDirectory, createTempDataDirectory, RESOLVE_HOOK_URL } from "../helpers.js";
 
 /**
- * 跨进程 Crash Window 测试（P4 文档 §14.3）：真实 fork 子进程 +
+ * 跨进程 Crash Window 测试（docs/phase-1-reference.md）：真实 fork 子进程 +
  * P2 私有 IPC 检查点 + SIGKILL 强制终止（普通 close 不算 Crash），
  * 再以同一数据目录重启并验证恢复结果。
  */

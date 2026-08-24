@@ -5,7 +5,7 @@ import { readInt, readNullableText, readText } from "./sqlite-port.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-port.js";
 
 /**
- * session_records 表：Append-only 会话记录（P2 文档 §8.1）。
+ * session_records 表：Append-only 会话记录（docs/protocols/persistence-and-recovery.md）。
  *
  * - 写入前 SessionRecordSchema 校验（schemaVersion 由 Zod literal 闭合）。
  * - 读取后重校验；未知 schemaVersion → record_version_unknown。

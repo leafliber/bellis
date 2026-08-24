@@ -6,7 +6,7 @@
 >
 > 决策范围：DecisionPacket、Control WebSocket Envelope、双向可靠性与 JSON Schema dialect
 >
-> 关联文档：[系统架构设计](../architecture-plan.md) · [技术选型基线](../technology-selection.md) · [Phase 1 构建指导](../phase-1-build-guide.md)
+> 关联文档：[系统架构设计](../architecture-plan.md) · [技术选型基线](../technology-selection.md) · [Phase 1 完成态参考](../phase-1-reference.md)
 
 ## 背景
 

@@ -2,8 +2,7 @@
 
 > 适用范围：`packages/persistence`（DB Worker、Migration、Session Records、
 > 原子 commitScene、Outbox、恢复）。
-> 上位规范：[Phase 1 构建指导](../phase-1-build-guide.md) §9 ·
-> [P2 任务文档](../phase-1/p2-persistence.md) ·
+> 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) ·
 > [ADR 0002](../adr/0002-node-26-baseline.md)。
 
 ## 1. Worker 边界

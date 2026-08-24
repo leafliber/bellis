@@ -19,7 +19,7 @@ import {
 } from "../helpers.js";
 
 /**
- * Crash Window 测试子进程 harness（P2 文档 §11、§12.3）。
+ * Crash Window 测试子进程 harness（docs/protocols/persistence-and-recovery.md）。
  *
  * 仅测试可用：通过 fork 继承的私有 IPC（process.send）向父进程报告
  * 到达检查点/关键状态，然后等待；父进程以 SIGKILL 强制终止本进程，

@@ -8,11 +8,11 @@
 >
 > 决策范围：`engines.node`、CI Node 版本、`node:sqlite` 稳定性核验基线
 >
-> 关联文档：[Phase 1 构建指导](../phase-1-build-guide.md) · [技术选型基线](../technology-selection.md)
+> 关联文档：[Phase 1 完成态参考](../phase-1-reference.md) · [技术选型基线](../technology-selection.md)
 
 ## 背景
 
-`technology-selection.md` 第 21 节冻结项与 `phase-1-build-guide.md` 第 3.1 节规定：
+`technology-selection.md` 第 21 节冻结项与原 Phase 1 构建任务书曾规定：
 
 - Runtime 使用 Node.js 24 LTS，最低 24.15，`engines.node` 固定 `>=24.15 <25`。
 - 文档修订时的验证基线为 Node.js 24.19.0。

@@ -1,5 +1,5 @@
 /**
- * 最小 Logger Port（Gate 1 空壳，phase-1-build-guide.md §6.3、§10.2）。
+ * 最小 Logger Port（Gate 1 空壳，docs/phase-1-reference.md）。
  * Port 只描述能力；P3 交付 Pino 实现与字段级 Redaction。
  * 字段约定：event 必填；trace/session/cycle/scene 标识存在时必须携带；
  * 禁止把 Cookie、启动 Token、授权头或未经处理的隐私数据写入日志。

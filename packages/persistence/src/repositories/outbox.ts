@@ -7,7 +7,7 @@ import { readInt, readText } from "./sqlite-port.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-port.js";
 
 /**
- * outbox 表：至少一次交付的持久化状态机（P2 文档 §10）。
+ * outbox 表：至少一次交付的持久化状态机（docs/protocols/persistence-and-recovery.md）。
  *
  * pending → in_flight → delivered / pending(退避) / dead。
  * 所有状态转换都是条件更新（status + lease_owner_instance_id），

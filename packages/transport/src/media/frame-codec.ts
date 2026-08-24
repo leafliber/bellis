@@ -3,7 +3,7 @@ import type { MediaFrameHeader } from "@bellis/contracts";
 import { MediaFrameError } from "../errors.js";
 
 /**
- * Binary Media 帧布局（phase-1-build-guide.md §8.4，冻结布局）：
+ * Binary Media 帧布局（docs/phase-1-reference.md，冻结布局）：
  *
  * ```text
  * 4 bytes  magic = ASCII "BELL"

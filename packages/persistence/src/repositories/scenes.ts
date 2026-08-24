@@ -3,7 +3,7 @@ import type { SqliteDatabase } from "./sqlite-port.js";
 import { PersistenceError } from "../errors.js";
 
 /**
- * scenes 表：提交事实与版本化 Payload（P2 文档 §3.2、§7）。
+ * scenes 表：提交事实与版本化 Payload（docs/protocols/persistence-and-recovery.md）。
  * commit_ordinal 在 commitScene 事务内按会话递增，是恢复排序依据；
  * committed_at_ms 仅审计。Payload 写入前已由操作层用 SceneSchema 校验。
  */

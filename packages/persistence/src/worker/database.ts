@@ -15,7 +15,7 @@ import type {
  * 真实 SQLite 连接（全包唯一允许导入 node:sqlite 的文件）。
  *
  * - state.db：synchronous=FULL；telemetry.db：synchronous=NORMAL；
- *   两者都启用 WAL、Foreign Keys、busy_timeout=3000（P2 文档 §6.1）。
+ *   两者都启用 WAL、Foreign Keys、busy_timeout=3000（docs/protocols/persistence-and-recovery.md）。
  * - Worker 启动记录 bootEpochMs + bootMonotonicUs 锚点，运行期间
  *   leaseNowMs 用单调增量投影，同一 Worker 生命周期不反复读取墙钟，
  *   NTP 跳变不影响 Lease 判断。

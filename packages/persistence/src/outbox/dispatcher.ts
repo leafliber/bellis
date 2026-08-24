@@ -6,7 +6,7 @@ import type { PersistenceCheckpointObserver } from "../checkpoints/observer.js";
 import type { PersistenceClient } from "../client/persistence-client.js";
 
 /**
- * Outbox Dispatcher（P2 文档 §10）：至少一次交付状态机的客户端驱动侧。
+ * Outbox Dispatcher（docs/protocols/persistence-and-recovery.md）：至少一次交付状态机的客户端驱动侧。
  *
  * 状态机在 DB Worker 的 outbox 表内（pending → in_flight → delivered /
  * pending 重试 / dead）；Dispatcher 负责 Claim → Publish → Complete 的
@@ -88,7 +88,7 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   const pendingGauge = metrics.gauge("bellis_outbox_pending");
   // Phase 1 规范指标：统一 bellis_outbox_delivery_total{result=delivered|retry|dead}，
   // 与 @bellis/observability 的 PHASE_1_METRIC_DEFINITIONS 对齐
-  // （phase-1-build-guide.md §10.3）；独立三指标名会被 Registry 拒绝成 No-op。
+  // （docs/phase-1-reference.md）；独立三指标名会被 Registry 拒绝成 No-op。
   const deliveredCounter = metrics.counter("bellis_outbox_delivery_total", {
     result: "delivered",
   });

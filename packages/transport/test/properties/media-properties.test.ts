@@ -7,7 +7,7 @@ import type { MediaFrameHeader } from "@bellis/contracts";
 import { FRAME_ID_A, SESSION_ID, STREAM_ID, TRACE_ID } from "../helpers.js";
 
 /**
- * 性质测试（phase-1-build-guide.md §11.2）：
+ * 性质测试（docs/phase-1-reference.md）：
  * - 任意合法 Media Frame 编码再解析保持等价。
  * - 任意分片组合产生相同帧。
  * - 首字节损坏总是产生相同的稳定错误（bad_magic + failed 状态）。

@@ -3,7 +3,7 @@ import { readText } from "./sqlite-port.js";
 import type { SqliteDatabase } from "./sqlite-port.js";
 
 /**
- * idempotency_keys 表（P2 文档 §8.3）：
+ * idempotency_keys 表（docs/protocols/persistence-and-recovery.md）：
  * - Key 带作用域（scene_commit:{sessionId}），非全库裸唯一。
  * - 保存请求摘要与结果引用；同 Key 同摘要返回第一次结果，
  *   同 Key 不同摘要返回不可重试冲突。

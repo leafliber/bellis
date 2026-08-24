@@ -23,7 +23,7 @@ import {
 } from "../helpers.js";
 
 /**
- * 传输集成测试（P1 文档 §10.3）：内存 Adapter + VirtualClock，
+ * 传输集成测试（docs/phase-1-reference.md）：内存 Adapter + VirtualClock，
  * 不依赖真实 Socket / 网络等待 / 公网。
  *
  * Harness 模拟 P4 适配器职责：把 accept/tick 产出的 Effect 应用到

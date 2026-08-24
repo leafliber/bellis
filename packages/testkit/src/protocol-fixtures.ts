@@ -10,7 +10,7 @@ import type {
 } from "@bellis/contracts";
 
 /**
- * 协议 Fixture 工厂（p3-observability-testkit.md §9.4）。
+ * 协议 Fixture 工厂（docs/phase-1-reference.md）。
  *
  * - 默认值全部通过 Contracts Schema；调用方只覆盖所需字段
  *   （显式传入 undefined 的字段保持默认值，不落入结果）；

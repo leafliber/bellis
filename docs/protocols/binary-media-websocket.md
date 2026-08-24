@@ -1,7 +1,7 @@
 # Binary Media WebSocket 协议（/ws/v1/media）
 
 > 状态：Phase 1 冻结 v1（实现：`@bellis/transport` P1）
-> 上位规范：[Phase 1 构建指导 §8.4](../phase-1-build-guide.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
+> 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
 > 姊妹文档：[Control WebSocket](./control-websocket.md)
 >
 > 本文档中的全部 `hex media-frame` 代码块由

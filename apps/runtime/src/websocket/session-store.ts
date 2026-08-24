@@ -3,7 +3,7 @@ import { MediaStreamRegistry } from "@bellis/transport";
 import type { ControlLogicalState, MediaStreamRegistryOptions } from "@bellis/transport";
 
 /**
- * 逻辑 Session 存储（P4 文档 §8/§9/§10）。
+ * 逻辑 Session 存储（docs/phase-1-reference.md）。
  *
  * Cookie 令牌 → 逻辑 Session 的进程内映射。逻辑 Session 拥有：
  * - P1 `MediaStreamRegistry`（Stream 必须经同 Session 的 Control 注册）；

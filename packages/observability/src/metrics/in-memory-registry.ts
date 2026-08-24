@@ -13,7 +13,7 @@ import {
 import type { MetricDefinition, MetricKind } from "./definitions.js";
 
 /**
- * 内存 Metrics Registry（p3-observability-testkit.md §8.2）。
+ * 内存 Metrics Registry（docs/phase-1-reference.md）。
  *
  * - 只接受 PHASE_1_METRIC_DEFINITIONS 中声明的指标：未知指标名、类型不匹配、
  *   未允许 Label、非法 Label 值、非有限数值与负 Counter 增量都被稳定拒绝

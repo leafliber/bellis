@@ -4,7 +4,7 @@ import { readText } from "./sqlite-port.js";
 import type { SqliteDatabase } from "./sqlite-port.js";
 
 /**
- * signal_watermarks 表（P2 文档 §8.2）：
+ * signal_watermarks 表（docs/protocols/persistence-and-recovery.md）：
  * (session_id, source) 唯一；只允许前进（相等幂等，倒退拒绝）；
  * 比较在 bigint 域完成；多 Source 的推进与 commitScene 同事务。
  */

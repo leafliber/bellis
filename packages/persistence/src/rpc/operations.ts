@@ -19,7 +19,7 @@ import { PersistenceError } from "../errors.js";
 import { z } from "zod";
 
 /**
- * 闭合 Operation 集合与双向编解码（P2 文档 §5.1）。
+ * 闭合 Operation 集合与双向编解码（docs/protocols/persistence-and-recovery.md）。
  *
  * - 输入侧（Client→Worker）与结果侧（Worker→Client）都有显式 Schema，
  *   两侧校验；解码失败稳定报错，不执行任何 SQL。

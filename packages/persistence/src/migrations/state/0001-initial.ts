@@ -1,7 +1,7 @@
 import type { MigrationDefinition } from "../definition.js";
 
 /**
- * state.db 0001：Phase 1 最小事实表（P2 文档 §7）。
+ * state.db 0001：Phase 1 最小事实表（docs/protocols/persistence-and-recovery.md）。
  *
  * - schema_migrations 由 Runner 的 bootstrap 独占创建（IF NOT EXISTS），
  *   版本化 Migration 内不再重复建表。

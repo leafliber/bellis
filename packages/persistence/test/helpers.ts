@@ -73,7 +73,7 @@ export function makeSessionRecord(overrides?: Partial<SessionRecord>): SessionRe
   return overrides === undefined ? base : ({ ...base, ...overrides } as SessionRecord);
 }
 
-/** 临时数据目录：成功/失败后都必须清理（P2 文档 §6.1）。 */
+/** 临时数据目录：成功/失败后都必须清理（docs/protocols/persistence-and-recovery.md）。 */
 export function createTempDataDirectory(prefix = "bellis-p2-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }

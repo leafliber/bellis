@@ -3,7 +3,7 @@ import type { MediaStreamRejectCode } from "../errors.js";
 import type { MediaFrame, MediaKindName } from "./frame-codec.js";
 
 /**
- * Media Stream Registry（phase-1-build-guide.md §8.4；P1 文档 §9.3）。
+ * Media Stream Registry（docs/phase-1-reference.md）。
  *
  * - Stream 必须先经 Control `media.stream.open` 注册（P4 在收到 accepted 的
  *   open 消息后调用 open()），才能收帧；Registry 绑定单一 Session。

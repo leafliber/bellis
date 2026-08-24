@@ -4,7 +4,7 @@ import { readInt, readText } from "./sqlite-port.js";
 import type { SqliteDatabase } from "./sqlite-port.js";
 
 /**
- * sessions 表：Session 生命周期与服务端 Seq 水位（P2 文档 §3.1、§3.3）。
+ * sessions 表：Session 生命周期与服务端 Seq 水位（docs/protocols/persistence-and-recovery.md）。
  * latest_server_seq 以无损十进制 TEXT 存取，只允许前进。
  */
 

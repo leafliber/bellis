@@ -3,7 +3,7 @@ import type { LogFields, LogLevel, LoggerPort } from "../logger.js";
 import { defineField, isSensitiveFieldName, redactValue } from "./redaction.js";
 
 /**
- * Pino Logger Factory：实现 Gate 1 的 LoggerPort（p3-observability-testkit.md §7.1）。
+ * Pino Logger Factory：实现 Gate 1 的 LoggerPort（docs/phase-1-reference.md）。
  *
  * - 每条日志包含 time、level、service、version、event；
  * - 所有字段（含子 Logger 固定字段）先经过字段级 Redaction 再交给 Pino，

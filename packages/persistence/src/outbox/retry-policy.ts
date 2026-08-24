@@ -1,5 +1,5 @@
 /**
- * Outbox 重试策略（P2 文档 §10.3）：有上限的指数退避 + 确定性抖动。
+ * Outbox 重试策略（docs/protocols/persistence-and-recovery.md）：有上限的指数退避 + 确定性抖动。
  *
  * 抖动由 (jitterSeed, attempts) 经整数散列确定性导出——相同种子下
  * 任意次重放得到相同序列，测试可精确断言 available_at_ms。

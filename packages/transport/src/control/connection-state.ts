@@ -1,5 +1,5 @@
 /**
- * Control 连接状态机（phase-1-build-guide.md §8.2）：
+ * Control 连接状态机（docs/phase-1-reference.md）：
  *
  * ```text
  * awaiting_client_hello → active → draining → closed

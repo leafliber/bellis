@@ -1,5 +1,5 @@
 /**
- * 确定性随机源（p3-observability-testkit.md §9.2）。
+ * 确定性随机源（docs/phase-1-reference.md）。
  *
  * 通过实例注入的最小随机接口（Outbox 抖动、性质测试），
  * 不引入全局 Math.random Mock；同一种子产生同一序列。

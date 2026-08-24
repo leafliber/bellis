@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, sep } from "node:path";
 
 /**
- * 安全临时数据目录（p3-observability-testkit.md §9.3）。
+ * 安全临时数据目录（docs/phase-1-reference.md）。
  *
  * - 只在系统临时目录内创建唯一子目录，返回绝对路径；
  * - cleanup() 幂等：目录缺失视为已清理，重复调用无副作用；

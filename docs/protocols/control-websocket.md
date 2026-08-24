@@ -1,7 +1,7 @@
 # Control WebSocket 协议（/ws/v1/control）
 
 > 状态：Phase 1 冻结 v1（实现：`@bellis/transport` P1）
-> 上位规范：[Phase 1 构建指导 §6.5/§8.2/§8.3](../phase-1-build-guide.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
+> 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
 > 姊妹文档：[Binary Media WebSocket](./binary-media-websocket.md)
 >
 > 本文档中的全部 `json control-envelope` 代码块由

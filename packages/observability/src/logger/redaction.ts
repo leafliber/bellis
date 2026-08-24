@@ -1,5 +1,5 @@
 /**
- * 字段级 Redaction（p3-observability-testkit.md §7.2）。
+ * 字段级 Redaction（docs/phase-1-reference.md）。
  *
  * 目标：敏感字段的原值绝不出现在日志序列化输出的任何位置，同时保证
  * 循环引用、Getter 抛错、超深对象、超大字段与 bigint 都被稳定处理，

@@ -1,5 +1,5 @@
 /**
- * Phase 1 指标定义（phase-1-build-guide.md §10.3、p3-observability-testkit.md §8.1）。
+ * Phase 1 指标定义（docs/phase-1-reference.md）。
  *
  * - 每个指标声明类型、说明与 Label Allowlist；未列入 Allowlist 的 Label
  *   会被 Registry 拒绝，从源头阻断高基数。

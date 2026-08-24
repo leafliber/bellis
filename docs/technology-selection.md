@@ -679,6 +679,8 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 
 ### 阶段二：演出纵向链路
 
+当前实施拆分、协议 Gate 与验收标准见 [Phase 2 开发指南](./phase-2-development-guide.md)。
+
 - 用 Fake Signal 和 Fake Model 产生 ActionFrame。
 - 打通 Action Compiler、Scene Director 和 Cue Timeline。
 - 实现 Stage、AudioWorklet、字幕和 Live2D Adapter。

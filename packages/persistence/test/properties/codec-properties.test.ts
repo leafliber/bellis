@@ -6,7 +6,7 @@ import { computeRetryDelayMs, deterministicJitter } from "../../src/outbox/retry
 import { CYCLE_ID, SCENE_ID, SESSION_ID, makeOutboxMessage, makeScene } from "../helpers.js";
 
 /**
- * fast-check 性质测试（P2 文档 §12.2，纯逻辑层）：
+ * fast-check 性质测试（docs/protocols/persistence-and-recovery.md，纯逻辑层）：
  * - 任意合法大整数经编解码（十进制字符串过线）保持等价。
  * - 任意水位更新序列在编解码往返后保持等价。
  * - 退避延迟对任意尝试次数都有界且确定性。

@@ -920,7 +920,11 @@ plugins/
 workers/
   python/
 docs/
+  README.md
   architecture-plan.md
+  technology-selection.md
+  phase-1-reference.md
+  phase-2-development-guide.md
   protocols/
   adr/
 ```
@@ -930,6 +934,10 @@ docs/
 项目按能够直接体验的纵向切片推进，而不是先建设完整抽象层。
 
 ### Milestone 1：可说、可看、可打断
+
+当前 Phase 2 只实现本 Milestone 的确定性演出骨架；范围边界和工作包见
+[Phase 2 开发指南](./phase-2-development-guide.md)。真实 Signal Hub、LLM
+Provider 与流式 TTS 在后续阶段接入。
 
 - Signal Hub 与一个模拟弹幕输入。
 - 单 Provider LLM Decision Loop。

@@ -1,5 +1,5 @@
 /**
- * Migration 定义（P2 文档 §6.2）。
+ * Migration 定义（docs/protocols/persistence-and-recovery.md）。
  *
  * SQL 文本内嵌在版本化 TS 模块中而不是独立 .sql 文件：tsc 不会复制 .sql
  * 到 dist，而 Migration 必须随包产物发布（“构建必须确保 SQL 文件进入包

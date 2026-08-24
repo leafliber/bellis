@@ -3,7 +3,7 @@ import type { Phase1SessionSnapshot } from "@bellis/contracts";
 import type { RecoveryState } from "@bellis/persistence";
 
 /**
- * 恢复与快照构造（P4 文档 §9/§14.3）。
+ * 恢复与快照构造（docs/phase-1-reference.md）。
  *
  * - 重连 Replay Gap：由 P2 `readRecoveryState` 构造 `Phase1SessionSnapshot`。
  * - Phase 1 固定限制：`activeScene` 恒为 `null`，`openMediaStreams` 恒为空

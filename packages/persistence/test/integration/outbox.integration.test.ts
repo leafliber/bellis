@@ -17,7 +17,7 @@ import {
 } from "../helpers.js";
 
 /**
- * Outbox 状态机集成测试（P2 文档 §12.3-5/6/7/8）：
+ * Outbox 状态机集成测试（docs/protocols/persistence-and-recovery.md）：
  * 条件更新、退避重试、Dead Letter、Lease 重启恢复与 Dispatcher 编排。
  */
 

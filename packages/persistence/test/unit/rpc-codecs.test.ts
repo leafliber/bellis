@@ -18,7 +18,7 @@ import {
   makeScene,
 } from "../helpers.js";
 
-/** RPC 编解码单元测试（P2 文档 §12.1）。 */
+/** RPC 编解码单元测试（docs/protocols/persistence-and-recovery.md）。 */
 
 describe("operation 集合", () => {
   it("闭合集合：已知操作被识别，任意方法名被拒绝", () => {

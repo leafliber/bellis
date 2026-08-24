@@ -2,7 +2,7 @@ import { parseDecimalString } from "@bellis/contracts";
 import type { ServerControlEnvelope } from "@bellis/contracts";
 
 /**
- * 服务端消息的有界 Replay Window（phase-1-build-guide.md §8.2；ADR 0001 §3）。
+ * 服务端消息的有界 Replay Window（docs/phase-1-reference.md；ADR 0001 §3）。
  *
  * - 每条服务端消息按分配顺序追加；窗口容量固定（默认 512），满时淘汰最旧。
  * - latestAssignedSeq 是单调计数器，不随剪枝回退；Session 可用它恢复 Seq 基线。

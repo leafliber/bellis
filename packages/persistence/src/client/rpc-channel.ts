@@ -20,7 +20,7 @@ import type {
 } from "../rpc/operations.js";
 
 /**
- * 主线程 RPC 通道（P2 文档 §5.1）。
+ * 主线程 RPC 通道（docs/protocols/persistence-and-recovery.md）。
  *
  * - requestId 关联响应；未知/迟到响应丢弃并记录诊断事件。
  * - Deadline：客户端定时器 + Envelope deadlineUs（Worker 事务开始前检查）。
