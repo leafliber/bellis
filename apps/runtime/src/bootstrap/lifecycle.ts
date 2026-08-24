@@ -17,6 +17,9 @@ import type {
 import { createInMemoryMetrics, createPinoLogger } from "@bellis/observability";
 import { SystemMonotonicClock } from "@bellis/transport";
 import { FakeSceneCommitService } from "../application/commit-fake-scene.js";
+import { PHASE_2_PCM_CONTENT_TYPE } from "@bellis/contracts";
+import { Phase2RuntimeHost } from "../application/phase-2/host.js";
+import { PersistenceSceneRepository } from "../application/phase-2/stage-port-adapter.js";
 import type {
   ControlBroadcast,
   FakeSceneCommitInput,
@@ -119,6 +122,8 @@ export interface RuntimeHandle {
   readonly status: RuntimeStatus;
   /** 签发一次性启动 Token（测试/开发装配用；原值只在此返回，不落日志）。 */
   issueStartupToken(): { token: string; expiresAtMs: number };
+  /** Phase 2 演出宿主（显式启用时非 null；开发/Demo 装配入口）。 */
+  readonly phase2: Phase2RuntimeHost | null;
   /** Fake Scene Commit Application Port（仅协议验证；无外部副作用）。 */
   commitFakeScene(
     input: FakeSceneCommitInput,
@@ -283,6 +288,36 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
   });
   const sessions = new LocalSessionService({ tokens, store, persistence, logger });
 
+  // Phase 2 演出宿主（显式启用的开发/Demo 装配；生产默认不创建）。
+  const startupTraceId = crypto.randomUUID().replaceAll("-", "").slice(0, 31) + "0";
+  let phase2Host: Phase2RuntimeHost | null = null;
+  if (config.phase2.enabled) {
+    phase2Host = new Phase2RuntimeHost({
+      sessionId: config.phase2.sessionId ?? "00000000-0000-4000-8000-000000000000",
+      capabilities: {
+        schemaVersion: 1,
+        audio: {
+          contentTypes: [PHASE_2_PCM_CONTENT_TYPE],
+          maxBufferedUs: "2000000",
+        },
+        subtitle: { supported: true },
+        avatar: { adapter: "fake-demo", motions: ["nod_agree"], expressions: ["happy"] },
+      },
+      clock,
+      wallClockMs: () => Date.now(),
+      compileIds: { nextId: () => crypto.randomUUID() },
+      recordId: () => crypto.randomUUID(),
+      repository: new PersistenceSceneRepository({
+        client: {
+          commitScene: async (input) => persistence.commitScene(input as never),
+          appendRecord: async (input) => persistence.appendRecord(input as never),
+        },
+        traceId: startupTraceId,
+        newRecordId: () => crypto.randomUUID(),
+      }),
+    });
+  }
+
   let app: Awaited<ReturnType<typeof buildServer>> | null = null;
   let dispatcher: OutboxDispatcher | null = null;
   try {
@@ -313,6 +348,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       origins,
       requestTraces,
       connections,
+      ...(phase2Host === null ? {} : { phase2: phase2Host }),
     });
     await app.listen({
       host: config.host === "localhost" ? "127.0.0.1" : config.host,
@@ -363,6 +399,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
    * 期间既不得继续执行已有 Commit 任务，也不得继续领取/发布 Outbox。
    */
   const closeSteps: Array<{ name: string; run: () => Promise<void> | void }> = [
+    {
+      name: "phase2-host",
+      run: () => phase2Host?.close() ?? Promise.resolve(),
+    },
     {
       name: "stop-listen",
       run: () => {
@@ -474,6 +514,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     instanceId,
     status,
     issueStartupToken: () => tokens.issue(),
+    phase2: phase2Host,
     commitFakeScene: (input, signal) => {
       if (closeStarted || status.phase !== "ready") {
         return Promise.reject(new ApplicationError("not_ready", "runtime is shutting down"));

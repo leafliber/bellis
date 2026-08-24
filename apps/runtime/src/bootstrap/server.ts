@@ -17,6 +17,8 @@ import type { RuntimeConfig } from "./config.js";
 import { normalizeHostHeader } from "./config.js";
 import type { ConnectionMetrics } from "../websocket/connection-metrics.js";
 import { ControlConnection } from "../websocket/control-adapter.js";
+import type { ClientControlEnvelope } from "@bellis/contracts";
+import type { Phase2RuntimeHost } from "../application/phase-2/host.js";
 import { MediaConnection } from "../websocket/media-adapter.js";
 import type { ControlResumePlan } from "../websocket/control-adapter.js";
 import type { LogicalSession } from "../websocket/session-store.js";
@@ -43,6 +45,8 @@ export interface ServerContext {
   readonly origins: OriginAllowlist;
   readonly requestTraces: RequestTraceStore;
   readonly connections: ConnectionMetrics;
+  /** Phase 2 演出宿主（显式启用的开发/Demo 装配；缺省不挂接）。 */
+  readonly phase2?: Phase2RuntimeHost;
 }
 
 const UNAUTHORIZED_CLOSE = 1008;
@@ -235,6 +239,7 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
     }
     // ControlConnection 同步挂接 Socket 监听并内部缓冲 resume 解析期间的
     // 入站消息（Upgrade 与异步加载之间零丢失）。
+    const phase2 = ctx.phase2;
     const connection = new ControlConnection({
       socket,
       logical,
@@ -255,7 +260,20 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
         sendFlushTimeoutMs: ctx.config.limits.sendFlushTimeoutMs,
       },
       loadResume: () => loadControlResume(ctx, logical),
+      ...(phase2 === undefined
+        ? {}
+        : {
+            onStageMessage: (envelope: ClientControlEnvelope, nowUs: bigint) => {
+              phase2.handleStageMessage(envelope, nowUs);
+            },
+          }),
     });
+    if (phase2 !== undefined) {
+      phase2.attachConnection(connection, logical.sessionId);
+      socket.on("close", () => {
+        phase2.detachConnection(connection);
+      });
+    }
     connection.start();
   });
 

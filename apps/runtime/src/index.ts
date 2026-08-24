@@ -40,6 +40,25 @@ export type {
   FakeSceneCommitResult,
 } from "./application/commit-fake-scene.js";
 export { buildSessionSnapshot } from "./application/recovery.js";
+export { Phase2RuntimeHost } from "./application/phase-2/host.js";
+export type { Phase2HostOptions } from "./application/phase-2/host.js";
+export { Phase2PerformanceService } from "./application/phase-2/performance-service.js";
+export type {
+  Phase2PerformanceServiceOptions,
+  SignalSubmission,
+  SubmissionOutcome,
+} from "./application/phase-2/performance-service.js";
+export { runFakeModel } from "./application/phase-2/fake-model.js";
+export type { FakeModelFixture, FakeModelScenario } from "./application/phase-2/fake-model.js";
+export { synthesizeSpeech, frameAt } from "./application/phase-2/fake-tts.js";
+export type { FakeTtsResult } from "./application/phase-2/fake-tts.js";
+export { RuntimeMediaSender } from "./application/phase-2/media-sender.js";
+export type { MediaSenderLimits, OutboundMediaFrame } from "./application/phase-2/media-sender.js";
+export {
+  PersistenceSceneRepository,
+  ControlStagePortAdapter,
+} from "./application/phase-2/stage-port-adapter.js";
+export type { ControlChannel } from "./application/phase-2/stage-port-adapter.js";
 export type { SnapshotReason } from "./application/recovery.js";
 export { createRecordingOutboxPublisher } from "./application/outbox-publisher.js";
 export type {

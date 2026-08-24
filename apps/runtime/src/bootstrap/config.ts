@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { UuidSchema } from "@bellis/contracts";
 import type { LogLevel } from "@bellis/observability";
 
 /**
@@ -107,6 +108,17 @@ const RuntimeConfigSchema = z
     persistence: z
       .object({
         defaultDeadlineMs: PositiveInt(120_000).default(10_000),
+      })
+      .prefault({}),
+    /**
+     * Phase 2 演出链路（开发/测试/Demo 装配，默认关闭）：启用后
+     * startRuntime 创建 Phase2RuntimeHost 并挂接 Stage 连接；生产默认
+     * 路径不装配任何 Phase 2 输入入口（docs/phase-2-development-guide.md §9.1）。
+     */
+    phase2: z
+      .object({
+        enabled: z.boolean().default(false),
+        sessionId: UuidSchema.optional(),
       })
       .prefault({}),
   })

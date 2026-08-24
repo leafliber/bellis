@@ -314,6 +314,34 @@ export class ControlConnection {
    * 在线上反超尚未写出的 prepared（P3）。返回写出结果与**本连接代际**；
    * `onlyConnectionId` 指定其它代际时拒绝发布（二轮评审修复 4）。
    */
+  /**
+   * Phase 2 演出命令发送（scene.prepare/commit/cancel/媒体声明，兼容新增）：
+   * 同 broadcast 的入队路径，但同步返回是否入队成功（StagePort 适配器
+   * 需要即时判定"确定性发送失败"）。仅由 Phase 2 装配使用。
+   */
+  sendPhase2Message(message: {
+    readonly type: string;
+    readonly payload: unknown;
+    readonly traceId: string;
+  }): boolean {
+    const session = this.#session;
+    if (session === null) {
+      return false;
+    }
+    const result: ServerEnqueueResult = session.enqueueServerMessage({
+      type: message.type,
+      payload: message.payload,
+      messageId: crypto.randomUUID(),
+      trace: { traceId: message.traceId },
+      sentAtUs: this.#clock.nowUs(),
+    });
+    if (result.status !== "queued") {
+      return false;
+    }
+    void this.#pump();
+    return true;
+  }
+
   async broadcast(
     message: {
       readonly type: string;

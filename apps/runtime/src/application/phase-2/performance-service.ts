@@ -62,10 +62,12 @@ export class Phase2PerformanceService {
   readonly #director: SceneDirector;
   readonly #stagePort: ControlStagePortAdapter;
   readonly #options: Phase2PerformanceServiceOptions;
+  #sessionId: string;
   readonly #activeScenes = new Map<string, { cycleId: string; startedAt: bigint | null }>();
 
   constructor(options: Phase2PerformanceServiceOptions) {
     this.#options = options;
+    this.#sessionId = options.sessionId;
     this.#stagePort = new ControlStagePortAdapter({
       channel: options.channel,
       clock: options.clock,
@@ -127,7 +129,7 @@ export class Phase2PerformanceService {
       startedAt: null,
     });
     const handle = this.#director.submit(compile.plan, {
-      sessionId: this.#options.sessionId,
+      sessionId: this.#sessionId,
       idempotencyKey: `phase2:${compile.plan.scene.sceneId}`,
       requestFingerprint: `phase2:${packet.cycleId}:${compile.plan.cues.length}`,
     });
@@ -209,7 +211,10 @@ export class Phase2PerformanceService {
   }
 
   /** Stage 连接出现（clientType=stage 的活跃连接）。 */
-  markStageConnected(): void {
+  markStageConnected(sessionId?: string): void {
+    if (sessionId !== undefined && sessionId !== this.#sessionId) {
+      this.#sessionId = sessionId;
+    }
     this.#stagePort.markConnected();
   }
 
