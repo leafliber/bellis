@@ -20,7 +20,7 @@ export const PHASE_2_PCM_BYTES_PER_SAMPLE = 2;
 /** 每帧 20 ms = 960 样本。 */
 export const PHASE_2_PCM_SAMPLES_PER_FRAME = 960;
 
-export const PHASE_2_PCM_FRAME_DURATION_US = 20_000;
+export const PHASE_2_PCM_FRAME_DURATION_US = 20_000n;
 
 /** 960 样本 × 2 字节 = 1920 字节。 */
 export const PHASE_2_PCM_FRAME_BYTES = PHASE_2_PCM_SAMPLES_PER_FRAME * PHASE_2_PCM_BYTES_PER_SAMPLE;

@@ -19,7 +19,7 @@ export interface LanePrepareResult {
 export interface StageLaneAdapter {
   readonly lane: CueLane;
   /** Prepare：只允许验证与缓冲资源；signal 触发即放弃并释放。 */
-  prepare(cues: readonly Cue[], signal: AbortSignal): Promise<LanePrepareResult>;
+  prepare(sceneId: string, cues: readonly Cue[], signal: AbortSignal): Promise<LanePrepareResult>;
   /** 生效：atStageUs 为映射后的本地目标时刻（到达或已过）。 */
   start(sceneId: string, atStageUs: bigint, cues: readonly Cue[]): Promise<void>;
   /** 停止并释放（取消/关闭路径）；reason 为稳定机器码。 */

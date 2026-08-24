@@ -137,7 +137,7 @@ export class SceneClient {
         if (scene.controller.signal.aborted) {
           return { lane, status: "unavailable", reason: "cancelled", cueIds: [] } as const;
         }
-        const outcome = await adapter.prepare(cues, scene.controller.signal).catch(() => ({
+        const outcome = await adapter.prepare(sceneId, cues, scene.controller.signal).catch(() => ({
           ready: false,
           reason: "prepare_failed",
         }));

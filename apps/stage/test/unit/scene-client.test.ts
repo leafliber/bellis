@@ -58,8 +58,8 @@ class FakeLane implements StageLaneAdapter {
 
   constructor(readonly lane: CueLane) {}
 
-  async prepare(_cues: readonly Cue[], signal: AbortSignal) {
-    this.commands.push(`prepare:${this.lane}`);
+  async prepare(sceneId: string, _cues: readonly Cue[], signal: AbortSignal) {
+    this.commands.push(`prepare:${this.lane}:${sceneId.slice(-4)}`);
     if (signal.aborted) {
       return { ready: false, reason: "cancelled" };
     }
@@ -168,8 +168,8 @@ describe("SceneClient", () => {
       expect.objectContaining({ lane: "subtitle", status: "ready" }),
     ]);
     // Prepare 只缓冲：没有任何 start。
-    expect(h.audio.commands).toEqual(["prepare:audio"]);
-    expect(h.subtitle.commands).toEqual(["prepare:subtitle"]);
+    expect(h.audio.commands).toEqual(["prepare:audio:4444"]);
+    expect(h.subtitle.commands).toEqual(["prepare:subtitle:4444"]);
   });
 
   it("Lane 准备失败：unavailable + 原因码上报，不阻塞其他 Lane 报告", async () => {
@@ -195,7 +195,7 @@ describe("SceneClient", () => {
     h.client.handleCommit(PLAN.scene.sceneId, 1_250_000n); // 本地目标 = 1_000_000µs
     await flush();
     // 目标在未来：到点前绝不启动（Commit 前零副作用在 Stage 侧同样成立）。
-    expect(h.audio.commands).toEqual(["prepare:audio"]);
+    expect(h.audio.commands).toEqual(["prepare:audio:4444"]);
     h.clock.advanceBy(1_000_000n);
     await flush();
     await flush();
