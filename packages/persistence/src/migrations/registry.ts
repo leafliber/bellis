@@ -1,4 +1,5 @@
 import { stateInitial } from "./state/0001-initial.js";
+import { statePhase2ScenePlan } from "./state/0002-phase2-scene-plan.js";
 import { telemetryInitial } from "./telemetry/0001-initial.js";
 import { validateMigrationRegistry } from "./definition.js";
 import type { MigrationDefinition } from "./definition.js";
@@ -10,7 +11,10 @@ import type { MigrationDefinition } from "./definition.js";
  * 已合入 Migration 不允许原地改写：checksum 会失配并拒绝启动。
  */
 
-export const STATE_MIGRATIONS: readonly MigrationDefinition[] = [stateInitial];
+export const STATE_MIGRATIONS: readonly MigrationDefinition[] = [
+  stateInitial,
+  statePhase2ScenePlan,
+];
 export const TELEMETRY_MIGRATIONS: readonly MigrationDefinition[] = [telemetryInitial];
 
 export function prepareRegistry(

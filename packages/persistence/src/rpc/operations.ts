@@ -1,6 +1,7 @@
 import {
   DecimalStringSchema,
   OutboxMessageSchema,
+  ScenePlanSchema,
   SceneSchema,
   SessionRecordSchema,
   TraceIdSchema,
@@ -8,7 +9,7 @@ import {
   formatDecimalString,
   parseDecimalString,
 } from "@bellis/contracts";
-import type { OutboxMessage, Scene } from "@bellis/contracts";
+import type { OutboxMessage, Scene, ScenePlan } from "@bellis/contracts";
 import type {
   CommitSceneResult,
   CompleteOutboxInput,
@@ -70,6 +71,8 @@ export interface OperationInputs {
     readonly cycleId: string;
     readonly sessionId: string;
     readonly scene: Scene;
+    /** Phase 2：可选完整 ScenePlan（写入 scenes.plan_json）。 */
+    readonly plan?: ScenePlan;
     readonly idempotencyKey: string;
     readonly requestFingerprint: string;
     readonly watermarks: ReadonlyArray<{ source: string; watermark: bigint }>;
@@ -129,6 +132,8 @@ const CommitScenePayloadSchema = z.object({
   cycleId: UuidSchema,
   sessionId: UuidSchema,
   scene: SceneSchema,
+  /** Phase 2 兼容新增：完整编译计划（scene-execution.md §9）。 */
+  plan: ScenePlanSchema.optional(),
   idempotencyKey: FingerprintSchema,
   requestFingerprint: FingerprintSchema,
   watermarks: z.array(WatermarkEntryJsonSchema),
@@ -248,6 +253,7 @@ export function encodeOperationPayload(message: OperationRequest): Record<string
         cycleId: message.input.cycleId,
         sessionId: message.input.sessionId,
         scene: message.input.scene,
+        ...(message.input.plan === undefined ? {} : { plan: message.input.plan }),
         idempotencyKey: message.input.idempotencyKey,
         requestFingerprint: message.input.requestFingerprint,
         watermarks: message.input.watermarks.map((entry) => ({
@@ -317,6 +323,7 @@ export function decodeOperationPayload(
           cycleId: parsed.cycleId,
           sessionId: parsed.sessionId,
           scene: parsed.scene,
+          ...(parsed.plan === undefined ? {} : { plan: parsed.plan }),
           idempotencyKey: parsed.idempotencyKey,
           requestFingerprint: parsed.requestFingerprint,
           watermarks: parsed.watermarks.map((entry) => ({

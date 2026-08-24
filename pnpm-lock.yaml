@@ -35,6 +35,9 @@ importers:
       '@bellis/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
+      '@bellis/scene-runtime':
+        specifier: workspace:*
+        version: link:../../packages/scene-runtime
       '@bellis/transport':
         specifier: workspace:*
         version: link:../../packages/transport

@@ -239,6 +239,9 @@ export class WorkerOperationRuntime {
       if (scene.sceneId !== input.sceneId || scene.cycleId !== input.cycleId) {
         throw new PersistenceError("scene_invalid", "scene payload ids do not match the request");
       }
+      if (input.plan !== undefined && input.plan.scene.sceneId !== input.sceneId) {
+        throw new PersistenceError("scene_invalid", "plan scene id does not match the request");
+      }
 
       const commitOrdinal = nextCommitOrdinal(state, input.sessionId);
       const aggregateId = `scene-commit:${input.sessionId}`;
@@ -267,6 +270,7 @@ export class WorkerOperationRuntime {
         committedAtMs: nowMs,
         schemaVersion: scene.schemaVersion,
         payloadJson: JSON.stringify(scene),
+        planJson: input.plan === undefined ? null : JSON.stringify(input.plan),
         idempotencyKey: input.idempotencyKey,
       });
       advanceWatermarks(state, input.sessionId, input.watermarks, nowMs);

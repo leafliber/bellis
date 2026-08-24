@@ -1,7 +1,13 @@
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { OutboxMessage, Scene, SessionRecord, TraceContext } from "@bellis/contracts";
+import type {
+  OutboxMessage,
+  Scene,
+  ScenePlan,
+  SessionRecord,
+  TraceContext,
+} from "@bellis/contracts";
 import { createNoopLogger } from "@bellis/observability";
 import type { LoggerPort } from "@bellis/observability";
 import type {
@@ -44,6 +50,8 @@ export interface CommitSceneInput {
   readonly sessionId: string;
   /** 完整版本化 Scene Payload；Worker 验证 sceneId/cycleId 一致后写入 scenes.payload_json。 */
   readonly scene: Scene;
+  /** Phase 2 兼容新增：完整编译计划写入 scenes.plan_json（Migration 0002）。 */
+  readonly plan?: ScenePlan;
   readonly idempotencyKey: string;
   /** 请求摘要：同一幂等键携带不同摘要时返回冲突错误。 */
   readonly requestFingerprint: string;

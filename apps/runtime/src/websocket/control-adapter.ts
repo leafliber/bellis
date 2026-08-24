@@ -85,6 +85,13 @@ export interface ControlConnectionOptions {
    * 抛错**（连接以 1011 失败关闭），不得降级为全新 Session。
    */
   readonly loadResume: () => Promise<ControlResumePlan>;
+  /**
+   * Phase 2 演出消息回调（兼容新增）：stage.capabilities / scene.ready /
+   * scene.started / scene.finished / scene.cancel.ack / media.stream.ready
+   * 交给应用层（Phase2PerformanceService 的 StagePort 适配器）；未注册时
+   * 这些消息按未知业务类型静默忽略（不影响 Phase 1 行为）。
+   */
+  readonly onStageMessage?: (envelope: ClientControlEnvelope, nowUs: bigint) => void;
 }
 
 type SendWaiter = (outcome: BroadcastOutcome) => void;
@@ -108,6 +115,7 @@ export class ControlConnection {
   readonly #runtimeVersion: string;
   readonly #limits: ControlLimits;
   readonly #resumeLoader: () => Promise<ControlResumePlan>;
+  readonly #stageMessageHandler: ((envelope: ClientControlEnvelope, nowUs: bigint) => void) | null;
   readonly #pumpAbort = new AbortController();
   readonly #sendWaiters = new Map<string, SendWaiter[]>();
   /** 连接代际标识（二轮评审修复 4）：prepared/committed 必须同代际送达。 */
@@ -136,6 +144,7 @@ export class ControlConnection {
     this.#runtimeVersion = options.runtimeVersion;
     this.#limits = options.limits;
     this.#resumeLoader = options.loadResume;
+    this.#stageMessageHandler = options.onStageMessage ?? null;
     // 注意：不在构造器清空 exportedControlState——loader 稍后读取它
     // （构造先于异步加载执行，提前清空会丢失同进程 resume 状态）。
     options.logical.control = this;
@@ -531,6 +540,20 @@ export class ControlConnection {
         trace: { traceId: envelope.trace.traceId },
         sentAtUs: nowUs,
       });
+      return;
+    }
+    // Phase 2 演出回执（scene-execution.md）：Envelope 已通过全量校验，
+    // 应用层按 type 分发；未知业务类型静默忽略。
+    const STAGE_MESSAGE_TYPES: readonly string[] = [
+      "stage.capabilities",
+      "scene.ready",
+      "scene.started",
+      "scene.finished",
+      "scene.cancel.ack",
+      "media.stream.ready",
+    ];
+    if (STAGE_MESSAGE_TYPES.includes(envelope.type)) {
+      this.#stageMessageHandler?.(envelope, nowUs);
     }
   }
 

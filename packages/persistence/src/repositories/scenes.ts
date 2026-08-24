@@ -32,6 +32,8 @@ export function insertSceneRow(
     readonly committedAtMs: number;
     readonly schemaVersion: number;
     readonly payloadJson: string;
+    /** Phase 2 完整编译计划（0002 列；Phase 1 行为 NULL）。 */
+    readonly planJson: string | null;
     readonly idempotencyKey: string;
   },
 ): void {
@@ -39,8 +41,8 @@ export function insertSceneRow(
     db.prepare(
       `INSERT INTO scenes
          (scene_id, cycle_id, session_id, status, commit_ordinal, committed_at_ms,
-          schema_version, payload_json, idempotency_key)
-       VALUES (?, ?, ?, 'committed', ?, ?, ?, ?, ?)`,
+          schema_version, payload_json, plan_json, idempotency_key)
+       VALUES (?, ?, ?, 'committed', ?, ?, ?, ?, ?, ?)`,
     ).run(
       input.sceneId,
       input.cycleId,
@@ -49,6 +51,7 @@ export function insertSceneRow(
       input.committedAtMs,
       input.schemaVersion,
       input.payloadJson,
+      input.planJson,
       input.idempotencyKey,
     );
   } catch (error) {
