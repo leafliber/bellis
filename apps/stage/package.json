@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "lint": "oxlint src test",
-    "format:check": "oxfmt --check src test"
+    "format:check": "oxfmt --check src test",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@bellis/contracts": "workspace:*",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@bellis/testkit": "workspace:*",
+    "@playwright/test": "^1.62.1",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.1.0",

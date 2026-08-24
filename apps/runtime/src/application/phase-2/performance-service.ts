@@ -68,8 +68,13 @@ export interface Phase2AuditPort {
   }): Promise<void>;
 }
 
-/** 出站流首帧目标提前量：须 ≤ Director commitLeadMs（提前缓冲，不超前播放）。 */
-const DEFAULT_MEDIA_START_LEAD_US = 150_000n;
+/**
+ * 出站流首帧目标提前量：须 ≤ Director commitLeadMs（提前缓冲，不超前
+ * 播放）。取值权衡：越大播放前缓冲越足，但音频 Lane 的预缓冲达标
+ * （prepare 语义）越晚——100ms 在 48k/20ms 帧下于 prepare 预算内
+ * 完成 6 帧预缓冲且 commit 后仍有 ~300ms 缓冲提前量。
+ */
+const DEFAULT_MEDIA_START_LEAD_US = 100_000n;
 
 export interface Phase2PerformanceServiceOptions {
   readonly sessionId: string;

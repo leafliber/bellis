@@ -8,7 +8,13 @@ import { defineConfig } from "vite";
  * - dev 代理：BELLIS_RUNTIME_PROXY=http://127.0.0.1:PORT 时把 /api 与
  *   /ws 转发到 Runtime（E2E 走 Vite 源码路径；Cookie/Origin 同源）。
  */
-const runtimeProxy = process.env.BELLIS_RUNTIME_PROXY;
+const runtimeProxyEnv = process.env.BELLIS_RUNTIME_PROXY;
+// 接受完整 URL 或 host:port。
+const runtimeProxy = runtimeProxyEnv?.includes("://")
+  ? runtimeProxyEnv
+  : runtimeProxyEnv === undefined
+    ? undefined
+    : `http://${runtimeProxyEnv}`;
 
 export default defineConfig({
   plugins: [react()],
@@ -18,8 +24,11 @@ export default defineConfig({
       ? {}
       : {
           proxy: {
-            "/api": { target: `http://${runtimeProxy}`, changeOrigin: false },
-            "/ws": { target: `ws://${runtimeProxy}`, ws: true },
+            "/api": { target: runtimeProxy, changeOrigin: true },
+            "/ws": {
+              target: runtimeProxy.replace(/^http/, "ws"),
+              ws: true,
+            },
           },
         },
   build: {

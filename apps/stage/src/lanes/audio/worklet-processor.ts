@@ -29,9 +29,17 @@ interface WorkletPort {
   onmessage: ((event: { data: unknown }) => void) | null;
 }
 
-declare abstract class AudioWorkletProcessorBase {
-  readonly port: WorkletPort;
-}
+/**
+ * 处理器基类取自 Worklet 全局作用域的 AudioWorkletProcessor（运行期由
+ * 浏览器提供；编译期以构造器类型描述）。不能用 `declare abstract class`
+ * ——declare 声明会被整体擦除，产物里的 extends 将指向不存在的绑定，
+ * registerProcessor 不会注册处理器（AudioWorkletNode 构造失败）。
+ */
+const ProcessorBase = (
+  globalThis as unknown as {
+    AudioWorkletProcessor: abstract new () => { readonly port: WorkletPort };
+  }
+).AudioWorkletProcessor;
 
 const PROTOCOL_VERSION = 1;
 
@@ -43,7 +51,7 @@ const state: WorkletState = {
   buffer: new PcmSceneBuffer({ maxBufferedUs: 2_000_000n, sampleRateHz: 48_000 }),
 };
 
-class PcmSceneProcessor extends AudioWorkletProcessorBase {
+class PcmSceneProcessor extends ProcessorBase {
   #underrunsReported = 0;
 
   constructor() {

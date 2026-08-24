@@ -51,9 +51,23 @@ export interface SceneClientOptions {
   readonly clockEstimate: () => ClockEstimate | null;
   /** 发送回执/报告（StageControlClient.sendClient 的封装）。 */
   readonly send: (type: string, payload: unknown) => boolean;
-  readonly onEvent?: (event: { sceneId: string; state: SceneClientState; reason?: string }) => void;
+  readonly onEvent?: (event: {
+    sceneId: string;
+    state: SceneClientState;
+    reason?: string;
+    /** scheduled 事件：映射后的本地目标时刻（对账/偏差诊断）。 */
+    targetLocalUs?: bigint;
+  }) => void;
   /** plan.speech 文本 → 字幕 Lane（Prepare 阶段暂存，Commit 才可见）。 */
   readonly speechPublisher?: SpeechTextPublisher;
+  /** Lane 生效时刻（started 上报时；偏差指标的浏览器侧事实来源）。 */
+  readonly onLaneStarted?: (report: {
+    readonly sceneId: string;
+    readonly lane: string;
+    readonly targetLocalUs: bigint;
+    readonly startedAtStageUs: bigint;
+    readonly late: boolean;
+  }) => void;
   /** commit 迟到容忍（微秒，默认 20ms：来不及安全启动 hard lane 即 late）。 */
   readonly lateCommitToleranceUs?: bigint;
 }
@@ -65,6 +79,7 @@ export class SceneClient {
   readonly #clockEstimate: () => ClockEstimate | null;
   readonly #send: (type: string, payload: unknown) => boolean;
   readonly #onEvent: SceneClientOptions["onEvent"];
+  readonly #onLaneStarted: SceneClientOptions["onLaneStarted"];
   readonly #speechPublisher: SpeechTextPublisher | null;
   readonly #lateToleranceUs: bigint;
   readonly #scenes = new Map<string, PreparedScene>();
@@ -76,6 +91,7 @@ export class SceneClient {
     this.#clockEstimate = options.clockEstimate;
     this.#send = options.send;
     this.#onEvent = options.onEvent;
+    this.#onLaneStarted = options.onLaneStarted;
     this.#speechPublisher = options.speechPublisher ?? null;
     this.#lateToleranceUs = options.lateCommitToleranceUs ?? 20_000n;
   }
@@ -212,6 +228,13 @@ export class SceneClient {
         critical: criticalLanes.has(lane),
         fire: ({ late }: { late: boolean }) => {
           const startedAtStageUs = this.#clock.nowUs();
+          this.#onLaneStarted?.({
+            sceneId,
+            lane,
+            targetLocalUs,
+            startedAtStageUs,
+            late,
+          });
           this.#send("scene.started", {
             sceneId,
             cycleId: scene.plan.scene.cycleId,
@@ -245,7 +268,7 @@ export class SceneClient {
       })),
     );
     scene.state = "scheduled";
-    this.#emit(sceneId, "scheduled");
+    this.#emit(sceneId, "scheduled", undefined, targetLocalUs);
   }
 
   /** scene.cancel：取消调度并停止/释放全部 Lane，随后 ack。 */
@@ -346,8 +369,13 @@ export class SceneClient {
     );
   }
 
-  #emit(sceneId: string, state: SceneClientState, reason?: string): void {
-    this.#onEvent?.({ sceneId, state, ...(reason === undefined ? {} : { reason }) });
+  #emit(sceneId: string, state: SceneClientState, reason?: string, targetLocalUs?: bigint): void {
+    this.#onEvent?.({
+      sceneId,
+      state,
+      ...(reason === undefined ? {} : { reason }),
+      ...(targetLocalUs === undefined ? {} : { targetLocalUs }),
+    });
   }
 }
 

@@ -1,4 +1,3 @@
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { StagePage } from "./StagePage.js";
 
@@ -19,9 +18,8 @@ function resolveProfile(): string {
 
 const root = document.getElementById("stage-root");
 if (root !== null) {
-  createRoot(root).render(
-    <StrictMode>
-      <StagePage profile={resolveProfile()} />
-    </StrictMode>,
-  );
+  // 不使用 StrictMode：一次性 startup token 的认证引导无法承受开发态
+  // 双挂载（第二次 mount 复用已消费 token 必然 401）；连接生命周期由
+  // StageApp 单元测试与 pagehide 清理覆盖。
+  createRoot(root).render(<StagePage profile={resolveProfile()} />);
 }

@@ -20,12 +20,11 @@ import type { AudioEnvironment, WorkletMessage } from "./audio-lane.js";
 const WORKLET_PROCESSOR_NAME = "bellis-pcm-scene";
 
 function workletModuleUrl(): string {
-  // import.meta.env.BASE_URL 在 build（base=/stage/）下是 "/stage/"，
-  // dev 下是 "/"。
-  if (import.meta.env.DEV) {
-    return "/src/lanes/audio/worklet-processor.ts";
-  }
-  return `${import.meta.env.BASE_URL}worklet/bellis-pcm-scene.js`;
+  // dev：Vite 服务 TS 源（按需转换）；build：独立 lib 产物。两者都必须
+  // 挂在 base（/stage/）下——AudioWorklet 的模块解析不允许跳出 base。
+  return import.meta.env.DEV
+    ? `${import.meta.env.BASE_URL}src/lanes/audio/worklet-processor.ts`
+    : `${import.meta.env.BASE_URL}worklet/bellis-pcm-scene.js`;
 }
 
 export class BrowserAudioEnvironment implements AudioEnvironment {
@@ -34,6 +33,12 @@ export class BrowserAudioEnvironment implements AudioEnvironment {
   #moduleLoaded = false;
   #workletHandler: ((message: WorkletMessage) => void) | null = null;
   #closed = false;
+  #lastError: string | null = null;
+
+  /** 最近一次 Arm/ensureNode 错误（诊断句柄暴露给 E2E）。 */
+  get lastError(): string | null {
+    return this.#lastError;
+  }
 
   async arm(): Promise<boolean> {
     if (this.#closed) {
@@ -42,7 +47,8 @@ export class BrowserAudioEnvironment implements AudioEnvironment {
     if (this.#context === null) {
       try {
         this.#context = new AudioContext({ sampleRate: 48_000, latencyHint: "interactive" });
-      } catch {
+      } catch (error) {
+        this.#lastError = `context:${String(error)}`;
         return false;
       }
     }
@@ -65,14 +71,25 @@ export class BrowserAudioEnvironment implements AudioEnvironment {
       return;
     }
     if (!this.#moduleLoaded) {
-      await context.audioWorklet.addModule(workletModuleUrl());
-      this.#moduleLoaded = true;
+      try {
+        await context.audioWorklet.addModule(workletModuleUrl());
+        this.#moduleLoaded = true;
+      } catch (error) {
+        this.#lastError = `addModule:${String(error)}`;
+        throw error;
+      }
     }
-    const node = new AudioWorkletNode(context, WORKLET_PROCESSOR_NAME, {
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      outputChannelCount: [1],
-    });
+    let node: AudioWorkletNode;
+    try {
+      node = new AudioWorkletNode(context, WORKLET_PROCESSOR_NAME, {
+        numberOfInputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      });
+    } catch (error) {
+      this.#lastError = `node:${String(error)}`;
+      throw error;
+    }
     node.port.onmessage = (event: MessageEvent) => {
       this.#workletHandler?.(event.data as WorkletMessage);
     };

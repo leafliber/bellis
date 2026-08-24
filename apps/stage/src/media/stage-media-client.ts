@@ -52,6 +52,8 @@ export interface StageMediaStats {
   readonly rejectedFrames: number;
   readonly openedStreams: number;
   readonly connectAttempts: number;
+  /** 原始 WS message 事件数（解析前；诊断传输层是否送达）。 */
+  readonly rawMessages: number;
 }
 
 const RECONNECT_BASE_MS = 500;
@@ -74,6 +76,7 @@ export class StageMediaClient {
     rejectedFrames: 0,
     openedStreams: 0,
     connectAttempts: 0,
+    rawMessages: 0,
   };
 
   constructor(options: StageMediaClientOptions) {
@@ -162,6 +165,7 @@ export class StageMediaClient {
   }
 
   #onMessage(data: string | Uint8Array): void {
+    this.#stats = { ...this.#stats, rawMessages: this.#stats.rawMessages + 1 };
     const parser = this.#parser;
     if (typeof data === "string" || parser === null) {
       // 媒体通道只承载二进制帧；文本帧按协议违例断开重连。

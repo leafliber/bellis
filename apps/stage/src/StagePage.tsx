@@ -51,6 +51,15 @@ interface StageDiagnostics {
   subtitleTexts(): readonly string[];
   avatarCommands(): number;
   mediaStats(): { acceptedFrames: number; rejectedFrames: number } | null;
+  audioError(): string | null;
+  laneStarts(): {
+    sceneId: string;
+    lane: string;
+    targetLocalUs: string;
+    startedAtStageUs: string;
+    late: boolean;
+  }[];
+  sceneEvents(): { sceneId: string; state: string; at: number; targetLocalUs?: string }[];
 }
 
 declare global {
@@ -72,6 +81,18 @@ export function StagePage({ profile }: { profile: string }) {
   const audioLaneRef = useRef<AudioLaneAdapter | null>(null);
   const mediaRef = useRef<StageMediaClient | null>(null);
   const registryRef = useRef<LaneRegistry | null>(null);
+  const laneStartsRef = useRef<
+    {
+      sceneId: string;
+      lane: string;
+      targetLocalUs: string;
+      startedAtStageUs: string;
+      late: boolean;
+    }[]
+  >([]);
+  const sceneEventsRef = useRef<
+    { sceneId: string; state: string; at: number; targetLocalUs?: string }[]
+  >([]);
 
   const authenticate = useCallback(async () => {
     // Phase 1 本地认证：startup token → HttpOnly session cookie。
@@ -132,35 +153,32 @@ export function StagePage({ profile }: { profile: string }) {
       speechPublisher: subtitleLane,
       onStateChange: (next) => setState(next),
       onSceneEvent: (event) => {
-        setSceneEvents((events) => [
-          ...events.slice(-15),
-          { sceneId: event.sceneId, state: event.state, at: Date.now() },
-        ]);
+        sceneEventsRef.current = [
+          ...sceneEventsRef.current.slice(-15),
+          {
+            sceneId: event.sceneId,
+            state: event.state,
+            at: Date.now(),
+            ...(event.targetLocalUs === undefined
+              ? {}
+              : { targetLocalUs: event.targetLocalUs.toString() }),
+          },
+        ];
+        setSceneEvents(sceneEventsRef.current);
+      },
+      onLaneStarted: (report) => {
+        laneStartsRef.current = [
+          ...laneStartsRef.current.slice(-15),
+          {
+            sceneId: report.sceneId,
+            lane: report.lane,
+            targetLocalUs: report.targetLocalUs.toString(),
+            startedAtStageUs: report.startedAtStageUs.toString(),
+            late: report.late,
+          },
+        ];
       },
       onMediaAnnounce: (payload, sendReady) => {
-        // 媒体客户端随首个 announce 建立（sessionId 此时已解析）。
-        if (mediaRef.current === null && app.sessionId !== null) {
-          const sessionId = app.sessionId;
-          const media = new StageMediaClient({
-            sessionId,
-            socketFactory: () =>
-              createBrowserSocket(
-                `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/v1/media`,
-              ),
-            clock,
-            audioContentTypes: AUDIO_CONTENT_TYPES,
-            onFrame: (frame) => {
-              if (frame.sceneId !== null) {
-                audioLane.appendFrame(frame.sceneId, frame.samples);
-              }
-            },
-            onDisconnected: () => {
-              audioLane.clearAll();
-            },
-          });
-          mediaRef.current = media;
-          void media.connect();
-        }
         const media = mediaRef.current;
         if (media === null) {
           return;
@@ -179,11 +197,43 @@ export function StagePage({ profile }: { profile: string }) {
       subtitleTexts: () => subtitleDocument.visibleTexts(),
       avatarCommands: () => avatarLane.commands.length,
       mediaStats: () => mediaRef.current?.stats ?? null,
+      audioError: () => audioEnvironment.lastError,
+      laneStarts: () => [...laneStartsRef.current],
+      sceneEvents: () => [...sceneEventsRef.current],
     };
     /* oxlint-enable no-underscore-dangle */
-    void app.start().catch((cause: unknown) => {
-      setError({ code: "stage_start_failed", message: String(cause) });
-    });
+    void app
+      .start()
+      .then(() => {
+        // 媒体连接随引导建立（非 announce 时）：announce → ready 链路
+        // 不再承担 WS 升级延迟（prepare 预算 500ms 内完成预缓冲）。
+        const sessionId = app.sessionId;
+        if (sessionId === null || mediaRef.current !== null) {
+          return;
+        }
+        const media = new StageMediaClient({
+          sessionId,
+          socketFactory: () =>
+            createBrowserSocket(
+              `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/v1/media`,
+            ),
+          clock,
+          audioContentTypes: AUDIO_CONTENT_TYPES,
+          onFrame: (frame) => {
+            if (frame.sceneId !== null) {
+              audioLane.appendFrame(frame.sceneId, frame.samples);
+            }
+          },
+          onDisconnected: () => {
+            audioLane.clearAll();
+          },
+        });
+        mediaRef.current = media;
+        media.connect();
+      })
+      .catch((cause: unknown) => {
+        setError({ code: "stage_start_failed", message: String(cause) });
+      });
     const onUnload = () => {
       mediaRef.current?.close();
       void app.close("page_unload");

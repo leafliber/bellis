@@ -65,59 +65,59 @@ var e = class {
 	releaseScene(e) {
 		this.#n.delete(e) && (this.#i += 1), this.#r === e && (this.#r = null);
 	}
-}, t = 1, n = { buffer: new e({
+}, t = globalThis.AudioWorkletProcessor, n = 1, r = { buffer: new e({
 	maxBufferedUs: 2000000n,
 	sampleRateHz: 48e3
-}) }, r = class extends AudioWorkletProcessorBase {
+}) }, i = class extends t {
 	#e = 0;
 	constructor() {
 		super(), this.port.onmessage = (e) => {
-			let r = e.data;
-			if (r.v !== t) {
+			let t = e.data;
+			if (t.v !== n) {
 				this.port.postMessage({
-					v: t,
+					v: n,
 					op: "error",
 					code: "unsupported_version"
 				});
 				return;
 			}
-			switch (r.op) {
+			switch (t.op) {
 				case "frame":
-					typeof r.sceneId == "string" && r.samples instanceof Int16Array && (i.add(r.sceneId), n.buffer.appendFrame(r.sceneId, r.samples) || this.port.postMessage({
-						v: t,
+					typeof t.sceneId == "string" && t.samples instanceof Int16Array && (a.add(t.sceneId), r.buffer.appendFrame(t.sceneId, t.samples) || this.port.postMessage({
+						v: n,
 						op: "error",
 						code: "buffer_full"
 					}));
 					break;
 				case "switch":
-					typeof r.sceneId == "string" && n.buffer.switchScene(r.sceneId);
+					typeof t.sceneId == "string" && r.buffer.switchScene(t.sceneId);
 					break;
 				case "cancel":
-					typeof r.sceneId == "string" && n.buffer.cancelScene(r.sceneId);
+					typeof t.sceneId == "string" && r.buffer.cancelScene(t.sceneId);
 					break;
 				case "clear":
-					for (let e of i) n.buffer.releaseScene(e);
-					i.clear();
+					for (let e of a) r.buffer.releaseScene(e);
+					a.clear();
 					break;
 				default: this.port.postMessage({
-					v: t,
+					v: n,
 					op: "error",
 					code: "unknown_op"
 				});
 			}
 		};
 	}
-	process(e, r) {
-		let i = r[0]?.[0];
+	process(e, t) {
+		let i = t[0]?.[0];
 		if (i === void 0) return !0;
 		let a = i.length, o = new Int16Array(a);
-		n.buffer.pull(o, a);
+		r.buffer.pull(o, a);
 		for (let e = 0; e < a; e += 1) i[e] = (o[e] ?? 0) / 32768;
-		let s = n.buffer.activeScene;
+		let s = r.buffer.activeScene;
 		if (s !== null) {
-			let e = n.buffer.underrunCount(s);
+			let e = r.buffer.underrunCount(s);
 			e > this.#e && (this.#e = e, this.port.postMessage({
-				v: t,
+				v: n,
 				op: "stats",
 				underruns: e,
 				activeScene: s
@@ -125,6 +125,6 @@ var e = class {
 		}
 		return !0;
 	}
-}, i = /* @__PURE__ */ new Set();
-registerProcessor("bellis-pcm-scene", r);
+}, a = /* @__PURE__ */ new Set();
+registerProcessor("bellis-pcm-scene", i);
 //#endregion

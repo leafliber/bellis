@@ -54,8 +54,21 @@ export interface StageAppOptions {
   readonly laneRegistry?: LaneRegistry;
   /** plan.speech 文本 → 字幕 Lane（P3 装配注入）。 */
   readonly speechPublisher?: SpeechTextPublisher;
-  /** Scene 状态事件（UI/E2E 断言）。 */
-  readonly onSceneEvent?: (event: { sceneId: string; state: string; reason?: string }) => void;
+  /** Scene 状态事件（UI/E2E 断言；scheduled 事件携带映射后的目标时刻）。 */
+  readonly onSceneEvent?: (event: {
+    sceneId: string;
+    state: string;
+    reason?: string;
+    targetLocalUs?: bigint;
+  }) => void;
+  /** Lane 生效时刻（偏差指标的浏览器侧事实来源）。 */
+  readonly onLaneStarted?: (report: {
+    readonly sceneId: string;
+    readonly lane: string;
+    readonly targetLocalUs: bigint;
+    readonly startedAtStageUs: bigint;
+    readonly late: boolean;
+  }) => void;
 }
 
 export class StageApp {
@@ -140,6 +153,9 @@ export class StageApp {
         ? {}
         : { speechPublisher: this.#options.speechPublisher }),
       ...(this.#options.onSceneEvent === undefined ? {} : { onEvent: this.#options.onSceneEvent }),
+      ...(this.#options.onLaneStarted === undefined
+        ? {}
+        : { onLaneStarted: this.#options.onLaneStarted }),
     });
     await control.connect();
   }

@@ -27,11 +27,23 @@ const FAULT_POINTS = new Set([
   "after_cancel_sent",
 ]);
 
+const fixedPort = Number(process.env.BELLIS_E2E_PORT ?? 0);
+const extraOrigins = (process.env.BELLIS_E2E_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
+// 保留默认回环源（直连 Runtime 的脚本请求），叠加 E2E 的 Vite 源。
+const allowedOrigins =
+  fixedPort > 0 && extraOrigins.length > 0
+    ? [`http://127.0.0.1:${fixedPort}`, `http://localhost:${fixedPort}`, ...extraOrigins]
+    : undefined;
+
 const runtime = await startRuntime({
   config: {
     dataDirectory,
     runtimeVersion: "0.1.0-phase2-demo",
-    port: 0,
+    port: fixedPort,
+    ...(allowedOrigins === undefined ? {} : { allowedOrigins }),
     phase2: {
       enabled: true,
       ...(faultPointArg !== undefined && FAULT_POINTS.has(faultPointArg)
