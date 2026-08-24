@@ -275,6 +275,8 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
                 phase2.attachConnection(connection, logical.sessionId);
               }
             },
+            snapshotDecorator: (snapshot, recoveryState) =>
+              phase2.decorateSnapshot(snapshot, recoveryState),
           }),
     });
     if (phase2 !== undefined) {

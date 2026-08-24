@@ -302,6 +302,53 @@ describe("SceneDirector 提交故障路径", () => {
 });
 
 describe("SceneDirector 断连与关闭", () => {
+  it("getActiveSceneView：活动 Scene 投影公开状态；uncertain 结果不可证；终态清白为 null", async () => {
+    const h = createHarness();
+    // 未完成 Scene（preparing 挂起）：视图 = preparing，结果确定。
+    submit(h, hardPlan("44444444-4444-4444-8444-4444444444d1"));
+    await flush();
+    const preparingView = h.director.getActiveSceneView();
+    expect(preparingView).not.toBeNull();
+    expect(preparingView?.executionState).toBe("preparing");
+    expect(preparingView?.outcomeCertain).toBe(true);
+
+    // running 断连 → uncertain：视图保留，outcomeCertain=false。
+    const runningPlan = hardPlan("44444444-4444-4444-8444-4444444444e1");
+    const runningHandle = h.director.submit(runningPlan, {
+      sessionId: "s",
+      idempotencyKey: "r",
+      requestFingerprint: "f",
+    });
+    await flush();
+    h.stage.settlePrepare(runningPlan.scene.sceneId, readyFor(runningPlan));
+    await flush();
+    h.director.notifyStarted(runningPlan.scene.sceneId, []);
+    h.director.notifyStageDisconnected("ws_closed");
+    await runningHandle.done;
+    const view = h.director.getActiveSceneView();
+    expect(view?.sceneId).toBe(runningPlan.scene.sceneId);
+    expect(view?.executionState).toBe("uncertain");
+    expect(view?.outcomeCertain).toBe(false);
+  });
+
+  it("getActiveSceneView：全部终态且无 uncertain 时为 null（无可对账事实）", async () => {
+    const h = createHarness();
+    const handle = submit(h, hardPlan("44444444-4444-4444-8444-4444444444f1"));
+    await flush();
+    h.stage.settlePrepare(
+      "44444444-4444-4444-8444-4444444444f1",
+      readyFor(hardPlan("44444444-4444-4444-8444-4444444444f1")),
+    );
+    await flush();
+    h.director.notifyStarted("44444444-4444-4444-8444-4444444444f1", []);
+    h.director.notifyFinished("44444444-4444-4444-8444-4444444444f1", [
+      { lane: "audio", outcome: "completed", finishedAtStageUs: 1n },
+      { lane: "subtitle", outcome: "completed", finishedAtStageUs: 1n },
+    ]);
+    await handle.done;
+    expect(h.director.getActiveSceneView()).toBeNull();
+  });
+
   it("准备中断连 → cancelled；running 断连 → uncertain（不自动重播）", async () => {
     const h = createHarness();
     const preparingHandle = submit(h, hardPlan("44444444-4444-4444-8444-4444444444a1"));

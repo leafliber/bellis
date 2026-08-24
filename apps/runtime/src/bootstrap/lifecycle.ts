@@ -320,6 +320,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       repository: phase2Repository,
       logger,
       metrics,
+      runtimeVersion: config.runtimeVersion,
       // 版本化审计 Record（Signal 接受/决策包/编译结果；不含发言全文）。
       audit: {
         append: async (record) => {

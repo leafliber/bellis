@@ -256,6 +256,37 @@ export class SceneDirector {
   }
 
   /**
+   * Snapshot v2 的 activeScene 对账视图：最近一个未完成 Scene，或
+   * （全部已终态时）最近一个 uncertain Scene。无对账价值时返回 null。
+   * requiresReprepare 由调用方按 Stage 连接状态补齐（Director 不持有连接）。
+   */
+  getActiveSceneView(): {
+    readonly sceneId: string;
+    readonly cycleId: string;
+    readonly executionState: SceneExecutionState;
+    readonly outcomeCertain: boolean;
+  } | null {
+    let view: {
+      readonly sceneId: string;
+      readonly cycleId: string;
+      readonly executionState: SceneExecutionState;
+      readonly outcomeCertain: boolean;
+    } | null = null;
+    for (const exec of this.#executions.values()) {
+      const isUncertain = exec.state === "uncertain";
+      if (!TERMINAL_STATES.has(exec.state) || isUncertain) {
+        view = {
+          sceneId: exec.plan.scene.sceneId,
+          cycleId: exec.plan.scene.cycleId,
+          executionState: publicState(exec.state),
+          outcomeCertain: !isUncertain,
+        };
+      }
+    }
+    return view;
+  }
+
+  /**
    * 提交一个已编译的 ScenePlan 并驱动到终态。plan 先经结构校验；
    * Director 关闭后拒绝新提交。
    */

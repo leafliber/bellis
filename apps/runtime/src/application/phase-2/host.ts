@@ -1,4 +1,11 @@
-import type { MonotonicClock, StageCapabilities } from "@bellis/contracts";
+import type {
+  MonotonicClock,
+  Phase1SessionSnapshot,
+  Phase2SessionSnapshot,
+  StageCapabilities,
+} from "@bellis/contracts";
+import { buildPhase2SessionSnapshot } from "../recovery.js";
+import type { RecoveryState } from "@bellis/persistence";
 import type { CompileIdSource, SceneRepositoryPort } from "@bellis/scene-runtime";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import type { ControlConnection } from "../../websocket/control-adapter.js";
@@ -37,10 +44,12 @@ export interface Phase2HostOptions {
   readonly audit?: Phase2AuditPort;
   /** SessionId 解析成功（Stage 连接出现）时回调（审计 Record 绑定会话）。 */
   readonly onSessionIdResolved?: (sessionId: string) => void;
+  readonly runtimeVersion?: string;
 }
 
 export class Phase2RuntimeHost {
   readonly #service: Phase2PerformanceService;
+  readonly #options: Phase2HostOptions;
   #connection: ControlConnection | null = null;
   #mediaConnection: MediaConnection | null = null;
   readonly #mediaDisconnectHandlers: (() => void)[] = [];
@@ -48,6 +57,7 @@ export class Phase2RuntimeHost {
   #closed = false;
 
   constructor(options: Phase2HostOptions) {
+    this.#options = options;
     const channel: ControlChannel = {
       enqueueServerMessage: (input) =>
         this.#connection?.sendPhase2Message({
@@ -128,6 +138,40 @@ export class Phase2RuntimeHost {
   /** ControlConnection.onStageMessage 入口。 */
   handleStageMessage(envelope: { type: string; payload: unknown }, nowUs: bigint): void {
     this.#service.handleStageMessage(envelope.type, envelope.payload, nowUs);
+  }
+
+  /**
+   * Snapshot 装饰（scene-execution.md §8）：存在对账价值的活动 Scene
+   * （未完成或 uncertain）时升级为 v2 形态并补 requiresReprepare
+   * （= 当前无 Stage 连接：准备资源已随旧连接丢失）；否则原样返回 v1。
+   */
+  /**
+   * Snapshot 装饰（scene-execution.md §8）：存在对账价值的活动 Scene
+   * （未完成或 uncertain）时升级为 v2 形态并补 requiresReprepare
+   * （= 当前无 Stage 连接：准备资源已随旧连接丢失）；否则原样返回 v1。
+   * 同步实现（恢复状态由调用方预加载），保持「快照必须成功入队」不变量。
+   */
+  decorateSnapshot(
+    base: Phase1SessionSnapshot,
+    recoveryState: RecoveryState,
+  ): Phase1SessionSnapshot | Phase2SessionSnapshot {
+    const view = this.#service.activeSceneView();
+    if (view === null) {
+      return base;
+    }
+    return buildPhase2SessionSnapshot(recoveryState, {
+      reason: base.reason,
+      sessionStatus: base.sessionStatus,
+      runtimeVersion: this.#options.runtimeVersion ?? base.runtimeVersion,
+      generatedAtMs: Date.now(),
+      activeScene: {
+        sceneId: view.sceneId,
+        cycleId: view.cycleId,
+        executionState: view.executionState as never,
+        outcomeCertain: view.outcomeCertain,
+        requiresReprepare: this.#connection === null,
+      },
+    });
   }
 
   submit(input: { signal: unknown; fixture: FakeModelFixture }): SubmissionOutcome {

@@ -401,6 +401,16 @@ export class Phase2PerformanceService {
     return this.#director.getExecutionState(sceneId);
   }
 
+  /** Snapshot v2 对账视图（§7.3/scene-execution.md §8）。 */
+  activeSceneView(): {
+    readonly sceneId: string;
+    readonly cycleId: string;
+    readonly executionState: string;
+    readonly outcomeCertain: boolean;
+  } | null {
+    return this.#director.getActiveSceneView();
+  }
+
   #startStream(streamId: string): void {
     const pending = this.#pendingStreams.get(streamId);
     if (pending === undefined) {

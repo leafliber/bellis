@@ -1,5 +1,11 @@
 import { MediaStreamClosedPayloadSchema, MediaStreamOpenPayloadSchema } from "@bellis/contracts";
-import type { ClientControlEnvelope, MonotonicClock, TraceContext } from "@bellis/contracts";
+import type {
+  ClientControlEnvelope,
+  MonotonicClock,
+  Phase1SessionSnapshot,
+  Phase2SessionSnapshot,
+  TraceContext,
+} from "@bellis/contracts";
 import { parseDecimalString } from "@bellis/contracts";
 import type { RecoveryState, PersistenceClient } from "@bellis/persistence";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
@@ -98,6 +104,14 @@ export interface ControlConnectionOptions {
    * Stage（Phase 1 观察者连接不进入 Phase 2 装配）。
    */
   readonly onStageHello?: (clientType: unknown) => void;
+  /**
+   * Phase 2 快照装饰（同步）：v1 快照构造后调用，存在活动 Scene 对账
+   * 视图时升级 schemaVersion 2；异常时回落 v1 形态（不丢快照事实）。
+   */
+  readonly snapshotDecorator?: (
+    snapshot: Phase1SessionSnapshot,
+    recoveryState: RecoveryState,
+  ) => Phase1SessionSnapshot | Phase2SessionSnapshot;
 }
 
 type SendWaiter = (outcome: BroadcastOutcome) => void;
@@ -123,6 +137,12 @@ export class ControlConnection {
   readonly #resumeLoader: () => Promise<ControlResumePlan>;
   readonly #stageMessageHandler: ((envelope: ClientControlEnvelope, nowUs: bigint) => void) | null;
   readonly #stageHelloHandler: ((clientType: unknown) => void) | null;
+  readonly #snapshotDecorator:
+    | ((
+        snapshot: Phase1SessionSnapshot,
+        recoveryState: RecoveryState,
+      ) => Phase1SessionSnapshot | Phase2SessionSnapshot)
+    | null;
   readonly #pumpAbort = new AbortController();
   readonly #sendWaiters = new Map<string, SendWaiter[]>();
   /** 连接代际标识（二轮评审修复 4）：prepared/committed 必须同代际送达。 */
@@ -153,6 +173,7 @@ export class ControlConnection {
     this.#resumeLoader = options.loadResume;
     this.#stageMessageHandler = options.onStageMessage ?? null;
     this.#stageHelloHandler = options.onStageHello ?? null;
+    this.#snapshotDecorator = options.snapshotDecorator ?? null;
     // 注意：不在构造器清空 exportedControlState——loader 稍后读取它
     // （构造先于异步加载执行，提前清空会丢失同进程 resume 状态）。
     options.logical.control = this;
@@ -522,12 +543,27 @@ export class ControlConnection {
     if (this.#recoveryState === null) {
       return false;
     }
-    const snapshot = buildSessionSnapshot(this.#recoveryState, {
-      reason: "replay_gap",
-      sessionStatus: "ready",
-      runtimeVersion: this.#runtimeVersion,
-      generatedAtMs: Date.now(),
-    });
+    let snapshot: Phase1SessionSnapshot | Phase2SessionSnapshot = buildSessionSnapshot(
+      this.#recoveryState,
+      {
+        reason: "replay_gap",
+        sessionStatus: "ready",
+        runtimeVersion: this.#runtimeVersion,
+        generatedAtMs: Date.now(),
+      },
+    );
+    // Phase 2 装饰（同步，预加载恢复状态）：存在活动 Scene 对账视图时
+    // 升级 v2 形态；快照必须成功入队的不变量不受装饰影响。
+    if (this.#snapshotDecorator !== null) {
+      try {
+        snapshot = this.#snapshotDecorator(snapshot, this.#recoveryState);
+      } catch (error) {
+        this.#logger.log("warn", "runtime_snapshot_decorate_failed", {
+          sessionId: this.#logical.sessionId,
+          error: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }
     const enqueued = session.enqueueServerMessage({
       type: "session.snapshot",
       payload: { snapshot },

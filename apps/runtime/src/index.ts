@@ -39,7 +39,7 @@ export type {
   FakeSceneCommitInput,
   FakeSceneCommitResult,
 } from "./application/commit-fake-scene.js";
-export { buildSessionSnapshot } from "./application/recovery.js";
+export { buildPhase2SessionSnapshot, buildSessionSnapshot } from "./application/recovery.js";
 export { Phase2RuntimeHost } from "./application/phase-2/host.js";
 export type { Phase2HostOptions } from "./application/phase-2/host.js";
 export { Phase2PerformanceService } from "./application/phase-2/performance-service.js";
