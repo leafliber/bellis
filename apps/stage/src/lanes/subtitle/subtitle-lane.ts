@@ -35,10 +35,17 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
     this.#document = document;
   }
 
-  /** Scene 的字幕文本（由 SceneClient 装配层从 plan.speech 传入）。 */
+  /** Scene 的字幕文本（由 SceneClient 装配层从 plan.speech 传入；可先于
+   * prepare 到达——行不存在时先创建不可见行，Commit 前绝不显示）。 */
   setSpeechText(sceneId: string, text: string): void {
-    const record = this.#lines.get(sceneId);
-    if (record !== undefined && !record.visible) {
+    let record = this.#lines.get(sceneId);
+    if (record === undefined) {
+      const line = this.#document.createLine(sceneId);
+      line.setVisible(false);
+      record = { line, text: null, visible: false };
+      this.#lines.set(sceneId, record);
+    }
+    if (!record.visible) {
       record.text = text;
       record.line.setText(text);
     }

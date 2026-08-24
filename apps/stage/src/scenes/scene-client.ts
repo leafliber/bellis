@@ -38,6 +38,11 @@ interface PreparedScene {
   readonly laneFinishes: Map<CueLane, { outcome: "completed" | "failed"; reason?: string }>;
 }
 
+/** 字幕文本发布：plan.speech 单一发言来源（Compiler 的 plan 级扩展键）。 */
+export interface SpeechTextPublisher {
+  setSpeechText(sceneId: string, text: string): void;
+}
+
 export interface SceneClientOptions {
   readonly clock: MonotonicClock;
   readonly timeline: CueTimeline;
@@ -47,6 +52,8 @@ export interface SceneClientOptions {
   /** 发送回执/报告（StageControlClient.sendClient 的封装）。 */
   readonly send: (type: string, payload: unknown) => boolean;
   readonly onEvent?: (event: { sceneId: string; state: SceneClientState; reason?: string }) => void;
+  /** plan.speech 文本 → 字幕 Lane（Prepare 阶段暂存，Commit 才可见）。 */
+  readonly speechPublisher?: SpeechTextPublisher;
   /** commit 迟到容忍（微秒，默认 20ms：来不及安全启动 hard lane 即 late）。 */
   readonly lateCommitToleranceUs?: bigint;
 }
@@ -58,6 +65,7 @@ export class SceneClient {
   readonly #clockEstimate: () => ClockEstimate | null;
   readonly #send: (type: string, payload: unknown) => boolean;
   readonly #onEvent: SceneClientOptions["onEvent"];
+  readonly #speechPublisher: SpeechTextPublisher | null;
   readonly #lateToleranceUs: bigint;
   readonly #scenes = new Map<string, PreparedScene>();
 
@@ -68,6 +76,7 @@ export class SceneClient {
     this.#clockEstimate = options.clockEstimate;
     this.#send = options.send;
     this.#onEvent = options.onEvent;
+    this.#speechPublisher = options.speechPublisher ?? null;
     this.#lateToleranceUs = options.lateCommitToleranceUs ?? 20_000n;
   }
 
@@ -100,6 +109,11 @@ export class SceneClient {
     const sceneId = scenePlan.scene.sceneId;
     if (this.#scenes.has(sceneId)) {
       return; // 重复 prepare：幂等忽略。
+    }
+    // plan.speech 单一发言来源 → 字幕 Lane 暂存（不可见）。
+    const speech = (scenePlan as { speech?: { text?: unknown } }).speech;
+    if (this.#speechPublisher !== null && typeof speech?.text === "string") {
+      this.#speechPublisher.setSpeechText(sceneId, speech.text);
     }
     if (this.#scenes.size >= MAX_CONCURRENT_SCENES) {
       this.#send("scene.ready", {

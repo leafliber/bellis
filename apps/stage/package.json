@@ -8,7 +8,7 @@
     "node": ">=26.5 <27"
   },
   "scripts": {
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --config vite.worklet.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "lint": "oxlint src test",

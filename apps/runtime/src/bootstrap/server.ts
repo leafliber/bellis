@@ -10,6 +10,7 @@ import { registerAuthRoute } from "../routes/auth.js";
 import type { OriginAllowlist, RequestTraceStore } from "../routes/context.js";
 import { registerHealthRoutes } from "../routes/health.js";
 import { registerOpenApiRoute } from "../routes/openapi.js";
+import { registerStageStatic } from "../routes/stage-static.js";
 import { registerVersionRoute } from "../routes/version.js";
 import type { LocalSessionService } from "../auth/local-session.js";
 import type { RuntimeStatus } from "./lifecycle.js";
@@ -168,6 +169,9 @@ export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> 
   registerVersionRoute(app, baseRoutes);
   registerOpenApiRoute(app, baseRoutes);
   registerAuthRoute(app, { ...baseRoutes, sessions: ctx.sessions });
+  if (ctx.config.phase2.stageDistDir !== undefined) {
+    registerStageStatic(app, ctx.config.phase2.stageDistDir);
+  }
 
   registerWebSocketRoutes(app, ctx);
   return app;

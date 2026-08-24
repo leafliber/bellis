@@ -2,7 +2,7 @@ import type { JsonValue, MonotonicClock } from "@bellis/contracts";
 import { StageControlClient, type StageControlEvent } from "../control/stage-control-client.js";
 import type { StageSocket } from "../control/stage-socket.js";
 import { LaneRegistry } from "../lanes/lane-registry.js";
-import { SceneClient } from "../scenes/scene-client.js";
+import { SceneClient, type SpeechTextPublisher } from "../scenes/scene-client.js";
 import { CueTimeline } from "../timeline/cue-timeline.js";
 
 /**
@@ -48,15 +48,21 @@ export interface StageAppOptions {
   readonly heartbeatIntervalMs?: number;
   readonly clockSamplesRequired?: number;
   readonly onStateChange?: (state: StageAppState, previous: StageAppState) => void;
-  /** Media Stream announce 处理（P3 AudioWorklet Lane 接管；P2 记录并确认）。 */
-  readonly onMediaAnnounce?: (payload: unknown) => void;
+  /** Media Stream announce 处理（装配层建立有界缓冲后回 media.stream.ready）。 */
+  readonly onMediaAnnounce?: (payload: unknown, sendReady: (payload: unknown) => boolean) => void;
+  /** Lane 注册表（缺省空注册表：无 Lane 时 prepare 全部 lane_not_available）。 */
+  readonly laneRegistry?: LaneRegistry;
+  /** plan.speech 文本 → 字幕 Lane（P3 装配注入）。 */
+  readonly speechPublisher?: SpeechTextPublisher;
+  /** Scene 状态事件（UI/E2E 断言）。 */
+  readonly onSceneEvent?: (event: { sceneId: string; state: string; reason?: string }) => void;
 }
 
 export class StageApp {
   readonly #clock: MonotonicClock;
   readonly #options: StageAppOptions;
   readonly #timeline: CueTimeline;
-  readonly #lanes = new LaneRegistry();
+  readonly #lanes: LaneRegistry;
   #state: StageAppState = "booting";
   #control: StageControlClient | null = null;
   #scenes: SceneClient | null = null;
@@ -64,15 +70,22 @@ export class StageApp {
   #lastError: { code: string; message: string } | null = null;
   #closed = false;
   #started = false;
+  #sessionId: string | null = null;
 
   constructor(options: StageAppOptions) {
     this.#clock = options.clock;
     this.#options = options;
     this.#timeline = new CueTimeline(options.clock);
+    this.#lanes = options.laneRegistry ?? new LaneRegistry();
   }
 
   get state(): StageAppState {
     return this.#state;
+  }
+
+  /** 认证后的逻辑 Session（booting 阶段为 null）。 */
+  get sessionId(): string | null {
+    return this.#sessionId;
   }
 
   get audioArmed(): boolean {
@@ -100,6 +113,7 @@ export class StageApp {
     }
     this.#started = true;
     const auth = await this.#options.authenticate();
+    this.#sessionId = auth.sessionId;
     this.#setState("auth_ready");
 
     const control = new StageControlClient({
@@ -122,8 +136,23 @@ export class StageApp {
       lanes: this.#lanes,
       clockEstimate: () => this.#control?.clockEstimate ?? null,
       send: (type, payload) => control.sendClient(type, payload as JsonValue) ?? false,
+      ...(this.#options.speechPublisher === undefined
+        ? {}
+        : { speechPublisher: this.#options.speechPublisher }),
+      ...(this.#options.onSceneEvent === undefined ? {} : { onEvent: this.#options.onSceneEvent }),
     });
     await control.connect();
+  }
+
+  /** Media announce 转发（装配层持有媒体客户端时使用）。 */
+  announceMedia(payload: unknown): void {
+    const control = this.#control;
+    if (control === null) {
+      return;
+    }
+    this.#options.onMediaAnnounce?.(payload, (ready) =>
+      control.sendClient("media.stream.ready", ready as JsonValue),
+    );
   }
 
   #onControlEvent(event: StageControlEvent): void {
@@ -185,7 +214,7 @@ export class StageApp {
         return;
       }
       case "media.stream.announce":
-        this.#options.onMediaAnnounce?.(payload);
+        this.announceMedia(payload);
         return;
       case "session.snapshot":
         // 重连对账：快照到达说明 replay 缺口走完整快照路径；未提交准备

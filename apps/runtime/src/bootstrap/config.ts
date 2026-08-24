@@ -119,6 +119,11 @@ const RuntimeConfigSchema = z
       .object({
         enabled: z.boolean().default(false),
         sessionId: UuidSchema.optional(),
+        /**
+         * Stage 浏览器应用的静态产物目录（开发/Demo 装配）：提供时以
+         * /stage/* 挂载（SPA 回退 index.html），形成可启动产品链路。
+         */
+        stageDistDir: z.string().min(1).optional(),
       })
       .prefault({}),
   })
