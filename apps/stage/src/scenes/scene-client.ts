@@ -100,16 +100,28 @@ export class SceneClient {
     return this.#scenes.size;
   }
 
-  /** 连接代际变化：丢弃全部未提交准备；已调度的取消本地调度交由对账。 */
+  /**
+   * 连接代际变化：取消全部本地调度并停止已生效的 Lane 副作用（音频淡出、
+   * 字幕行移除、Avatar stop）。断线后 Runtime 不再有决策通道，不能让
+   * running Scene 的副作用悬空到重连；未提交的准备缓存一并丢弃，结果
+   * 对账交由协议（uncertain 快照），本地绝不自行重播。
+   */
   onConnectionGenerationChange(): void {
     for (const [sceneId, scene] of this.#scenes) {
-      if (scene.state === "preparing" || scene.state === "ready") {
-        scene.controller.abort(new Error("connection_generation_changed"));
-        this.#scenes.delete(sceneId);
-      } else {
-        scene.scheduled?.cancel();
-        scene.scheduled = null;
+      scene.controller.abort(new Error("connection_generation_changed"));
+      scene.scheduled?.cancel();
+      scene.scheduled = null;
+      const reason =
+        scene.state === "scheduled" || scene.state === "running"
+          ? "connection_generation_changed"
+          : "connection_generation_changed_prepare";
+      for (const lane of new Set(scene.plan.cues.map((cue) => cue.lane))) {
+        void this.#lanes
+          .get(lane)
+          ?.stop(sceneId, reason)
+          .catch(() => {});
       }
+      this.#scenes.delete(sceneId);
     }
   }
 

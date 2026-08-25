@@ -158,6 +158,8 @@ export class ControlConnection {
   #finished = false;
   #lastPersistedSeq = 0n;
   #helloHandled = false;
+  /** 本连接 hello 声明的 clientType（Phase 2 演出消息的归属判据）。 */
+  #clientType: unknown = null;
   #snapshotEnqueued = false;
 
   constructor(options: ControlConnectionOptions) {
@@ -482,6 +484,7 @@ export class ControlConnection {
       try {
         if (accepted.envelope.type === "client.hello") {
           this.#helloHandled = true;
+          this.#clientType = (accepted.envelope.payload as { clientType?: unknown }).clientType;
           // 连接归属（Phase 2）：hello 通过校验后按 clientType 交给应用层
           // 决定是否绑定为演出 Stage（观察者连接不进入 Phase 2）。
           this.#stageHelloHandler?.(
@@ -630,6 +633,31 @@ export class ControlConnection {
       "media.stream.ready",
     ];
     if (STAGE_MESSAGE_TYPES.includes(envelope.type)) {
+      // 连接归属（Phase 2 隔离）：Phase 2 装配下只有 hello 声明
+      // clientType=stage 的连接才能提交演出回执；观察者/其它角色连接
+      // 发送即协议违例——拒绝转发并显式回执错误（绝不进入 Phase 2
+      // 状态机）。未装配 Phase 2 时维持 Phase 1 的静默忽略语义。
+      if (this.#stageMessageHandler !== null && this.#clientType !== "stage") {
+        this.#logger.log("warn", "runtime_stage_message_rejected", {
+          sessionId: this.#logical.sessionId,
+          type: envelope.type,
+          clientType: String(this.#clientType),
+        });
+        session.enqueueServerMessage({
+          type: "error",
+          payload: {
+            error: {
+              code: "invalid_message",
+              message: `stage message ${envelope.type} requires a clientType=stage connection`,
+              retryable: false,
+              traceId: envelope.trace.traceId,
+            },
+          },
+          trace: { traceId: envelope.trace.traceId },
+          sentAtUs: nowUs,
+        });
+        return;
+      }
       this.#stageMessageHandler?.(envelope, nowUs);
     }
   }

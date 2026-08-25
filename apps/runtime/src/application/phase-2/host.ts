@@ -60,6 +60,8 @@ export class Phase2RuntimeHost {
   #mediaConnection: MediaConnection | null = null;
   readonly #mediaDisconnectHandlers: (() => void)[] = [];
   readonly #disconnectHandlers: (() => void)[] = [];
+  /** 当前绑定的 Stage 逻辑 Session（首个 clientType=stage hello 决定）。 */
+  #stageSessionId: string | null = null;
   #closed = false;
 
   constructor(options: Phase2HostOptions) {
@@ -113,8 +115,26 @@ export class Phase2RuntimeHost {
     return this.#service;
   }
 
-  /** Stage 连接建立（server 装配在 ControlConnection 创建后调用）。 */
+  /**
+   * Stage 连接建立（server 装配在 ControlConnection 创建后调用）。
+   * 首个 clientType=stage hello 决定归属 Session；此后其它 Session 的
+   * stage hello 不再改绑（隔离：防止第二条会话劫持演出连接与媒体流）。
+   */
   attachConnection(connection: ControlConnection, sessionId?: string): void {
+    if (
+      sessionId !== undefined &&
+      this.#stageSessionId !== null &&
+      sessionId !== this.#stageSessionId
+    ) {
+      this.#options.logger?.log("warn", "phase2_stage_rebind_rejected", {
+        boundSessionId: this.#stageSessionId,
+        attemptedSessionId: sessionId,
+      });
+      return;
+    }
+    if (sessionId !== undefined) {
+      this.#stageSessionId = sessionId;
+    }
     this.#connection = connection;
     this.#service.markStageConnected(sessionId);
   }
@@ -127,6 +147,15 @@ export class Phase2RuntimeHost {
         handler();
       }
     }
+  }
+
+  /**
+   * Media 连接是否可绑定到给定 Session：只有当前绑定的 Stage Session
+   * 允许（隔离：其它 Session 的 Media WS 不得替换 Stage 媒体连接或
+   * 接收 PCM）。Stage hello 先于 Media 连接到达是装配前置条件。
+   */
+  acceptsMediaSession(sessionId: string): boolean {
+    return !this.#closed && this.#stageSessionId === sessionId;
   }
 
   /** Media 连接建立（server 装配在 MediaConnection 创建后调用）。 */
@@ -144,9 +173,14 @@ export class Phase2RuntimeHost {
     }
   }
 
-  /** ControlConnection.onStageMessage 入口。 */
+  /** ControlConnection.onStageMessage 入口（仅当前绑定连接的回执进入状态机）。 */
   handleStageMessage(envelope: { type: string; payload: unknown }, nowUs: bigint): void {
     this.#service.handleStageMessage(envelope.type, envelope.payload, nowUs);
+  }
+
+  /** 连接归属：是否为当前绑定的 Stage ControlConnection（入站回执判据）。 */
+  ownsConnection(connection: ControlConnection): boolean {
+    return this.#connection === connection && !this.#closed;
   }
 
   /**

@@ -55,6 +55,8 @@ class FakeLane implements StageLaneAdapter {
   readonly commands: string[] = [];
   prepareResult: { ready: boolean; reason?: string } = { ready: true };
   startError = false;
+  /** start 永不完成（构造持续 running 的 Scene）。 */
+  startHangs = false;
 
   constructor(readonly lane: CueLane) {}
 
@@ -68,6 +70,9 @@ class FakeLane implements StageLaneAdapter {
 
   async start(sceneId: string, atStageUs: bigint) {
     this.commands.push(`start:${this.lane}@${atStageUs}`);
+    if (this.startHangs) {
+      return new Promise<void>(() => {});
+    }
     if (this.startError) {
       throw new Error("lane_error");
     }
@@ -262,6 +267,38 @@ describe("SceneClient", () => {
     // 调度已取消：无 start、无 started 上报。
     expect(h.audio.commands).not.toContainEqual(expect.stringMatching(/^start/));
     expect(h.sent.some((m) => m.type === "scene.started")).toBe(false);
+  });
+
+  it("连接代际变化：running Scene 的 Lane 副作用本地停止（断线不得悬空）", async () => {
+    const h = createSceneHarness();
+    h.audio.startHangs = true;
+    h.subtitle.startHangs = true;
+    await h.client.handlePrepare({ plan: PLAN, prepareDeadlineUs: "1000" });
+    await flush();
+    h.client.handleCommit(PLAN.scene.sceneId, 1_250_000n);
+    h.clock.advanceBy(1_000_000n);
+    await flush();
+    await flush();
+    expect(h.audio.commands).toContainEqual(expect.stringMatching(/^start:audio/));
+    h.client.onConnectionGenerationChange();
+    await flush();
+    // 音频/字幕副作用立即停止（音频淡出、字幕行移除）。
+    expect(h.audio.commands).toContain("stop:audio:connection_generation_changed");
+    expect(h.subtitle.commands).toContain("stop:subtitle:connection_generation_changed");
+    // Scene 已清理：不再产生新的 finished 上报。
+    h.clock.advanceBy(2_000_000n);
+    await flush();
+    expect(h.sent.some((m) => m.type === "scene.finished")).toBe(false);
+  });
+
+  it("连接代际变化：仅 Prepare 的 Scene 也停止 Lane（暂存字幕行移除）", async () => {
+    const h = createSceneHarness();
+    await h.client.handlePrepare({ plan: PLAN, prepareDeadlineUs: "1000" });
+    await flush();
+    h.client.onConnectionGenerationChange();
+    await flush();
+    expect(h.subtitle.commands).toContain("stop:subtitle:connection_generation_changed_prepare");
+    expect(h.client.activeCount).toBe(0);
   });
 
   it("未知 Scene 的 commit/cancel：本地拒绝，不伪造回执", async () => {

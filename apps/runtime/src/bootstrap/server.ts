@@ -268,7 +268,11 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
         ? {}
         : {
             onStageMessage: (envelope: ClientControlEnvelope, nowUs: bigint) => {
-              phase2.handleStageMessage(envelope, nowUs);
+              // 入站归属（Phase 2 隔离）：只有当前绑定的 Stage 连接的
+              // 演出回执进入状态机（被拒绝改绑的连接不产生副作用）。
+              if (phase2.ownsConnection(connection)) {
+                phase2.handleStageMessage(envelope, nowUs);
+              }
             },
             onStageHello: (clientType: unknown) => {
               if (clientType === "stage") {
@@ -301,6 +305,12 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
     // 所有权与该连接绑定，避免多条连接互相 closeAll 串扰。
     if (logical.mediaConnections.size > 0) {
       socket.close(UNAUTHORIZED_CLOSE, "session already has a media connection");
+      return;
+    }
+    // Phase 2 隔离：只有当前绑定的 Stage Session 可以承载演出媒体出站；
+    // 其它 Session 的 Media WS 不进入 Phase 2 Host（不接收 PCM）。
+    if (phase2 !== undefined && !phase2.acceptsMediaSession(logical.sessionId)) {
+      socket.close(UNAUTHORIZED_CLOSE, "phase2 media requires the bound stage session");
       return;
     }
     const connection = new MediaConnection({
