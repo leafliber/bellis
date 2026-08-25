@@ -77,7 +77,12 @@ class Ipc {
       }
       const message = await Promise.race([
         new Promise((resolve) => this.waiters.push(resolve)),
-        new Promise((_, reject) => setTimeout(() => reject(new DemoFailure("ipc", `timeout waiting for ${type}`)), remaining)),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new DemoFailure("ipc", `timeout waiting for ${type}`)),
+            remaining,
+          ),
+        ),
       ]);
       if (message.type === type) {
         return message;
@@ -162,7 +167,7 @@ class StageClient {
     this.seq = 0;
     this.clockSamples = 0;
     this.offsetUs = null;
-    this.streams = new Map(); // streamId → {header 帧列表, lastSeq, rms}
+    this.streams = new Map(); // streamId → {header 帧列表, lastSeq, rms, traceId}
     this.frameWaiters = [];
     this.traceRoots = new Map(); // sceneId → traceId（announce/prepare/commit/cancel）
   }
@@ -229,6 +234,7 @@ class StageClient {
       lastSeq: -1,
       rmsSum: 0,
       stoppedAt: null,
+      traceId: null,
     });
     if (sceneId !== undefined && envelope.trace?.traceId !== undefined) {
       this.traceRoots.set(sceneId, envelope.trace.traceId);
@@ -250,7 +256,16 @@ class StageClient {
       throw new DemoFailure("media-frame", `sequence gap: got ${sequence} after ${stream.lastSeq}`);
     }
     if (payload.length !== PCM_FRAME_BYTES) {
-      throw new DemoFailure("media-frame", `payload ${payload.length} bytes, want ${PCM_FRAME_BYTES}`);
+      throw new DemoFailure(
+        "media-frame",
+        `payload ${payload.length} bytes, want ${PCM_FRAME_BYTES}`,
+      );
+    }
+    // Media 帧头的 traceId（首帧记录）：Signal→…→Media 连续性的媒体证据。
+    if (stream.traceId === null) {
+      stream.traceId = header.traceId ?? null;
+    } else if (header.traceId !== undefined && header.traceId !== stream.traceId) {
+      throw new DemoFailure("media-frame", "trace root changed mid-stream");
     }
     stream.lastSeq = sequence;
     let sumSquares = 0;
@@ -294,18 +309,20 @@ class StageClient {
   }
 
   send(type, payload, extra = {}) {
-    this.ws.send(JSON.stringify({
-      version: 1,
-      direction: "client",
-      type,
-      messageId: uuid(),
-      sessionId: this.sessionId,
-      trace: { traceId: traceId() },
-      sentAtUs: String(Math.round(performance.now() * 1000)),
-      ...(this.seq === 0 ? {} : { ack: String(this.seq) }),
-      ...extra,
-      payload,
-    }));
+    this.ws.send(
+      JSON.stringify({
+        version: 1,
+        direction: "client",
+        type,
+        messageId: uuid(),
+        sessionId: this.sessionId,
+        trace: { traceId: traceId() },
+        sentAtUs: String(Math.round(performance.now() * 1000)),
+        ...(this.seq === 0 ? {} : { ack: String(this.seq) }),
+        ...extra,
+        payload,
+      }),
+    );
   }
 
   /** 等待指定类型的下一条服务端消息（消费 seq）。 */
@@ -320,11 +337,19 @@ class StageClient {
       }
       const remaining = deadline - performance.now();
       if (remaining <= 0) {
-        throw new DemoFailure("stage-wait", `timeout waiting for ${type} (inbox: ${this.inbox.map((e) => e.type).join(",")})`);
+        throw new DemoFailure(
+          "stage-wait",
+          `timeout waiting for ${type} (inbox: ${this.inbox.map((e) => e.type).join(",")})`,
+        );
       }
       const envelope = await Promise.race([
         new Promise((resolve) => this.waiters.push(resolve)),
-        new Promise((_, reject) => setTimeout(() => reject(new DemoFailure("stage-wait", `timeout waiting for ${type}`)), remaining)),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new DemoFailure("stage-wait", `timeout waiting for ${type}`)),
+            remaining,
+          ),
+        ),
       ]);
       this.seq = Number(envelope.seq);
       if (envelope.type === type) {
@@ -345,6 +370,16 @@ const evidence = {};
 function report(key, value) {
   evidence[key] = value;
   process.stdout.write(`${key}=${value}\n`);
+}
+
+/** 按 trace 根查询子进程 DB Record（Trace 连续性的持久化证据）。 */
+async function queryTraceRecords(child, ipc, traceIdValue) {
+  child.send({ type: "trace-records", traceId: traceIdValue });
+  const reply = await ipc.expect("trace-records");
+  if (reply.error !== undefined || reply.records === undefined) {
+    throw new DemoFailure("trace-records", `query failed: ${String(reply.error ?? "no records")}`);
+  }
+  return reply.records;
 }
 
 async function run() {
@@ -407,7 +442,8 @@ async function run() {
     // 4. Fake Signal → announce → ready → PCM 预缓冲（音频 Lane 达标）。
     const submitAt = performance.now();
     const cycleA = uuid();
-    child.send({ type: "submit", cycleId: cycleA, traceId: traceId(), text: "我看看现在的任务进度" });
+    const traceA = traceId();
+    child.send({ type: "submit", cycleId: cycleA, traceId: traceA, text: "我看看现在的任务进度" });
     const submitted = await ipc.expect("submit-result");
     if (!submitted.ok) {
       throw new DemoFailure("submit", `submission rejected: ${submitted.kind}`);
@@ -429,7 +465,10 @@ async function run() {
     if (plan.cues.length < 3 || plan.speech?.text !== "我看看现在的任务进度") {
       throw new DemoFailure("prepare", `unexpected plan: ${plan.cues?.length} cues`);
     }
-    report("scenePlan", `compiled(${plan.cues.length} cues, ${plan.scene.groups[0].lanes.join("+")})`);
+    report(
+      "scenePlan",
+      `compiled(${plan.cues.length} cues, ${plan.scene.groups[0].lanes.join("+")})`,
+    );
 
     // 5. 全部 hard Lane ready（音频以预缓冲达标为准）。
     stage.send("scene.ready", {
@@ -449,7 +488,10 @@ async function run() {
     report("sceneCommit", "durable");
 
     // 7. 到点：三 Lane 同时 started（双域时刻）+ finished → completed。
-    const targetDelayMs = Math.max(0, Number(commitAtRuntimeUs - stage.offsetUs) / 1000 - performance.now());
+    const targetDelayMs = Math.max(
+      0,
+      Number(commitAtRuntimeUs - stage.offsetUs) / 1000 - performance.now(),
+    );
     await new Promise((resolve) => setTimeout(resolve, targetDelayMs));
     const startedAt = performance.now();
     const startedAtStageUs = BigInt(Math.round(startedAt * 1000));
@@ -505,13 +547,24 @@ async function run() {
 
     // 8. 第二条紧急 Signal：新 Scene prepare 后立即打断 → 取消时延 + 停流。
     const cycleB = uuid();
-    child.send({ type: "submit", cycleId: cycleB, traceId: traceId(), urgent: true, text: "紧急打断" });
+    const traceB = traceId();
+    child.send({
+      type: "submit",
+      cycleId: cycleB,
+      traceId: traceB,
+      urgent: true,
+      text: "紧急打断",
+    });
     const submittedB = await ipc.expect("submit-result");
     const prepareB = await stage.waitFor("scene.prepare");
     stage.send("scene.ready", {
       sceneId: prepareB.payload.plan.scene.sceneId,
       cycleId: prepareB.payload.plan.scene.cycleId,
-      lanes: prepareB.payload.plan.scene.groups[0].lanes.map((lane) => ({ lane, status: "ready", cueIds: [] })),
+      lanes: prepareB.payload.plan.scene.groups[0].lanes.map((lane) => ({
+        lane,
+        status: "ready",
+        cueIds: [],
+      })),
       preparedAtStageUs: String(Math.round(performance.now() * 1000)),
     });
     const interruptStart = performance.now();
@@ -528,7 +581,10 @@ async function run() {
     });
     const cancelLatencyMs = performance.now() - interruptStart;
     if (cancelLatencyMs > 100) {
-      throw new DemoFailure("interrupt", `cancel latency ${cancelLatencyMs.toFixed(1)}ms exceeds 100ms budget`);
+      throw new DemoFailure(
+        "interrupt",
+        `cancel latency ${cancelLatencyMs.toFixed(1)}ms exceeds 100ms budget`,
+      );
     }
     report("interruptLatencyMs", cancelLatencyMs.toFixed(2));
     const settledB = await ipc.expect("scene-settled");
@@ -547,8 +603,9 @@ async function run() {
     }
     report("mediaStopOnCancel", "ok");
 
-    // 8.5 Trace 连续性：同一 Scene 的 announce/prepare/commit 共用同一根；
-    // 被打断 Scene 的 cancel 也必须携带它自己 announce 时的根。
+    // 8.5 Trace 连续性（完整链路）：Signal 提交根（traceA）→ Control 线上
+    // （announce/prepare/commit）→ Media 帧头 → DB Record（审计 + 生命周期）
+    // 必须共用同一根；被打断 Scene 的 cancel/媒体同理（traceB）。
     const sceneTrace = stage.traceRoots.get(plan.scene.sceneId);
     const wireTraces = [announce, prepare, commit]
       .map((e) => e.trace?.traceId)
@@ -559,6 +616,19 @@ async function run() {
         `trace roots diverge: announce=${sceneTrace} wire=${[...new Set(wireTraces)].join(",")}`,
       );
     }
+    if (sceneTrace !== traceA) {
+      throw new DemoFailure(
+        "trace",
+        `signal→control trace root diverged: submitted=${traceA} wire=${sceneTrace}`,
+      );
+    }
+    const mediaTrace = stream?.traceId ?? null;
+    if (mediaTrace !== traceA) {
+      throw new DemoFailure(
+        "trace",
+        `media frame trace root diverged: submitted=${traceA} media=${String(mediaTrace)}`,
+      );
+    }
     const interruptedTrace = stage.traceRoots.get(cancelEnvelope.payload.sceneId);
     if (
       interruptedTrace !== undefined &&
@@ -567,7 +637,30 @@ async function run() {
     ) {
       throw new DemoFailure("trace", "interrupted scene cancel carries a foreign trace root");
     }
-    report("traceContinuity", `ok(${sceneTrace.slice(0, 8)}…×3+cancel)`);
+    if (interruptedTrace !== traceB) {
+      throw new DemoFailure(
+        "trace",
+        `interrupted scene announce root ${String(interruptedTrace)} != submitted ${traceB}`,
+      );
+    }
+    // DB 证据：同一 trace 根下必须同时存在 Signal/决策/编译审计 Record 与
+    // 生命周期 Record（sessionId 为真实逻辑会话）。
+    const recordsA = await queryTraceRecords(child, ipc, traceA);
+    const typesA = new Set(recordsA.map((record) => record.recordType));
+    for (const expected of [
+      "phase2_signal_accepted",
+      "phase2_decision_packet",
+      "phase2_scene_plan_compiled",
+      "scene_lifecycle",
+    ]) {
+      if (!typesA.has(expected)) {
+        throw new DemoFailure("trace", `db records for ${traceA.slice(0, 8)}… lack ${expected}`);
+      }
+    }
+    if (recordsA.some((record) => record.sessionId !== session.sessionId)) {
+      throw new DemoFailure("trace", "db trace records carry a foreign sessionId");
+    }
+    report("traceContinuity", `ok(${traceA.slice(0, 8)}… signal→compile→db→control→media)`);
 
     // 9. Crash Window：SIGKILL → 同目录重启 → 不重复执行已提交 Scene。
     child.kill("SIGKILL");
@@ -579,7 +672,10 @@ async function run() {
     const ready2 = await ipc2.expect("ready");
     child.send({ type: "issue-token" });
     const { token: token2 } = await ipc2.expect("token");
-    const exchange2 = await postJson(ready2.port, "/api/v1/auth/exchange", { startupToken: token2, resumeSessionId: session.sessionId });
+    const exchange2 = await postJson(ready2.port, "/api/v1/auth/exchange", {
+      startupToken: token2,
+      resumeSessionId: session.sessionId,
+    });
     const session2 = JSON.parse(exchange2.body);
     child.send({ type: "recovery", sessionId: session.sessionId });
     const recovery = await ipc2.expect("recovery");
@@ -601,7 +697,10 @@ async function run() {
     await new Promise((resolve) => setTimeout(resolve, 300));
     const strayPrepare = stage2.inbox.findIndex((e) => e.type === "scene.prepare");
     if (strayPrepare !== -1) {
-      throw new DemoFailure("recovery", "restarted runtime replayed a committed scene without a new signal");
+      throw new DemoFailure(
+        "recovery",
+        "restarted runtime replayed a committed scene without a new signal",
+      );
     }
     report("recoveryDuplicateEffects", "0");
     if (recovery.lastCommittedScene === null) {
@@ -615,14 +714,14 @@ async function run() {
     const exitInfo = await Promise.race([
       new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal }))),
       new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new DemoFailure("shutdown", "graceful close timed out")),
-          10000,
-        ),
+        setTimeout(() => reject(new DemoFailure("shutdown", "graceful close timed out")), 10000),
       ),
     ]);
     if (exitInfo.code !== 0) {
-      throw new DemoFailure("shutdown", `child exited with code=${exitInfo.code} signal=${exitInfo.signal}`);
+      throw new DemoFailure(
+        "shutdown",
+        `child exited with code=${exitInfo.code} signal=${exitInfo.signal}`,
+      );
     }
     child = null;
     report("shutdownClean", "ok");

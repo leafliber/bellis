@@ -65,6 +65,8 @@ export interface Phase2AuditPort {
     readonly recordType: string;
     readonly aggregateId: string;
     readonly payload: JsonValue;
+    /** 提交链 trace 根（Signal→决策→编译共用；缺省由装配层提供）。 */
+    readonly traceId?: string;
   }): Promise<void>;
 }
 
@@ -192,28 +194,49 @@ export class Phase2PerformanceService {
       this.#options.logger?.log("warn", "phase2_signal_invalid", {});
       return { kind: "invalid_signal" };
     }
-    void this.#audit("phase2_signal_accepted", `signal:${signalCheck.data.id}`, {
-      signalId: signalCheck.data.id,
-      kind: signalCheck.data.kind,
-      source: signalCheck.data.source,
-      cycleId: input.fixture.cycleId,
-    });
+    // 提交链 trace 根（Signal→决策→编译→DB→Control→Media 共用）：
+    // Fixture 携带合法 32 位十六进制根时优先（上游 Signal 溯源），
+    // 否则生成新根——绝不静默换根。
+    const traceId = /^[0-9a-f]{32}$/i.test(input.fixture.traceId)
+      ? input.fixture.traceId
+      : this.#newTraceId();
+    void this.#audit(
+      "phase2_signal_accepted",
+      `signal:${signalCheck.data.id}`,
+      {
+        signalId: signalCheck.data.id,
+        kind: signalCheck.data.kind,
+        source: signalCheck.data.source,
+        cycleId: input.fixture.cycleId,
+      },
+      traceId,
+    );
     const model = runFakeModel(input.fixture);
     if (model.rejected || model.packet === null) {
       this.#options.logger?.log("warn", "phase2_packet_rejected", {
         cycleId: input.fixture.cycleId,
       });
-      void this.#audit("phase2_decision_packet", `cycle:${input.fixture.cycleId}`, {
-        cycleId: input.fixture.cycleId,
-        accepted: false,
-      });
+      void this.#audit(
+        "phase2_decision_packet",
+        `cycle:${input.fixture.cycleId}`,
+        {
+          cycleId: input.fixture.cycleId,
+          accepted: false,
+        },
+        traceId,
+      );
       return { kind: "invalid_packet" };
     }
     const packet: DecisionPacket = model.packet;
-    void this.#audit("phase2_decision_packet", `cycle:${packet.cycleId}`, {
-      cycleId: packet.cycleId,
-      accepted: true,
-    });
+    void this.#audit(
+      "phase2_decision_packet",
+      `cycle:${packet.cycleId}`,
+      {
+        cycleId: packet.cycleId,
+        accepted: true,
+      },
+      traceId,
+    );
     const compile: CompileResult = compileActionFrame({
       frame: packet.action,
       cycleId: packet.cycleId,
@@ -232,14 +255,20 @@ export class Phase2PerformanceService {
       };
     }
     const sceneId = compile.plan.scene.sceneId;
-    const traceId = this.#newTraceId();
     this.#stagePort.registerScene(sceneId, compile.plan.scene.cycleId, traceId);
-    void this.#audit("phase2_scene_plan_compiled", `scene:${sceneId}`, {
-      sceneId,
-      cycleId: compile.plan.scene.cycleId,
-      cueCount: compile.plan.cues.length,
-      lanes: [...new Set(compile.plan.cues.map((cue) => cue.lane))],
-    });
+    // durable commit 与生命周期 Record 携带同一 trace 根（跨层连续）。
+    this.#options.repository.bindSceneTrace?.(sceneId, traceId);
+    void this.#audit(
+      "phase2_scene_plan_compiled",
+      `scene:${sceneId}`,
+      {
+        sceneId,
+        cycleId: compile.plan.scene.cycleId,
+        cueCount: compile.plan.cues.length,
+        lanes: [...new Set(compile.plan.cues.map((cue) => cue.lane))],
+      },
+      traceId,
+    );
     this.#announceSpeechStream(compile.plan, traceId);
     this.#activeScenes.set(sceneId, {
       cycleId: compile.plan.scene.cycleId,
@@ -452,12 +481,22 @@ export class Phase2PerformanceService {
     });
   }
 
-  async #audit(recordType: string, aggregateId: string, payload: JsonValue): Promise<void> {
+  async #audit(
+    recordType: string,
+    aggregateId: string,
+    payload: JsonValue,
+    traceId?: string,
+  ): Promise<void> {
     if (this.#options.audit === undefined) {
       return;
     }
     try {
-      await this.#options.audit.append({ recordType, aggregateId, payload });
+      await this.#options.audit.append({
+        recordType,
+        aggregateId,
+        payload,
+        ...(traceId === undefined ? {} : { traceId }),
+      });
     } catch (error) {
       // 审计失败不阻塞提交链路，但必须显式记录（不吞错）。
       this.#options.logger?.log("warn", "phase2_audit_append_failed", {

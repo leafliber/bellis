@@ -367,6 +367,29 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
     this.#sessionId = sessionId;
   }
 
+  /** Scene 级 trace 根登记（提交链共用同一根；容量 64 按登记顺序淘汰）。 */
+  readonly #sceneTraces = new Map<string, string>();
+  #sceneTraceOrder: string[] = [];
+
+  bindSceneTrace(sceneId: string, traceId: string): void {
+    this.#sceneTraces.set(sceneId, traceId);
+    this.#sceneTraceOrder.push(sceneId);
+    while (this.#sceneTraceOrder.length > 64) {
+      const oldest = this.#sceneTraceOrder.shift();
+      if (oldest !== undefined && oldest !== sceneId) {
+        this.#sceneTraces.delete(oldest);
+      } else {
+        break;
+      }
+    }
+  }
+
+  /** Scene 的 trace 根（未登记回落装配级 trace：Trace 事实不缺席）。 */
+  #sceneTraceOf(sceneId: string): { readonly traceId: string } {
+    const bound = this.#sceneTraces.get(sceneId);
+    return bound === undefined ? this.#trace : { traceId: bound };
+  }
+
   async commit(
     input: {
       readonly sessionId: string;
@@ -386,7 +409,7 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
       requestFingerprint: input.requestFingerprint,
       watermarks: [],
       outbox: [],
-      trace: this.#trace,
+      trace: this.#sceneTraceOf(input.plan.scene.sceneId),
     })) as { sceneId: string; committedAtMs: number; duplicate: boolean };
     return result;
   }
@@ -414,7 +437,7 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
         sessionId,
         recordType: "scene_lifecycle",
         aggregateId: `scene-lifecycle:${record.sceneId}`,
-        traceId: this.#trace.traceId,
+        traceId: this.#sceneTraceOf(record.sceneId).traceId,
         occurredAtMs: record.occurredAtMs,
         payload: {
           sceneId: record.sceneId,
@@ -424,7 +447,7 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
           ...(record.reason === undefined ? {} : { reason: record.reason }),
         },
       },
-      trace: this.#trace,
+      trace: this.#sceneTraceOf(record.sceneId),
     });
   }
 }

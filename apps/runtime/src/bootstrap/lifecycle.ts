@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { MonotonicClock } from "@bellis/contracts";
+import type { MonotonicClock, SessionRecord } from "@bellis/contracts";
 import type {
   OutboxDispatcher,
   PersistenceCheckpointObserver,
@@ -131,6 +131,8 @@ export interface RuntimeHandle {
   ): Promise<FakeSceneCommitResult>;
   /** 读取逻辑 Session 的恢复状态（Scene/Watermark/Server Seq）。 */
   readSessionRecovery(sessionId: string): Promise<RecoveryState>;
+  /** 按 trace 根查询 Session Record（Trace 连续性验证；不含帧内容）。 */
+  listRecordsByTrace(traceId: string): Promise<readonly SessionRecord[]>;
   /** Phase 1 发布者的脱敏交付记录（含允许的重复交付）。 */
   outboxDeliveries(): readonly OutboxDeliveryRecord[];
   /** 逻辑 Session 的媒体帧聚合计数（不含帧内容）。 */
@@ -345,8 +347,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
             },
           }),
       // 版本化审计 Record（Signal 接受/决策包/编译结果；不含发言全文）。
+      // traceId：提交链根（Signal→决策→编译共用，由 Service 传入）；
+      // 缺省回落装配级 startup 根。
       audit: {
         append: async (record) => {
+          const traceId = record.traceId ?? startupTraceId;
           await persistence.appendRecord({
             record: {
               schemaVersion: 1,
@@ -354,11 +359,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
               sessionId: phase2SessionId,
               recordType: record.recordType,
               aggregateId: record.aggregateId,
-              traceId: startupTraceId,
+              traceId,
               occurredAtMs: Date.now(),
               payload: record.payload,
             },
-            trace: { traceId: startupTraceId },
+            trace: { traceId },
           });
         },
       },
@@ -586,6 +591,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       return tracked;
     },
     readSessionRecovery: (sessionId) => persistence.readRecoveryState(sessionId),
+    listRecordsByTrace: (traceId) =>
+      persistence.listRecords({ traceId, limit: 64 }).then((records) => [...records]),
     outboxDeliveries: () => publisher.records(),
     mediaFrameStats: (sessionId) => {
       const logical = store.resolveById(sessionId);

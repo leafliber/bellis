@@ -96,4 +96,10 @@ export interface SceneLifecycleRecord {
 export interface SceneRepositoryPort {
   commit(input: DurableSceneCommit, signal: AbortSignal): Promise<DurableCommitResult>;
   appendLifecycle(record: SceneLifecycleRecord, signal: AbortSignal): Promise<void>;
+  /**
+   * 绑定 Scene 级 trace 根（可选能力）：提交链（Signal→编译→DB）共用
+   * 同一 traceId 时由应用层登记，durable commit 与生命周期 Record 携带
+   * 该根，实现跨层 Trace 连续；未绑定的实现沿用装配级 trace。
+   */
+  bindSceneTrace?(sceneId: string, traceId: string): void;
 }

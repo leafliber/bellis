@@ -16,7 +16,10 @@ function notify(message) {
 
 const [dataDirectory, faultPointArg] = process.argv.slice(2);
 if (dataDirectory === undefined) {
-  notify({ type: "harness-error", message: "usage: phase-2-demo-child.mjs <dataDirectory> [faultPoint]" });
+  notify({
+    type: "harness-error",
+    message: "usage: phase-2-demo-child.mjs <dataDirectory> [faultPoint]",
+  });
   process.exit(2);
 }
 
@@ -126,6 +129,25 @@ process.on("message", (event) => {
       })
       .catch((error) => {
         notify({ type: "recovery", error: String(error) });
+      });
+    return;
+  }
+  if (event.type === "trace-records") {
+    runtime
+      .listRecordsByTrace(event.traceId)
+      .then((records) => {
+        notify({
+          type: "trace-records",
+          traceId: event.traceId,
+          records: records.map((record) => ({
+            recordType: record.recordType,
+            aggregateId: record.aggregateId,
+            sessionId: record.sessionId,
+          })),
+        });
+      })
+      .catch((error) => {
+        notify({ type: "trace-records", traceId: event.traceId, error: String(error) });
       });
     return;
   }
