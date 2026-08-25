@@ -458,6 +458,43 @@ describe("Phase2PerformanceService 媒体编排", () => {
     }
   });
 
+  it("能力快照权威：合法但不含 PCM 的上报不回落默认（音频 Cue 拒绝）", async () => {
+    const h = createService();
+    // Stage 明确声明不支持 PCM 基线：编译不得回落默认能力重新启用音频。
+    h.service.handleStageMessage(
+      "stage.capabilities",
+      {
+        capabilities: {
+          schemaVersion: 1,
+          audio: { contentTypes: ["audio/opus-48000-mono"], maxBufferedUs: "2000000" },
+          subtitle: { supported: true },
+          avatar: { adapter: "reporting", motions: ["nod_agree"], expressions: ["happy"] },
+        },
+      },
+      h.clock.nowUs(),
+    );
+    const outcome = h.service.submit({ signal: SIGNAL, fixture: FIXTURE });
+    expect(outcome.kind).toBe("rejected");
+    if (outcome.kind === "rejected") {
+      expect(
+        outcome.issues.some(
+          (issue) =>
+            issue.code === "capability_missing" || issue.code === "hard_lane_unsatisfiable",
+        ),
+      ).toBe(true);
+    }
+    // 断线清除快照：代际更新后回落装配默认（Stage 重新上报前）。
+    for (const handler of h.channel.disconnectHandlers) {
+      handler();
+    }
+    expect(h.service.submit({ signal: SIGNAL, fixture: FIXTURE }).kind).toBe("submitted");
+    const closing = h.service.close();
+    await flush();
+    h.clock.advanceBy(3_000_000n);
+    await flush(20);
+    await closing;
+  });
+
   it("审计 Record：signal 接受 / 决策包 / 编译结果（不含发言全文）", async () => {
     const records: { recordType: string; payload: JsonValue }[] = [];
     const clock = new VirtualClock();

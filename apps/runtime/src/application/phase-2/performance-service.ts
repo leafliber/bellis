@@ -442,14 +442,20 @@ export class Phase2PerformanceService {
     return this.#director.getExecutionState(sceneId);
   }
 
-  /** 编译能力：stage.capabilities 快照（Schema 校验通过且含 PCM 基线）。 */
+  /**
+   * 编译能力：stage.capabilities 快照为权威——Schema 校验通过即照单全收
+   * （Stage 明确声明不支持 PCM 时音频 Cue 被编译拒绝 capability_missing，
+   * 绝不回落默认能力重新启用 Stage 不支持的 Lane）；未上报（null）才
+   * 回落装配默认。断线时快照按连接代际清除（StagePort 侧）。
+   */
   #compileCapabilities(): StageCapabilities {
     const reported = this.#stagePort.latestStageCapabilities as { capabilities?: unknown } | null;
     if (reported !== null) {
       const check = StageCapabilitiesSchema.safeParse(reported.capabilities);
-      if (check.success && check.data.audio.contentTypes.includes(PHASE_2_PCM_CONTENT_TYPE)) {
+      if (check.success) {
         return check.data;
       }
+      this.#options.logger?.log("warn", "phase2_stage_capabilities_invalid", {});
     }
     return this.#options.capabilities;
   }

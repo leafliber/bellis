@@ -12,8 +12,10 @@ import type { FakeTtsResult } from "./fake-tts.js";
  *
  * - 帧 Sequence 从 0 严格连续；targetTimeUs = commitAtRuntimeUs + 帧序 ×
  *   20ms；发送节奏跟随时钟（目标时刻到达才发，不提前洪泛）；
- * - 队列三重限制：帧数、字节数、最大未来音频时长（≤ Stage 声明的
- *   maxBufferedUs 预算）；任一超限暂停发送并等待时钟追赶；
+ * - 队列三重限制（全部落地）：帧数、字节数以「已发送未播放」账目执行
+ *   （播放时刻过去即出账；追赶突发不占队列），未来音频时长 ≤ maxFutureUs；
+ *   超过追赶预算的迟到帧丢弃重同步（droppedByLimit 计数，sequence 仍
+ *   严格连续）；
  * - Control 取消优先于 Media 发送：cancel() 后立即停止产生新帧；
  * - 所有等待由注入时钟 sleepUntil 驱动并接受 Abort；close() 零残留。
  */
@@ -61,6 +63,13 @@ export class RuntimeMediaSender {
   readonly #limits: MediaSenderLimits;
   readonly #sendFrame: (frame: OutboundMediaFrame) => boolean;
   readonly #jobs = new Map<string, SendJob>();
+  /**
+   * 已交发送但播放时刻未过的帧（socket 内未播音频的发送侧账目）：
+   * 三重限制的帧数/字节维度的执行载体。播放时刻过去即出账（prune）；
+   * 追赶突发中所有帧均已过期 → 即时出账，不占队列。
+   */
+  readonly #queue: { readonly targetUs: bigint; readonly bytes: number }[] = [];
+  #queuedBytes = 0;
   #closed = false;
   #sentTotal = 0;
   #droppedByLimit = 0;
@@ -83,6 +92,11 @@ export class RuntimeMediaSender {
   /** 传输层拒绝（连接不存在/背压超限）导致的丢弃帧数。 */
   get droppedByTransport(): number {
     return this.#droppedByTransport;
+  }
+
+  /** 当前排队（已发送未播放）帧数/字节数（限制执行的可观测账目）。 */
+  get queued(): { readonly frames: number; readonly bytes: number } {
+    return { frames: this.#queue.length, bytes: this.#queuedBytes };
   }
 
   get activeJobs(): number {
@@ -161,8 +175,7 @@ export class RuntimeMediaSender {
     const totalFrames = job.pcm.frameCount;
     while (!job.stopped && !this.#closed && frameIndex < totalFrames) {
       const targetUs = job.firstFrameTargetUs + BigInt(frameIndex) * perFrameUs;
-      // 三重限制：未来时长超预算时等待时钟追赶（帧数/字节随帧推进单调，
-      // 未来时长是唯一会随突发堆积的维度；上限由 maxQueuedFrames 保证）。
+      // 限制 1/3（未来时长）：超预算提前量时等待时钟追赶。
       const lead = targetUs - this.#clock.nowUs();
       if (lead > this.#limits.maxFutureUs) {
         const waitOk = await this.#sleep(
@@ -183,6 +196,32 @@ export class RuntimeMediaSender {
       if (job.stopped || this.#closed) {
         return;
       }
+      // 播放时刻已过：出账（追赶突发不占队列）。
+      this.#pruneQueue();
+      const frameBytes = PHASE_2_PCM_FRAME_BYTES;
+      const queueFull =
+        this.#queue.length >= this.#limits.maxQueuedFrames ||
+        this.#queuedBytes + frameBytes > this.#limits.maxQueuedBytes;
+      const overdueBy = this.#clock.nowUs() - targetUs;
+      if (queueFull && overdueBy <= this.#limits.maxFutureUs) {
+        // 限制 2/3（帧数/字节）：队列满但帧仍在有效窗口内——等待队头
+        // 播放出账后重估（不丢有效音频）。
+        const head = this.#queue[0];
+        if (head !== undefined) {
+          const waitOk = await this.#sleep(head.targetUs + perFrameUs, job.controller.signal);
+          if (!waitOk) {
+            return;
+          }
+          continue;
+        }
+      }
+      if (queueFull || overdueBy > this.#limits.maxFutureUs) {
+        // 队列满的过期帧 / 超过追赶预算的迟到帧：丢弃重同步（迟到音频
+        // 无播放价值，不洪泛 socket）；sequence 仍严格连续。
+        this.#droppedByLimit += 1;
+        frameIndex += 1;
+        continue;
+      }
       const start = frameIndex * PHASE_2_PCM_FRAME_BYTES;
       const payload = job.pcm.pcm.subarray(start, start + PHASE_2_PCM_FRAME_BYTES);
       const header: Record<string, string | number> = {
@@ -201,11 +240,26 @@ export class RuntimeMediaSender {
       if (!this.#sendFrame({ header, payload })) {
         this.#droppedByTransport += 1;
       }
+      this.#queue.push({ targetUs, bytes: frameBytes });
+      this.#queuedBytes += frameBytes;
       this.#sentTotal += 1;
       frameIndex += 1;
     }
     if (!job.stopped) {
       this.#jobs.delete(job.sceneId);
+    }
+  }
+
+  /** 播放时刻已过的队头出账（未播音频账目只保留真正排队的帧）。 */
+  #pruneQueue(): void {
+    const nowUs = this.#clock.nowUs();
+    while (this.#queue.length > 0) {
+      const head = this.#queue[0]!;
+      if (head.targetUs + PHASE_2_PCM_FRAME_DURATION_US > nowUs) {
+        return;
+      }
+      this.#queue.shift();
+      this.#queuedBytes -= head.bytes;
     }
   }
 

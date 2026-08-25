@@ -93,8 +93,15 @@ describe("RuntimeMediaSender", () => {
       traceId: "0123456789abcdef0123456789abcdef",
       firstFrameTargetUs: 1_000_000n,
     });
-    // 推进到全部帧的目标时刻之后。
-    clock.advanceBy(1_000_000n + tts.durationUs + 100_000n);
+    // 按帧步进时钟（模拟真实节奏；一次性跳过全流会触发迟到丢弃）。
+    const stepUs = 20_000n;
+    const endUs = 1_000_000n + tts.durationUs + 100_000n;
+    for (let t = 0n; t < endUs; t += stepUs) {
+      clock.advanceBy(stepUs);
+      for (let i = 0; i < 2; i += 1) {
+        await Promise.resolve();
+      }
+    }
     for (let i = 0; i < 20; i += 1) {
       await Promise.resolve();
     }
@@ -104,6 +111,46 @@ describe("RuntimeMediaSender", () => {
     expect(sent[1]?.header.targetTimeUs).toBe("1020000");
     expect(sent.at(-1)?.header.sequence).toBe(String(tts.frameCount - 1));
     expect(sender.sentTotal).toBe(tts.frameCount);
+    expect(sender.droppedByLimit).toBe(0);
+    sender.close();
+  });
+
+  it("迟到超预算帧丢弃重同步：droppedByLimit 计数，sequence 仍严格", async () => {
+    const clock = new VirtualClock();
+    const sent: { header: Record<string, string | number> }[] = [];
+    const sender = new RuntimeMediaSender({
+      clock,
+      sendFrame: (frame) => {
+        sent.push(frame);
+        return true;
+      },
+    });
+    const tts = synthesizeSpeech(SPEECH);
+    sender.startSpeechStream({
+      plan: PLAN,
+      tts,
+      audioCueId: "c",
+      streamId: "s",
+      sessionId: "sess",
+      traceId: "0123456789abcdef0123456789abcdef",
+      firstFrameTargetUs: 1_000_000n,
+    });
+    // 一次性跳过全流（模拟长停顿）：超过追赶预算的头部帧丢弃，
+    // 追赶窗口内的帧照常送达。
+    clock.advanceBy(1_000_000n + tts.durationUs + 100_000n);
+    for (let i = 0; i < 40; i += 1) {
+      await Promise.resolve();
+    }
+    expect(sender.droppedByLimit).toBeGreaterThan(0);
+    expect(sender.droppedByLimit).toBeLessThan(tts.frameCount);
+    expect(sent.length + sender.droppedByLimit).toBe(tts.frameCount);
+    let last = -1;
+    for (const frame of sent) {
+      const sequence = Number(frame.header.sequence);
+      expect(sequence).toBeGreaterThan(last);
+      last = sequence;
+    }
+    expect(sender.sentTotal).toBe(sent.length);
     sender.close();
   });
 

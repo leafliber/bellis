@@ -64,6 +64,9 @@ export class ControlStagePortAdapter implements StagePort {
     this.#nextMessageId = options.nextMessageId;
     void options;
     this.#channel.onDisconnected(() => {
+      // 能力快照按连接代际清除：重连后的 Stage 是新装配，必须重新上报
+      // stage.capabilities（旧连接声明的能力不得延续到新代际）。
+      this.#latestCapabilities = null;
       // 等待中的取消：结果不确定。
       for (const [sceneId, waiter] of this.#cancelWaiters) {
         this.#cancelWaiters.delete(sceneId);
