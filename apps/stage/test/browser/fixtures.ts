@@ -138,6 +138,10 @@ export const test = base.extend<{ stageEnv: StageEnvironment }>({
       },
     };
 
+    // Teardown 严格化：优雅关闭是 Gate 断言的一部分——超时被迫 SIGKILL
+    // 的 Runtime / 退不出的 Vite / 非零退出码都记为失败。清理无条件执行
+    //（setup 失败同样回收子进程）；teardown 问题优先于 run 的失败抛出。
+    let runError: unknown = null;
     try {
       await expectRpc("ready", 30_000);
       const viteDeadline = Date.now() + 30_000;
@@ -167,27 +171,46 @@ ${viteLogs.join("").slice(-800)}`,
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
       }
       await run(environment);
-    } finally {
-      child.send({ type: "shutdown" });
-      await new Promise<void>((resolvePromise) => {
-        const timer = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolvePromise();
-        }, 10_000);
-        child.once("exit", () => {
-          clearTimeout(timer);
-          resolvePromise();
-        });
+    } catch (error) {
+      runError = error;
+    }
+    const teardownProblems: string[] = [];
+    child.send({ type: "shutdown" });
+    await new Promise<void>((resolvePromise) => {
+      const timer = setTimeout(() => {
+        teardownProblems.push("runtime graceful shutdown timed out (SIGKILL forced)");
+        child.kill("SIGKILL");
+        resolvePromise();
+      }, 10_000);
+      child.once("exit", (code) => {
+        clearTimeout(timer);
+        if (code !== 0) {
+          teardownProblems.push(`runtime exited with code ${String(code)}`);
+        }
+        resolvePromise();
       });
-      vite.kill("SIGTERM");
-      await new Promise<void>((resolvePromise) => {
-        const timer = setTimeout(resolvePromise, 5000);
-        vite.once("exit", () => {
-          clearTimeout(timer);
-          resolvePromise();
-        });
+    });
+    vite.kill("SIGTERM");
+    await new Promise<void>((resolvePromise) => {
+      const timer = setTimeout(() => {
+        teardownProblems.push("vite dev server did not exit within 5s");
+        vite.kill("SIGKILL");
+        resolvePromise();
+      }, 5000);
+      vite.once("exit", () => {
+        clearTimeout(timer);
+        resolvePromise();
       });
-      rmSync(dataDirectory, { recursive: true, force: true });
+    });
+    rmSync(dataDirectory, { recursive: true, force: true });
+    if (teardownProblems.length > 0) {
+      throw new Error(
+        `stage e2e teardown was not clean: ${teardownProblems.join("; ")}
+runtime-tail: ${childLogs.join("").slice(-600)}`,
+      );
+    }
+    if (runError !== null) {
+      throw runError;
     }
   },
 });

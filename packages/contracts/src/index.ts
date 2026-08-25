@@ -90,6 +90,19 @@ export type {
 } from "./session/session-snapshot.js";
 export { SessionRecordSchema } from "./session/session-record.js";
 export type { SessionRecord } from "./session/session-record.js";
+export {
+  PHASE_2_AUDIT_PAYLOAD_VERSION,
+  Phase2DecisionPacketPayloadSchema,
+  Phase2ScenePlanCompiledPayloadSchema,
+  Phase2SignalAcceptedPayloadSchema,
+  SceneLifecyclePayloadSchema,
+} from "./session/phase-2-records.js";
+export type {
+  Phase2DecisionPacketPayload,
+  Phase2ScenePlanCompiledPayload,
+  Phase2SignalAcceptedPayload,
+  SceneLifecyclePayload,
+} from "./session/phase-2-records.js";
 
 export {
   CONTROL_MESSAGE_TYPE_PATTERN,

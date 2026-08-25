@@ -8,6 +8,7 @@ import type {
 } from "@bellis/contracts";
 import {
   MediaStreamReadyPayloadSchema,
+  PHASE_2_AUDIT_PAYLOAD_VERSION,
   PHASE_2_PCM_CONTENT_TYPE,
   SignalSchema,
   SpeechIntentSchema,
@@ -204,6 +205,7 @@ export class Phase2PerformanceService {
       "phase2_signal_accepted",
       `signal:${signalCheck.data.id}`,
       {
+        payloadVersion: PHASE_2_AUDIT_PAYLOAD_VERSION,
         signalId: signalCheck.data.id,
         kind: signalCheck.data.kind,
         source: signalCheck.data.source,
@@ -220,6 +222,7 @@ export class Phase2PerformanceService {
         "phase2_decision_packet",
         `cycle:${input.fixture.cycleId}`,
         {
+          payloadVersion: PHASE_2_AUDIT_PAYLOAD_VERSION,
           cycleId: input.fixture.cycleId,
           accepted: false,
         },
@@ -232,6 +235,7 @@ export class Phase2PerformanceService {
       "phase2_decision_packet",
       `cycle:${packet.cycleId}`,
       {
+        payloadVersion: PHASE_2_AUDIT_PAYLOAD_VERSION,
         cycleId: packet.cycleId,
         accepted: true,
       },
@@ -262,6 +266,7 @@ export class Phase2PerformanceService {
       "phase2_scene_plan_compiled",
       `scene:${sceneId}`,
       {
+        payloadVersion: PHASE_2_AUDIT_PAYLOAD_VERSION,
         sceneId,
         cycleId: compile.plan.scene.cycleId,
         cueCount: compile.plan.cues.length,

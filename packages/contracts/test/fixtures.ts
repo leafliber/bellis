@@ -878,6 +878,55 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
       { ...snapshotBase, latestServerSeq: Number(MAX_U64) },
     ],
   },
+  "phase2-signal-accepted-payload": {
+    valid: [
+      {
+        payloadVersion: 1,
+        signalId: MESSAGE_ID,
+        kind: "danmaku",
+        source: "phase2-demo",
+        cycleId: CYCLE_ID,
+      },
+    ],
+    invalid: [
+      // payloadVersion 是闭合字面量：未知版本必须整体拒绝。
+      { payloadVersion: 2, signalId: MESSAGE_ID, kind: "danmaku", source: "s", cycleId: CYCLE_ID },
+      { payloadVersion: 1, signalId: "not-a-uuid", kind: "danmaku", source: "s", cycleId: CYCLE_ID },
+    ],
+  },
+  "phase2-decision-packet-payload": {
+    valid: [{ payloadVersion: 1, cycleId: CYCLE_ID, accepted: true }],
+    invalid: [
+      { payloadVersion: 1, cycleId: CYCLE_ID },
+      { payloadVersion: 1, cycleId: CYCLE_ID, accepted: "yes" },
+    ],
+  },
+  "phase2-scene-plan-compiled-payload": {
+    valid: [
+      { payloadVersion: 1, sceneId: SCENE_ID, cycleId: CYCLE_ID, cueCount: 3, lanes: ["audio"] },
+    ],
+    invalid: [
+      { payloadVersion: 1, sceneId: SCENE_ID, cycleId: CYCLE_ID, cueCount: -1, lanes: ["audio"] },
+      { payloadVersion: 1, sceneId: SCENE_ID, cycleId: CYCLE_ID, cueCount: 1, lanes: [""] },
+    ],
+  },
+  "scene-lifecycle-payload": {
+    valid: [
+      {
+        payloadVersion: 1,
+        sceneId: SCENE_ID,
+        cycleId: CYCLE_ID,
+        from: "created",
+        to: "preparing",
+        reason: "submit|normal",
+      },
+      { payloadVersion: 1, sceneId: SCENE_ID, cycleId: CYCLE_ID, from: "running", to: "cancelled" },
+    ],
+    invalid: [
+      { payloadVersion: 1, sceneId: SCENE_ID, cycleId: CYCLE_ID, from: "", to: "preparing" },
+      { payloadVersion: 0, sceneId: SCENE_ID, cycleId: CYCLE_ID, from: "created", to: "ready" },
+    ],
+  },
   "outbox-message": {
     valid: [
       {

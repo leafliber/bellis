@@ -1,7 +1,9 @@
 import type { JsonValue, MonotonicClock, ScenePlan } from "@bellis/contracts";
 import {
+  PHASE_2_AUDIT_PAYLOAD_VERSION,
   SceneCancelAckPayloadSchema,
   SceneCommitPayloadSchema,
+  SceneLifecyclePayloadSchema,
   SceneReadyPayloadSchema,
   StageCapabilitiesPayloadSchema,
 } from "@bellis/contracts";
@@ -442,13 +444,14 @@ export class PersistenceSceneRepository implements SceneRepositoryPort {
         aggregateId: `scene-lifecycle:${record.sceneId}`,
         traceId: this.#sceneTraceOf(record.sceneId).traceId,
         occurredAtMs: record.occurredAtMs,
-        payload: {
+        payload: SceneLifecyclePayloadSchema.parse({
+          payloadVersion: PHASE_2_AUDIT_PAYLOAD_VERSION,
           sceneId: record.sceneId,
           cycleId: record.cycleId,
           from: record.from,
           to: record.to,
           ...(record.reason === undefined ? {} : { reason: record.reason }),
-        },
+        }),
       },
       trace: this.#sceneTraceOf(record.sceneId),
     });

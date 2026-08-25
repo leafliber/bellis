@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { VirtualClock, createDeterministicIdSource } from "@bellis/testkit";
 import type { JsonValue, StageCapabilities } from "@bellis/contracts";
+import {
+  Phase2DecisionPacketPayloadSchema,
+  Phase2ScenePlanCompiledPayloadSchema,
+  Phase2SignalAcceptedPayloadSchema,
+} from "@bellis/contracts";
+import type { z } from "zod";
 import type { SceneLifecycleRecord } from "@bellis/scene-runtime";
 import { Phase2PerformanceService } from "../../src/application/phase-2/performance-service.js";
 import {
@@ -532,6 +538,18 @@ describe("Phase2PerformanceService 媒体编排", () => {
     expect(types).toContain("phase2_signal_accepted");
     expect(types).toContain("phase2_decision_packet");
     expect(types).toContain("phase2_scene_plan_compiled");
+    // 版本化 Payload：每条 Record 的 payload 通过对应 recordType 的
+    // 版本化 Schema（SessionRecord 的闭合约定，非任意 JSON）。
+    const payloadSchemas: Record<string, z.ZodType> = {
+      phase2_signal_accepted: Phase2SignalAcceptedPayloadSchema,
+      phase2_decision_packet: Phase2DecisionPacketPayloadSchema,
+      phase2_scene_plan_compiled: Phase2ScenePlanCompiledPayloadSchema,
+    };
+    for (const record of records) {
+      const schema = payloadSchemas[record.recordType];
+      expect(schema !== undefined, `no schema registered for ${record.recordType}`).toBe(true);
+      expect(schema?.safeParse(record.payload).success).toBe(true);
+    }
     // 隐私约束：审计 payload 不携带 Signal/发言全文。
     const serialized = JSON.stringify(records);
     expect(serialized.includes("冲")).toBe(false);

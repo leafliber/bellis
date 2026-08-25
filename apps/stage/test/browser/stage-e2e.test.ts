@@ -181,9 +181,9 @@ test("Audio Arm → 媒体流 → 三 Lane 生效 → 偏差/打断指标", asyn
   );
   expect(hiddenAt).toBeGreaterThan(0);
   const interruptLatencyMs = hiddenAt - interruptAt;
-  // 100ms 预算 + MutationObserver 微任务观测余量。
-  expect(interruptLatencyMs).toBeLessThanOrEqual(150);
-  console.info(`interruptLatencyMs=${interruptLatencyMs.toFixed(2)}(browser, budget=100+slack)`);
+  // Gate 预算 100ms：MutationObserver 为微任务级观测，不另给松弛。
+  expect(interruptLatencyMs).toBeLessThanOrEqual(100);
+  console.info(`interruptLatencyMs=${interruptLatencyMs.toFixed(2)}(browser, budget=100)`);
 
   // 打断后：被打断 Scene 的媒体帧停止累积。
   const beforeFrames = await page.evaluate(

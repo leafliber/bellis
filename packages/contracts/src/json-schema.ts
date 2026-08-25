@@ -24,6 +24,12 @@ import {
 } from "./session/session-snapshot.js";
 import { SessionRecordSchema } from "./session/session-record.js";
 import {
+  Phase2DecisionPacketPayloadSchema,
+  Phase2ScenePlanCompiledPayloadSchema,
+  Phase2SignalAcceptedPayloadSchema,
+  SceneLifecyclePayloadSchema,
+} from "./session/phase-2-records.js";
+import {
   ClientControlEnvelopeSchema,
   ControlEnvelopeSchema,
   ServerControlEnvelopeSchema,
@@ -78,6 +84,10 @@ export const CONTRACT_SCHEMA_ENTRIES = {
   "scene-execution-state": SceneExecutionStateSchema,
   "stage-capabilities": StageCapabilitiesSchema,
   "session-record": SessionRecordSchema,
+  "phase2-signal-accepted-payload": Phase2SignalAcceptedPayloadSchema,
+  "phase2-decision-packet-payload": Phase2DecisionPacketPayloadSchema,
+  "phase2-scene-plan-compiled-payload": Phase2ScenePlanCompiledPayloadSchema,
+  "scene-lifecycle-payload": SceneLifecyclePayloadSchema,
   "phase1-session-snapshot": Phase1SessionSnapshotSchema,
   "phase2-session-snapshot": Phase2SessionSnapshotSchema,
   "session-snapshot-union": SessionSnapshotUnionSchema,

@@ -28,6 +28,11 @@ import type {
 import { createRecordingOutboxPublisher } from "../application/outbox-publisher.js";
 import type { OutboxDeliveryRecord } from "../application/outbox-publisher.js";
 import { LocalSessionService } from "../auth/local-session.js";
+import {
+  Phase2DecisionPacketPayloadSchema,
+  Phase2ScenePlanCompiledPayloadSchema,
+  Phase2SignalAcceptedPayloadSchema,
+} from "@bellis/contracts";
 import { StartupTokenService } from "../auth/startup-token.js";
 import { ApplicationError } from "../errors/mapping.js";
 import { RequestTraceStore, createOriginAllowlist } from "../routes/context.js";
@@ -184,6 +189,22 @@ function mergeSignals(signals: readonly AbortSignal[]): {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Phase 2 审计 Record 的版本化 payload Schema 注册表（recordType → Schema）。 */
+const PHASE_2_AUDIT_PAYLOAD_SCHEMAS = {
+  phase2_signal_accepted: Phase2SignalAcceptedPayloadSchema,
+  phase2_decision_packet: Phase2DecisionPacketPayloadSchema,
+  phase2_scene_plan_compiled: Phase2ScenePlanCompiledPayloadSchema,
+} as const;
+
+function phase2AuditPayloadSchemaFor(recordType: string) {
+  const schema =
+    PHASE_2_AUDIT_PAYLOAD_SCHEMAS[recordType as keyof typeof PHASE_2_AUDIT_PAYLOAD_SCHEMAS];
+  if (schema === undefined) {
+    throw new Error(`phase2_audit_payload_unknown_record_type:${recordType}`);
+  }
+  return schema;
 }
 
 export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHandle> {
@@ -347,10 +368,20 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
             },
           }),
       // 版本化审计 Record（Signal 接受/决策包/编译结果；不含发言全文）。
+      // payload 必须通过对应 recordType 的版本化 Schema（SessionRecord 的
+      // 闭合约定），非法 payload 显式失败而非落任意 JSON。
       // traceId：提交链根（Signal→决策→编译共用，由 Service 传入）；
       // 缺省回落装配级 startup 根。
       audit: {
         append: async (record) => {
+          const payloadCheck = phase2AuditPayloadSchemaFor(record.recordType).safeParse(
+            record.payload,
+          );
+          if (!payloadCheck.success) {
+            throw new Error(
+              `phase2_audit_payload_invalid:${record.recordType}:${payloadCheck.error.issues[0]?.code ?? "unknown"}`,
+            );
+          }
           const traceId = record.traceId ?? startupTraceId;
           await persistence.appendRecord({
             record: {
