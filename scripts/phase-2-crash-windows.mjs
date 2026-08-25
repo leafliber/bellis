@@ -141,8 +141,40 @@ async function restartAndVerify(options) {
   const stage = await connectStage(ready.port, cookie, sessionId);
   const snapshot = await stage.waitFor("session.snapshot");
   const snapshotBody = snapshot.payload.snapshot;
-  if (snapshotBody.schemaVersion !== 1) {
-    // 跨重启无 Director 状态：不得虚构执行状态（W0 之外均为 v1 形态）。
+  // 跨进程对账视图（Gate 2）：无落库 Scene（W1）→ v1，不虚构状态；
+  // 有落库 Scene 且结果不可证明（W2/W3）→ v2 uncertain + requiresReprepare；
+  // W4 的 cancel 终态记录可能已/未在崩溃前落库 → v1 或 v2 均合法，
+  // v2 时必须是 uncertain 形态。
+  if (options.expectSnapshotV2) {
+    if (snapshotBody.schemaVersion !== 2) {
+      throw new ScriptFailure(
+        windowKey,
+        `expected v2 uncertain snapshot, got v${snapshotBody.schemaVersion}`,
+      );
+    }
+    const active = snapshotBody.activeScene;
+    if (
+      active === null ||
+      active.sceneId !== options.sceneId ||
+      active.executionState !== "uncertain" ||
+      active.outcomeCertain !== false ||
+      active.requiresReprepare !== true
+    ) {
+      throw new ScriptFailure(windowKey, `unexpected activeScene: ${JSON.stringify(active)}`);
+    }
+  } else if (snapshotBody.schemaVersion === 2) {
+    // W4：cancel 终态记录可能已/未在崩溃前落库，v1/v2 均合法；
+    // v2 时必须是 uncertain 对账形态（绝不虚构其它状态）。
+    const active = snapshotBody.activeScene;
+    if (
+      active === null ||
+      active.sceneId !== options.sceneId ||
+      active.executionState !== "uncertain" ||
+      active.requiresReprepare !== true
+    ) {
+      throw new ScriptFailure(windowKey, `unexpected activeScene: ${JSON.stringify(active)}`);
+    }
+  } else if (snapshotBody.schemaVersion !== 1) {
     throw new ScriptFailure(windowKey, `expected v1 snapshot, got v${snapshotBody.schemaVersion}`);
   }
   if (expectCommitted && snapshotBody.lastCommittedScene?.sceneId !== options.sceneId) {
@@ -314,9 +346,15 @@ async function main() {
       throw new ScriptFailure("after_durable_commit", "stage received commit before crash window");
     }
     await new Promise((resolve) => setTimeout(resolve, 1200));
-    return { crashConfirmed: child.exitCode === null && child.signalCode === "SIGKILL", expectCommitted: true, sceneId };
+    return {
+      crashConfirmed: child.exitCode === null && child.signalCode === "SIGKILL",
+      expectCommitted: true,
+      sceneId,
+      // durable 已落库、Stage 未收到 commit：结果不可证明 → v2 uncertain。
+      expectSnapshotV2: true,
+    };
   });
-  report("crashWindow2", "ok(durable落库,无commit外泄,不补发)");
+  report("crashWindow2", "ok(durable落库,无commit外泄,v2对账不补发)");
 
   // W3：Stage 已收到 Commit、started 未回。
   await crashWindow("after_stage_commit", async ({ child, ipc, stage }) => {
@@ -324,9 +362,15 @@ async function main() {
     const commit = await stage.waitFor("scene.commit");
     void commit;
     await new Promise((resolve) => setTimeout(resolve, 1200));
-    return { crashConfirmed: child.exitCode === null && child.signalCode === "SIGKILL", expectCommitted: true, sceneId };
+    return {
+      crashConfirmed: child.exitCode === null && child.signalCode === "SIGKILL",
+      expectCommitted: true,
+      sceneId,
+      // commit 已送达但 started/finished 未回：结果不可证明 → v2 uncertain。
+      expectSnapshotV2: true,
+    };
   });
-  report("crashWindow3", "ok(commit已送达,无重放)");
+  report("crashWindow3", "ok(commit已送达,v2对账无重放)");
 
   // W4：Cancel 已入队、Ack 前。
   await crashWindow("after_cancel_sent", async ({ child, ipc, stage }) => {
@@ -345,16 +389,21 @@ async function main() {
     });
     child.send({ type: "interrupt", reason: "crash_window_cancel" });
     const cancel = await stage.observeType("scene.cancel", 1000);
+    if (cancel === null) {
+      // Cancel 从未到达 Stage：窗口语义不成立（不能在未观察取消的
+      // 现场宣称「Cancel 已发、Ack 前」覆盖）。
+      throw new ScriptFailure("after_cancel_sent", "cancel not observed before crash");
+    }
     await new Promise((resolve) => setTimeout(resolve, 1000));
     return {
       crashConfirmed: child.exitCode === null && child.signalCode === "SIGKILL",
       expectCommitted: true,
       sceneId,
       expectCancelReplayPossible: true,
-      observedCancelPreCrash: cancel !== null,
+      observedCancelPreCrash: true,
     };
   });
-  report("crashWindow4", "ok(cancel≤1次,无重复取消)");
+  report("crashWindow4", "ok(cancel已观察,≤1次重放,无重复取消)");
 
   if (evidence.length < 5) {
     throw new ScriptFailure("summary", "missing evidence lines");

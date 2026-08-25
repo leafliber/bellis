@@ -197,7 +197,7 @@ function resolveWsSession(ctx: ServerContext, request: FastifyRequest): LogicalS
  * 读取失败只是**回滚**导出状态的 claim——故障解除后的下一次重连仍能
  * 正常恢复，绝不能让一次瞬态失败把同进程导出状态不可逆消费掉。
  */
-async function loadControlResume(
+async function loadControlResumePlan(
   ctx: ServerContext,
   logical: LogicalSession,
 ): Promise<ControlResumePlan> {
@@ -224,6 +224,34 @@ async function loadControlResume(
     return { resume, recoveryState: state };
   }
   return { recoveryState: null };
+}
+
+/**
+ * Phase 2 跨进程对账证据预加载：存在落库 Scene 时读取其生命周期 Record
+ * （同步快照装饰的输入）。读取失败不阻塞恢复（无证据按 uncertain 处理）。
+ */
+async function loadControlResume(
+  ctx: ServerContext,
+  logical: LogicalSession,
+): Promise<ControlResumePlan> {
+  const plan = await loadControlResumePlan(ctx, logical);
+  if (ctx.phase2 === undefined) {
+    return plan;
+  }
+  const committed = plan.recoveryState?.lastCommittedScene;
+  if (committed === undefined || committed === null) {
+    return plan;
+  }
+  try {
+    const records = await ctx.persistence.listRecords({
+      sessionId: logical.sessionId,
+      aggregateId: `scene-lifecycle:${committed.sceneId}`,
+      limit: 16,
+    });
+    return { ...plan, phase2SceneLifecycle: records };
+  } catch {
+    return { ...plan, phase2SceneLifecycle: null };
+  }
 }
 
 function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void {
@@ -279,8 +307,8 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
                 phase2.attachConnection(connection, logical.sessionId);
               }
             },
-            snapshotDecorator: (snapshot, recoveryState) =>
-              phase2.decorateSnapshot(snapshot, recoveryState),
+            snapshotDecorator: (snapshot, recoveryState, sceneLifecycle) =>
+              phase2.decorateSnapshot(snapshot, recoveryState, sceneLifecycle),
           }),
     });
     if (phase2 !== undefined) {

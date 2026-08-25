@@ -3,7 +3,12 @@ import { VirtualClock, createDeterministicIdSource } from "@bellis/testkit";
 import type { JsonValue, StageCapabilities } from "@bellis/contracts";
 import type { SceneLifecycleRecord } from "@bellis/scene-runtime";
 import { Phase2PerformanceService } from "../../src/application/phase-2/performance-service.js";
-import type { ControlChannel } from "../../src/application/phase-2/stage-port-adapter.js";
+import {
+  PersistenceSceneRepository,
+  type ControlChannel,
+} from "../../src/application/phase-2/stage-port-adapter.js";
+import { Phase2RuntimeHost } from "../../src/application/phase-2/host.js";
+import { buildSessionSnapshot } from "../../src/application/recovery.js";
 
 /**
  * Phase 2 应用服务全链路（docs/phase-2-development-guide.md §9.2）：
@@ -499,5 +504,98 @@ describe("Phase2PerformanceService 媒体编排", () => {
     clock.advanceBy(3_000_000n);
     await flush(20);
     await closing;
+  });
+});
+
+describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot）", () => {
+  const RECOVERY = {
+    sessionId: "11111111-2222-4333-8333-444444444444",
+    latestServerSeq: 12n,
+    signalWatermarks: [],
+    lastCommittedScene: {
+      sceneId: "44444444-4444-4444-8444-4444440000aa",
+      cycleId: "33333333-3333-4333-8333-333333333333",
+      committedAtMs: 1000,
+    },
+  } as const;
+
+  function lifecycleRecord(to: string): { payload: { to: string } } {
+    return { payload: { to } };
+  }
+
+  function createHost(): Phase2RuntimeHost {
+    const persistence = new FakePersistence();
+    const repository = new PersistenceSceneRepository({
+      client: persistence,
+      traceId: "0000000000000000000000000000000",
+      newRecordId: () => "55555555-5555-4555-8555-555555555555",
+    });
+    return new Phase2RuntimeHost({
+      sessionId: RECOVERY.sessionId,
+      capabilities: CAPABILITIES,
+      clock: new VirtualClock(),
+      wallClockMs: () => 0,
+      compileIds: { nextId: () => "77777777-7777-4777-8777-777777777777" },
+      recordId: () => "66666666-6666-4666-8666-666666666666",
+      repository,
+    });
+  }
+
+  function baseSnapshot() {
+    return buildSessionSnapshot(
+      { ...RECOVERY },
+      {
+        reason: "replay_gap",
+        sessionStatus: "ready",
+        runtimeVersion: "0.1.0-test",
+        generatedAtMs: 1,
+      },
+    );
+  }
+
+  it("落库 Scene 生命周期在途（非终态记录）→ v2 uncertain + requiresReprepare", () => {
+    const host = createHost();
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+      lifecycleRecord("created"),
+      lifecycleRecord("committing"),
+    ] as never);
+    expect(decorated.schemaVersion).toBe(2);
+    const active = (decorated as { activeScene: { executionState: string } }).activeScene;
+    expect(active.executionState).toBe("uncertain");
+  });
+
+  it("生命周期记录已证终态（completed/cancelled/failed）→ 维持 v1", () => {
+    const host = createHost();
+    for (const terminal of ["completed", "cancelled", "failed"]) {
+      const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+        lifecycleRecord("running"),
+        lifecycleRecord(terminal),
+      ] as never);
+      expect(decorated.schemaVersion).toBe(1);
+    }
+  });
+
+  it("记录缺失（null）→ 结果不可证明 → v2 uncertain", () => {
+    const host = createHost();
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, null);
+    expect(decorated.schemaVersion).toBe(2);
+  });
+
+  it("uncertain 记录保持对账视图（不可证终态）→ v2 uncertain", () => {
+    const host = createHost();
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+      lifecycleRecord("uncertain"),
+    ] as never);
+    expect(decorated.schemaVersion).toBe(2);
+  });
+
+  it("无落库 Scene → v1（不虚构状态）", () => {
+    const host = createHost();
+    const decorated = host.decorateSnapshot(
+      baseSnapshot(),
+      { ...RECOVERY, lastCommittedScene: null },
+      null,
+    );
+    expect(decorated.schemaVersion).toBe(1);
   });
 });

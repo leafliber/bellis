@@ -1,7 +1,9 @@
 import type {
+  ActiveSceneState,
   MonotonicClock,
   Phase1SessionSnapshot,
   Phase2SessionSnapshot,
+  SessionRecord,
   StageCapabilities,
 } from "@bellis/contracts";
 import { buildPhase2SessionSnapshot } from "../recovery.js";
@@ -187,20 +189,23 @@ export class Phase2RuntimeHost {
    * Snapshot 装饰（scene-execution.md §8）：存在对账价值的活动 Scene
    * （未完成或 uncertain）时升级为 v2 形态并补 requiresReprepare
    * （= 当前无 Stage 连接：准备资源已随旧连接丢失）；否则原样返回 v1。
-   */
-  /**
-   * Snapshot 装饰（scene-execution.md §8）：存在对账价值的活动 Scene
-   * （未完成或 uncertain）时升级为 v2 形态并补 requiresReprepare
-   * （= 当前无 Stage 连接：准备资源已随旧连接丢失）；否则原样返回 v1。
    * 同步实现（恢复状态由调用方预加载），保持「快照必须成功入队」不变量。
+   *
+   * 跨进程（重启后无 Director 状态）：durable 落库 Scene 以预加载的
+   * 生命周期 Record 为证据——最后记录已达终态（completed/cancelled/
+   * failed）即无对账价值（v1）；记录缺失、未达终态或为 uncertain 时，
+   * 结果不可证明 → v2 uncertain 视图（requiresReprepare=true，绝不虚构
+   * 其它执行状态，也绝不自动重播）。
    */
   decorateSnapshot(
     base: Phase1SessionSnapshot,
     recoveryState: RecoveryState,
+    sceneLifecycle: readonly SessionRecord[] | null = null,
   ): Phase1SessionSnapshot | Phase2SessionSnapshot {
     const view = this.#service.activeSceneView();
     if (view === null) {
-      return base;
+      const crossProcess = this.#crossProcessView(recoveryState, sceneLifecycle);
+      return crossProcess === null ? base : buildPhase2SessionSnapshot(recoveryState, crossProcess);
     }
     return buildPhase2SessionSnapshot(recoveryState, {
       reason: base.reason,
@@ -217,6 +222,44 @@ export class Phase2RuntimeHost {
         requiresReprepare: view.executionState === "uncertain" || this.#connection === null,
       },
     });
+  }
+
+  /** 跨进程对账视图构造参数；无对账价值（无落库/已证终态）返回 null。 */
+  #crossProcessView(
+    recoveryState: RecoveryState,
+    sceneLifecycle: readonly SessionRecord[] | null,
+  ): {
+    readonly reason: Phase1SessionSnapshot["reason"];
+    readonly sessionStatus: Phase1SessionSnapshot["sessionStatus"];
+    readonly runtimeVersion: string;
+    readonly generatedAtMs: number;
+    readonly activeScene: ActiveSceneState;
+  } | null {
+    const committed = recoveryState.lastCommittedScene;
+    if (committed === null) {
+      return null;
+    }
+    const last = sceneLifecycle?.[sceneLifecycle.length - 1];
+    const to = last !== undefined ? (last.payload as { to?: unknown }).to : undefined;
+    // 生命周期 Record 的终态转换（DirectorInternalState 语义）：只有
+    // completed/cancelled/failed 是可证终态；uncertain 与缺失/在途记录
+    // 都意味着「结果不可证明」→ 保持 uncertain 对账视图。
+    if (to === "completed" || to === "cancelled" || to === "failed") {
+      return null;
+    }
+    return {
+      reason: "replay_gap",
+      sessionStatus: "ready",
+      runtimeVersion: this.#options.runtimeVersion ?? "unknown",
+      generatedAtMs: Date.now(),
+      activeScene: {
+        sceneId: committed.sceneId,
+        cycleId: committed.cycleId,
+        executionState: "uncertain",
+        outcomeCertain: false,
+        requiresReprepare: true,
+      },
+    };
   }
 
   submit(input: { signal: unknown; fixture: FakeModelFixture }): SubmissionOutcome {
