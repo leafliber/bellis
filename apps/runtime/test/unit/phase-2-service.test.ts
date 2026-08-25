@@ -519,10 +519,6 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot）", () => 
     },
   } as const;
 
-  function lifecycleRecord(to: string): { payload: { to: string } } {
-    return { payload: { to } };
-  }
-
   function createHost(): Phase2RuntimeHost {
     const persistence = new FakePersistence();
     const repository = new PersistenceSceneRepository({
@@ -599,3 +595,8 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot）", () => 
     expect(decorated.schemaVersion).toBe(1);
   });
 });
+
+/** 生命周期 Record 的最小证据形态（payload.to 为状态机转换目标）。 */
+function lifecycleRecord(to: string): { payload: { to: string } } {
+  return { payload: { to } };
+}
