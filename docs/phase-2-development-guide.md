@@ -413,7 +413,9 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 - 输入只接受 `SpeechIntent`；输出固定 PCM 格式和可选词/句时间标记；
 - 波形、分块、时长和 Timing 对相同输入确定；
 - 按 Frame Sequence 发送，使用 `targetTimeUs/durationUs`；
-- 发送队列按帧数、字节数和最大未来音频时长三重限制；
+- 发送队列按帧数、字节数和最大未来音频时长三重限制（帧数/字节以
+  「已发送未播放」账目执行：播放时刻过去即出账；超过追赶预算的迟到
+  帧丢弃重同步并计入 `droppedByLimit`，sequence 仍严格连续）；
 - Control Cancel 优先于 Media 发送，取消后不再产生新帧；
 - 不把 PCM、全文或敏感输入写入日志。
 
@@ -530,18 +532,22 @@ Phase 2 验收由三个互补命令承担（全部自动、无公网、失败非
   握手/时钟校准、announce → ready → 真实 PCM 帧流（BELL v1 解析、
   sequence 严格连续、20ms 等差、RMS > 0、预缓冲达标才宣告 audio
   ready）、durable Commit、三 Lane 回执、紧急打断（取消时延 +
-  停流）、Crash 后同目录重启不重复执行、真实 Trace 连续性
-  （announce/prepare/commit/cancel 共用同一根）；
+  停流）、Crash 后同目录重启不重复执行、全链路 Trace 连续性
+  （Signal 提交根 == Control 线上 announce/prepare/commit/cancel ==
+  Media 帧头 == DB Record 四类证据 + 真实 sessionId）；
 - `pnpm demo:phase2:crash`——四个关键 Crash Window 定向覆盖 +
   同进程断连的 Snapshot v2（uncertain + requiresReprepare）：
-  W1 Prepare 后/DB Commit 前（未落库、无重放）、W2 DB Commit 后/
-  Stage Commit 前（durable 落库、commit 不外泄、不补发）、W3 Stage
-  已收到 Commit/started 前（无重放）、W4 Cancel 已入队/Ack 前
-  （cancel 至多重放一次）；
+  W1 Prepare 后/DB Commit 前（未落库、无重放、v1）、W2 DB Commit 后/
+  Stage Commit 前（durable 落库、commit 不外泄、不补发；重启返回
+  v2 uncertain 对账视图）、W3 Stage 已收到 Commit/started 前（无重放；
+  v2 uncertain）、W4 Cancel 已入队/Ack 前（崩溃前必须真实观察到
+  cancel；至多重放一次）；
 - `pnpm test:browser`——真实 Chromium E2E（真实用户手势 Arm、真实
   AudioContext/AudioWorklet、Vite dev 源路径）：认证 → 时钟校准 →
   预缓冲 ≥6 帧 → 三 Lane 到点生效 → 浏览器级偏差 ≤50ms（实测
-  ~3ms）→ MutationObserver 打断时延（实测 ~2ms）→ 打断后停流。
+  ~3ms）→ MutationObserver 打断时延（预算 100ms，实测 ~2ms）→
+  打断后停流；teardown 严格化（Runtime 优雅关闭超时/非零退出码、
+  Vite 退不出均判失败）。
 
 `pnpm demo:phase2` 成功输出至少包含：
 

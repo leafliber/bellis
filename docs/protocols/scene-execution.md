@@ -304,9 +304,19 @@ contentType  audio/pcm-s16le-48000-mono
   Prepare 才能接受新 Commit）。
 - 恢复事实与重新执行分离：Snapshot 可以说明"已提交/结果不确定"，
   不导致自动重播；只有新的显式 `scene.prepare → commit` 才产生新副作用。
+- 跨进程（Runtime 重启后无 Director 状态）：以持久化证据推导——
+  最后落库 Scene 的生命周期 Record 已达终态（completed/cancelled/
+  failed）则无对账价值（v1）；记录缺失、在途或为 uncertain 时结果
+  不可证明 → v2 uncertain（requiresReprepare=true），绝不虚构其它
+  执行状态。
 - `openMediaStreams` 在两个版本中恒为空（连接级资源，重连重新声明）。
 - Runtime 在未启用 Phase 2 演出链路的会话中继续发送 v1 快照，
   Phase 1 客户端行为不变。
+- 连接归属（隔离）：演出回执（scene.ready/started/finished/
+  cancel.ack/stage.capabilities/media.stream.ready）仅 hello 声明
+  `clientType=stage` 的**当前绑定连接**可提交；首个 stage hello 决定
+  归属 Session（其它 Session 的 stage hello 不改绑）；Media WebSocket
+  仅归属 Session 可承载 Phase 2 出站（其它连接 1008 拒绝）。
 
 ## 9. ScenePlan 持久化策略（P0 决策，P4 实施）
 

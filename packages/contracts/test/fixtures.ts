@@ -891,7 +891,13 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
     invalid: [
       // payloadVersion 是闭合字面量：未知版本必须整体拒绝。
       { payloadVersion: 2, signalId: MESSAGE_ID, kind: "danmaku", source: "s", cycleId: CYCLE_ID },
-      { payloadVersion: 1, signalId: "not-a-uuid", kind: "danmaku", source: "s", cycleId: CYCLE_ID },
+      {
+        payloadVersion: 1,
+        signalId: "not-a-uuid",
+        kind: "danmaku",
+        source: "s",
+        cycleId: CYCLE_ID,
+      },
     ],
   },
   "phase2-decision-packet-payload": {

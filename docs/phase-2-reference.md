@@ -58,31 +58,43 @@ interruptLatencyMs=2.0~2.1(browser, budget=100+slack)
 
 协议级（`pnpm demo:phase2`）：媒体帧 sequence 严格连续、targetTimeUs 恒
 20ms 等差、RMS≈4854（真实波形非静音）、预缓冲 6 帧达标才宣告 audio
-ready、取消后帧流立即停止、announce/prepare/commit/cancel 共用同一
-trace 根。
+ready、取消后帧流立即停止、全链路 Trace 连续（Signal 提交根 ==
+Control 线上 announce/prepare/commit/cancel == Media 帧头 == DB Record
+四类证据 + 真实 sessionId）。
 
-Crash Window（`pnpm demo:phase2:crash`）：W1 未落库无重放；W2 durable
-落库且 commit 不外泄、不补发；W3 commit 已送达无重放；W4 cancel 至多
-重放一次；同进程断连重连收到 schemaVersion 2 快照
-（activeScene.executionState=uncertain、requiresReprepare=true）。
+Crash Window（`pnpm demo:phase2:crash`）：W1 未落库无重放（v1）；W2
+durable 落库且 commit 不外泄、不补发，重启返回 v2 uncertain 对账视图；
+W3 commit 已送达无重放（v2 uncertain）；W4 崩溃前真实观察到 cancel、
+至多重放一次（cancel 终态落库竞态下 v1/v2 均合法）；同进程断连重连
+收到 schemaVersion 2 快照（activeScene.executionState=uncertain、
+requiresReprepare=true）。
 
 ## 4. 资源与失败语义（不变量）
 
 - 所有队列/缓冲/Barrier/Timer/Socket/浏览器资源有界并具备 Abort、
-  Deadline 与 close 路径（媒体发送三重限制、Worklet 有界缓冲、重连
-  退避封顶、Director 并发与终态保留上限）；
+  Deadline 与 close 路径（媒体发送三重限制——帧数/字节按「已发送未
+  播放」账目执行、迟到超预算丢弃重同步计入 droppedByLimit、Worklet
+  有界缓冲、重连退避封顶、Director 并发与终态保留上限）；
 - Prepare 零副作用（缓冲不是生效）；Commit 持久化优先；
   commitAtRuntimeUs 在 durable 提交之前选定；
 - 硬同步组整组处理：任一 hard Lane 不可用即整组取消
   （`hard_lane_unavailable:<detail>`）；降级重编译属应用层策略；
 - 取消优先于媒体发送；Control 取消先于 Media 帧（P1 优先级）；
-- uncertain 绝不自动重试外部效果；迟到回执不得复活终态。
+- uncertain 绝不自动重试外部效果；迟到回执不得复活终态；
+- 断线即停：Stage 连接代际变化时 running Scene 的 Lane 副作用本地
+  停止（音频淡出/字幕行移除/Avatar stop），对账交由协议；
+- 角色与 Session 隔离：演出回执仅 clientType=stage 的绑定连接可提交；
+  首个 stage hello 决定归属 Session（改绑拒绝）；Media WS 仅归属
+  Session 可承载 Phase 2 出站；
+- 能力快照权威：stage.capabilities Schema 通过即照单（Stage 明确不
+  支持 PCM 时音频 Cue 编译拒绝，不回落默认）；断线按代际清除；
+- 审计 payload 版本化：signal_accepted/decision_packet/
+  scene_plan_compiled/scene_lifecycle 携带 payloadVersion=1 并经
+  版本化 Schema 校验（非法 payload 显式失败，不落任意 JSON）。
 
 ## 5. 已知边界（后续阶段）
 
 - `bellis_stage_*` 指标上报通道（现以 E2E 证据行承载）；
 - 真实 Cubism Adapter（浏览器路径为 Recording+DOM 徽标；未授权资源
   不进仓库）；
-- 真实 TTS Provider/LLM/Signal Hub（Phase 3+）；
-- 跨重启的 uncertain Scene 对账视图回落 v1 快照（不虚构执行状态；
-  生命周期 Record 已持久化，重建视图属后续阶段）。
+- 真实 TTS Provider/LLM/Signal Hub（Phase 3+）。
