@@ -258,7 +258,9 @@ export class RuntimeMediaSender {
           continue;
         }
       }
-      if (queueFull || overdueBy > LATE_DROP_US) {
+      // 等号对齐 Stage Deadline（now−target ≥ 宽限即拒）：恰好到达阈值
+      // 的帧 Stage 必拒，发送侧直接丢弃（只产生会被接受的帧）。
+      if (queueFull || overdueBy >= LATE_DROP_US) {
         // 队列满的过期帧 / 超过追赶预算的迟到帧：丢弃重同步（迟到音频
         // 无播放价值，不洪泛 socket）；sequence 仍严格连续。
         this.#droppedByLimit += 1;

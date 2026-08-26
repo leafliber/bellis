@@ -243,18 +243,13 @@ async function loadControlResume(
     return plan;
   }
   try {
-    // 生命周期专用最近窗口（recordType 过滤 + 倒序取最近 128 条再回正）：
-    // 只取 scene_lifecycle 不被审计 Record 挤占；并发 Scene 下「最新已
-    // 终态、较早仍在途」也可对账（历史缺陷：升序固定窗口取到最早一批）。
-    const records = await ctx.persistence.listRecords({
-      sessionId: logical.sessionId,
-      recordType: "scene_lifecycle",
-      order: "desc",
-      limit: 128,
-    });
-    return { ...plan, phase2SceneLifecycle: records.toReversed() };
+    // 活动 Scene 索引（写侧同事务维护的权威对账来源）：「任一未证终态
+    // 即 v2」不受记录窗口挤出影响——长期在途的旧 Scene 不会因新 Scene
+    // 流量被遗忘（历史缺陷：固定窗口无论升降序都可能遗漏）。
+    const activeScenes = await ctx.persistence.listActiveScenes(logical.sessionId);
+    return { ...plan, phase2ActiveScenes: [...activeScenes] };
   } catch {
-    return { ...plan, phase2SceneLifecycle: null };
+    return { ...plan, phase2ActiveScenes: null };
   }
 }
 

@@ -7,8 +7,7 @@ import type {
   TraceContext,
 } from "@bellis/contracts";
 import { parseDecimalString } from "@bellis/contracts";
-import type { RecoveryState, PersistenceClient } from "@bellis/persistence";
-import type { SessionRecord } from "@bellis/contracts";
+import type { ActiveSceneRow, RecoveryState, PersistenceClient } from "@bellis/persistence";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import { CONTROL_CLOSE_CODES, ControlSession, decodeControlMessage } from "@bellis/transport";
 import type { ControlEffect, ControlLogicalState, ServerEnqueueResult } from "@bellis/transport";
@@ -69,11 +68,11 @@ export interface ControlResumePlan {
   /** 预加载的 P2 恢复状态（Replay Gap 快照内容；可能为 null）。 */
   readonly recoveryState: RecoveryState | null;
   /**
-   * Phase 2 跨进程对账证据（server 装配预加载）：最后落库 Scene 的
-   * 生命周期 Record（按 aggregateId 过滤）。null = 无 Phase 2 装配或
-   * 无落库 Scene；快照装饰据此在不虚构状态的前提下给出 uncertain 视图。
+   * Phase 2 跨进程对账证据（server 装配预加载）：活动 Scene 索引行
+   * （写侧同事务维护）。null = 无 Phase 2 装配或索引读取失败；快照
+   * 装饰据此在不虚构状态的前提下给出 uncertain 视图。
    */
-  readonly phase2SceneLifecycle?: readonly SessionRecord[] | null;
+  readonly phase2ActiveScenes?: readonly ActiveSceneRow[] | null;
   /**
    * 导出状态的事务式消费句柄（三轮评审修复 1）：恢复读取、水位对账
    * 与 ControlSession 构造全部成功后 commit；任何失败或初始化期间连接
@@ -119,7 +118,7 @@ export interface ControlConnectionOptions {
   readonly snapshotDecorator?: (
     snapshot: Phase1SessionSnapshot,
     recoveryState: RecoveryState,
-    sceneLifecycle: readonly SessionRecord[] | null,
+    activeScenes: readonly ActiveSceneRow[] | null,
   ) => Phase1SessionSnapshot | Phase2SessionSnapshot;
 }
 
@@ -150,7 +149,7 @@ export class ControlConnection {
     | ((
         snapshot: Phase1SessionSnapshot,
         recoveryState: RecoveryState,
-        sceneLifecycle: readonly SessionRecord[] | null,
+        activeScenes: readonly ActiveSceneRow[] | null,
       ) => Phase1SessionSnapshot | Phase2SessionSnapshot)
     | null;
   readonly #pumpAbort = new AbortController();
@@ -159,8 +158,8 @@ export class ControlConnection {
   readonly connectionId = crypto.randomUUID();
   #session: ControlSession | null = null;
   #recoveryState: RecoveryState | null = null;
-  /** Phase 2 跨进程生命周期证据（预加载；无装配为 null）。 */
-  #phase2SceneLifecycle: readonly SessionRecord[] | null = null;
+  /** Phase 2 活动 Scene 索引（预加载；无装配/读取失败为 null）。 */
+  #phase2ActiveScenes: readonly ActiveSceneRow[] | null = null;
   /** 本连接是否以 resume 恢复（决定无 lastAck 时是否强制快照）。 */
   #resumedSession = false;
   /** resume 解析期间的入站缓冲（同步挂监听，零丢失）。 */
@@ -245,7 +244,7 @@ export class ControlConnection {
         return;
       }
       this.#recoveryState = plan.recoveryState;
-      this.#phase2SceneLifecycle = plan.phase2SceneLifecycle ?? null;
+      this.#phase2ActiveScenes = plan.phase2ActiveScenes ?? null;
       this.#resumedSession = plan.resume !== undefined;
       // 恢复水位对账（二轮评审修复 2）：任何 Replay/新消息上线前，先把
       // 上条连接已分配的最大 Seq 补落库。advanceServerSeq 幂等接受相等。
@@ -572,11 +571,7 @@ export class ControlConnection {
     // 升级 v2 形态；快照必须成功入队的不变量不受装饰影响。
     if (this.#snapshotDecorator !== null) {
       try {
-        snapshot = this.#snapshotDecorator(
-          snapshot,
-          this.#recoveryState,
-          this.#phase2SceneLifecycle,
-        );
+        snapshot = this.#snapshotDecorator(snapshot, this.#recoveryState, this.#phase2ActiveScenes);
       } catch (error) {
         this.#logger.log("warn", "runtime_snapshot_decorate_failed", {
           sessionId: this.#logical.sessionId,

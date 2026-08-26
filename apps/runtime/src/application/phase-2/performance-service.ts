@@ -153,6 +153,7 @@ export class Phase2PerformanceService {
     string,
     {
       readonly sceneId: string;
+      readonly sessionId: string;
       readonly reason: string;
       readonly finalSequence?: bigint;
       readonly traceId: string;
@@ -187,9 +188,13 @@ export class Phase2PerformanceService {
       // 帧（Media WS）跨连接送达无全局顺序——边界让先到的 closed 不丢
       // 乱序尾帧（超边界即拒）。
       onJobEnd: (info) => {
-        if (info.reason === "completed") {
-          this.#closeStreamForScene(info.sceneId, "stream_completed", info.finalSequence);
-        }
+        // 完成/取消统一走带边界的关闭：interruptAll 等直接 cancelStream 的
+        // 路径不再丢失边界（在途尾帧仍可入账）。
+        this.#closeStreamForScene(
+          info.sceneId,
+          info.reason === "completed" ? "stream_completed" : "stream_cancelled",
+          info.finalSequence,
+        );
       },
     });
     this.#stagePort.onStageDisconnected(() => {
@@ -202,6 +207,7 @@ export class Phase2PerformanceService {
       for (const [sceneId, record] of this.#sceneStreams) {
         this.#pendingStreamClosures.set(record.streamId, {
           sceneId,
+          sessionId: this.#sessionId,
           reason: "control_channel_closed",
           ...(record.finalSequence === null ? {} : { finalSequence: record.finalSequence }),
           traceId: record.traceId,
@@ -407,47 +413,63 @@ export class Phase2PerformanceService {
         this.#pendingStreams.delete(streamId);
       }
     }
-    const closure = {
+    this.#enqueueStreamClosed(record.streamId, {
       sceneId,
+      sessionId: this.#sessionId,
       reason,
-      ...(boundary === null || boundary === undefined ? {} : { finalSequence: boundary }),
+      // 负边界不携带（契约 DecimalString 非负——零送达流带 "-1" 会被
+      // Schema 拒绝并使 closed 永久滞留待发）。
+      ...(boundary === null || boundary === undefined || boundary < 0n
+        ? {}
+        : { finalSequence: boundary }),
       traceId: record.traceId,
-    };
+    });
+  }
+
+  /**
+   * closed 入队（幂等键 = streamId）：成功即出待发集合；失败（断线/
+   * 队列满）保留待发重试。
+   */
+  #enqueueStreamClosed(
+    streamId: string,
+    closure: {
+      readonly sceneId: string;
+      readonly sessionId: string;
+      readonly reason: string;
+      readonly finalSequence?: bigint;
+      readonly traceId: string;
+    },
+  ): void {
     const sent = this.#options.channel.enqueueServerMessage({
       type: "media.stream.closed",
       payload: {
-        streamId: record.streamId,
-        reason,
+        streamId,
+        reason: closure.reason,
         ...(closure.finalSequence === undefined
           ? {}
           : { finalSequence: closure.finalSequence.toString() }),
       },
-      trace: { traceId: record.traceId },
+      trace: { traceId: closure.traceId },
     });
     if (sent) {
-      this.#pendingStreamClosures.delete(record.streamId);
+      this.#pendingStreamClosures.delete(streamId);
     } else {
-      this.#pendingStreamClosures.set(record.streamId, closure);
+      this.#pendingStreamClosures.set(streamId, closure);
     }
   }
 
-  /** 冲刷未送达的 closed（连接恢复/下次关闭时机；幂等）。 */
+  /**
+   * 冲刷未送达的 closed（连接恢复/下次关闭时机；幂等）。按 Session 过滤：
+   * 归属已易主时，旧 Session 的待发项不得冲入新 Session 的连接（隔离）——
+   * 其 Stage 已随控制代际失效槽位，安全丢弃。
+   */
   #flushPendingStreamClosures(): void {
     for (const [streamId, closure] of this.#pendingStreamClosures) {
-      const sent = this.#options.channel.enqueueServerMessage({
-        type: "media.stream.closed",
-        payload: {
-          streamId,
-          reason: closure.reason,
-          ...(closure.finalSequence === undefined
-            ? {}
-            : { finalSequence: closure.finalSequence.toString() }),
-        },
-        trace: { traceId: closure.traceId },
-      });
-      if (sent) {
+      if (closure.sessionId !== this.#sessionId) {
         this.#pendingStreamClosures.delete(streamId);
+        continue;
       }
+      this.#enqueueStreamClosed(streamId, closure);
     }
   }
 
@@ -557,7 +579,9 @@ export class Phase2PerformanceService {
   /** 紧急打断：取消全部活动 Scene（demo 第 9 步）；取消优先于媒体发送。 */
   async interruptAll(reason: string): Promise<void> {
     for (const sceneId of Array.from(this.#activeScenes.keys())) {
-      this.#mediaSender.cancelStream(sceneId, reason);
+      // 经 #closeStreamForScene 关闭：取消前捕获送达边界（直接
+      // cancelStream 会让终态关闭取不到边界）。
+      this.#closeStreamForScene(sceneId, reason);
       await this.#director.cancel(sceneId, reason);
     }
   }

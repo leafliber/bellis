@@ -11,6 +11,7 @@ import { ApplicationError, FakeSceneCommitService } from "../../src/index.js";
 
 /** 记录调用顺序的假持久化客户端（恢复语义由真实 Worker 集成测试覆盖）。 */
 class RecordingClient implements PersistenceClient {
+  listActiveScenes = async (): Promise<readonly never[]> => [];
   readonly commits: CommitSceneInput[] = [];
   #result: CommitSceneResult;
 

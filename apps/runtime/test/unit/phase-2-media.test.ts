@@ -236,6 +236,41 @@ describe("RuntimeMediaSender", () => {
     sender.close();
   });
 
+  it("迟到恰好达到阈值即丢弃（等号与 Stage Deadline 对齐：≥ 宽限必拒）", async () => {
+    const clock = new VirtualClock();
+    const sent: { header: Record<string, string | number> }[] = [];
+    const sender = new RuntimeMediaSender({
+      clock,
+      sendFrame: (frame) => {
+        sent.push(frame);
+        return true;
+      },
+    });
+    const tts = synthesizeSpeech(SPEECH);
+    sender.startSpeechStream({
+      plan: PLAN,
+      tts,
+      audioCueId: "c",
+      streamId: "s",
+      sessionId: "sess",
+      traceId: "0123456789abcdef0123456789abcdef",
+      firstFrameTargetUs: 1_000_000n,
+    });
+    // 帧目标 1_000_000；时钟推进到 1_100_000 → 帧 0 迟到恰好 100ms
+    //（Stage：now−target ≥ 100ms 即 deadline_exceeded）→ 发送侧同判丢弃；
+    // 尾部帧（迟到 < 100ms）照常送达。
+    clock.advanceBy(1_100_000n);
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
+    }
+    expect(sender.droppedByLimit).toBeGreaterThanOrEqual(1);
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    for (const frame of sent) {
+      expect(1_100_000n - BigInt(frame.header.targetTimeUs)).toBeLessThan(100_000n);
+    }
+    sender.close();
+  });
+
   it("流生命周期：自然完成与取消都通知 onJobEnd（Stream 关闭依据）", async () => {
     const clock = new VirtualClock();
     const ended: { sceneId: string; streamId: string; reason: string }[] = [];

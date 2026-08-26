@@ -13,10 +13,8 @@ import {
   PersistenceSceneRepository,
   type ControlChannel,
 } from "../../src/application/phase-2/stage-port-adapter.js";
-import {
-  Phase2RuntimeHost,
-  type Phase2LifecycleEvidence,
-} from "../../src/application/phase-2/host.js";
+import { Phase2RuntimeHost } from "../../src/application/phase-2/host.js";
+import type { ActiveSceneRow } from "@bellis/persistence";
 import { buildSessionSnapshot } from "../../src/application/recovery.js";
 
 /**
@@ -397,9 +395,8 @@ describe("Phase2PerformanceService 媒体编排", () => {
     expect(closed).toHaveLength(1);
     const closedPayload = closed[0]!.payload as { streamId?: string; reason?: string };
     expect(closedPayload.streamId).toBe(payload.streamId);
-    expect(closedPayload.reason === undefined || closedPayload.reason === "scene_terminal").toBe(
-      true,
-    );
+    // 打断路径经 #closeStreamForScene 关闭：reason = interruptAll 的理由。
+    expect(closedPayload.reason).toBe("urgent_interrupt");
     await h.service.close();
   });
 
@@ -518,6 +515,25 @@ describe("Phase2PerformanceService 媒体编排", () => {
     expect(flushed).toHaveLength(1);
     expect((flushed[0]!.payload as { streamId?: string }).streamId).toBe(streamId);
     expect(typeof (flushed[0]!.payload as { finalSequence?: string }).finalSequence).toBe("string");
+    // 跨 Session 隔离：归属易主后，旧 Session 的待发 closed 不得冲入新
+    // Session 的连接（Stage 已随代际失效，安全丢弃）。
+    h.channel.closedDelivery = false;
+    const second = h.service.submit({
+      signal: SIGNAL,
+      fixture: { ...FIXTURE, cycleId: "33333333-3333-4333-8333-333333333006" },
+    });
+    if (second.kind !== "submitted") {
+      throw new Error("expected submitted");
+    }
+    await flush();
+    h.channel.reply(h.service, h.clock);
+    await flush();
+    h.service.markStageConnected("22222222-2222-4222-8222-222222222222");
+    await flush();
+    const afterRebind = h.channel.sent.filter((m) => m.type === "media.stream.closed");
+    // 归属已变更为新 Session：旧待发项被丢弃而非冲刷。
+    expect(afterRebind).toHaveLength(1);
+
     // Scene 终态：closed 已送达（幂等，不重复发送）。
     h.service.handleStageMessage(
       "scene.finished",
@@ -695,7 +711,7 @@ describe("Phase2PerformanceService 媒体编排", () => {
   });
 });
 
-describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot）", () => {
+describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Scene 索引）", () => {
   const RECOVERY = {
     sessionId: "11111111-2222-4333-8333-444444444444",
     latestServerSeq: 12n,
@@ -737,118 +753,102 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot）", () => 
     );
   }
 
-  it("落库 Scene 生命周期在途（非终态记录）→ v2 uncertain + requiresReprepare", () => {
+  function indexRow(
+    overrides: Partial<{
+      sceneId: string;
+      cycleId: string | null;
+      state: string;
+      updatedAtMs: number;
+    }>,
+  ): ActiveSceneRow {
+    return {
+      sceneId: overrides.sceneId ?? RECOVERY.lastCommittedScene.sceneId,
+      cycleId: overrides.cycleId ?? RECOVERY.lastCommittedScene.cycleId,
+      state: overrides.state ?? "scheduled",
+      updatedAtMs: overrides.updatedAtMs ?? 1000,
+    };
+  }
+
+  it("索引存在在途行 → v2 uncertain + requiresReprepare", () => {
     const host = createHost();
     const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
-      lifecycleRecord("created"),
-      lifecycleRecord("scheduled"),
-    ] as never);
+      indexRow({ state: "running" }),
+    ]);
     expect(decorated.schemaVersion).toBe(2);
     expect(activeOf(decorated)?.executionState).toBe("uncertain");
   });
 
-  it("生命周期记录已证终态（completed/cancelled/failed）→ 维持 v1", () => {
+  it("索引无行（全部已证终态，写侧 DELETE）→ 维持 v1", () => {
     const host = createHost();
-    for (const terminal of ["completed", "cancelled", "failed"]) {
-      const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
-        lifecycleRecord("running"),
-        lifecycleRecord(terminal),
-      ] as never);
-      expect(decorated.schemaVersion).toBe(1);
-    }
+    expect(host.decorateSnapshot(baseSnapshot(), RECOVERY, []).schemaVersion).toBe(1);
   });
 
-  it("记录缺失（null）→ 结果不可证明 → v2 uncertain", () => {
+  it("索引读取失败（null）→ 无证据可对账 → v1（不虚构）", () => {
     const host = createHost();
-    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, null);
-    expect(decorated.schemaVersion).toBe(2);
+    expect(host.decorateSnapshot(baseSnapshot(), RECOVERY, null).schemaVersion).toBe(1);
   });
 
-  it("uncertain 记录保持对账视图（不可证终态）→ v2 uncertain", () => {
+  it("uncertain 状态行保持对账视图 → v2", () => {
+    const host = createHost();
+    expect(
+      host.decorateSnapshot(baseSnapshot(), RECOVERY, [indexRow({ state: "uncertain" })])
+        .schemaVersion,
+    ).toBe(2);
+  });
+
+  it("无落库 Scene → v1", () => {
+    const host = createHost();
+    expect(
+      host.decorateSnapshot(baseSnapshot(), { ...RECOVERY, lastCommittedScene: null }, [
+        indexRow({ state: "scheduled" }),
+      ]).schemaVersion,
+    ).toBe(1);
+  });
+
+  it("并发 Scene：最新已终态（索引无行）、较早仍在途 → 对较早 Scene 给出 v2（窗口挤出场景修复）", () => {
     const host = createHost();
     const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
-      lifecycleRecord("uncertain"),
-    ] as never);
+      indexRow({
+        sceneId: "44444444-4444-4444-8444-4444440000bb",
+        cycleId: "33333333-3333-4333-8333-33333333300b",
+        state: "running",
+        updatedAtMs: 900,
+      }),
+    ]);
     expect(decorated.schemaVersion).toBe(2);
-  });
-
-  it("无落库 Scene → v1（不虚构状态）", async () => {
-    const host = createHost();
-    const decorated = host.decorateSnapshot(
-      baseSnapshot(),
-      { ...RECOVERY, lastCommittedScene: null },
-      [lifecycleRecord("scheduled")] as never,
-    );
-    expect(decorated.schemaVersion).toBe(1);
-  });
-
-  it("并发 Scene：最新已终态、较早仍在途 → 对较早 Scene 给出 uncertain 视图", () => {
-    const host = createHost();
-    const earlier = lifecycleRecord("running", {
-      sceneId: "44444444-4444-4444-8444-4444440000bb",
-      cycleId: "33333333-3333-4333-8333-33333333300b",
-      occurredAtMs: 900,
-    });
-    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
-      earlier,
-      lifecycleRecord("completed"),
-    ] as never);
-    expect(decorated.schemaVersion).toBe(2);
-    const active = activeOf(decorated);
-    expect((active as { sceneId?: string } | null)?.sceneId).toBe(
+    expect((activeOf(decorated) as { sceneId?: string } | null)?.sceneId).toBe(
       "44444444-4444-4444-8444-4444440000bb",
     );
   });
 
-  it("未知 payloadVersion 不被当作已知格式：最后落库 Scene → 保守 uncertain", () => {
+  it("unknown 状态（payload 版本不可验证）→ 保守 uncertain（v2）", () => {
     const host = createHost();
-    const future = {
-      recordType: "scene_lifecycle",
-      aggregateId: `scene-lifecycle:${RECOVERY.lastCommittedScene.sceneId}`,
-      occurredAtMs: 1100,
-      payload: { payloadVersion: 2, to: "completed", sceneId: RECOVERY.lastCommittedScene.sceneId },
-    };
-    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [future] as never);
-    expect(decorated.schemaVersion).toBe(2);
-    expect(activeOf(decorated)?.executionState).toBe("uncertain");
+    expect(
+      host.decorateSnapshot(baseSnapshot(), RECOVERY, [indexRow({ state: "unknown" })])
+        .schemaVersion,
+    ).toBe(2);
   });
 
-  it("非最后落库 Scene 的 committing 不作为对账依据（落库歧义）→ v1", () => {
+  it("非锚点 Scene 的 committing 不作为对账依据（落库歧义）→ v1；锚点 committing → v2", () => {
     const host = createHost();
-    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
-      lifecycleRecord("committing", {
-        sceneId: "44444444-4444-4444-8444-4444440000cc",
-        cycleId: "33333333-3333-4333-8333-33333333300c",
-      }),
-      lifecycleRecord("completed"),
-    ] as never);
-    expect(decorated.schemaVersion).toBe(1);
+    expect(
+      host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+        indexRow({
+          sceneId: "44444444-4444-4444-8444-4444440000cc",
+          cycleId: "33333333-3333-4333-8333-33333333300c",
+          state: "committing",
+        }),
+      ]).schemaVersion,
+    ).toBe(1);
+    expect(
+      host.decorateSnapshot(baseSnapshot(), RECOVERY, [indexRow({ state: "committing" })])
+        .schemaVersion,
+    ).toBe(2);
   });
 });
-
-/** 生命周期 Record 的最小证据形态（版本化 payload v1）。 */
-function lifecycleRecord(
-  to: string,
-  overrides: { sceneId?: string; cycleId?: string; occurredAtMs?: number } = {},
-): Phase2LifecycleEvidence {
-  return {
-    recordType: "scene_lifecycle",
-    aggregateId: `scene-lifecycle:${overrides.sceneId ?? RECOVERY_SCENE_ID}`,
-    occurredAtMs: overrides.occurredAtMs ?? 1000,
-    payload: {
-      payloadVersion: 1,
-      sceneId: overrides.sceneId ?? RECOVERY_SCENE_ID,
-      cycleId: overrides.cycleId ?? RECOVERY_CYCLE_ID,
-      from: "created",
-      to,
-    },
-  };
-}
 
 /** 装饰结果的 activeScene 投影（缺省 null）。 */
 function activeOf(decorated: { schemaVersion: number }): { executionState?: string } | null {
   return (decorated as { activeScene?: { executionState?: string } }).activeScene ?? null;
 }
 
-const RECOVERY_SCENE_ID = "44444444-4444-4444-8444-4444440000aa";
-const RECOVERY_CYCLE_ID = "33333333-3333-4333-8333-333333333333";
