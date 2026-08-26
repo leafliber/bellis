@@ -13,7 +13,10 @@ import {
   PersistenceSceneRepository,
   type ControlChannel,
 } from "../../src/application/phase-2/stage-port-adapter.js";
-import { Phase2RuntimeHost } from "../../src/application/phase-2/host.js";
+import {
+  Phase2RuntimeHost,
+  type Phase2LifecycleEvidence,
+} from "../../src/application/phase-2/host.js";
 import { buildSessionSnapshot } from "../../src/application/recovery.js";
 
 /**
@@ -673,11 +676,10 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot）", () => 
     const host = createHost();
     const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
       lifecycleRecord("created"),
-      lifecycleRecord("committing"),
+      lifecycleRecord("scheduled"),
     ] as never);
     expect(decorated.schemaVersion).toBe(2);
-    const active = (decorated as { activeScene: { executionState: string } }).activeScene;
-    expect(active.executionState).toBe("uncertain");
+    expect(activeOf(decorated)?.executionState).toBe("uncertain");
   });
 
   it("生命周期记录已证终态（completed/cancelled/failed）→ 维持 v1", () => {
@@ -705,18 +707,83 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot）", () => 
     expect(decorated.schemaVersion).toBe(2);
   });
 
-  it("无落库 Scene → v1（不虚构状态）", () => {
+  it("无落库 Scene → v1（不虚构状态）", async () => {
     const host = createHost();
     const decorated = host.decorateSnapshot(
       baseSnapshot(),
       { ...RECOVERY, lastCommittedScene: null },
-      null,
+      [lifecycleRecord("scheduled")] as never,
     );
+    expect(decorated.schemaVersion).toBe(1);
+  });
+
+  it("并发 Scene：最新已终态、较早仍在途 → 对较早 Scene 给出 uncertain 视图", () => {
+    const host = createHost();
+    const earlier = lifecycleRecord("running", {
+      sceneId: "44444444-4444-4444-8444-4444440000bb",
+      cycleId: "33333333-3333-4333-8333-33333333300b",
+      occurredAtMs: 900,
+    });
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+      earlier,
+      lifecycleRecord("completed"),
+    ] as never);
+    expect(decorated.schemaVersion).toBe(2);
+    const active = activeOf(decorated);
+    expect((active as { sceneId?: string } | null)?.sceneId).toBe(
+      "44444444-4444-4444-8444-4444440000bb",
+    );
+  });
+
+  it("未知 payloadVersion 不被当作已知格式：最后落库 Scene → 保守 uncertain", () => {
+    const host = createHost();
+    const future = {
+      recordType: "scene_lifecycle",
+      aggregateId: `scene-lifecycle:${RECOVERY.lastCommittedScene.sceneId}`,
+      occurredAtMs: 1100,
+      payload: { payloadVersion: 2, to: "completed", sceneId: RECOVERY.lastCommittedScene.sceneId },
+    };
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [future] as never);
+    expect(decorated.schemaVersion).toBe(2);
+    expect(activeOf(decorated)?.executionState).toBe("uncertain");
+  });
+
+  it("非最后落库 Scene 的 committing 不作为对账依据（落库歧义）→ v1", () => {
+    const host = createHost();
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+      lifecycleRecord("committing", {
+        sceneId: "44444444-4444-4444-8444-4444440000cc",
+        cycleId: "33333333-3333-4333-8333-33333333300c",
+      }),
+      lifecycleRecord("completed"),
+    ] as never);
     expect(decorated.schemaVersion).toBe(1);
   });
 });
 
-/** 生命周期 Record 的最小证据形态（payload.to 为状态机转换目标）。 */
-function lifecycleRecord(to: string): { payload: { to: string } } {
-  return { payload: { to } };
+/** 生命周期 Record 的最小证据形态（版本化 payload v1）。 */
+function lifecycleRecord(
+  to: string,
+  overrides: { sceneId?: string; cycleId?: string; occurredAtMs?: number } = {},
+): Phase2LifecycleEvidence {
+  return {
+    recordType: "scene_lifecycle",
+    aggregateId: `scene-lifecycle:${overrides.sceneId ?? RECOVERY_SCENE_ID}`,
+    occurredAtMs: overrides.occurredAtMs ?? 1000,
+    payload: {
+      payloadVersion: 1,
+      sceneId: overrides.sceneId ?? RECOVERY_SCENE_ID,
+      cycleId: overrides.cycleId ?? RECOVERY_CYCLE_ID,
+      from: "created",
+      to,
+    },
+  };
 }
+
+/** 装饰结果的 activeScene 投影（缺省 null）。 */
+function activeOf(decorated: { schemaVersion: number }): { executionState?: string } | null {
+  return (decorated as { activeScene?: { executionState?: string } }).activeScene ?? null;
+}
+
+const RECOVERY_SCENE_ID = "44444444-4444-4444-8444-4444440000aa";
+const RECOVERY_CYCLE_ID = "33333333-3333-4333-8333-333333333333";

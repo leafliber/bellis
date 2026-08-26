@@ -3,9 +3,25 @@ import type {
   MonotonicClock,
   Phase1SessionSnapshot,
   Phase2SessionSnapshot,
-  SessionRecord,
   StageCapabilities,
 } from "@bellis/contracts";
+import { SceneLifecyclePayloadSchema } from "@bellis/contracts";
+
+/** 跨进程对账证据的最小结构（SessionRecord 的结构子集）。 */
+export interface Phase2LifecycleEvidence {
+  readonly recordType: string;
+  readonly aggregateId?: string | undefined;
+  readonly occurredAtMs: number;
+  readonly payload: unknown;
+}
+
+/** aggregateId（scene-lifecycle:<uuid>）提取 sceneId；非该形态返回 null。 */
+function sceneIdFromAggregate(aggregateId: string | undefined): string | null {
+  if (aggregateId === undefined || !aggregateId.startsWith("scene-lifecycle:")) {
+    return null;
+  }
+  return aggregateId.slice("scene-lifecycle:".length);
+}
 import { buildPhase2SessionSnapshot } from "../recovery.js";
 import type { RecoveryState } from "@bellis/persistence";
 import type {
@@ -208,7 +224,7 @@ export class Phase2RuntimeHost {
   decorateSnapshot(
     base: Phase1SessionSnapshot,
     recoveryState: RecoveryState,
-    sceneLifecycle: readonly SessionRecord[] | null = null,
+    sceneLifecycle: readonly Phase2LifecycleEvidence[] | null = null,
   ): Phase1SessionSnapshot | Phase2SessionSnapshot {
     const view = this.#service.activeSceneView();
     if (view === null) {
@@ -232,10 +248,24 @@ export class Phase2RuntimeHost {
     });
   }
 
-  /** 跨进程对账视图构造参数；无对账价值（无落库/已证终态）返回 null。 */
+  /**
+   * 跨进程对账视图构造参数；无对账价值（无落库/全部已证终态）返回 null。
+   *
+   * 证据规则（scene-execution.md §8）：
+   * - 生命周期 payload 经版本化 Schema 校验（payloadVersion=1）：未知/
+   *   非法版本绝不静默当作已知格式——对最后落库 Scene 视为「结果不可
+   *   证明」（uncertain）；对其它 Scene 无法构造合法视图则跳过并告警；
+   * - 可证终态 = completed/cancelled/failed；记录缺失、在途、uncertain
+   *   均为「结果不可证明」→ uncertain 视图（requiresReprepare=true）；
+   * - "committing" 存在落库歧义（崩溃可发生在 durable 前后）：只有
+   *   最后落库 Scene 以 RecoveryState 落库事实证明其已提交，其它
+   *   Scene 的 committing 不作为对账依据；
+   * - 并发 Scene：任一未证终态的已提交 Scene 都构成对账视图（取最近
+   *   证据），不只看最后提交。
+   */
   #crossProcessView(
     recoveryState: RecoveryState,
-    sceneLifecycle: readonly SessionRecord[] | null,
+    sceneLifecycle: readonly Phase2LifecycleEvidence[] | null,
   ): {
     readonly reason: Phase1SessionSnapshot["reason"];
     readonly sessionStatus: Phase1SessionSnapshot["sessionStatus"];
@@ -247,22 +277,74 @@ export class Phase2RuntimeHost {
     if (committed === null) {
       return null;
     }
-    const last = sceneLifecycle?.[sceneLifecycle.length - 1];
-    const to = last !== undefined ? (last.payload as { to?: unknown }).to : undefined;
-    // 生命周期 Record 的终态转换（DirectorInternalState 语义）：只有
-    // completed/cancelled/failed 是可证终态；uncertain 与缺失/在途记录
-    // 都意味着「结果不可证明」→ 保持 uncertain 对账视图。
-    if (to === "completed" || to === "cancelled" || to === "failed") {
+    // 按 sceneId 聚合最后一条生命周期证据（查询已按 occurredAtMs 排序）。
+    const lastByScene = new Map<
+      string,
+      {
+        occurredAtMs: number;
+        verified: boolean;
+        to: string | null;
+        cycleId: string | null;
+      }
+    >();
+    for (const record of sceneLifecycle ?? []) {
+      if (record.recordType !== "scene_lifecycle") {
+        continue;
+      }
+      const parsed = SceneLifecyclePayloadSchema.safeParse(record.payload);
+      const sceneId = parsed.success
+        ? parsed.data.sceneId
+        : sceneIdFromAggregate(record.aggregateId);
+      if (sceneId === null) {
+        continue;
+      }
+      lastByScene.set(sceneId, {
+        occurredAtMs: record.occurredAtMs,
+        verified: parsed.success,
+        to: parsed.success ? parsed.data.to : null,
+        cycleId: parsed.success ? parsed.data.cycleId : null,
+      });
+    }
+    const candidates: { sceneId: string; cycleId: string; occurredAtMs: number }[] = [];
+    const consider = (sceneId: string, cycleId: string | null, occurredAtMs: number): void => {
+      if (cycleId === null) {
+        // 无法构造合法视图（cycleId 未知）：不可证终态但跳过，显式告警。
+        this.#options.logger?.log("warn", "phase2_recovery_evidence_unverified", {
+          sceneId,
+        });
+        return;
+      }
+      candidates.push({ sceneId, cycleId, occurredAtMs });
+    };
+    for (const [sceneId, evidence] of lastByScene) {
+      if (evidence.to === "completed" || evidence.to === "cancelled" || evidence.to === "failed") {
+        continue;
+      }
+      if (evidence.to === "committing" && sceneId !== committed.sceneId) {
+        continue;
+      }
+      const cycleId =
+        evidence.cycleId ?? (sceneId === committed.sceneId ? committed.cycleId : null);
+      consider(sceneId, cycleId, evidence.occurredAtMs);
+    }
+    // 最后落库 Scene 无任何窗口内证据：结果不可证明（保守 uncertain）。
+    if (!lastByScene.has(committed.sceneId)) {
+      consider(committed.sceneId, committed.cycleId, committed.committedAtMs);
+    }
+    if (candidates.length === 0) {
       return null;
     }
+    const chosen = candidates.reduce((left, right) =>
+      right.occurredAtMs > left.occurredAtMs ? right : left,
+    );
     return {
       reason: "replay_gap",
       sessionStatus: "ready",
       runtimeVersion: this.#options.runtimeVersion ?? "unknown",
       generatedAtMs: Date.now(),
       activeScene: {
-        sceneId: committed.sceneId,
-        cycleId: committed.cycleId,
+        sceneId: chosen.sceneId,
+        cycleId: chosen.cycleId,
         executionState: "uncertain",
         outcomeCertain: false,
         requiresReprepare: true,

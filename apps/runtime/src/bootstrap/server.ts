@@ -243,10 +243,11 @@ async function loadControlResume(
     return plan;
   }
   try {
+    // 全 Session 记录窗口（含审计 Record，host 侧按 recordType 过滤）：
+    // 并发 Scene 下「最新已终态、较早仍在途」也可对账，不只看最后提交。
     const records = await ctx.persistence.listRecords({
       sessionId: logical.sessionId,
-      aggregateId: `scene-lifecycle:${committed.sceneId}`,
-      limit: 16,
+      limit: 64,
     });
     return { ...plan, phase2SceneLifecycle: records };
   } catch {

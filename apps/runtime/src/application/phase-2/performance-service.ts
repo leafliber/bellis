@@ -28,7 +28,7 @@ import {
   type SceneRepositoryPort,
 } from "@bellis/scene-runtime";
 import { runFakeModel, type FakeModelFixture } from "./fake-model.js";
-import { synthesizeSpeech, type FakeTtsResult } from "./fake-tts.js";
+import { synthesizeSpeech } from "./fake-tts.js";
 import { RuntimeMediaSender, type OutboundMediaFrame } from "./media-sender.js";
 import { ControlStagePortAdapter, type ControlChannel } from "./stage-port-adapter.js";
 
