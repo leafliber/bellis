@@ -51,6 +51,8 @@ export interface StageMediaClientOptions {
   readonly onDisconnected?: (reason: string) => void;
   readonly maxHeaderBytes?: number;
   readonly maxPayloadBytes?: number;
+  /** Deadline 判定宽限（默认 100ms；映射后的同域比较才有意义）。 */
+  readonly deadlineGraceUs?: bigint;
 }
 
 export interface StageMediaStats {
@@ -64,6 +66,11 @@ export interface StageMediaStats {
 
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8_000;
+/**
+ * Deadline 判定宽限：Runtime 按目标时刻节奏发送（到达 ≈ 目标时刻），
+ * 加上传输/主线程处理抖动——超过该宽限才视为迟到不可用（丢弃）。
+ */
+const DEFAULT_DEADLINE_GRACE_US = 100_000n;
 /** announce 到媒体连接就绪的等待上限（超时放弃该 Stream 的 ready）。 */
 const READY_WAIT_TIMEOUT_MS = 2_000;
 
@@ -87,7 +94,10 @@ export class StageMediaClient {
 
   constructor(options: StageMediaClientOptions) {
     this.#options = options;
-    this.#registry = new MediaStreamRegistry({ sessionId: options.sessionId });
+    this.#registry = new MediaStreamRegistry({
+      sessionId: options.sessionId,
+      deadlineGraceUs: options.deadlineGraceUs ?? DEFAULT_DEADLINE_GRACE_US,
+    });
   }
 
   get stats(): StageMediaStats {

@@ -104,8 +104,12 @@ test("Audio Arm → 媒体流 → 三 Lane 生效 → 偏差/打断指标", asyn
   // 终态后字幕行已撤下（资源释放）。
   expect(diagnostics.subtitleTexts).toHaveLength(0);
   expect(diagnostics.avatarCommands).toBeGreaterThanOrEqual(2);
-  const mediaStats = diagnostics.mediaStats as { acceptedFrames: number } | null;
+  const mediaStats = diagnostics.mediaStats as {
+    acceptedFrames: number;
+    rejectedFrames: number;
+  } | null;
   expect(mediaStats?.acceptedFrames ?? 0).toBeGreaterThanOrEqual(6);
+  expect(mediaStats?.rejectedFrames ?? 0).toBe(0);
   expect(diagnostics.underruns).toBeLessThanOrEqual(8);
 
   // 4. 硬同步偏差：各 Lane startedAtStageUs − targetLocalUs ≤ 50ms。
@@ -196,4 +200,45 @@ test("Audio Arm → 媒体流 → 三 Lane 生效 → 偏差/打断指标", asyn
     sceneB,
   );
   expect(afterFrames).toBe(beforeFrames);
+
+  // 6. Stream 槽位马拉松：连续 9 场演出（超过 Stage Registry 并发上限
+  // 8）——每场 media.stream.closed 释放槽位后第 9 场仍可 announce/ready，
+  // 全部完成且零拒绝帧（sequence 严格连续的直接证据）。
+  const marathonStart = Date.now();
+  for (let i = 0; i < 9; i += 1) {
+    stageEnv.rpc({
+      type: "submit",
+      cycleId: randomUUID(),
+      traceId: randomUUID().replaceAll("-", "").slice(0, 32),
+      text: "连续演出",
+    });
+    const submittedN = (await stageEnv.expectRpc("submit-result", 30_000)) as unknown as {
+      ok: boolean;
+      sceneId?: string;
+    };
+    expect(submittedN.ok).toBe(true);
+    const sceneN = submittedN.sceneId ?? "";
+    await page.waitForFunction(
+      (scene) =>
+        (window.__bellisStage?.sceneEvents() ?? []).some(
+          (event) => event.sceneId === scene && event.state === "finished",
+        ),
+      sceneN,
+      { timeout: 30_000 },
+    );
+    const settledN = (await stageEnv.expectRpc("scene-settled", 30_000)) as unknown as {
+      state: string;
+    };
+    expect(settledN.state).toBe("completed");
+  }
+  const marathonStats = await page.evaluate(() => ({
+    openedStreams: window.__bellisStage?.mediaStats()?.openedStreams ?? 0,
+    rejectedFrames: window.__bellisStage?.mediaStats()?.rejectedFrames ?? -1,
+    underruns: window.__bellisStage?.underruns() ?? -1,
+  }));
+  expect(marathonStats.rejectedFrames).toBe(0);
+  expect(marathonStats.openedStreams).toBeGreaterThanOrEqual(11);
+  console.info(
+    `streamMarathon=ok(scenes=9+, opened=${marathonStats.openedStreams}, rejected=0, ${Date.now() - marathonStart}ms)`,
+  );
 });

@@ -13,6 +13,7 @@ import {
   SignalSchema,
   SpeechIntentSchema,
   StageCapabilitiesSchema,
+  TraceIdSchema,
 } from "@bellis/contracts";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import {
@@ -211,9 +212,10 @@ export class Phase2PerformanceService {
       return { kind: "invalid_signal" };
     }
     // 提交链 trace 根（Signal→决策→编译→DB→Control→Media 共用）：
-    // Fixture 携带合法 32 位十六进制根时优先（上游 Signal 溯源），
-    // 否则生成新根——绝不静默换根。
-    const traceId = /^[0-9a-f]{32}$/i.test(input.fixture.traceId)
+    // Fixture 携带的根经契约 TraceIdSchema 校验（32 位小写十六进制；
+    // 大写/非法形态不接受——下游审计/DB/Envelope 校验同源），否则生成
+    // 新根——绝不静默换根。
+    const traceId = TraceIdSchema.safeParse(input.fixture.traceId).success
       ? input.fixture.traceId
       : this.#newTraceId();
     void this.#audit(

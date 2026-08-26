@@ -184,18 +184,20 @@ export class StageClient {
   }
 
   send(type, payload, extra = {}) {
-    this.ws.send(JSON.stringify({
-      version: 1,
-      direction: "client",
-      type,
-      messageId: uuid(),
-      sessionId: this.sessionId,
-      trace: { traceId: traceId() },
-      sentAtUs: String(Math.round(performance.now() * 1000)),
-      ...(this.seq === 0 ? {} : { ack: String(this.seq) }),
-      ...extra,
-      payload,
-    }));
+    this.ws.send(
+      JSON.stringify({
+        version: 1,
+        direction: "client",
+        type,
+        messageId: uuid(),
+        sessionId: this.sessionId,
+        trace: { traceId: traceId() },
+        sentAtUs: String(Math.round(performance.now() * 1000)),
+        ...(this.seq === 0 ? {} : { ack: String(this.seq) }),
+        ...extra,
+        payload,
+      }),
+    );
   }
 
   async waitFor(type, timeoutMs = 15000) {
@@ -214,20 +216,35 @@ export class StageClient {
           `timeout waiting for ${type} (inbox: ${this.inbox.map((e) => e.type).join(",")})`,
         );
       }
-      const envelope = await Promise.race([
-        new Promise((resolve) => this.waiters.push(resolve)),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new ScriptFailure("stage-wait", `timeout waiting for ${type}`)),
-            remaining,
-          ),
-        ),
-      ]);
-      this.seq = Number(envelope.seq);
-      if (envelope.type === type) {
-        return envelope;
+      let timer = undefined;
+      let alive = true;
+      try {
+        const envelope = await Promise.race([
+          new Promise((resolve) => {
+            this.waiters.push((delivered) => {
+              if (alive) {
+                resolve(delivered);
+              } else {
+                this.inbox.push(delivered);
+              }
+            });
+          }),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new ScriptFailure("stage-wait", `timeout waiting for ${type}`)),
+              remaining,
+            );
+          }),
+        ]);
+        this.seq = Number(envelope.seq);
+        if (envelope.type === type) {
+          return envelope;
+        }
+        this.inbox.push(envelope);
+      } finally {
+        alive = false;
+        clearTimeout(timer);
       }
-      this.inbox.push(envelope);
     }
   }
 
@@ -243,16 +260,33 @@ export class StageClient {
       if (remaining <= 0) {
         return null;
       }
-      const envelope = await Promise.race([
-        new Promise((resolve) => this.waiters.push(resolve)),
-        new Promise((resolve) => setTimeout(resolve, remaining)),
-      ]);
-      if (envelope !== undefined && envelope.type === type) {
-        this.seq = Number(envelope.seq);
-        return envelope;
-      }
-      if (envelope !== undefined) {
-        this.inbox.push(envelope);
+      let timer = undefined;
+      let alive = true;
+      try {
+        const envelope = await Promise.race([
+          new Promise((resolve) => {
+            this.waiters.push((delivered) => {
+              if (alive) {
+                resolve(delivered);
+              } else {
+                this.inbox.push(delivered);
+              }
+            });
+          }),
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, remaining);
+          }),
+        ]);
+        if (envelope !== undefined && envelope.type === type) {
+          this.seq = Number(envelope.seq);
+          return envelope;
+        }
+        if (envelope !== undefined) {
+          this.inbox.push(envelope);
+        }
+      } finally {
+        alive = false;
+        clearTimeout(timer);
       }
     }
   }
@@ -288,16 +322,37 @@ export class Ipc {
       if (remaining <= 0) {
         throw new ScriptFailure("ipc", `timeout waiting for ${type}`);
       }
-      const message = await Promise.race([
-        new Promise((resolve) => this.waiters.push(resolve)),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new ScriptFailure("ipc", `timeout waiting for ${type}`)), remaining),
-        ),
-      ]);
-      if (message.type === type) {
-        return message;
+      // 计时器在成功/失败两侧都清理；超时方遗留的 waiter 标记失效
+      //（消息送达死 waiter 时原样回队，不吞消息）。
+      let timer = undefined;
+      let alive = true;
+      try {
+        const message = await Promise.race([
+          new Promise((resolve) => {
+            this.waiters.push((delivered) => {
+              if (alive) {
+                resolve(delivered);
+              } else {
+                // 超时后送达：死 waiter 不吞消息，原样回队。
+                this.pending.push(delivered);
+              }
+            });
+          }),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new ScriptFailure("ipc", `timeout waiting for ${type}`)),
+              remaining,
+            );
+          }),
+        ]);
+        if (message.type === type) {
+          return message;
+        }
+        this.pending.push(message);
+      } finally {
+        alive = false;
+        clearTimeout(timer);
       }
-      this.pending.push(message);
     }
   }
 }

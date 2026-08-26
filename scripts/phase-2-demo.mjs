@@ -75,19 +75,38 @@ class Ipc {
       if (remaining <= 0) {
         throw new DemoFailure("ipc", `timeout waiting for ${type}`);
       }
-      const message = await Promise.race([
-        new Promise((resolve) => this.waiters.push(resolve)),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new DemoFailure("ipc", `timeout waiting for ${type}`)),
-            remaining,
-          ),
-        ),
-      ]);
-      if (message.type === type) {
-        return message;
+      // 计时器在成功/失败两侧都清理（不残留 pending timer 拖住进程）；
+      // 超时方遗留的 waiter 标记失效（消息送达死 waiter 时原样回队，
+      // 不吞消息）。
+      let timer = undefined;
+      let alive = true;
+      try {
+        const message = await Promise.race([
+          new Promise((resolve) => {
+            this.waiters.push((delivered) => {
+              if (alive) {
+                resolve(delivered);
+              } else {
+                // 超时后送达：死 waiter 不吞消息，原样回队。
+                this.pending.push(delivered);
+              }
+            });
+          }),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new DemoFailure("ipc", `timeout waiting for ${type}`)),
+              remaining,
+            );
+          }),
+        ]);
+        if (message.type === type) {
+          return message;
+        }
+        this.pending.push(message);
+      } finally {
+        alive = false;
+        clearTimeout(timer);
       }
-      this.pending.push(message);
     }
   }
 }
@@ -346,20 +365,36 @@ class StageClient {
           `timeout waiting for ${type} (inbox: ${this.inbox.map((e) => e.type).join(",")})`,
         );
       }
-      const envelope = await Promise.race([
-        new Promise((resolve) => this.waiters.push(resolve)),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new DemoFailure("stage-wait", `timeout waiting for ${type}`)),
-            remaining,
-          ),
-        ),
-      ]);
-      this.seq = Number(envelope.seq);
-      if (envelope.type === type) {
-        return envelope;
+      let timer = undefined;
+      let alive = true;
+      try {
+        const envelope = await Promise.race([
+          new Promise((resolve) => {
+            this.waiters.push((delivered) => {
+              if (alive) {
+                resolve(delivered);
+              } else {
+                // 超时后送达：死 waiter 不吞消息，原样回队。
+                this.inbox.push(delivered);
+              }
+            });
+          }),
+          new Promise((_, reject) => {
+            timer = setTimeout(
+              () => reject(new DemoFailure("stage-wait", `timeout waiting for ${type}`)),
+              remaining,
+            );
+          }),
+        ]);
+        this.seq = Number(envelope.seq);
+        if (envelope.type === type) {
+          return envelope;
+        }
+        this.inbox.push(envelope);
+      } finally {
+        alive = false;
+        clearTimeout(timer);
       }
-      this.inbox.push(envelope);
     }
   }
 
@@ -735,12 +770,20 @@ async function run() {
 
     // 10. 干净关闭。
     child.send({ type: "shutdown" });
-    const exitInfo = await Promise.race([
-      new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal }))),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new DemoFailure("shutdown", "graceful close timed out")), 10000),
-      ),
-    ]);
+    let exitTimerRef = undefined;
+    const exitPromise = new Promise((resolve) => {
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    const exitTimeout = new Promise((_, reject) => {
+      exitTimerRef = setTimeout(
+        () => reject(new DemoFailure("shutdown", "graceful close timed out")),
+        10000,
+      );
+    });
+    // 成功/超时两侧都清理计时器（不残留 timer 拖住父进程）。
+    const exitInfo = await Promise.race([exitPromise, exitTimeout]).finally(() =>
+      clearTimeout(exitTimerRef),
+    );
     if (exitInfo.code !== 0) {
       throw new DemoFailure(
         "shutdown",

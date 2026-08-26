@@ -50,7 +50,13 @@ interface StageDiagnostics {
   bufferedFrames(): Record<string, number>;
   subtitleTexts(): readonly string[];
   avatarCommands(): number;
-  mediaStats(): { acceptedFrames: number; rejectedFrames: number } | null;
+  mediaStats(): {
+    acceptedFrames: number;
+    rejectedFrames: number;
+    openedStreams: number;
+    connectAttempts: number;
+    rawMessages: number;
+  } | null;
   audioError(): string | null;
   laneStarts(): {
     sceneId: string;

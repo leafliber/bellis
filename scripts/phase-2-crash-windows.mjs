@@ -52,11 +52,9 @@ function report(key, value) {
 }
 
 function forkChild(dataDirectory, faultPoint) {
-  return fork(
-    CHILD,
-    faultPoint === undefined ? [dataDirectory] : [dataDirectory, faultPoint],
-    { stdio: ["ignore", "pipe", "pipe", "ipc"] },
-  );
+  return fork(CHILD, faultPoint === undefined ? [dataDirectory] : [dataDirectory, faultPoint], {
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
+  });
 }
 
 function collectDiagnostics(child) {
@@ -211,12 +209,18 @@ async function restartAndVerify(options) {
   }
 
   child.send({ type: "shutdown" });
+  let exitTimer = undefined;
   const exitInfo = await Promise.race([
-    new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal }))),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new ScriptFailure(windowKey, "graceful close timed out")), 10_000),
-    ),
-  ]);
+    new Promise((resolve) => {
+      child.on("exit", (code, signal) => resolve({ code, signal }));
+    }),
+    new Promise((_, reject) => {
+      exitTimer = setTimeout(
+        () => reject(new ScriptFailure(windowKey, "graceful close timed out")),
+        10_000,
+      );
+    }),
+  ]).finally(() => clearTimeout(exitTimer));
   if (exitInfo.code !== 0) {
     throw new ScriptFailure(
       windowKey,
@@ -334,7 +338,11 @@ async function main() {
     const { sceneId } = await submitAndReady(child, ipc, stage, "崩溃在提交前");
     void sceneId;
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    return { crashConfirmed: child.exitCode === null && child.signalCode === "SIGKILL", expectCommitted: false, sceneId };
+    return {
+      crashConfirmed: child.exitCode === null && child.signalCode === "SIGKILL",
+      expectCommitted: false,
+      sceneId,
+    };
   });
   report("crashWindow1", "ok(pre-commit:无落库,无重放)");
 

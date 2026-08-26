@@ -215,9 +215,10 @@ describe("StageMediaClient Deadline 时钟域映射", () => {
     // < 目标：未过期，接受。
     h.socket()!.serverSend(frameBytes(0));
     expect(frames).toHaveLength(1);
-    // 帧 1 目标 = 1_020_000：本域推进 600_000 → 映射后 1_100_000 ≥ 目标
-    // （宽限 0）→ deadline_exceeded，拒绝且不入帧。
-    h.clock.advanceBy(600_000n);
+    // 帧 1 目标 = 1_020_000：本域推进 620_000 → 映射后 1_120_000 − 目标
+    // = 100ms ≥ 宽限（默认 100ms：发送按目标节奏 + 抖动余量）→
+    // deadline_exceeded，拒绝且不入帧。
+    h.clock.advanceBy(620_000n);
     h.socket()!.serverSend(frameBytes(1));
     expect(frames).toHaveLength(1);
   });
