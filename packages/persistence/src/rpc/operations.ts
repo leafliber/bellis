@@ -40,6 +40,7 @@ export const PERSISTENCE_OPERATIONS = [
   "advance_server_seq",
   "read_recovery_state",
   "list_records",
+  "list_active_scenes",
   "claim_outbox",
   "complete_outbox",
   "retry_outbox",
@@ -91,6 +92,7 @@ export interface OperationInputs {
     readonly order?: "asc" | "desc" | undefined;
     readonly limit?: number | undefined;
   };
+  readonly list_active_scenes: { readonly sessionId: string };
   readonly claim_outbox: {
     readonly limit: number;
     readonly leaseMs: number;
@@ -115,6 +117,7 @@ export interface OperationResults {
   readonly advance_server_seq: { readonly latestServerSeq: bigint };
   readonly read_recovery_state: RecoveryState;
   readonly list_records: { readonly records: readonly unknown[] };
+  readonly list_active_scenes: { readonly scenes: readonly unknown[] };
   readonly claim_outbox: { readonly messages: readonly unknown[] };
   readonly complete_outbox: void;
   readonly retry_outbox: { readonly disposition: "retry" | "dead" };
@@ -215,6 +218,15 @@ const OutboxStatsResultSchema = z.object({
   dead: z.number().int().nonnegative(),
 });
 const ListRecordsResultSchema = z.object({ records: z.array(SessionRecordSchema) });
+
+const ActiveSceneRowSchema = z.object({
+  sceneId: z.string().min(1).max(128),
+  cycleId: z.string().min(1).max(128).nullable(),
+  state: z.string().min(1).max(32),
+  updatedAtMs: z.number().int().nonnegative(),
+});
+
+const ActiveScenesResultSchema = z.object({ scenes: z.array(ActiveSceneRowSchema) });
 const ClaimOutboxResultSchema = z.object({ messages: z.array(OutboxMessageSchema) });
 
 function invalid(message: string): PersistenceError {
@@ -274,6 +286,8 @@ export function encodeOperationPayload(message: OperationRequest): Record<string
     case "read_recovery_state":
       return { sessionId: message.input.sessionId };
     case "list_records":
+      return { ...message.input };
+    case "list_active_scenes":
       return { ...message.input };
     case "claim_outbox":
       return { ...message.input };
@@ -370,6 +384,15 @@ export function decodeOperationPayload(
           invalid("list_records payload failed validation"),
         ),
       };
+    case "list_active_scenes":
+      return {
+        operation,
+        input: parseOr(
+          z.object({ sessionId: UuidSchema }),
+          payload,
+          invalid("list_active_scenes payload failed validation"),
+        ),
+      };
     case "claim_outbox":
       return {
         operation,
@@ -432,6 +455,8 @@ export function encodeOperationResult(message: OperationResultMessage): Record<s
       };
     case "list_records":
       return { records: message.result.records };
+    case "list_active_scenes":
+      return { scenes: message.result.scenes };
     case "claim_outbox":
       return { messages: message.result.messages };
     case "read_outbox_stats":
@@ -526,6 +551,17 @@ export function decodeOperationResult(
             payload,
             internal("list_records result failed validation"),
           ).records,
+        },
+      };
+    case "list_active_scenes":
+      return {
+        operation,
+        result: {
+          scenes: parseOr(
+            ActiveScenesResultSchema,
+            payload,
+            internal("list_active_scenes result failed validation"),
+          ).scenes,
         },
       };
     case "claim_outbox":

@@ -15,6 +15,7 @@ import {
 } from "../repositories/sessions.js";
 import {
   appendSessionRecord,
+  listActiveScenes,
   listSessionRecords,
   nextAggregateSeq,
 } from "../repositories/session-records.js";
@@ -153,6 +154,16 @@ export class WorkerOperationRuntime {
             records: listSessionRecords(
               this.databases.state,
               input as OperationInputs["list_records"],
+            ),
+          },
+        };
+      case "list_active_scenes":
+        return {
+          operation,
+          result: {
+            scenes: listActiveScenes(
+              this.databases.state,
+              (input as OperationInputs["list_active_scenes"]).sessionId,
             ),
           },
         };

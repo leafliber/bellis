@@ -714,7 +714,13 @@ async function run() {
     // 耗尽）。reason ∈ {stream_completed, scene_terminal}（先到者触发）。
     await new Promise((resolve) => setTimeout(resolve, 300));
     const closedReasons = new Set(stage.closedStreams.values());
-    const validReasons = new Set(["stream_completed", "scene_terminal"]);
+    const validReasons = new Set([
+      "stream_completed",
+      "scene_terminal",
+      // 打断路径经 #closeStreamForScene 关闭：reason = interruptAll 的理由。
+      "urgent_interrupt",
+      "stream_cancelled",
+    ]);
     if (
       stage.closedStreams.size < 2 ||
       [...closedReasons].some((reason) => !validReasons.has(reason))

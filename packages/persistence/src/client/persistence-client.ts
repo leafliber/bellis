@@ -77,6 +77,14 @@ export interface RecoveryState {
   } | null;
 }
 
+/** 活动 Scene 索引行（scene-execution.md §8 对账视图来源）。 */
+export interface ActiveSceneRow {
+  readonly sceneId: string;
+  readonly cycleId: string | null;
+  readonly state: string;
+  readonly updatedAtMs: number;
+}
+
 export interface AdvanceServerSeqInput {
   readonly sessionId: string;
   readonly latestServerSeq: bigint;
@@ -134,6 +142,8 @@ export interface PersistenceClient {
   advanceServerSeq(input: AdvanceServerSeqInput): Promise<bigint>;
   readRecoveryState(sessionId: string): Promise<RecoveryState>;
   listRecords(input: ListRecordsInput): Promise<SessionRecord[]>;
+  /** 活动 Scene 索引查询（跨进程恢复对账的权威来源）。 */
+  listActiveScenes(sessionId: string): Promise<readonly ActiveSceneRow[]>;
   claimOutbox(input: ClaimOutboxInput): Promise<OutboxMessage[]>;
   completeOutbox(input: CompleteOutboxInput): Promise<void>;
   retryOutbox(input: RetryOutboxInput): Promise<OutboxRetryDisposition>;
@@ -333,6 +343,17 @@ export function createPersistenceClientForTesting(
         internalTrace(),
       );
       return result;
+    },
+    async listActiveScenes(sessionId: string): Promise<readonly ActiveSceneRow[]> {
+      requireMigrated();
+      const result = await channel.call<"list_active_scenes">(
+        {
+          operation: "list_active_scenes",
+          input: { sessionId },
+        },
+        internalTrace(),
+      );
+      return result.scenes as ActiveSceneRow[];
     },
     async listRecords(input: ListRecordsInput): Promise<SessionRecord[]> {
       requireMigrated();

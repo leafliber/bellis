@@ -184,24 +184,7 @@ export class MediaStreamRegistry {
     if (record === undefined) {
       return reject("unknown_stream", "stream is not registered on this connection");
     }
-    if (record.closed) {
-      // 带边界的关闭：仅接受严格连续且不超出边界的迟到尾帧（closed 经
-      // Control 与帧跨连接送达，无全局顺序——先到的 closed 不丢尾帧）。
-      if (record.finalSequence !== null) {
-        const closingSequence = parseDecimalString(frame.header.sequence);
-        const expected = record.lastSequence === null ? 0n : record.lastSequence + 1n;
-        if (
-          closingSequence === expected &&
-          closingSequence <= record.finalSequence &&
-          record.frameCount < this.#maxFramesPerStream
-        ) {
-          record.lastSequence = closingSequence;
-          record.frameCount += 1;
-          return { status: "accepted", lastSequence: closingSequence };
-        }
-      }
-      return reject("stream_closed", "stream is closed; frames are no longer accepted");
-    }
+    // 内容一致性与开放 Stream 同规（墓碑尾帧不得绕过）。
     if (frame.header.contentType !== record.contentType) {
       return reject(
         "content_type_mismatch",
@@ -213,7 +196,18 @@ export class MediaStreamRegistry {
     }
     const sequence = parseDecimalString(frame.header.sequence);
     const expected = record.lastSequence === null ? 0n : record.lastSequence + 1n;
-    if (sequence !== expected) {
+    if (record.closed) {
+      // 带边界的关闭：尾帧仍须严格连续且不超出边界（closed 经 Control
+      // 与帧跨连接送达，无全局顺序——先到的 closed 不丢边界内尾帧）；
+      // frameId 去重与 Deadline 检查与开放 Stream 一致（下方继续执行）。
+      if (
+        record.finalSequence === null ||
+        sequence !== expected ||
+        sequence > record.finalSequence
+      ) {
+        return reject("stream_closed", "stream is closed; frames are no longer accepted");
+      }
+    } else if (sequence !== expected) {
       return reject(
         "sequence_violation",
         "frame sequence must be contiguous and strictly increasing from 0",

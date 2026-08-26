@@ -1,4 +1,8 @@
-import { SessionRecordSchema, parseDecimalString } from "@bellis/contracts";
+import {
+  SceneLifecyclePayloadSchema,
+  SessionRecordSchema,
+  parseDecimalString,
+} from "@bellis/contracts";
 import type { SessionRecord } from "@bellis/contracts";
 import { PersistenceError } from "../errors.js";
 import { readInt, readNullableText, readText } from "./sqlite-port.js";
@@ -84,6 +88,11 @@ export function appendSessionRecord(db: SqliteDatabase, record: SessionRecord): 
       }
     }
   }
+  // Record 与活动 Scene 索引同事务落库：崩溃不会留下「记录在而索引缺」
+  // 的半状态（该方向的失配会把未证终态 Scene 误判为已终态）。SAVEPOINT
+  // 兼容外层事务（commitScene 等在既有事务内调用 appendRecord）；名称
+  // 为静态常量（SQL 接口闭合，无拼接通道；本函数不自嵌套，同名栈安全）。
+  db.exec("SAVEPOINT append_record_index");
   try {
     db.prepare(
       `INSERT INTO session_records
@@ -101,7 +110,11 @@ export function appendSessionRecord(db: SqliteDatabase, record: SessionRecord): 
       parsed.data.schemaVersion,
       JSON.stringify(parsed.data.payload),
     );
+    maintainActiveSceneIndex(db, parsed.data);
+    db.exec("RELEASE append_record_index");
   } catch (error) {
+    db.exec("ROLLBACK TO append_record_index");
+    db.exec("RELEASE append_record_index");
     if (error instanceof PersistenceError) {
       throw error;
     }
@@ -119,6 +132,88 @@ export function appendSessionRecord(db: SqliteDatabase, record: SessionRecord): 
     throw error;
   }
   return parsed.data;
+}
+
+/** 可证终态（DirectorInternalState 语义）：索引行删除。 */
+const INDEX_TERMINAL_STATES = new Set(["completed", "cancelled", "failed"]);
+
+/**
+ * scene_lifecycle Record 的活动 Scene 索引维护（同事务调用）：
+ * - 非终态转换 UPSERT（sceneId 取 payload 或 aggregateId 前缀）；
+ * - 可证终态 DELETE；payload 不可解析/无版本时以 state='unknown' 保守
+ *   保留（读取端按不可证终态处理，绝不静默当作已知格式）。
+ */
+function maintainActiveSceneIndex(
+  db: SqliteDatabase,
+  record: {
+    sessionId: string;
+    recordType: string;
+    aggregateId?: string | undefined;
+    occurredAtMs: number;
+    payload: unknown;
+  },
+): void {
+  if (record.recordType !== "scene_lifecycle") {
+    return;
+  }
+  // payload 经版本化 Schema 校验后才可信（未知 payloadVersion/非法形态
+  // 的 to 绝不当作已知状态——保守保留 unknown 行）。
+  const parsed = SceneLifecyclePayloadSchema.safeParse(record.payload);
+  const sceneId = parsed.success
+    ? parsed.data.sceneId
+    : sceneIdFromLifecycleAggregate(record.aggregateId);
+  if (sceneId === null) {
+    return;
+  }
+  const cycleId = parsed.success ? parsed.data.cycleId : null;
+  const to = parsed.success ? parsed.data.to : "unknown";
+  if (INDEX_TERMINAL_STATES.has(to)) {
+    db.prepare(`DELETE FROM active_scenes WHERE session_id = ? AND scene_id = ?`).run(
+      record.sessionId,
+      sceneId,
+    );
+    return;
+  }
+  db.prepare(
+    `INSERT INTO active_scenes (session_id, scene_id, cycle_id, state, updated_at_ms)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (session_id, scene_id) DO UPDATE SET
+       cycle_id = excluded.cycle_id, state = excluded.state,
+       updated_at_ms = excluded.updated_at_ms`,
+  ).run(record.sessionId, sceneId, cycleId, to, record.occurredAtMs);
+}
+
+function sceneIdFromLifecycleAggregate(aggregateId: string | undefined): string | null {
+  if (aggregateId === undefined || !aggregateId.startsWith("scene-lifecycle:")) {
+    return null;
+  }
+  const sceneId = aggregateId.slice("scene-lifecycle:".length);
+  return sceneId.length > 0 ? sceneId : null;
+}
+
+/** 活动 Scene 索引查询（跨进程恢复的对账权威来源）。 */
+export function listActiveScenes(
+  db: SqliteDatabase,
+  sessionId: string,
+): { sceneId: string; cycleId: string | null; state: string; updatedAtMs: number }[] {
+  return db
+    .prepare(
+      `SELECT scene_id, cycle_id, state, updated_at_ms FROM active_scenes
+        WHERE session_id = ? ORDER BY updated_at_ms, scene_id`,
+    )
+    .all(sessionId)
+    .map((row) => {
+      const record = row as Record<string, unknown>;
+      return {
+        sceneId: String(record["scene_id"]),
+        cycleId:
+          record["cycle_id"] === null || record["cycle_id"] === undefined
+            ? null
+            : String(record["cycle_id"]),
+        state: String(record["state"]),
+        updatedAtMs: Number(record["updated_at_ms"]),
+      };
+    });
 }
 
 export interface ListRecordsQuery {

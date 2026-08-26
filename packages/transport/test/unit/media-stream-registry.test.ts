@@ -32,6 +32,11 @@ function registry(
   return new MediaStreamRegistry({ sessionId: SESSION_ID, ...overrides });
 }
 
+/** 帧内唯一 frameId（按序号派生）。 */
+function fid(n: number): string {
+  return `aaaaaaaa-aaaa-4aaa-8aaa-${n.toString(16).padStart(12, "0")}`;
+}
+
 describe("MediaStreamRegistry", () => {
   it("注册 → 按严格连续 Sequence 收帧 → 关闭 → 关闭后拒帧", () => {
     const clock = new VirtualClock();
@@ -187,8 +192,9 @@ describe("MediaStreamRegistry", () => {
     expect(soon.status).toBe("accepted");
   });
 
-  it("带 finalSequence 边界的关闭：乱序尾帧仍入账、超出边界即拒", () => {
+  it("带 finalSequence 边界的关闭：乱序尾帧仍入账、超出边界即拒；尾帧全量校验", () => {
     const clock = new VirtualClock();
+    const clock2 = new VirtualClock();
     const reg = registry();
     reg.open({
       streamId: STREAM_ID,
@@ -196,18 +202,48 @@ describe("MediaStreamRegistry", () => {
       mediaKind: "binary-test",
       contentType: "application/octet-stream",
     });
-    expect(reg.accept(frame({ sequence: "0" }), clock.nowUs()).status).toBe("accepted");
-    // closed 先于尾帧到达（跨连接乱序）：边界 = 已交送的最大 Sequence 2。
-    expect(reg.close(STREAM_ID, { finalSequence: 2n }).status).toBe("closed");
-    const inWindow = reg.accept(frame({ sequence: "1" }), clock.nowUs());
+    expect(reg.accept(frame({ sequence: "0", frameId: fid(0) }), clock.nowUs()).status).toBe(
+      "accepted",
+    );
+    // closed 先于尾帧到达（跨连接乱序）：边界 = 已交送的最大 Sequence 3。
+    expect(reg.close(STREAM_ID, { finalSequence: 3n }).status).toBe("closed");
+    // 尾帧绕过校验的回归用例：内容不一致 / 重复 frameId / Deadline 过期
+    // 都必须拒绝（与开放 Stream 同规）。
+    expect(
+      reg.accept(
+        frame({ sequence: "1", frameId: fid(1), contentType: "audio/other" }),
+        clock.nowUs(),
+      ).status,
+    ).toBe("rejected");
+    expect(reg.accept(frame({ sequence: "1", frameId: fid(0) }), clock.nowUs()).status).toBe(
+      "rejected",
+    );
+    clock.advanceBy(1_000_000n);
+    expect(
+      reg.accept(frame({ sequence: "1", frameId: fid(1), targetTimeUs: "1" }), clock.nowUs())
+        .status,
+    ).toBe("rejected");
+    // 合法尾帧（重新 open 新流验证 Deadline 干净路径）。
+    const reg2 = registry();
+    reg2.open({
+      streamId: STREAM_ID,
+      sessionId: SESSION_ID,
+      mediaKind: "binary-test",
+      contentType: "application/octet-stream",
+    });
+    expect(reg2.accept(frame({ sequence: "0", frameId: fid(0) }), clock2.nowUs()).status).toBe(
+      "accepted",
+    );
+    expect(reg2.close(STREAM_ID, { finalSequence: 2n }).status).toBe("closed");
+    const inWindow = reg2.accept(frame({ sequence: "1", frameId: fid(1) }), clock2.nowUs());
     expect(inWindow.status).toBe("accepted");
-    const last = reg.accept(frame({ sequence: "2" }), clock.nowUs());
+    const last = reg2.accept(frame({ sequence: "2", frameId: fid(2) }), clock2.nowUs());
     expect(last.status).toBe("accepted");
     // 超出边界（发送侧从未交送）→ 拒绝。
-    const beyond = reg.accept(frame({ sequence: "3" }), clock.nowUs());
+    const beyond = reg2.accept(frame({ sequence: "3", frameId: fid(3) }), clock2.nowUs());
     expect(beyond.status).toBe("rejected");
     // 跳号（乱序）→ 拒绝（连续性在边界内同样成立）。
-    const gap = reg.accept(frame({ sequence: "5" }), clock.nowUs());
+    const gap = reg2.accept(frame({ sequence: "5", frameId: fid(5) }), clock2.nowUs());
     expect(gap.status).toBe("rejected");
   });
 

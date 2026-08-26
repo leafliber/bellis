@@ -69,6 +69,11 @@ afterEach(() => {
   );
 });
 
+/** 索引测试专用 sceneId（不与其它测试的聚合前缀冲突）。 */
+function indexSceneId(n: number): string {
+  return `55555555-5555-4555-8555-5555555500${String(n).padStart(2, "0")}`;
+}
+
 describe("Session 生命周期", () => {
   it("ensureSession 幂等；同 ID 不同 createdAtMs 冲突", async () => {
     await client.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE });
@@ -120,6 +125,59 @@ describe("Session Records", () => {
         trace: TRACE,
       }),
     ).rejects.toMatchObject({ code: "session_not_found" });
+  });
+
+  it("活动 Scene 索引：非终态 UPSERT、可证终态 DELETE、不可验证 payload 保守保留", async () => {
+    const lifecycle = (n: number, to: string, at: number, payloadOverrides = {}) =>
+      makeSessionRecord({
+        recordId: `99999999-9999-4999-8999-${(n * 100 + at).toString().padStart(12, "0")}`,
+        recordType: "scene_lifecycle",
+        occurredAtMs: at,
+        aggregateId: `scene-lifecycle:${indexSceneId(n)}`,
+        aggregateSeq: String(at),
+        payload: {
+          payloadVersion: 1,
+          sceneId: indexSceneId(n),
+          cycleId: indexSceneId(n),
+          from: "x",
+          to,
+          ...payloadOverrides,
+        },
+      });
+    // 在途 → 索引行；再推进 → UPSERT 更新状态。
+    await client.appendRecord({ record: lifecycle(1, "preparing", 1), trace: TRACE });
+    await client.appendRecord({ record: lifecycle(1, "running", 2), trace: TRACE });
+    let rows = await client.listActiveScenes(SESSION_ID);
+    expect(rows.filter((row) => row.sceneId === indexSceneId(1)).map((row) => row.state)).toEqual([
+      "running",
+    ]);
+    // 可证终态 → DELETE（写侧同事务）。
+    await client.appendRecord({ record: lifecycle(1, "completed", 3), trace: TRACE });
+    rows = await client.listActiveScenes(SESSION_ID);
+    expect(rows.some((row) => row.sceneId === indexSceneId(1))).toBe(false);
+    // payload 无版本（不可验证）→ 保守保留 unknown（绝不当作已知格式）。
+    await client.appendRecord({
+      record: lifecycle(2, "completed", 4, { payloadVersion: 2 }),
+      trace: TRACE,
+    });
+    rows = await client.listActiveScenes(SESSION_ID);
+    const unknown = rows.find((row) => row.sceneId === indexSceneId(2));
+    expect(unknown?.state).toBe("unknown");
+    // aggregateId 兜底：payload 缺 sceneId 时以聚合前缀归属。
+    await client.appendRecord({
+      record: makeSessionRecord({
+        recordId: "99999999-9999-4999-8999-000000000099",
+        recordType: "scene_lifecycle",
+        occurredAtMs: 5,
+        aggregateId: `scene-lifecycle:${indexSceneId(3)}`,
+        payload: { to: "scheduled" },
+      }),
+      trace: TRACE,
+    });
+    rows = await client.listActiveScenes(SESSION_ID);
+    // payload 无版本不可信（to 不采信）→ unknown；sceneId 归属仍由
+    // aggregateId 前缀兜底（行存在即未证终态）。
+    expect(rows.some((row) => row.sceneId === indexSceneId(3) && row.state === "unknown")).toBe(true);
   });
 
   it("recordType 过滤 + 倒序最近窗口（生命周期专用查询语义）", async () => {

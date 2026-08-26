@@ -294,7 +294,7 @@ describe("Crash Window 恢复（真实 SIGKILL）", () => {
     }
 
     const extra: MigrationDefinition = {
-      version: 3,
+      version: 4,
       name: "extra",
       sql: "CREATE TABLE test_extra (id INTEGER PRIMARY KEY) STRICT;",
     };
@@ -310,7 +310,7 @@ describe("Crash Window 恢复（真实 SIGKILL）", () => {
           .prepare("SELECT version FROM schema_migrations ORDER BY version")
           .all()
           .map((row) => Number(row["version"]));
-        expect(versions).toEqual([1, 2, 3]);
+        expect(versions).toEqual([1, 2, 3, 4]);
         expect(
           db.prepare("SELECT name FROM sqlite_master WHERE name = 'test_extra'").get(),
         ).toBeDefined();

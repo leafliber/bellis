@@ -50,7 +50,7 @@ describe("Migration 集成", () => {
     const db = openState();
     try {
       const rows = db.prepare("SELECT version FROM schema_migrations").all();
-      expect(rows).toEqual([{ version: 1 }, { version: 2 }]);
+      expect(rows).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
       expect(
         db.prepare("SELECT name FROM sqlite_master WHERE name = 'sessions'").get(),
       ).toBeDefined();
