@@ -222,6 +222,7 @@ export function StagePage({ profile }: { profile: string }) {
             ),
           clock,
           audioContentTypes: AUDIO_CONTENT_TYPES,
+          runtimeOffsetUs: () => app.runtimeOffsetUs(),
           onFrame: (frame) => {
             if (frame.sceneId !== null) {
               audioLane.appendFrame(frame.sceneId, frame.samples);

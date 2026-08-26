@@ -162,6 +162,11 @@ export class StageApp {
     await control.connect();
   }
 
+  /** Runtime 时钟域偏移估计（runtime − stage；clock_ready 前为 null）。 */
+  runtimeOffsetUs(): bigint | null {
+    return this.#control?.clockEstimate?.runtimeOffsetUs ?? null;
+  }
+
   /** Media announce 转发（装配层持有媒体客户端时使用）。 */
   announceMedia(payload: unknown): void {
     const control = this.#control;

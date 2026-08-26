@@ -161,7 +161,7 @@ export class MediaStreamRegistry {
    * 接受一帧：Session/注册状态、contentType、Sequence 严格连续递增、
    * frameId 去重、targetTimeUs Deadline 与帧数上限全部通过才算 accepted。
    */
-  accept(frame: MediaFrame, nowUs: bigint): MediaFrameAcceptResult {
+  accept(frame: MediaFrame, nowUs: bigint | null): MediaFrameAcceptResult {
     if (frame.header.sessionId !== this.#sessionId) {
       return reject("session_mismatch", "frame belongs to a different session");
     }
@@ -192,7 +192,7 @@ export class MediaStreamRegistry {
     if (record.frameIds.has(frame.header.frameId)) {
       return reject("duplicate_frame_id", "frameId was already used in this stream");
     }
-    if (frame.header.targetTimeUs !== undefined) {
+    if (frame.header.targetTimeUs !== undefined && nowUs !== null) {
       const targetUs = parseDecimalString(frame.header.targetTimeUs);
       if (nowUs - targetUs >= this.#deadlineGraceUs) {
         return reject("deadline_exceeded", "frame target time has passed");

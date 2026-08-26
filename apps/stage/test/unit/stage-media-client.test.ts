@@ -81,7 +81,10 @@ function frameBytes(sequence: number, samplesValue = 0x0102): Uint8Array {
   );
 }
 
-function createClient(frames: InboundMediaFrame[]) {
+function createClient(
+  frames: InboundMediaFrame[],
+  options?: { readonly runtimeOffsetUs?: () => bigint | null },
+) {
   const clock = new VirtualClock();
   let socket: FakeSocket | null = null;
   const client = new StageMediaClient({
@@ -92,6 +95,7 @@ function createClient(frames: InboundMediaFrame[]) {
     },
     clock,
     audioContentTypes: [CONTENT_TYPE],
+    ...(options?.runtimeOffsetUs === undefined ? {} : { runtimeOffsetUs: options.runtimeOffsetUs }),
     onFrame: (frame) => frames.push(frame),
   });
   return {
@@ -193,5 +197,43 @@ describe("StageMediaClient", () => {
     socket!.serverSend(frameBytes(1));
     expect(frames).toHaveLength(1);
     client.close();
+  });
+});
+
+describe("StageMediaClient Deadline 时钟域映射", () => {
+  it("targetTimeUs（Runtime 域）经偏移映射后判定：过期拒绝、未过期接受", async () => {
+    const frames: InboundMediaFrame[] = [];
+    // Runtime 时钟领先本域 500ms：映射后 now(runtime) = 本域 + 500ms。
+    const h = createClient(frames, { runtimeOffsetUs: () => 500_000n });
+    h.client.connect();
+    h.socket()!.serverOpen();
+    await h.client.handleAnnounce(
+      { streamId: STREAM, mediaKind: "audio", contentType: CONTENT_TYPE },
+      () => true,
+    );
+    // 帧 0 目标 = 1_000_000（Runtime 域）；本域时钟 0 → 映射后 500_000
+    // < 目标：未过期，接受。
+    h.socket()!.serverSend(frameBytes(0));
+    expect(frames).toHaveLength(1);
+    // 帧 1 目标 = 1_020_000：本域推进 600_000 → 映射后 1_100_000 ≥ 目标
+    // （宽限 0）→ deadline_exceeded，拒绝且不入帧。
+    h.clock.advanceBy(600_000n);
+    h.socket()!.serverSend(frameBytes(1));
+    expect(frames).toHaveLength(1);
+  });
+
+  it("偏移估计缺失（clock_ready 前）：跳过 Deadline 检查，帧照常接受", async () => {
+    const frames: InboundMediaFrame[] = [];
+    const h = createClient(frames, { runtimeOffsetUs: () => null });
+    h.client.connect();
+    h.socket()!.serverOpen();
+    await h.client.handleAnnounce(
+      { streamId: STREAM, mediaKind: "audio", contentType: CONTENT_TYPE },
+      () => true,
+    );
+    // 本域时钟远小于 Runtime 域目标——不做跨域比较，直接接受。
+    h.clock.advanceBy(10n);
+    h.socket()!.serverSend(frameBytes(0));
+    expect(frames).toHaveLength(1);
   });
 });

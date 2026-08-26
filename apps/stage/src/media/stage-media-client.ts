@@ -39,6 +39,12 @@ export interface StageMediaClientOptions {
   readonly clock: MonotonicClock;
   /** 本端声明接受的能力（stage.capabilities.audio.contentTypes）。 */
   readonly audioContentTypes: readonly string[];
+  /**
+   * Runtime 时钟域偏移估计（runtime − stage，clock_ready 前为 null）：
+   * targetTimeUs 属 Runtime 单调域，Deadline 检查必须先映射到本域——
+   * 直接用本域时钟比较属跨域误判（检查形同虚设）。null 时跳过检查。
+   */
+  readonly runtimeOffsetUs?: () => bigint | null;
   /** 校验通过的 PCM 帧（appendFrame 送入有界缓冲，不生效）。 */
   readonly onFrame: (frame: InboundMediaFrame) => void;
   /** 意外断线重连前的通知（装配层可清空 Lane 缓冲）。 */
@@ -200,7 +206,9 @@ export class StageMediaClient {
   }
 
   #acceptFrame(frame: MediaFrame): void {
-    const result = this.#registry.accept(frame, this.#options.clock.nowUs());
+    const offsetUs = this.#options.runtimeOffsetUs?.() ?? null;
+    const nowUs = offsetUs === null ? null : this.#options.clock.nowUs() + offsetUs;
+    const result = this.#registry.accept(frame, nowUs);
     if (result.status === "rejected") {
       this.#stats = { ...this.#stats, rejectedFrames: this.#stats.rejectedFrames + 1 };
       // 帧级违规后该 Stream 状态不可信：关闭 Stream，连接保持。

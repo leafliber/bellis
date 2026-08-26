@@ -187,6 +187,22 @@ describe("MediaStreamRegistry", () => {
     expect(soon.status).toBe("accepted");
   });
 
+  it("nowUs=null 跳过 Deadline 检查（时钟估计未就绪，不做跨域误判）", () => {
+    const clock = new VirtualClock();
+    clock.advanceBy(1_000_000_000n);
+    const reg = registry();
+    reg.open({
+      streamId: STREAM_ID,
+      sessionId: SESSION_ID,
+      mediaKind: "binary-test",
+      contentType: "application/octet-stream",
+    });
+    // targetTimeUs 属另一时钟域（Runtime 单调），本域时钟不可比较：
+    // 估计缺失时接受帧（deadline 检查交由映射后的调用方域判断）。
+    const result = reg.accept(frame({ targetTimeUs: "1" }), null);
+    expect(result.status).toBe("accepted");
+  });
+
   it("deadline 宽限可配置", () => {
     const clock = new VirtualClock();
     clock.advanceBy(1_000_000n);
