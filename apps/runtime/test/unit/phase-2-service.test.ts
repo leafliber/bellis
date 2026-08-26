@@ -102,6 +102,7 @@ function createService(options?: {
   readonly media?: {
     sendFrame: (frame: { header: Record<string, string | number>; payload: Uint8Array }) => boolean;
   };
+  readonly maxActiveScenes?: number;
 }) {
   const clock = new VirtualClock();
   const channel = new EchoControlChannel();
@@ -159,7 +160,7 @@ function createService(options?: {
       commitLeadMs: 400,
       cancelTimeoutMs: 500,
       commitSendTimeoutMs: 500,
-      maxActiveScenes: 8,
+      maxActiveScenes: options?.maxActiveScenes ?? 8,
       closeTimeoutMs: 1000,
     },
   });
@@ -388,9 +389,9 @@ describe("Phase2PerformanceService 媒体编排", () => {
     expect(closed).toHaveLength(1);
     const closedPayload = closed[0]!.payload as { streamId?: string; reason?: string };
     expect(closedPayload.streamId).toBe(payload.streamId);
-    expect(
-      closedPayload.reason === undefined || closedPayload.reason === "scene_terminal",
-    ).toBe(true);
+    expect(closedPayload.reason === undefined || closedPayload.reason === "scene_terminal").toBe(
+      true,
+    );
     await h.service.close();
   });
 
@@ -471,6 +472,61 @@ describe("Phase2PerformanceService 媒体编排", () => {
       await flush(20);
       await closing;
     }
+  });
+
+  it("admission 拒绝：预分配回滚（closed 释放槽位），后续提交不受污染", async () => {
+    const h = createService({ maxActiveScenes: 1, media: { sendFrame: () => true } });
+    const first = h.service.submit({ signal: SIGNAL, fixture: FIXTURE });
+    expect(first.kind).toBe("submitted");
+    await flush();
+    h.channel.reply(h.service, h.clock);
+    await flush();
+    expect(h.service.activeSceneCount).toBe(1);
+
+    // 第二条提交触发 Director admission 上限：同步抛错 + 状态回滚。
+    const fixtureB = { ...FIXTURE, cycleId: "33333333-3333-4333-8333-333333333004" };
+    expect(() => h.service.submit({ signal: SIGNAL, fixture: fixtureB })).toThrow(
+      "scene_director_active_limit_reached",
+    );
+    expect(h.service.activeSceneCount).toBe(1);
+    // 已 announce 的流收到 closed（Stage 槽位释放），pending 清空。
+    const closed = h.channel.sent.filter((m) => m.type === "media.stream.closed");
+    expect(closed).toHaveLength(1);
+    expect((closed[0]!.payload as { reason?: string }).reason).toBe("admission_rejected");
+
+    // 重复请求不再累积：第三次同样拒绝且计数不变。
+    expect(() => h.service.submit({ signal: SIGNAL, fixture: fixtureB })).toThrow(
+      "scene_director_active_limit_reached",
+    );
+    expect(h.service.activeSceneCount).toBe(1);
+
+    // 第一条正常结算后，新提交恢复可用（无泄漏阻塞）。
+    const submission = first;
+    if (submission.kind !== "submitted") {
+      throw new Error("unreachable");
+    }
+    h.service.handleStageMessage(
+      "scene.finished",
+      {
+        sceneId: submission.sceneId,
+        cycleId: FIXTURE.cycleId,
+        lanes: [
+          { lane: "audio", outcome: "completed", finishedAtStageUs: "1000000" },
+          { lane: "subtitle", outcome: "completed", finishedAtStageUs: "1000000" },
+          { lane: "avatar", outcome: "completed", finishedAtStageUs: "1000000" },
+        ],
+      },
+      h.clock.nowUs(),
+    );
+    await submission.handle.done;
+    expect(h.service.activeSceneCount).toBe(0);
+    const fixtureC = { ...FIXTURE, cycleId: "33333333-3333-4333-8333-333333333005" };
+    expect(h.service.submit({ signal: SIGNAL, fixture: fixtureC }).kind).toBe("submitted");
+    const closing = h.service.close();
+    await flush();
+    h.clock.advanceBy(3_000_000n);
+    await flush(20);
+    await closing;
   });
 
   it("能力快照权威：合法但不含 PCM 的上报不回落默认（音频 Cue 拒绝）", async () => {

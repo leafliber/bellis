@@ -116,7 +116,8 @@ export type SubmissionOutcome =
 
 interface PendingStream {
   readonly plan: ScenePlan;
-  readonly tts: FakeTtsResult;
+  /** 懒合成：admission 通过且 Stage ready 后才物化完整 PCM。 */
+  readonly speech: SpeechIntent;
   readonly audioCueId: string;
   readonly sessionId: string;
   readonly traceId: string;
@@ -293,11 +294,21 @@ export class Phase2PerformanceService {
       cycleId: compile.plan.scene.cycleId,
       startedAt: null,
     });
-    const handle = this.#director.submit(compile.plan, {
-      sessionId: this.#sessionId,
-      idempotencyKey: `phase2:${sceneId}`,
-      requestFingerprint: `phase2:${packet.cycleId}:${compile.plan.cues.length}`,
-    });
+    let handle: SceneHandle;
+    try {
+      handle = this.#director.submit(compile.plan, {
+        sessionId: this.#sessionId,
+        idempotencyKey: `phase2:${sceneId}`,
+        requestFingerprint: `phase2:${packet.cycleId}:${compile.plan.cues.length}`,
+      });
+    } catch (error) {
+      // Admission 拒绝（活跃上限/重复提交）：回滚预分配状态——announce
+      // 已发出不可撤回，以 media.stream.closed 释放 Stage 槽位；异常
+      // 如实上抛（不吞错、不虚报提交成功）。
+      this.#activeScenes.delete(sceneId);
+      this.#closeStreamForScene(sceneId, "admission_rejected");
+      throw error;
+    }
     void handle.done.finally(() => {
       // 终态清理：活动索引、Stream（closed 通知）与帧任务一并释放。
       this.#activeScenes.delete(sceneId);
@@ -340,7 +351,7 @@ export class Phase2PerformanceService {
     }
     this.#pendingStreams.set(streamId, {
       plan,
-      tts: synthesizeSpeech(speech),
+      speech,
       audioCueId: audioCue.cueId,
       sessionId: this.#sessionId,
       traceId,
@@ -491,6 +502,11 @@ export class Phase2PerformanceService {
     return this.#director.getExecutionState(sceneId);
   }
 
+  /** 活动索引大小（admission 回滚的可观测账目）。 */
+  get activeSceneCount(): number {
+    return this.#activeScenes.size;
+  }
+
   /**
    * 编译能力：stage.capabilities 快照为权威——Schema 校验通过即照单全收
    * （Stage 明确声明不支持 PCM 时音频 Cue 被编译拒绝 capability_missing，
@@ -527,7 +543,7 @@ export class Phase2PerformanceService {
     this.#pendingStreams.delete(streamId);
     this.#mediaSender.startSpeechStream({
       plan: pending.plan,
-      tts: pending.tts,
+      tts: synthesizeSpeech(pending.speech),
       audioCueId: pending.audioCueId,
       streamId,
       sessionId: pending.sessionId,
