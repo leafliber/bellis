@@ -322,7 +322,15 @@ class StageClient {
           `stream ${streamId} reached ${stream?.frames.length ?? 0}/${count} frames`,
         );
       }
-      await new Promise((resolve) => this.frameWaiters.push(resolve));
+      // 帧停止到达时也要醒来复查 deadline（真实计时器，不挂死）。
+      const remaining = deadline - performance.now();
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, remaining);
+        this.frameWaiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
     }
   }
 

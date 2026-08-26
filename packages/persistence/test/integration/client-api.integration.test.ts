@@ -122,6 +122,36 @@ describe("Session Records", () => {
     ).rejects.toMatchObject({ code: "session_not_found" });
   });
 
+  it("recordType 过滤 + 倒序最近窗口（生命周期专用查询语义）", async () => {
+    // 插入 70 条混合记录：早期 lifecycle 与近期 lifecycle 之间夹大量
+    // 审计记录——固定升序窗口会取到最早一批（历史缺陷），倒序 +
+    // recordType 过滤必须取到最近的 lifecycle 证据。
+    for (let i = 0; i < 70; i += 1) {
+      const recordType = i < 20 || i >= 60 ? "scene_lifecycle" : "phase2_audit_noise";
+      await client.appendRecord({
+        record: makeSessionRecord({
+          recordId: `88888888-8888-4888-8888-${(i + 1).toString().padStart(12, "0")}`,
+          recordType,
+          occurredAtMs: i + 1,
+          aggregateId: `scene-lifecycle:44444444-4444-4444-8444-4444440000${String(i).padStart(2, "0")}`,
+          aggregateSeq: String(i + 1),
+        }),
+        trace: TRACE,
+      });
+    }
+    const window = await client.listRecords({
+      sessionId: SESSION_ID,
+      recordType: "scene_lifecycle",
+      order: "desc",
+      limit: 5,
+    });
+    expect(window).toHaveLength(5);
+    expect(window.every((record) => record.recordType === "scene_lifecycle")).toBe(true);
+    // 倒序返回最近 5 条 lifecycle（occurredAtMs 70..66），绝不包含
+    // 最早 20 条（历史缺陷：升序固定窗口取到 1..N）。
+    expect(window.map((record) => record.occurredAtMs)).toEqual([70, 69, 68, 67, 66]);
+  });
+
   it("按 trace / session / aggregate 索引查询", async () => {
     const byTrace = await client.listRecords({ traceId: TRACE.traceId });
     expect(byTrace.length).toBeGreaterThanOrEqual(2);

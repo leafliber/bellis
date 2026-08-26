@@ -87,6 +87,8 @@ export interface OperationInputs {
     readonly sessionId?: string | undefined;
     readonly traceId?: string | undefined;
     readonly aggregateId?: string | undefined;
+    readonly recordType?: string | undefined;
+    readonly order?: "asc" | "desc" | undefined;
     readonly limit?: number | undefined;
   };
   readonly claim_outbox: {
@@ -173,6 +175,8 @@ const ListRecordsPayloadSchema = z.object({
   sessionId: UuidSchema.optional(),
   traceId: TraceIdSchema.optional(),
   aggregateId: z.string().min(1).max(128).optional(),
+  recordType: z.string().min(1).max(64).optional(),
+  order: z.enum(["asc", "desc"]).optional(),
   limit: z.number().int().min(1).max(1000).optional(),
 });
 

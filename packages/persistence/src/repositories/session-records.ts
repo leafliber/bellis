@@ -125,6 +125,10 @@ export interface ListRecordsQuery {
   readonly sessionId?: string | undefined;
   readonly traceId?: string | undefined;
   readonly aggregateId?: string | undefined;
+  /** 按 recordType 过滤（如 scene_lifecycle 专用窗口）。 */
+  readonly recordType?: string | undefined;
+  /** 排序方向（默认 asc；desc 取最近窗口）。 */
+  readonly order?: "asc" | "desc" | undefined;
   readonly limit?: number | undefined;
 }
 
@@ -143,9 +147,14 @@ export function listSessionRecords(db: SqliteDatabase, query: ListRecordsQuery):
     conditions.push("aggregate_id = ?");
     params.push(query.aggregateId);
   }
+  if (query.recordType !== undefined) {
+    conditions.push("record_type = ?");
+    params.push(query.recordType);
+  }
   const limit = Math.min(Math.max(1, query.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
   const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
-  const sql = `SELECT * FROM session_records${where} ORDER BY occurred_at_ms, record_id LIMIT ?`;
+  const direction = query.order === "desc" ? " DESC" : "";
+  const sql = `SELECT * FROM session_records${where} ORDER BY occurred_at_ms${direction}, record_id${direction} LIMIT ?`;
   return db
     .prepare(sql)
     .all(...params, limit)

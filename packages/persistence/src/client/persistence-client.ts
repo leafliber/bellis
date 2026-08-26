@@ -87,6 +87,10 @@ export interface ListRecordsInput {
   readonly sessionId?: string;
   readonly traceId?: string;
   readonly aggregateId?: string;
+  /** 按 recordType 过滤（如 scene_lifecycle 专用窗口）。 */
+  readonly recordType?: string;
+  /** 排序方向（默认 asc；desc 取最近窗口）。 */
+  readonly order?: "asc" | "desc";
   readonly limit?: number;
 }
 
@@ -339,6 +343,8 @@ export function createPersistenceClientForTesting(
             ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
             ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
             ...(input.aggregateId === undefined ? {} : { aggregateId: input.aggregateId }),
+            ...(input.recordType === undefined ? {} : { recordType: input.recordType }),
+            ...(input.order === undefined ? {} : { order: input.order }),
             ...(input.limit === undefined ? {} : { limit: input.limit }),
           },
         },
