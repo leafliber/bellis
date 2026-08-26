@@ -851,4 +851,3 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
 function activeOf(decorated: { schemaVersion: number }): { executionState?: string } | null {
   return (decorated as { activeScene?: { executionState?: string } }).activeScene ?? null;
 }
-

@@ -177,7 +177,9 @@ describe("Session Records", () => {
     rows = await client.listActiveScenes(SESSION_ID);
     // payload 无版本不可信（to 不采信）→ unknown；sceneId 归属仍由
     // aggregateId 前缀兜底（行存在即未证终态）。
-    expect(rows.some((row) => row.sceneId === indexSceneId(3) && row.state === "unknown")).toBe(true);
+    expect(rows.some((row) => row.sceneId === indexSceneId(3) && row.state === "unknown")).toBe(
+      true,
+    );
   });
 
   it("recordType 过滤 + 倒序最近窗口（生命周期专用查询语义）", async () => {

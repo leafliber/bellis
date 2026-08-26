@@ -266,7 +266,7 @@ describe("RuntimeMediaSender", () => {
     expect(sender.droppedByLimit).toBeGreaterThanOrEqual(1);
     expect(sent.length).toBeGreaterThanOrEqual(1);
     for (const frame of sent) {
-      expect(1_100_000n - BigInt(frame.header.targetTimeUs)).toBeLessThan(100_000n);
+      expect(1_100_000n - BigInt(frame.header.targetTimeUs ?? "1100000")).toBeLessThan(100_000n);
     }
     sender.close();
   });
