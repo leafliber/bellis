@@ -412,10 +412,15 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 
 - 输入只接受 `SpeechIntent`；输出固定 PCM 格式和可选词/句时间标记；
 - 波形、分块、时长和 Timing 对相同输入确定；
-- 按 Frame Sequence 发送，使用 `targetTimeUs/durationUs`；
+- 按 Frame Sequence 发送，使用 `targetTimeUs/durationUs`；Sequence 只
+  计数到达传输层的帧（限制丢弃/传输拒绝不消耗序号——缺号会被
+  Registry 判 sequence_violation 关闭整个 Stream）；
 - 发送队列按帧数、字节数和最大未来音频时长三重限制（帧数/字节以
   「已发送未播放」账目执行：播放时刻过去即出账；超过追赶预算的迟到
-  帧丢弃重同步并计入 `droppedByLimit`，sequence 仍严格连续）；
+  帧丢弃重同步并计入 `droppedByLimit`）；未来音频预算跟随
+  stage.capabilities.audio.maxBufferedUs 动态更新；
+- Stream 生命周期：帧流完成或 Scene 终态即发送 media.stream.closed
+  （either-direction）释放 Stage Registry 并发槽位；
 - Control Cancel 优先于 Media 发送，取消后不再产生新帧；
 - 不把 PCM、全文或敏感输入写入日志。
 

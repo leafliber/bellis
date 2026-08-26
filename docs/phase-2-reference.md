@@ -81,6 +81,11 @@ requiresReprepare=true）。
   （`hard_lane_unavailable:<detail>`）；降级重编译属应用层策略；
 - 取消优先于媒体发送；Control 取消先于 Media 帧（P1 优先级）；
 - uncertain 绝不自动重试外部效果；迟到回执不得复活终态；
+- Media Sequence 只计数到达传输层的帧（丢弃帧不缺号）；媒体 Stream
+  完成/终态即 closed（Stage Registry 并发槽位释放；E2E 马拉松 9+ 场
+  opened=11 仍零拒绝帧）；
+- Stage 侧 Deadline 检查经时钟偏移映射后同域比较（宽限 100ms；
+  估计未就绪跳过——不做跨域误判）；
 - 断线即停：Stage 连接代际变化时 running Scene 的 Lane 副作用本地
   停止（音频淡出/字幕行移除/Avatar stop），对账交由协议；
 - 角色与 Session 隔离：演出回执仅 clientType=stage 的绑定连接可提交；
@@ -90,7 +95,10 @@ requiresReprepare=true）。
   支持 PCM 时音频 Cue 编译拒绝，不回落默认）；断线按代际清除；
 - 审计 payload 版本化：signal_accepted/decision_packet/
   scene_plan_compiled/scene_lifecycle 携带 payloadVersion=1 并经
-  版本化 Schema 校验（非法 payload 显式失败，不落任意 JSON）。
+  版本化 Schema 校验（非法 payload 显式失败，不落任意 JSON）；
+- 跨进程对账覆盖并发 Scene（全记录窗口聚合，不只看最后提交）；
+  未知 payloadVersion 绝不静默当作已知格式；Director admission 拒绝
+  时预分配状态回滚（PCM 物化推迟到 ready 之后）。
 
 ## 5. 已知边界（后续阶段）
 

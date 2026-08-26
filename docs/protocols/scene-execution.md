@@ -305,10 +305,12 @@ contentType  audio/pcm-s16le-48000-mono
 - 恢复事实与重新执行分离：Snapshot 可以说明"已提交/结果不确定"，
   不导致自动重播；只有新的显式 `scene.prepare → commit` 才产生新副作用。
 - 跨进程（Runtime 重启后无 Director 状态）：以持久化证据推导——
-  最后落库 Scene 的生命周期 Record 已达终态（completed/cancelled/
-  failed）则无对账价值（v1）；记录缺失、在途或为 uncertain 时结果
-  不可证明 → v2 uncertain（requiresReprepare=true），绝不虚构其它
-  执行状态。
+  按 sceneId 聚合生命周期 Record（版本化 payload 校验，未知
+  payloadVersion 不当作已知格式）；已达可证终态（completed/
+  cancelled/failed）无对账价值（v1）；记录缺失、在途、uncertain 或
+  证据不可验证时结果不可证明 → v2 uncertain（requiresReprepare=
+  true）。并发 Scene 任一未证终态即构成视图（不只看最后提交）；
+  "committing" 仅对最后落库 Scene 生效（durable 前后歧义）。
 - `openMediaStreams` 在两个版本中恒为空（连接级资源，重连重新声明）。
 - Runtime 在未启用 Phase 2 演出链路的会话中继续发送 v1 快照，
   Phase 1 客户端行为不变。
