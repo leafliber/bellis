@@ -50,6 +50,8 @@ export interface StageAppOptions {
   readonly onStateChange?: (state: StageAppState, previous: StageAppState) => void;
   /** Media Stream announce 处理（装配层建立有界缓冲后回 media.stream.ready）。 */
   readonly onMediaAnnounce?: (payload: unknown, sendReady: (payload: unknown) => boolean) => void;
+  /** Runtime 关闭媒体 Stream（media.stream.closed）：释放 Registry 槽位。 */
+  readonly onMediaStreamClosed?: (streamId: string) => void;
   /** Lane 注册表（缺省空注册表：无 Lane 时 prepare 全部 lane_not_available）。 */
   readonly laneRegistry?: LaneRegistry;
   /** plan.speech 文本 → 字幕 Lane（P3 装配注入）。 */
@@ -232,6 +234,15 @@ export class StageApp {
       case "media.stream.announce":
         this.announceMedia(payload);
         return;
+      case "media.stream.closed": {
+        // Runtime → Stage 方向的 Stream 关闭（either-direction 类型）：
+        // 本地关闭 Registry 槽位即可，不回发（避免关闭回执风暴）。
+        const closed = payload as { streamId?: unknown };
+        if (typeof closed.streamId === "string") {
+          this.#options.onMediaStreamClosed?.(closed.streamId);
+        }
+        return;
+      }
       case "session.snapshot":
         // 重连对账：快照到达说明 replay 缺口走完整快照路径；未提交准备
         // 已随代际变化丢弃，不自动重播 uncertain Scene（§7.3）。

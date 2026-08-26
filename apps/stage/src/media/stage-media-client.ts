@@ -164,6 +164,14 @@ export class StageMediaClient {
     return sendReady({ streamId: announce.streamId });
   }
 
+  /**
+   * 关闭单个 Stream（Control media.stream.closed 到达时调用）：释放
+   * Registry 槽位（并发上限）与帧级状态；后续帧按 stream_closed 拒绝。
+   */
+  closeStream(streamId: string): void {
+    this.#registry.close(streamId);
+  }
+
   #onMessage(data: string | Uint8Array): void {
     this.#stats = { ...this.#stats, rawMessages: this.#stats.rawMessages + 1 };
     const parser = this.#parser;

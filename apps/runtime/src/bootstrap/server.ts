@@ -308,7 +308,11 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
               }
             },
             snapshotDecorator: (snapshot, recoveryState, sceneLifecycle) =>
-              phase2.decorateSnapshot(snapshot, recoveryState, sceneLifecycle),
+              // Session 归属（隔离）：装饰只对绑定的 Stage Session 生效——
+              // 其它 Session/overlay 的快照绝不携带全局 Director 的活动态。
+              phase2.ownsSession(logical.sessionId)
+                ? phase2.decorateSnapshot(snapshot, recoveryState, sceneLifecycle)
+                : snapshot,
           }),
     });
     if (phase2 !== undefined) {

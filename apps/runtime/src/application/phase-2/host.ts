@@ -145,6 +145,9 @@ export class Phase2RuntimeHost {
   detachConnection(connection: ControlConnection): void {
     if (this.#connection === connection) {
       this.#connection = null;
+      // 绑定随建立它的连接存亡：归属连接关闭即释放 Session 归属
+      //（后续 Session 可依序改绑；连接存续期间改绑仍被拒绝）。
+      this.#stageSessionId = null;
       for (const handler of Array.from(this.#disconnectHandlers)) {
         handler();
       }
@@ -183,6 +186,11 @@ export class Phase2RuntimeHost {
   /** 连接归属：是否为当前绑定的 Stage ControlConnection（入站回执判据）。 */
   ownsConnection(connection: ControlConnection): boolean {
     return this.#connection === connection && !this.#closed;
+  }
+
+  /** Session 归属：快照装饰只对绑定的 Stage Session 生效（隔离）。 */
+  ownsSession(sessionId: string): boolean {
+    return !this.#closed && this.#stageSessionId === sessionId;
   }
 
   /**

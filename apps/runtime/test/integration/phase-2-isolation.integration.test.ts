@@ -63,6 +63,24 @@ async function connectedClient(
   return client;
 }
 
+/** resume 连接：hello 在 open 后立即发送（holdNewSends 语义），无 ack → 强制快照。 */
+async function resumeClient(
+  cookie: string,
+  sessionId: string,
+  clientType: string,
+): Promise<ControlWsClient> {
+  const client = new ControlWsClient(wsOptions(cookie));
+  await client.opened();
+  client.send(
+    clientEnvelope({
+      sessionId,
+      type: "client.hello",
+      payload: { protocolVersion: 1, clientType },
+    }),
+  );
+  return client;
+}
+
 async function authSession(): Promise<{ sessionId: string; cookie: string }> {
   const issued = handle.issueStartupToken();
   return mustExchange(handle, issued.token);
@@ -176,5 +194,84 @@ describe("Phase 2 角色与 Session 隔离", () => {
     expect(closedAgain.code).toBe(1008);
     otherStage.close();
     stageClient.close();
+  });
+});
+
+describe("Phase 2 Snapshot 装饰 Session 归属", () => {
+  it("全局 Director 活动态只装饰归属 Session 的快照；其它 Session 维持 v1", async () => {
+    const host = handle.phase2;
+    expect(host).not.toBeNull();
+    if (host === null) {
+      return;
+    }
+    const stage = await authSession();
+    const other = await authSession();
+    const stageClient = await connectedClient(stage.cookie, stage.sessionId, "stage");
+
+    // 提交一个 Scene 并保持非终态（回 ready、不回 started/finished）。
+    const submitted = host.submit({
+      signal: {
+        schemaVersion: 1,
+        id: "77777777-7777-4777-8777-777777777777",
+        kind: "danmaku",
+        source: "isolation-test",
+        occurredAt: Date.now(),
+        priority: 100,
+        payload: { text: "对账视图隔离" },
+      },
+      fixture: {
+        cycleId: "88888888-8888-4888-8888-888888888888",
+        traceId: "0123456789abcdef0123456789abcdef",
+        scenario: "normal",
+      },
+    });
+    expect(submitted.kind).toBe("submitted");
+    const prepare = await stageClient.waitForType("scene.prepare");
+    const plan = (
+      prepare.payload as {
+        plan: { scene: { sceneId: string; cycleId: string; groups: { lanes: string[] }[] } };
+      }
+    ).plan;
+    stageClient.send(
+      clientEnvelope({
+        sessionId: stage.sessionId,
+        type: "scene.ready",
+        payload: {
+          sceneId: plan.scene.sceneId,
+          cycleId: plan.scene.cycleId,
+          lanes: plan.scene.groups[0]!.lanes.map((lane) => ({ lane, status: "ready", cueIds: [] })),
+          preparedAtStageUs: String(Date.now() * 1000),
+        },
+      }),
+    );
+    // Director 进入活动态（非终态视图可用于快照装饰）。
+    await stageClient.waitForType("scene.commit");
+    expect(host.service.activeSceneView()).not.toBeNull();
+
+    // 其它 Session：连接 → resume 重连（无 ack → 强制快照）必须 v1
+    //（绝不携带全局 Director 的活动态）。
+    const otherFirst = await connectedClient(other.cookie, other.sessionId, "overlay");
+    otherFirst.close();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // resume 连接在 client.hello 前保留一切出站（含 server.hello）：
+    // hello 必须在 open 后立即发送（不携带 ack → 强制快照）。
+    const otherSecond = await resumeClient(other.cookie, other.sessionId, "overlay");
+    const otherSnapshot = (await otherSecond.waitForType("session.snapshot")) as unknown as {
+      payload: { snapshot: { schemaVersion: number; activeScene?: unknown } };
+    };
+    expect(otherSnapshot.payload.snapshot.schemaVersion).toBe(1);
+    expect(otherSnapshot.payload.snapshot.activeScene ?? null).toBeNull();
+
+    // 归属 Session 自身的 resume 快照升级 v2（正控制）。
+    stageClient.close();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const stageSecond = await resumeClient(stage.cookie, stage.sessionId, "stage");
+    const stageSnapshot = (await stageSecond.waitForType("session.snapshot")) as unknown as {
+      payload: { snapshot: { schemaVersion: number } };
+    };
+    expect(stageSnapshot.payload.snapshot.schemaVersion).toBe(2);
+
+    otherSecond.close();
+    stageSecond.close();
   });
 });

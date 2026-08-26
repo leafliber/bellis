@@ -170,6 +170,7 @@ class StageClient {
     this.streams = new Map(); // streamId → {header 帧列表, lastSeq, rms, traceId}
     this.frameWaiters = [];
     this.traceRoots = new Map(); // sceneId → traceId（announce/prepare/commit/cancel）
+    this.closedStreams = new Map(); // streamId → reason（media.stream.closed 证据）
   }
 
   connect() {
@@ -213,6 +214,9 @@ class StageClient {
   handleServerEnvelope(envelope) {
     if (envelope.type === "media.stream.announce") {
       this.handleAnnounce(envelope);
+    }
+    if (envelope.type === "media.stream.closed") {
+      this.closedStreams.set(envelope.payload.streamId, envelope.payload.reason ?? "unknown");
     }
     const waiter = this.waiters.shift();
     if (waiter === undefined) {
@@ -661,6 +665,26 @@ async function run() {
       throw new DemoFailure("trace", "db trace records carry a foreign sessionId");
     }
     report("traceContinuity", `ok(${traceA.slice(0, 8)}… signal→compile→db→control→media)`);
+
+    // 8.6 Stream 生命周期：每个已 announce 的 Stream 都必须收到
+    // media.stream.closed（Stage Registry 并发槽位释放；缺失会在第 9 场
+    // 耗尽）。reason ∈ {stream_completed, scene_terminal}（先到者触发）。
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const closedReasons = new Set(stage.closedStreams.values());
+    const validReasons = new Set(["stream_completed", "scene_terminal"]);
+    if (
+      stage.closedStreams.size < 2 ||
+      [...closedReasons].some((reason) => !validReasons.has(reason))
+    ) {
+      throw new DemoFailure(
+        "stream-closed",
+        `expected closed for both announced streams, got ${JSON.stringify([...stage.closedStreams.entries()])}`,
+      );
+    }
+    report(
+      "streamClosed",
+      `ok(${stage.closedStreams.size} streams, reasons=${[...closedReasons].sort().join("+")})`,
+    );
 
     // 9. Crash Window：SIGKILL → 同目录重启 → 不重复执行已提交 Scene。
     child.kill("SIGKILL");

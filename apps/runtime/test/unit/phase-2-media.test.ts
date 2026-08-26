@@ -144,13 +144,116 @@ describe("RuntimeMediaSender", () => {
     expect(sender.droppedByLimit).toBeGreaterThan(0);
     expect(sender.droppedByLimit).toBeLessThan(tts.frameCount);
     expect(sent.length + sender.droppedByLimit).toBe(tts.frameCount);
-    let last = -1;
-    for (const frame of sent) {
-      const sequence = Number(frame.header.sequence);
-      expect(sequence).toBeGreaterThan(last);
-      last = sequence;
+    // 送达帧 sequence 必须从 0 严格连续（next === previous + 1）：丢帧不
+    // 消耗序号，缺号会被 Registry 判 sequence_violation 关闭整个 Stream。
+    expect(Number(sent[0]?.header.sequence)).toBe(0);
+    for (let i = 1; i < sent.length; i += 1) {
+      expect(Number(sent[i]?.header.sequence)).toBe(i);
     }
     expect(sender.sentTotal).toBe(sent.length);
+    sender.close();
+  });
+
+  it("传输层拒绝的帧不消耗 sequence：后续帧严格连续补位", async () => {
+    const clock = new VirtualClock();
+    const sent: { header: Record<string, string | number> }[] = [];
+    let attempt = 0;
+    const sender = new RuntimeMediaSender({
+      clock,
+      sendFrame: (frame) => {
+        attempt += 1;
+        // 第 2、3 次交送被传输层拒绝（背压）：帧丢弃，序号不前进。
+        const deliver = !(attempt === 2 || attempt === 3);
+        if (deliver) {
+          sent.push(frame);
+        }
+        return deliver;
+      },
+    });
+    const tts = synthesizeSpeech(SPEECH);
+    sender.startSpeechStream({
+      plan: PLAN,
+      tts,
+      audioCueId: "c",
+      streamId: "s",
+      sessionId: "sess",
+      traceId: "0123456789abcdef0123456789abcdef",
+      firstFrameTargetUs: 1_000_000n,
+    });
+    const stepUs = 20_000n;
+    const endUs = 1_000_000n + tts.durationUs + 100_000n;
+    for (let t = 0n; t < endUs; t += stepUs) {
+      clock.advanceBy(stepUs);
+      for (let i = 0; i < 2; i += 1) {
+        await Promise.resolve();
+      }
+    }
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve();
+    }
+    expect(sender.droppedByTransport).toBe(2);
+    expect(sent.length).toBe(tts.frameCount - 2);
+    // 被拒帧携带的序号接收方永远看不到：送达帧严格连续 0,1,2,…。
+    for (let i = 0; i < sent.length; i += 1) {
+      expect(Number(sent[i]?.header.sequence)).toBe(i);
+    }
+    sender.close();
+  });
+
+  it("流生命周期：自然完成与取消都通知 onJobEnd（Stream 关闭依据）", async () => {
+    const clock = new VirtualClock();
+    const ended: { sceneId: string; streamId: string; reason: string }[] = [];
+    const sender = new RuntimeMediaSender({
+      clock,
+      sendFrame: () => true,
+      onJobEnd: (info) => ended.push({ ...info }),
+    });
+    const tts = synthesizeSpeech(SPEECH);
+    sender.startSpeechStream({
+      plan: PLAN,
+      tts,
+      audioCueId: "c",
+      streamId: "stream-a",
+      sessionId: "sess",
+      traceId: "0123456789abcdef0123456789abcdef",
+      firstFrameTargetUs: 1_000_000n,
+    });
+    const stepUs = 20_000n;
+    const endUs = 1_000_000n + tts.durationUs + 100_000n;
+    for (let t = 0n; t < endUs; t += stepUs) {
+      clock.advanceBy(stepUs);
+      for (let i = 0; i < 2; i += 1) {
+        await Promise.resolve();
+      }
+    }
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve();
+    }
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({
+      sceneId: PLAN.scene.sceneId,
+      streamId: "stream-a",
+      reason: "completed",
+    });
+
+    // 第二个流：中途取消 → cancelled 通知。
+    const endedBefore = ended.length;
+    sender.startSpeechStream({
+      plan: {
+        ...PLAN,
+        scene: { ...PLAN.scene, sceneId: "44444444-4444-4444-8444-4444440000bb" },
+      } as ScenePlan,
+      tts,
+      audioCueId: "c",
+      streamId: "stream-b",
+      sessionId: "sess",
+      traceId: "0123456789abcdef0123456789abcdef",
+      firstFrameTargetUs: 5_000_000n,
+    });
+    sender.cancelStream("44444444-4444-4444-8444-4444440000bb", "urgent_interrupt");
+    expect(ended.length).toBe(endedBefore + 1);
+    expect(ended.at(-1)?.reason).toBe("cancelled");
+    expect(ended.at(-1)?.streamId).toBe("stream-b");
     sender.close();
   });
 

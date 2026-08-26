@@ -138,6 +138,11 @@ export class Phase2PerformanceService {
   readonly #activeScenes = new Map<string, { cycleId: string; startedAt: bigint | null }>();
   /** 已 announce、等待 media.stream.ready 的流（≤ 活跃 Scene 上限，有界）。 */
   readonly #pendingStreams = new Map<string, PendingStream>();
+  /** sceneId → 已 announce 的 Stream（终态/完成时发送 media.stream.closed）。 */
+  readonly #sceneStreams = new Map<
+    string,
+    { readonly streamId: string; readonly traceId: string }
+  >();
 
   constructor(options: Phase2PerformanceServiceOptions) {
     this.#options = options;
@@ -161,12 +166,21 @@ export class Phase2PerformanceService {
     this.#mediaSender = new RuntimeMediaSender({
       clock: options.clock,
       sendFrame: (frame) => options.mediaChannel?.sendFrame(frame) ?? false,
+      // 流生命周期：自然完成/取消即关闭 Stream——Stage Registry 的并发
+      // Stream 槽位（默认 8）必须释放，否则同一连接第 9 场 announce 被拒。
+      onJobEnd: (info) => {
+        if (info.reason === "completed") {
+          this.#closeStreamForScene(info.sceneId, "stream_completed");
+        }
+      },
     });
     this.#stagePort.onStageDisconnected(() => {
       this.#director.notifyStageDisconnected("control_channel_closed");
-      // Stream 状态随连接丢弃：停止全部帧任务（重连后必须重新 announce）。
+      // Stream 状态随连接丢弃：停止全部帧任务（重连后必须重新 announce）；
+      // 连接已死，closed 消息无需也无法送达（Stage 侧随连接清空）。
       this.#mediaSender.cancelAll("control_channel_closed");
       this.#pendingStreams.clear();
+      this.#sceneStreams.clear();
     });
     options.mediaChannel?.onDisconnected(() => {
       this.#mediaSender.cancelAll("media_channel_closed");
@@ -285,14 +299,9 @@ export class Phase2PerformanceService {
       requestFingerprint: `phase2:${packet.cycleId}:${compile.plan.cues.length}`,
     });
     void handle.done.finally(() => {
-      // 终态清理：活动索引、未确认流与帧任务一并释放（有界状态）。
+      // 终态清理：活动索引、Stream（closed 通知）与帧任务一并释放。
       this.#activeScenes.delete(sceneId);
-      this.#mediaSender.cancelStream(sceneId, "scene_terminal");
-      for (const [streamId, pending] of this.#pendingStreams) {
-        if (pending.plan.scene.sceneId === sceneId) {
-          this.#pendingStreams.delete(streamId);
-        }
-      }
+      this.#closeStreamForScene(sceneId, "scene_terminal");
     });
     return { kind: "submitted", sceneId, handle };
   }
@@ -336,10 +345,45 @@ export class Phase2PerformanceService {
       sessionId: this.#sessionId,
       traceId,
     });
+    this.#sceneStreams.set(plan.scene.sceneId, { streamId, traceId });
+  }
+
+  /**
+   * 关闭 Scene 的媒体 Stream（幂等）：发送 media.stream.closed 释放
+   * Stage Registry 槽位；本地帧任务与索引一并清理。
+   */
+  #closeStreamForScene(sceneId: string, reason: string): void {
+    const record = this.#sceneStreams.get(sceneId);
+    if (record === undefined) {
+      return;
+    }
+    this.#sceneStreams.delete(sceneId);
+    this.#mediaSender.cancelStream(sceneId, reason);
+    this.#options.channel.enqueueServerMessage({
+      type: "media.stream.closed",
+      payload: { streamId: record.streamId, reason },
+      trace: { traceId: record.traceId },
+    });
+    for (const [streamId, pending] of this.#pendingStreams) {
+      if (pending.plan.scene.sceneId === sceneId) {
+        this.#pendingStreams.delete(streamId);
+      }
+    }
   }
 
   /** ControlConnection 阶段消息入口（stage.ready/started/finished/cancel.ack…）。 */
   handleStageMessage(type: string, payload: unknown, nowUs: bigint): void {
+    if (type === "stage.capabilities") {
+      // 能力驱动媒体预算：maxFutureUs 跟随 Stage 声明的 audio.maxBufferedUs
+      // （未来音频提前量不得超过 Stage 缓冲预算）。
+      this.#stagePort.handleStageMessage(type, payload, nowUs);
+      const reported = this.#stagePort.latestStageCapabilities as { capabilities?: unknown } | null;
+      const check = StageCapabilitiesSchema.safeParse(reported?.capabilities);
+      if (check.success) {
+        this.#mediaSender.updateMaxFutureUs(BigInt(check.data.audio.maxBufferedUs));
+      }
+      return;
+    }
     if (type === "media.stream.ready") {
       const parsed = MediaStreamReadyPayloadSchema.safeParse(payload);
       if (parsed.success) {

@@ -382,6 +382,15 @@ describe("Phase2PerformanceService 媒体编排", () => {
     await flush(20);
     expect(frames.length).toBe(beforeCancel);
     expect(h.service.mediaStats.sent).toBe(beforeCancel);
+    // Stream 生命周期：Scene 终态后发送 media.stream.closed 恰好一次
+    // （Stage Registry 槽位释放；无 closed 会在第 9 场耗尽并发上限）。
+    const closed = h.channel.sent.filter((m) => m.type === "media.stream.closed");
+    expect(closed).toHaveLength(1);
+    const closedPayload = closed[0]!.payload as { streamId?: string; reason?: string };
+    expect(closedPayload.streamId).toBe(payload.streamId);
+    expect(
+      closedPayload.reason === undefined || closedPayload.reason === "scene_terminal",
+    ).toBe(true);
     await h.service.close();
   });
 

@@ -10,8 +10,9 @@ import type { FakeTtsResult } from "./fake-tts.js";
 /**
  * Runtime → Stage 媒体发送器（docs/phase-2-development-guide.md §8.1）。
  *
- * - 帧 Sequence 从 0 严格连续；targetTimeUs = commitAtRuntimeUs + 帧序 ×
- *   20ms；发送节奏跟随时钟（目标时刻到达才发，不提前洪泛）；
+ * - 帧 Sequence 从 0 严格连续（只计数到达传输层的帧：丢弃帧不消耗
+ *   序号）；targetTimeUs = 首帧目标 + PCM 帧序 × 20ms；发送节奏跟随时钟
+ *   （目标时刻到达才发，不提前洪泛）；
  * - 队列三重限制（全部落地）：帧数、字节数以「已发送未播放」账目执行
  *   （播放时刻过去即出账；追赶突发不占队列），未来音频时长 ≤ maxFutureUs；
  *   超过追赶预算的迟到帧丢弃重同步（droppedByLimit 计数，sequence 仍
@@ -44,6 +45,16 @@ export interface RuntimeMediaSenderOptions {
   readonly limits?: Partial<MediaSenderLimits>;
   /** 帧发出回调（适配器负责编码与 socket 写入）；false = 传输层丢弃。 */
   readonly sendFrame: (frame: OutboundMediaFrame) => boolean;
+  /**
+   * 流任务结束回调（自然完成或取消/被取代）：应用层据此发送
+   * media.stream.closed，释放 Stage Registry 的并发 Stream 槽位。
+   */
+  readonly onJobEnd?: (info: {
+    readonly sceneId: string;
+    readonly streamId: string;
+    readonly traceId: string;
+    readonly reason: "completed" | "cancelled";
+  }) => void;
 }
 
 interface SendJob {
@@ -56,12 +67,20 @@ interface SendJob {
   readonly firstFrameTargetUs: bigint;
   controller: AbortController;
   stopped: boolean;
+  /**
+   * 已成功交送传输层的帧数（= 下一帧的 Sequence）：丢弃帧（限制/传输）
+   * 不消耗 Sequence——接收端只看到严格连续 0,1,2,…，缺号即
+   * sequence_violation（binary-media-websocket.md）。
+   */
+  sentSequence: bigint;
 }
 
 export class RuntimeMediaSender {
   readonly #clock: MonotonicClock;
-  readonly #limits: MediaSenderLimits;
+  /** 内部可变副本（maxFutureUs 随 Stage 能力上报动态更新）。 */
+  readonly #limits: { -readonly [K in keyof MediaSenderLimits]: MediaSenderLimits[K] };
   readonly #sendFrame: (frame: OutboundMediaFrame) => boolean;
+  readonly #onJobEnd: RuntimeMediaSenderOptions["onJobEnd"];
   readonly #jobs = new Map<string, SendJob>();
   /**
    * 已交发送但播放时刻未过的帧（socket 内未播音频的发送侧账目）：
@@ -79,6 +98,17 @@ export class RuntimeMediaSender {
     this.#clock = options.clock;
     this.#limits = { ...DEFAULT_MEDIA_SENDER_LIMITS, ...options.limits };
     this.#sendFrame = options.sendFrame;
+    this.#onJobEnd = options.onJobEnd;
+  }
+
+  /**
+   * 能力驱动预算更新（stage.capabilities.audio.maxBufferedUs）：未来音频
+   * 提前量不得超过 Stage 声明的缓冲预算（发送中动态生效）。
+   */
+  updateMaxFutureUs(maxFutureUs: bigint): void {
+    if (maxFutureUs > 0n) {
+      this.#limits.maxFutureUs = maxFutureUs;
+    }
   }
 
   get sentTotal(): number {
@@ -132,6 +162,7 @@ export class RuntimeMediaSender {
       firstFrameTargetUs: input.firstFrameTargetUs,
       controller,
       stopped: false,
+      sentSequence: 0n,
     };
     this.#jobs.set(sceneId, job);
     void this.#run(job);
@@ -146,6 +177,7 @@ export class RuntimeMediaSender {
     job.stopped = true;
     job.controller.abort(new Error(`media_cancelled:${reason}`));
     this.#jobs.delete(sceneId);
+    this.#notifyJobEnd(job, "cancelled");
   }
 
   /** 全部发送任务立即停止（媒体连接断开：Stream 不可跨连接复活）。 */
@@ -154,6 +186,7 @@ export class RuntimeMediaSender {
       job.stopped = true;
       job.controller.abort(new Error(`media_cancelled:${reason}`));
       this.#jobs.delete(sceneId);
+      this.#notifyJobEnd(job, "cancelled");
     }
   }
 
@@ -231,23 +264,40 @@ export class RuntimeMediaSender {
         sessionId: job.sessionId,
         sceneId: job.sceneId,
         cueId: job.cueId,
-        sequence: String(frameIndex),
+        // Sequence 只统计到达传输层的帧：丢弃帧不消耗序号（缺号会被
+        // Registry 判 sequence_violation 并关闭整个 Stream）。
+        sequence: job.sentSequence.toString(),
         targetTimeUs: targetUs.toString(),
         durationUs: perFrameUs.toString(),
         contentType: PHASE_2_PCM_CONTENT_TYPE,
         traceId: job.traceId,
       };
-      if (!this.#sendFrame({ header, payload })) {
+      const delivered = this.#sendFrame({ header, payload });
+      if (!delivered) {
         this.#droppedByTransport += 1;
+      } else {
+        job.sentSequence += 1n;
       }
-      this.#queue.push({ targetUs, bytes: frameBytes });
-      this.#queuedBytes += frameBytes;
+      if (delivered) {
+        this.#queue.push({ targetUs, bytes: frameBytes });
+        this.#queuedBytes += frameBytes;
+      }
       this.#sentTotal += 1;
       frameIndex += 1;
     }
     if (!job.stopped) {
       this.#jobs.delete(job.sceneId);
+      this.#notifyJobEnd(job, "completed");
     }
+  }
+
+  #notifyJobEnd(job: SendJob, reason: "completed" | "cancelled"): void {
+    this.#onJobEnd?.({
+      sceneId: job.sceneId,
+      streamId: job.streamId,
+      traceId: job.traceId,
+      reason,
+    });
   }
 
   /** 播放时刻已过的队头出账（未播音频账目只保留真正排队的帧）。 */

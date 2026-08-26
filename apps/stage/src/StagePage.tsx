@@ -185,6 +185,9 @@ export function StagePage({ profile }: { profile: string }) {
         }
         void media.handleAnnounce(payload, sendReady);
       },
+      onMediaStreamClosed: (streamId) => {
+        mediaRef.current?.closeStream(streamId);
+      },
     });
     appRef.current = app;
     // E2E 诊断句柄：命名以下划线开头表示测试专用全局（oxlint no-dangling-underscores 例外）。
