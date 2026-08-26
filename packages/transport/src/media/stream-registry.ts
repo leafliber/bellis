@@ -50,6 +50,15 @@ export type CloseStreamResult =
   | { readonly status: "unknown_stream" }
   | { readonly status: "already_closed" };
 
+export interface CloseStreamOptions {
+  /**
+   * 关闭边界（可选）：closed 与帧跨连接送达无全局顺序——携带边界时，
+   * sequence ≤ finalSequence 且严格连续的迟到帧仍可入账（尾帧乱序
+   * 不丢），超出边界即拒。缺省 = 立即关闭。
+   */
+  readonly finalSequence?: bigint;
+}
+
 interface StreamRecord {
   readonly streamId: string;
   readonly mediaKind: MediaKindName;
@@ -57,15 +66,20 @@ interface StreamRecord {
   lastSequence: bigint | null;
   readonly frameIds: Set<string>;
   closed: boolean;
+  /** 关闭边界（null = 立即关闭；携带边界时保留 lastSequence 续收尾帧）。 */
+  finalSequence: bigint | null;
   frameCount: number;
 }
 
-/** 关闭后只保留禁止复活的墓碑标记，帧级状态全部释放。 */
-function toTombstone(record: StreamRecord): void {
+/** 关闭后只保留禁止复活的墓碑标记；带边界的关闭保留续收所需水位。 */
+function toTombstone(record: StreamRecord, finalSequence: bigint | null): void {
   record.closed = true;
-  record.lastSequence = null;
-  record.frameIds.clear();
-  record.frameCount = 0;
+  record.finalSequence = finalSequence;
+  if (finalSequence === null) {
+    record.lastSequence = null;
+    record.frameIds.clear();
+    record.frameCount = 0;
+  }
 }
 
 const DEFAULT_MAX_OPEN_STREAMS = 8;
@@ -151,6 +165,7 @@ export class MediaStreamRegistry {
       lastSequence: null,
       frameIds: new Set<string>(),
       closed: false,
+      finalSequence: null,
       frameCount: 0,
     });
     this.#totalStreams += 1;
@@ -170,6 +185,21 @@ export class MediaStreamRegistry {
       return reject("unknown_stream", "stream is not registered on this connection");
     }
     if (record.closed) {
+      // 带边界的关闭：仅接受严格连续且不超出边界的迟到尾帧（closed 经
+      // Control 与帧跨连接送达，无全局顺序——先到的 closed 不丢尾帧）。
+      if (record.finalSequence !== null) {
+        const closingSequence = parseDecimalString(frame.header.sequence);
+        const expected = record.lastSequence === null ? 0n : record.lastSequence + 1n;
+        if (
+          closingSequence === expected &&
+          closingSequence <= record.finalSequence &&
+          record.frameCount < this.#maxFramesPerStream
+        ) {
+          record.lastSequence = closingSequence;
+          record.frameCount += 1;
+          return { status: "accepted", lastSequence: closingSequence };
+        }
+      }
       return reject("stream_closed", "stream is closed; frames are no longer accepted");
     }
     if (frame.header.contentType !== record.contentType) {
@@ -208,7 +238,7 @@ export class MediaStreamRegistry {
   }
 
   /** 关闭单个 Stream（对应 Control media.stream.closed 或服务端主动关闭）。 */
-  close(streamId: string): CloseStreamResult {
+  close(streamId: string, options?: CloseStreamOptions): CloseStreamResult {
     const record = this.#streams.get(streamId);
     if (record === undefined) {
       return { status: "unknown_stream" };
@@ -217,8 +247,8 @@ export class MediaStreamRegistry {
       return { status: "already_closed" };
     }
     // 关闭即释放帧级状态（frameId 集合等），只留轻量墓碑防止复活；
-    // 否则顺序创建大量流时 frameId 集合会驻留到 closeAll()。
-    toTombstone(record);
+    // 带边界的关闭保留 lastSequence/计数以续收乱序尾帧（帧数上限不变）。
+    toTombstone(record, options?.finalSequence ?? null);
     return { status: "closed" };
   }
 

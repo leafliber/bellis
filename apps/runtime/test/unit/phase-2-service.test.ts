@@ -41,9 +41,14 @@ interface SentMessage {
 class EchoControlChannel implements ControlChannel {
   readonly sent: SentMessage[] = [];
   connected = true;
+  /** 测试开关：模拟 closed 入队失败（连接断开/队列满）。 */
+  closedDelivery = true;
   readonly disconnectHandlers: (() => void)[] = [];
 
   enqueueServerMessage(input: { type: string; payload: JsonValue }): boolean {
+    if (input.type === "media.stream.closed" && !this.closedDelivery) {
+      return false;
+    }
     this.sent.push({ type: input.type, payload: input.payload });
     return true;
   }
@@ -475,6 +480,66 @@ describe("Phase2PerformanceService 媒体编排", () => {
       await flush(20);
       await closing;
     }
+  });
+
+  it("closed 携带 finalSequence；入队失败保留并重试（可靠交付）", async () => {
+    const frames: unknown[] = [];
+    const h = createService({
+      media: {
+        sendFrame: () => {
+          frames.push(1);
+          return true;
+        },
+      },
+    });
+    const submission = h.service.submit({ signal: SIGNAL, fixture: FIXTURE });
+    if (submission.kind !== "submitted") {
+      throw new Error("expected submitted");
+    }
+    await flush();
+    h.channel.reply(h.service, h.clock);
+    await flush();
+    const announce = h.channel.sent.find((m) => m.type === "media.stream.announce");
+    const streamId = (announce!.payload as { streamId: string }).streamId;
+    // 流发完（携带关闭边界）；closed 入队失败（连接断开/队列满）→ 保留。
+    h.service.handleStageMessage("media.stream.ready", { streamId }, h.clock.nowUs());
+    h.clock.advanceBy(2_600_000n);
+    await flush(30);
+    expect(frames.length).toBeGreaterThan(0);
+    h.channel.closedDelivery = false;
+    h.clock.advanceBy(200_000n);
+    await flush(30);
+    expect(h.channel.sent.filter((m) => m.type === "media.stream.closed")).toHaveLength(0);
+    // 连接恢复（markStageConnected）：待发 closed 冲刷，携带 finalSequence。
+    h.channel.closedDelivery = true;
+    h.service.markStageConnected();
+    await flush();
+    const flushed = h.channel.sent.filter((m) => m.type === "media.stream.closed");
+    expect(flushed).toHaveLength(1);
+    expect((flushed[0]!.payload as { streamId?: string }).streamId).toBe(streamId);
+    expect(typeof (flushed[0]!.payload as { finalSequence?: string }).finalSequence).toBe("string");
+    // Scene 终态：closed 已送达（幂等，不重复发送）。
+    h.service.handleStageMessage(
+      "scene.finished",
+      {
+        sceneId: submission.sceneId,
+        cycleId: FIXTURE.cycleId,
+        lanes: [
+          { lane: "audio", outcome: "completed", finishedAtStageUs: "1000000" },
+          { lane: "subtitle", outcome: "completed", finishedAtStageUs: "1000000" },
+          { lane: "avatar", outcome: "completed", finishedAtStageUs: "1000000" },
+        ],
+      },
+      h.clock.nowUs(),
+    );
+    await submission.handle.done;
+    await flush();
+    expect(h.channel.sent.filter((m) => m.type === "media.stream.closed")).toHaveLength(1);
+    const closing = h.service.close();
+    await flush();
+    h.clock.advanceBy(3_000_000n);
+    await flush(20);
+    await closing;
   });
 
   it("admission 拒绝：预分配回滚（closed 释放槽位），后续提交不受污染", async () => {

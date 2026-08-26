@@ -162,6 +162,13 @@ export const MediaStreamOpenPayloadSchema = extensibleJsonObject({
 export const MediaStreamClosedPayloadSchema = extensibleJsonObject({
   streamId: UuidSchema,
   reason: z.string().min(1).max(256),
+  /**
+   * 关闭边界（可选）：发送侧已交送传输层的最大帧 Sequence。closed 经
+   * Control 连接与帧（Media WebSocket）跨连接送达，无全局顺序保证——
+   * 先到的 closed 只标记边界：sequence ≤ finalSequence 且严格连续的
+   * 迟到帧仍可入账，超出即拒。缺省 = 立即关闭（兼容既有语义）。
+   */
+  finalSequence: DecimalStringSchema.optional(),
 });
 
 export const ErrorPayloadSchema = extensibleJsonObject({

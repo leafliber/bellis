@@ -629,7 +629,12 @@ export class ControlConnection {
     }
     if (envelope.type === "media.stream.closed") {
       const payload = MediaStreamClosedPayloadSchema.parse(envelope.payload);
-      this.#logical.mediaStreams.close(payload.streamId);
+      this.#logical.mediaStreams.close(
+        payload.streamId,
+        payload.finalSequence === undefined
+          ? undefined
+          : { finalSequence: BigInt(payload.finalSequence) },
+      );
       // 双向消息类型：服务端回执确认（Stream 关闭后不能复活）。
       session.enqueueServerMessage({
         type: "media.stream.closed",

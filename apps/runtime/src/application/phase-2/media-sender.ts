@@ -14,9 +14,9 @@ import type { FakeTtsResult } from "./fake-tts.js";
  *   序号）；targetTimeUs = 首帧目标 + PCM 帧序 × 20ms；发送节奏跟随时钟
  *   （目标时刻到达才发，不提前洪泛）；
  * - 队列三重限制（全部落地）：帧数、字节数以「已发送未播放」账目执行
- *   （播放时刻过去即出账；追赶突发不占队列），未来音频时长 ≤ maxFutureUs；
- *   超过追赶预算的迟到帧丢弃重同步（droppedByLimit 计数，sequence 仍
- *   严格连续）；
+ *   （播放时刻过去即出账；追赶突发不占队列），未来音频时长 ≤ maxFutureUs
+ *   （契约允许零预算 = 只按目标时刻发送）；超过迟到阈值的帧丢弃重同步
+ *   （droppedByLimit 计数，与 Stage Deadline 宽限同族）；
  * - Control 取消优先于 Media 发送：cancel() 后立即停止产生新帧；
  * - 所有等待由注入时钟 sleepUntil 驱动并接受 Abort；close() 零残留。
  */
@@ -33,6 +33,13 @@ export const DEFAULT_MEDIA_SENDER_LIMITS: MediaSenderLimits = {
   maxQueuedBytes: PHASE_2_PCM_FRAME_BYTES * 128,
   maxFutureUs: 2_000_000n,
 };
+
+/**
+ * 迟到重同步阈值（与 Stage 侧 Deadline 宽限同族）：超过该迟到的帧
+ * 会被 Stage 的 deadline 检查拒绝，发送侧直接丢弃重同步。独立于
+ * maxFutureUs（提前量预算允许合法的零预算——不意味着零迟到容忍）。
+ */
+const LATE_DROP_US = 100_000n;
 
 export interface OutboundMediaFrame {
   /** MediaFrameHeader 字段（schemaVersion 为数字 1，其余为字符串）。 */
@@ -54,6 +61,8 @@ export interface RuntimeMediaSenderOptions {
     readonly streamId: string;
     readonly traceId: string;
     readonly reason: "completed" | "cancelled";
+    /** 已交送传输层的最大 Sequence（无送达帧为 -1）：closed 边界。 */
+    readonly finalSequence: bigint;
   }) => void;
 }
 
@@ -103,10 +112,11 @@ export class RuntimeMediaSender {
 
   /**
    * 能力驱动预算更新（stage.capabilities.audio.maxBufferedUs）：未来音频
-   * 提前量不得超过 Stage 声明的缓冲预算（发送中动态生效）。
+   * 提前量不得超过 Stage 声明的缓冲预算（发送中动态生效）。契约允许
+   * 零预算（只按目标时刻发送，无提前量）；负数拒绝。
    */
   updateMaxFutureUs(maxFutureUs: bigint): void {
-    if (maxFutureUs > 0n) {
+    if (maxFutureUs >= 0n) {
       this.#limits.maxFutureUs = maxFutureUs;
     }
   }
@@ -236,7 +246,7 @@ export class RuntimeMediaSender {
         this.#queue.length >= this.#limits.maxQueuedFrames ||
         this.#queuedBytes + frameBytes > this.#limits.maxQueuedBytes;
       const overdueBy = this.#clock.nowUs() - targetUs;
-      if (queueFull && overdueBy <= this.#limits.maxFutureUs) {
+      if (queueFull && overdueBy <= LATE_DROP_US) {
         // 限制 2/3（帧数/字节）：队列满但帧仍在有效窗口内——等待队头
         // 播放出账后重估（不丢有效音频）。
         const head = this.#queue[0];
@@ -248,7 +258,7 @@ export class RuntimeMediaSender {
           continue;
         }
       }
-      if (queueFull || overdueBy > this.#limits.maxFutureUs) {
+      if (queueFull || overdueBy > LATE_DROP_US) {
         // 队列满的过期帧 / 超过追赶预算的迟到帧：丢弃重同步（迟到音频
         // 无播放价值，不洪泛 socket）；sequence 仍严格连续。
         this.#droppedByLimit += 1;
@@ -277,12 +287,12 @@ export class RuntimeMediaSender {
         this.#droppedByTransport += 1;
       } else {
         job.sentSequence += 1n;
-      }
-      if (delivered) {
         this.#queue.push({ targetUs, bytes: frameBytes });
         this.#queuedBytes += frameBytes;
+        // sentTotal 只计到达传输层的帧（与 droppedByTransport 不重叠；
+        // mediaStats.sent = 真实送达数）。
+        this.#sentTotal += 1;
       }
-      this.#sentTotal += 1;
       frameIndex += 1;
     }
     if (!job.stopped) {
@@ -297,7 +307,14 @@ export class RuntimeMediaSender {
       streamId: job.streamId,
       traceId: job.traceId,
       reason,
+      finalSequence: job.sentSequence - 1n,
     });
+  }
+
+  /** 活跃任务的当前送达边界（无任务为 null；closed 边界查询）。 */
+  finalSequenceOf(sceneId: string): bigint | null {
+    const job = this.#jobs.get(sceneId);
+    return job === undefined ? null : job.sentSequence - 1n;
   }
 
   /** 播放时刻已过的队头出账（未播音频账目只保留真正排队的帧）。 */

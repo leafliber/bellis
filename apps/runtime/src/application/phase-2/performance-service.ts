@@ -143,7 +143,20 @@ export class Phase2PerformanceService {
   /** sceneId → 已 announce 的 Stream（终态/完成时发送 media.stream.closed）。 */
   readonly #sceneStreams = new Map<
     string,
-    { readonly streamId: string; readonly traceId: string }
+    { readonly streamId: string; readonly traceId: string; finalSequence: bigint | null }
+  >();
+  /**
+   * 未能送达的 closed（入队失败/断线）：连接恢复或下次关闭时冲刷。
+   * 以 streamId 为键幂等去重；容量 ≤ 已 announce 流数（有界）。
+   */
+  readonly #pendingStreamClosures = new Map<
+    string,
+    {
+      readonly sceneId: string;
+      readonly reason: string;
+      readonly finalSequence?: bigint;
+      readonly traceId: string;
+    }
   >();
 
   constructor(options: Phase2PerformanceServiceOptions) {
@@ -170,19 +183,31 @@ export class Phase2PerformanceService {
       sendFrame: (frame) => options.mediaChannel?.sendFrame(frame) ?? false,
       // 流生命周期：自然完成/取消即关闭 Stream——Stage Registry 的并发
       // Stream 槽位（默认 8）必须释放，否则同一连接第 9 场 announce 被拒。
+      // finalSequence = 已交送传输层的最大 Sequence：closed 经 Control 与
+      // 帧（Media WS）跨连接送达无全局顺序——边界让先到的 closed 不丢
+      // 乱序尾帧（超边界即拒）。
       onJobEnd: (info) => {
         if (info.reason === "completed") {
-          this.#closeStreamForScene(info.sceneId, "stream_completed");
+          this.#closeStreamForScene(info.sceneId, "stream_completed", info.finalSequence);
         }
       },
     });
     this.#stagePort.onStageDisconnected(() => {
       this.#director.notifyStageDisconnected("control_channel_closed");
-      // Stream 状态随连接丢弃：停止全部帧任务（重连后必须重新 announce）；
-      // 连接已死，closed 消息无需也无法送达（Stage 侧随连接清空）。
+      // Stream 状态随连接丢弃：停止全部帧任务（重连后必须重新 announce）。
+      // 未能送达的 closed 转入待发集合：连接恢复时冲刷（Stage 侧随控制
+      // 代际失效全部媒体流，冲刷为幂等 no-op，但保持交付语义完整）。
       this.#mediaSender.cancelAll("control_channel_closed");
       this.#pendingStreams.clear();
-      this.#sceneStreams.clear();
+      for (const [sceneId, record] of this.#sceneStreams) {
+        this.#pendingStreamClosures.set(record.streamId, {
+          sceneId,
+          reason: "control_channel_closed",
+          ...(record.finalSequence === null ? {} : { finalSequence: record.finalSequence }),
+          traceId: record.traceId,
+        });
+        this.#sceneStreams.delete(sceneId);
+      }
     });
     options.mediaChannel?.onDisconnected(() => {
       this.#mediaSender.cancelAll("media_channel_closed");
@@ -358,28 +383,70 @@ export class Phase2PerformanceService {
       sessionId: this.#sessionId,
       traceId,
     });
-    this.#sceneStreams.set(plan.scene.sceneId, { streamId, traceId });
+    this.#sceneStreams.set(plan.scene.sceneId, { streamId, traceId, finalSequence: null });
   }
 
   /**
    * 关闭 Scene 的媒体 Stream（幂等）：发送 media.stream.closed 释放
-   * Stage Registry 槽位；本地帧任务与索引一并清理。
+   * Stage Registry 槽位；本地帧任务与索引一并清理。finalSequence 缺省
+   * 时取活跃任务当前送达边界（取消路径：已交送帧可能仍在途）。
+   * 入队失败不丢事实：转入 #pendingStreamClosures，连接恢复/下次关闭
+   * 时冲刷（Stage 侧控制代际失效兜底，冲刷幂等）。
    */
-  #closeStreamForScene(sceneId: string, reason: string): void {
+  #closeStreamForScene(sceneId: string, reason: string, finalSequence?: bigint): void {
+    this.#flushPendingStreamClosures();
     const record = this.#sceneStreams.get(sceneId);
     if (record === undefined) {
       return;
     }
     this.#sceneStreams.delete(sceneId);
+    const boundary = finalSequence ?? this.#mediaSender.finalSequenceOf(sceneId);
     this.#mediaSender.cancelStream(sceneId, reason);
-    this.#options.channel.enqueueServerMessage({
-      type: "media.stream.closed",
-      payload: { streamId: record.streamId, reason },
-      trace: { traceId: record.traceId },
-    });
     for (const [streamId, pending] of this.#pendingStreams) {
       if (pending.plan.scene.sceneId === sceneId) {
         this.#pendingStreams.delete(streamId);
+      }
+    }
+    const closure = {
+      sceneId,
+      reason,
+      ...(boundary === null || boundary === undefined ? {} : { finalSequence: boundary }),
+      traceId: record.traceId,
+    };
+    const sent = this.#options.channel.enqueueServerMessage({
+      type: "media.stream.closed",
+      payload: {
+        streamId: record.streamId,
+        reason,
+        ...(closure.finalSequence === undefined
+          ? {}
+          : { finalSequence: closure.finalSequence.toString() }),
+      },
+      trace: { traceId: record.traceId },
+    });
+    if (sent) {
+      this.#pendingStreamClosures.delete(record.streamId);
+    } else {
+      this.#pendingStreamClosures.set(record.streamId, closure);
+    }
+  }
+
+  /** 冲刷未送达的 closed（连接恢复/下次关闭时机；幂等）。 */
+  #flushPendingStreamClosures(): void {
+    for (const [streamId, closure] of this.#pendingStreamClosures) {
+      const sent = this.#options.channel.enqueueServerMessage({
+        type: "media.stream.closed",
+        payload: {
+          streamId,
+          reason: closure.reason,
+          ...(closure.finalSequence === undefined
+            ? {}
+            : { finalSequence: closure.finalSequence.toString() }),
+        },
+        trace: { traceId: closure.traceId },
+      });
+      if (sent) {
+        this.#pendingStreamClosures.delete(streamId);
       }
     }
   }
@@ -482,6 +549,8 @@ export class Phase2PerformanceService {
       this.#sessionId = sessionId;
       this.#options.onSessionIdResolved?.(sessionId);
     }
+    // 新连接可承载出站：冲刷此前未送达的 closed（幂等）。
+    this.#flushPendingStreamClosures();
     this.#stagePort.markConnected();
   }
 

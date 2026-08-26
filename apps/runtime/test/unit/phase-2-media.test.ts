@@ -135,9 +135,9 @@ describe("RuntimeMediaSender", () => {
       traceId: "0123456789abcdef0123456789abcdef",
       firstFrameTargetUs: 1_000_000n,
     });
-    // 一次性跳过全流（模拟长停顿）：超过追赶预算的头部帧丢弃，
-    // 追赶窗口内的帧照常送达。
-    clock.advanceBy(1_000_000n + tts.durationUs + 100_000n);
+    // 一次性跳过全流（模拟长停顿）：迟到超过阈值（与 Stage Deadline
+    // 宽限同族）的帧丢弃重同步，仅尾部仍在窗口内的帧照常送达。
+    clock.advanceBy(1_000_000n + tts.durationUs);
     for (let i = 0; i < 40; i += 1) {
       await Promise.resolve();
     }
@@ -197,6 +197,42 @@ describe("RuntimeMediaSender", () => {
     for (let i = 0; i < sent.length; i += 1) {
       expect(Number(sent[i]?.header.sequence)).toBe(i);
     }
+    sender.close();
+  });
+
+  it("maxBufferedUs=0 合法生效：零预算下绝不提前发送（只按目标时刻）", async () => {
+    const clock = new VirtualClock();
+    const sent: { header: Record<string, string | number> }[] = [];
+    const sender = new RuntimeMediaSender({
+      clock,
+      sendFrame: (frame) => {
+        sent.push(frame);
+        return true;
+      },
+    });
+    const tts = synthesizeSpeech(SPEECH);
+    sender.startSpeechStream({
+      plan: PLAN,
+      tts,
+      audioCueId: "c",
+      streamId: "s",
+      sessionId: "sess",
+      traceId: "0123456789abcdef0123456789abcdef",
+      firstFrameTargetUs: 1_000_000n,
+    });
+    // Stage 声明零预算（契约允许）：提前量归零——目标前 1µs 都不发。
+    sender.updateMaxFutureUs(0n);
+    clock.advanceBy(999_999n);
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
+    }
+    expect(sent).toHaveLength(0);
+    clock.advanceBy(60_000n);
+    for (let i = 0; i < 10; i += 1) {
+      await Promise.resolve();
+    }
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    expect(sent[0]?.header.targetTimeUs).toBe("1000000");
     sender.close();
   });
 

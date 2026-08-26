@@ -187,6 +187,30 @@ describe("MediaStreamRegistry", () => {
     expect(soon.status).toBe("accepted");
   });
 
+  it("带 finalSequence 边界的关闭：乱序尾帧仍入账、超出边界即拒", () => {
+    const clock = new VirtualClock();
+    const reg = registry();
+    reg.open({
+      streamId: STREAM_ID,
+      sessionId: SESSION_ID,
+      mediaKind: "binary-test",
+      contentType: "application/octet-stream",
+    });
+    expect(reg.accept(frame({ sequence: "0" }), clock.nowUs()).status).toBe("accepted");
+    // closed 先于尾帧到达（跨连接乱序）：边界 = 已交送的最大 Sequence 2。
+    expect(reg.close(STREAM_ID, { finalSequence: 2n }).status).toBe("closed");
+    const inWindow = reg.accept(frame({ sequence: "1" }), clock.nowUs());
+    expect(inWindow.status).toBe("accepted");
+    const last = reg.accept(frame({ sequence: "2" }), clock.nowUs());
+    expect(last.status).toBe("accepted");
+    // 超出边界（发送侧从未交送）→ 拒绝。
+    const beyond = reg.accept(frame({ sequence: "3" }), clock.nowUs());
+    expect(beyond.status).toBe("rejected");
+    // 跳号（乱序）→ 拒绝（连续性在边界内同样成立）。
+    const gap = reg.accept(frame({ sequence: "5" }), clock.nowUs());
+    expect(gap.status).toBe("rejected");
+  });
+
   it("nowUs=null 跳过 Deadline 检查（时钟估计未就绪，不做跨域误判）", () => {
     const clock = new VirtualClock();
     clock.advanceBy(1_000_000_000n);

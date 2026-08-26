@@ -51,7 +51,13 @@ export interface StageAppOptions {
   /** Media Stream announce 处理（装配层建立有界缓冲后回 media.stream.ready）。 */
   readonly onMediaAnnounce?: (payload: unknown, sendReady: (payload: unknown) => boolean) => void;
   /** Runtime 关闭媒体 Stream（media.stream.closed）：释放 Registry 槽位。 */
-  readonly onMediaStreamClosed?: (streamId: string) => void;
+  readonly onMediaStreamClosed?: (streamId: string, finalSequence?: bigint) => void;
+  /**
+   * 控制代际变化：Runtime 已随断线取消全部帧任务（Stream 不跨连接
+   * 复活）——媒体 Registry 必须同步失效，否则未收到 closed 的槽位
+   * 永久遗留（媒体连接存活不清理是泄漏窗口）。
+   */
+  readonly onMediaStreamsInvalidate?: () => void;
   /** Lane 注册表（缺省空注册表：无 Lane 时 prepare 全部 lane_not_available）。 */
   readonly laneRegistry?: LaneRegistry;
   /** plan.speech 文本 → 字幕 Lane（P3 装配注入）。 */
@@ -184,8 +190,10 @@ export class StageApp {
         if (event.state === "active") {
           this.#setState("control_ready");
         } else if (event.state === "reconnect_wait" && !this.#closed) {
-          // 重连即新连接代际：未提交准备缓存丢弃，时钟重新校准。
+          // 重连即新连接代际：未提交准备缓存丢弃，时钟重新校准；媒体
+          // Stream 随 Runtime 侧取消一并失效（Registry 槽位不遗留）。
           this.#scenes?.onConnectionGenerationChange();
+          this.#options.onMediaStreamsInvalidate?.();
           this.#setState("reconnecting");
         }
         return;
@@ -242,9 +250,14 @@ export class StageApp {
       case "media.stream.closed": {
         // Runtime → Stage 方向的 Stream 关闭（either-direction 类型）：
         // 本地关闭 Registry 槽位即可，不回发（避免关闭回执风暴）。
-        const closed = payload as { streamId?: unknown };
+        // finalSequence 为关闭边界：closed 与帧跨连接乱序时，边界内
+        // 严格连续的迟到尾帧仍可入账。
+        const closed = payload as { streamId?: unknown; finalSequence?: unknown };
         if (typeof closed.streamId === "string") {
-          this.#options.onMediaStreamClosed?.(closed.streamId);
+          this.#options.onMediaStreamClosed?.(
+            closed.streamId,
+            typeof closed.finalSequence === "string" ? BigInt(closed.finalSequence) : undefined,
+          );
         }
         return;
       }

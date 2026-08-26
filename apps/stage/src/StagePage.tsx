@@ -191,8 +191,11 @@ export function StagePage({ profile }: { profile: string }) {
         }
         void media.handleAnnounce(payload, sendReady);
       },
-      onMediaStreamClosed: (streamId) => {
-        mediaRef.current?.closeStream(streamId);
+      onMediaStreamClosed: (streamId, finalSequence) => {
+        mediaRef.current?.closeStream(streamId, finalSequence);
+      },
+      onMediaStreamsInvalidate: () => {
+        mediaRef.current?.invalidateStreams();
       },
     });
     appRef.current = app;

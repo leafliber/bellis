@@ -182,10 +182,19 @@ export class StageMediaClient {
 
   /**
    * 关闭单个 Stream（Control media.stream.closed 到达时调用）：释放
-   * Registry 槽位（并发上限）与帧级状态；后续帧按 stream_closed 拒绝。
+   * Registry 槽位（并发上限）与帧级状态。finalSequence 为关闭边界：
+   * closed 与帧跨连接乱序时，边界内严格连续的迟到尾帧仍可入账。
    */
-  closeStream(streamId: string): void {
-    this.#registry.close(streamId);
+  closeStream(streamId: string, finalSequence?: bigint): void {
+    this.#registry.close(streamId, finalSequence === undefined ? undefined : { finalSequence });
+  }
+
+  /**
+   * 失效全部媒体 Stream（控制代际变化）：Runtime 已随断线取消全部帧
+   * 任务（Stream 不跨连接复活）——Registry 槽位同步清空，不遗留。
+   */
+  invalidateStreams(): void {
+    this.#registry.closeAll();
   }
 
   #onMessage(data: string | Uint8Array): void {
