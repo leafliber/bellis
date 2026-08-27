@@ -1,6 +1,7 @@
 /* StageSocket Port 以 on* setter 为接口（自研 Port，非 DOM 事件）。 */
 /* oxlint-disable unicorn/prefer-add-event-listener */
 import type { MonotonicClock } from "@bellis/contracts";
+import { PHASE_2_PCM_FRAME_DURATION_US } from "@bellis/contracts";
 import {
   MediaFrameParser,
   MediaFrameError,
@@ -47,6 +48,17 @@ export interface StageMediaClientOptions {
   readonly runtimeOffsetUs?: () => bigint | null;
   /** 校验通过的 PCM 帧（appendFrame 送入有界缓冲，不生效）。 */
   readonly onFrame: (frame: InboundMediaFrame) => void;
+  /**
+   * Stream 关闭（media.stream.closed 处理后触发）：携带从已验收帧推导的
+   * 发言结束时刻（映射到 Stage 本地域；无帧或无时钟估计为 null）。
+   * 装配层据此驱动音频 EOS 与字幕定时撤下（Lane 真实完成信号）。
+   */
+  readonly onStreamClosed?: (info: {
+    readonly streamId: string;
+    readonly sceneId: string | null;
+    readonly finalSequence: bigint | null;
+    readonly endLocalUs: bigint | null;
+  }) => void;
   /** 意外断线重连前的通知（装配层可清空 Lane 缓冲）。 */
   readonly onDisconnected?: (reason: string) => void;
   readonly maxHeaderBytes?: number;
@@ -74,9 +86,17 @@ const DEFAULT_DEADLINE_GRACE_US = 100_000n;
 /** announce 到媒体连接就绪的等待上限（超时放弃该 Stream 的 ready）。 */
 const READY_WAIT_TIMEOUT_MS = 2_000;
 
+/** 已验收帧的流元数据（发言结束时刻推导）。 */
+interface StreamMeta {
+  sceneId: string | null;
+  firstTargetUs: bigint | null;
+  lastTargetUs: bigint | null;
+}
+
 export class StageMediaClient {
   readonly #options: StageMediaClientOptions;
   readonly #registry: MediaStreamRegistry;
+  readonly #streamMeta = new Map<string, StreamMeta>();
   #socket: StageSocket | null = null;
   #parser: MediaFrameParser | null = null;
   #connected = false;
@@ -183,10 +203,36 @@ export class StageMediaClient {
   /**
    * 关闭单个 Stream（Control media.stream.closed 到达时调用）：释放
    * Registry 槽位（并发上限）与帧级状态。finalSequence 为关闭边界：
-   * closed 与帧跨连接乱序时，边界内严格连续的迟到尾帧仍可入账。
+   * closed 与帧跨连接乱序时，边界内严格连续的迟到尾帧仍可入账。随后以
+   * 已验收帧元数据推导发言结束时刻并触发 onStreamClosed（驱动 Lane 的
+   * 真实完成信号）。
    */
   closeStream(streamId: string, finalSequence?: bigint): void {
     this.#registry.close(streamId, finalSequence === undefined ? undefined : { finalSequence });
+    const meta = this.#streamMeta.get(streamId);
+    if (meta === undefined) {
+      return; // 从未验收过帧：无可推导的结束时刻，也无可驱动的 Lane。
+    }
+    this.#streamMeta.delete(streamId);
+    const offsetUs = this.#options.runtimeOffsetUs?.() ?? null;
+    const endRuntimeUs = this.#speechEndRuntimeUs(meta, finalSequence ?? null);
+    this.#options.onStreamClosed?.({
+      streamId,
+      sceneId: meta.sceneId,
+      finalSequence: finalSequence ?? null,
+      endLocalUs: endRuntimeUs !== null && offsetUs !== null ? endRuntimeUs - offsetUs : null,
+    });
+  }
+
+  /** 发言结束（Runtime 域）：优先首帧时刻 + 边界帧数 × 20ms。 */
+  #speechEndRuntimeUs(meta: StreamMeta, finalSequence: bigint | null): bigint | null {
+    if (meta.firstTargetUs !== null && finalSequence !== null) {
+      return meta.firstTargetUs + (finalSequence + 1n) * PHASE_2_PCM_FRAME_DURATION_US;
+    }
+    if (meta.lastTargetUs !== null) {
+      return meta.lastTargetUs + PHASE_2_PCM_FRAME_DURATION_US;
+    }
+    return null;
   }
 
   /**
@@ -195,6 +241,7 @@ export class StageMediaClient {
    */
   invalidateStreams(): void {
     this.#registry.closeAll();
+    this.#streamMeta.clear();
   }
 
   #onMessage(data: string | Uint8Array): void {
@@ -232,15 +279,27 @@ export class StageMediaClient {
       this.#stats = { ...this.#stats, rejectedFrames: this.#stats.rejectedFrames + 1 };
       // 帧级违规后该 Stream 状态不可信：关闭 Stream，连接保持。
       this.#registry.close(frame.header.streamId);
+      this.#streamMeta.delete(frame.header.streamId);
       return;
     }
     this.#stats = { ...this.#stats, acceptedFrames: this.#stats.acceptedFrames + 1 };
+    const targetUs =
+      frame.header.targetTimeUs === undefined ? null : BigInt(frame.header.targetTimeUs);
+    const meta = this.#streamMeta.get(frame.header.streamId) ?? {
+      sceneId: null,
+      firstTargetUs: null,
+      lastTargetUs: null,
+    };
+    this.#streamMeta.set(frame.header.streamId, {
+      sceneId: frame.header.sceneId ?? meta.sceneId,
+      firstTargetUs: meta.firstTargetUs ?? targetUs,
+      lastTargetUs: targetUs ?? meta.lastTargetUs,
+    });
     this.#options.onFrame({
       streamId: frame.header.streamId,
       sceneId: frame.header.sceneId ?? null,
       sequence: result.lastSequence,
-      targetTimeUs:
-        frame.header.targetTimeUs === undefined ? null : BigInt(frame.header.targetTimeUs),
+      targetTimeUs: targetUs,
       samples: decodeInt16Le(frame.payload),
     });
   }
@@ -262,6 +321,7 @@ export class StageMediaClient {
     this.#parser = null;
     // Stream 状态随连接丢弃（不跨连接复活）。
     this.#registry.closeAll();
+    this.#streamMeta.clear();
     this.#options.onDisconnected?.(reason);
     if (this.#closedByUser) {
       return;
@@ -317,6 +377,7 @@ export class StageMediaClient {
     this.#parser?.reset();
     this.#parser = null;
     this.#registry.closeAll();
+    this.#streamMeta.clear();
     for (const waiter of this.#connectWaiters.splice(0)) {
       waiter();
     }

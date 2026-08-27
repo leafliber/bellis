@@ -200,6 +200,84 @@ describe("StageMediaClient", () => {
   });
 });
 
+describe("StageMediaClient onStreamClosed（发言结束推导）", () => {
+  it("closeStream 携带边界：以首帧时刻 + 帧数推导结束时刻并映射本地域", async () => {
+    const frames: InboundMediaFrame[] = [];
+    const closures: {
+      streamId: string;
+      sceneId: string | null;
+      finalSequence: bigint | null;
+      endLocalUs: bigint | null;
+    }[] = [];
+    const clock = new VirtualClock();
+    let socket: FakeSocket | null = null;
+    const client = new StageMediaClient({
+      sessionId: SESSION,
+      socketFactory: () => {
+        socket = new FakeSocket();
+        return socket;
+      },
+      clock,
+      audioContentTypes: [CONTENT_TYPE],
+      runtimeOffsetUs: () => 500_000n,
+      onFrame: (frame) => frames.push(frame),
+      onStreamClosed: (info) => closures.push(info),
+    });
+    client.connect();
+    socket!.serverOpen();
+    await client.handleAnnounce(
+      { streamId: STREAM, mediaKind: "audio", contentType: CONTENT_TYPE },
+      () => true,
+    );
+    socket!.serverSend(frameBytes(0));
+    socket!.serverSend(frameBytes(1));
+    // closed 边界 = 3（帧 0..3）：结束 = 1_000_000 + 4 × 20ms（Runtime 域），
+    // 映射本地域（runtime − offset 500ms）= 580_000。
+    client.closeStream(STREAM, 3n);
+    expect(closures).toEqual([
+      {
+        streamId: STREAM,
+        sceneId: SCENE,
+        finalSequence: 3n,
+        endLocalUs: 1_080_000n - 500_000n,
+      },
+    ]);
+    client.close();
+  });
+
+  it("无边界/无帧：无偏移时不映射（null → 装配层保守立即撤下）", async () => {
+    const frames: InboundMediaFrame[] = [];
+    const closures: { endLocalUs: bigint | null; sceneId: string | null }[] = [];
+    const clock = new VirtualClock();
+    let socket: FakeSocket | null = null;
+    const client = new StageMediaClient({
+      sessionId: SESSION,
+      socketFactory: () => {
+        socket = new FakeSocket();
+        return socket;
+      },
+      clock,
+      audioContentTypes: [CONTENT_TYPE],
+      runtimeOffsetUs: () => null, // 时钟估计缺失：不做跨域比较
+      onFrame: (frame) => frames.push(frame),
+      onStreamClosed: (info) => closures.push(info),
+    });
+    client.connect();
+    socket!.serverOpen();
+    await client.handleAnnounce(
+      { streamId: STREAM, mediaKind: "audio", contentType: CONTENT_TYPE },
+      () => true,
+    );
+    socket!.serverSend(frameBytes(0));
+    client.closeStream(STREAM); // 无边界：以最后验收帧 + 20ms 推导（Runtime 域）。
+    // Runtime 域时刻在无偏移时**不可映射**：返回 null，装配层保守立即
+    // 撤下（绝不做跨域比较）。
+    expect(closures.at(-1)?.endLocalUs).toBeNull();
+    expect(closures.at(-1)?.sceneId).toBe(SCENE);
+    client.close();
+  });
+});
+
 describe("StageMediaClient Deadline 时钟域映射", () => {
   it("targetTimeUs（Runtime 域）经偏移映射后判定：过期拒绝、未过期接受", async () => {
     const frames: InboundMediaFrame[] = [];

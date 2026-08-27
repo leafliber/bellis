@@ -426,7 +426,13 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 
 ### 8.2 AudioWorklet
 
-- Worklet 内维护有界 PCM Ring Buffer；下溢输出静音并计数，不复用旧样本；
+- Worklet 内维护有界 PCM Ring Buffer；下溢输出静音并计数，不复用旧样本
+  （EOS 后耗尽的静音是预期尾态，不计下越）；Worklet 放完全部样本时上报
+  `ended`（每 Scene 至多一次）——这是音频 Lane 的**真实完成信号**：
+  `start()` 的 Promise 在 ended 回报时兑现（零帧流在 EOS 即完成；ended
+  缺失时以「start + 已缓冲时长 + 宽限」为兜底截止，保证 scene.finished
+  有界）。EOS 经尾帧宽限窗（100ms）转发给 Worklet：closed 先于跨连接
+  尾帧到达时不丢尾帧；
 - Commit 前即使数据已到达也保持静音；
 - Commit 通过 Scene/Cue generation 原子切换播放；
 - Cancel 在预算内清空目标 Scene 样本并淡出，不能影响其他 Scene；
@@ -439,9 +445,13 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 - 文本直接来自同一 SpeechIntent；
 - 时间标记优先使用 Fake TTS 产出的句/词边界，不另做文本生成；
 - Commit 前不可见，Cancel 后在预算内撤下；
+- `start()` 的 Promise 在字幕**真实撤下**时兑现：发言结束时刻由
+  media.stream.closed 边界推导（首帧时刻 + 帧数 × 20ms，映射本地域），
+  到点隐藏；时刻不可得时保守立即撤下；可见性上限兜底保证有界；
 - DOM 内容使用文本节点，禁止把模型文本作为 HTML；
 - 处理长文本换行、空白、Emoji、CJK 和 Reduced Motion；
-- 字幕实际显示时刻进入 Scene Trace，不记录不必要的全文。
+- 字幕实际显示时刻进入 Scene Trace，不记录不必要的全文；
+- 可见区间（显示 → 撤下）作为诊断事实保留，供 E2E 断言「实际可见一段时间」。
 
 ### 8.4 Live2D Adapter
 
@@ -462,6 +472,9 @@ interface AvatarLaneAdapter {
 - CI 使用 Recording/Fake Adapter 验证命令、顺序、资源释放和 drift；
 - 浏览器 Cubism Adapter 只接收语义 motion/expression/channel，不接收 LLM 帧级参数；
 - 模型、动作和表达资源在 Prepare 验证，Commit 才生效；
+- 动作呈现窗口由意图 `durationMs` 声明（Compiler 透传到 cue intent）：
+  `start()` 的 Promise 在窗口结束时兑现（徽标/动作回 idle）——
+  scene.finished 不因「start 已发出」而立即上报；
 - 未授权 SDK/模型资源不进入仓库；本地手工 Smoke 使用明确配置的已授权资源；
 - Phase 2 只建立 Adapter 和基础动作，不实现 Presence Engine/Avatar Mixer；
 - 口型若由 PCM RMS/viseme 驱动，属于 Audio 派生 Lane，必须跟随同一 Scene generation 取消。
@@ -550,9 +563,10 @@ Phase 2 验收由三个互补命令承担（全部自动、无公网、失败非
 - `pnpm test:browser`——真实 Chromium E2E（真实用户手势 Arm、真实
   AudioContext/AudioWorklet、Vite dev 源路径）：认证 → 时钟校准 →
   预缓冲 ≥6 帧 → 三 Lane 到点生效 → 浏览器级偏差 ≤50ms（实测
-  ~3ms）→ MutationObserver 打断时延（预算 100ms，实测 ~2ms）→
-  打断后停流；teardown 严格化（Runtime 优雅关闭超时/非零退出码、
-  Vite 退不出均判失败）。
+  ~3ms）→ 真实完成信号（运行时长 ≈ 语音时长、字幕实际可见区间、
+  Commit 后音频能量 AnalyserNode RMS 采样）→ MutationObserver 打断
+  时延（预算 100ms，实测 ~2ms）→ 打断后停流；teardown 严格化
+  （Runtime 优雅关闭超时/非零退出码、Vite 退不出均判失败）。
 
 `pnpm demo:phase2` 成功输出至少包含：
 
@@ -584,8 +598,10 @@ audioWorklet=started(frames=<N>)
 subtitle=visible(textNodes,releasedOnFinish)
 avatarAdapter=started(commands=<N>)
 hardLaneSkewMs=<number <= 50>(browser)
-underruns=<bounded>
+underruns=<frames 为上界（饥饿崩溃检测；逐量子硬预算属真机 Smoke）>
+presentation=real(runMs≈语音时长, visibleMs≈语音时长, loudSamples≥20)
 interruptLatencyMs=<number <= 100 + 观测余量>(browser)
+streamMarathon=ok(scenes=9+, opened>=11, rejected=0)
 ```
 
 ### 10.3 阶段完成命令

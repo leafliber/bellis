@@ -63,8 +63,8 @@ interface DraftCue {
   readonly lane: CueLane;
   readonly anchor: string;
   readonly offsetMs: number;
-  /** 由 JSON 值（string）构成的 intent；最终经 ScenePlanSchema 校验。 */
-  readonly intent: Record<string, string>;
+  /** 由 JSON 值（string/number）构成的 intent；最终经 ScenePlanSchema 校验。 */
+  readonly intent: Record<string, string | number>;
   /** 能力缺失时丢弃所需的信息。 */
   readonly capabilityIssue: CompileIssue | undefined;
 }
@@ -174,7 +174,11 @@ export function compileActionFrame(input: CompileInput): CompileResult {
       if (!expressionKnown) {
         unknown.push(`expression:${expression ?? ""}`);
       }
-      const avatarIntent: Record<string, string> = { intentId: intent.intentId };
+      const avatarIntent: Record<string, string | number> = {
+        intentId: intent.intentId,
+        // 动作时长随意图下发：Stage Avatar Lane 的真实完成信号（呈现窗口）。
+        durationMs: intent.durationMs,
+      };
       if (motion !== undefined) {
         avatarIntent.motion = motion;
       }

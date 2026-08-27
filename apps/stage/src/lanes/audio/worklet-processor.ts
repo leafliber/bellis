@@ -9,10 +9,15 @@ import { PcmSceneBuffer } from "./pcm-scene-buffer.js";
  * 与主线程的消息协议（版本化）：
  * - { v: 1, op: "frame", sceneId, samples: Int16Array }：追加 PCM；
  * - { v: 1, op: "switch", sceneId }：Commit 时刻原子切换播放 generation；
+ * - { v: 1, op: "end", sceneId }：流终止（EOS）——标记后拒绝追加，
+ *   该 Scene 样本放完时上报 { op: "ended", sceneId }（每 Scene 至多一次；
+ *   无样本或已放完则立即上报）；
  * - { v: 1, op: "cancel", sceneId }：预算内淡出并释放目标 Scene；
  * - { v: 1, op: "clear" }：连接代际变化/关闭，全部丢弃（静音）。
  * 未知版本/未知 op 稳定忽略并回执 error 事件；上报告在
  * { v: 1, op: "stats", underruns, activeScene } 周期回报。
+ * ended 是音频 Lane 的**真实完成信号**：PCM 全部经扬声器时钟放出（不是
+ * 「已收到」也不是「已入缓冲」）。
  *
  * 逻辑核心是 PcmSceneBuffer（与 Node 测试共用）；本文件只做
  * Worklet 样本格式（Float32 输出）转换与消息分发。
@@ -82,6 +87,14 @@ class PcmSceneProcessor extends ProcessorBase {
             state.buffer.switchScene(message.sceneId);
           }
           break;
+        case "end":
+          if (typeof message.sceneId === "string") {
+            sceneIds.add(message.sceneId);
+            if (state.buffer.endScene(message.sceneId)) {
+              this.port.postMessage({ v: PROTOCOL_VERSION, op: "ended", sceneId: message.sceneId });
+            }
+          }
+          break;
         case "cancel":
           if (typeof message.sceneId === "string") {
             state.buffer.cancelScene(message.sceneId);
@@ -109,6 +122,10 @@ class PcmSceneProcessor extends ProcessorBase {
     state.buffer.pull(pcm, frames);
     for (let i = 0; i < frames; i += 1) {
       output[i] = (pcm[i] ?? 0) / 32768;
+    }
+    // EOS 耗尽上报（播放完成信号；每 Scene 至多一次）。
+    for (const endedSceneId of state.buffer.drainEndedScenes()) {
+      this.port.postMessage({ v: PROTOCOL_VERSION, op: "ended", sceneId: endedSceneId });
     }
     const active = state.buffer.activeScene;
     if (active !== null) {

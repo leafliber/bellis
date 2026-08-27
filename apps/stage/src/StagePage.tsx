@@ -49,6 +49,8 @@ interface StageDiagnostics {
   underruns(): number;
   bufferedFrames(): Record<string, number>;
   subtitleTexts(): readonly string[];
+  /** 字幕真实可见区间（shownAtUs → hiddenAtUs，Stage 单调微秒）。 */
+  subtitleIntervals(): { sceneId: string; shownAtUs: string; hiddenAtUs: string | null }[];
   avatarCommands(): number;
   mediaStats(): {
     acceptedFrames: number;
@@ -58,6 +60,8 @@ interface StageDiagnostics {
     rawMessages: number;
   } | null;
   audioError(): string | null;
+  /** 输出能量采样（performance.now ms + RMS；Commit 后真实出声证据）。 */
+  audioEnergy(): { at: number; rms: number }[];
   laneStarts(): {
     sceneId: string;
     lane: string;
@@ -126,13 +130,15 @@ export function StagePage({ profile }: { profile: string }) {
     const audioEnvironment = new BrowserAudioEnvironment();
     const audioLane = new AudioLaneAdapter({
       environment: audioEnvironment,
+      clock,
       minPreparedFrames: 6,
     });
     const subtitleDocument = new DomSubtitleDocument(subtitleRootRef.current ?? document.body);
-    const subtitleLane = new SubtitleLaneAdapter(subtitleDocument);
+    const subtitleLane = new SubtitleLaneAdapter({ document: subtitleDocument, clock });
     const avatarLane = new DomAvatarLane(
       { adapter: "recording", motions: ["nod_agree"], expressions: ["happy"] },
       avatarBadgeRef.current ?? document.body,
+      clock,
     );
     const registry = new LaneRegistry();
     registry.register(audioLane);
@@ -207,9 +213,16 @@ export function StagePage({ profile }: { profile: string }) {
       underruns: () => audioLane.underruns,
       bufferedFrames: () => Object.fromEntries(audioLane.bufferedFrames),
       subtitleTexts: () => subtitleDocument.visibleTexts(),
+      subtitleIntervals: () =>
+        subtitleLane.visibleIntervals().map((interval) => ({
+          sceneId: interval.sceneId,
+          shownAtUs: interval.shownAtUs.toString(),
+          hiddenAtUs: interval.hiddenAtUs === null ? null : interval.hiddenAtUs.toString(),
+        })),
       avatarCommands: () => avatarLane.commands.length,
       mediaStats: () => mediaRef.current?.stats ?? null,
       audioError: () => audioEnvironment.lastError,
+      audioEnergy: () => audioEnvironment.energyTrace().map(({ at, rms }) => ({ at, rms })),
       laneStarts: () => [...laneStartsRef.current],
       sceneEvents: () => [...sceneEventsRef.current],
     };
@@ -236,6 +249,15 @@ export function StagePage({ profile }: { profile: string }) {
             if (frame.sceneId !== null) {
               audioLane.appendFrame(frame.sceneId, frame.samples);
             }
+          },
+          onStreamClosed: (info) => {
+            // 发言结束（closed 边界推导）：驱动音频 EOS（播放完成信号）
+            // 与字幕定时撤下（真实可见区间）。
+            if (info.sceneId === null) {
+              return;
+            }
+            audioLane.endOfSpeech(info.sceneId);
+            subtitleLane.endOfSpeech(info.sceneId, info.endLocalUs);
           },
           onDisconnected: () => {
             audioLane.clearAll();

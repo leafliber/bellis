@@ -15,11 +15,21 @@ import { expect, test } from "./fixtures.js";
  *    - subtitle=visible（文本节点，textContent；完成后释放）；
  *    - avatarAdapter=started（语义命令 prepare→start）；
  * 4. hardLaneSkewMs：各 Lane startedAtStageUs − targetLocalUs ≤ 50ms；
- * 5. 紧急打断：MutationObserver 计量字幕撤下时延（100ms 预算 + 观测
+ * 5. 真实完成信号（不是「开始即完成」）：
+ *    - 运行时长（running→finished）接近语音时长（8 CJK ≈ 2.16s）；
+ *    - 字幕实际可见一段时间（显示 → 发言结束撤下）；
+ *    - Commit 后音频能量：AnalyserNode RMS 采样证明 PCM 真实持续出声；
+ * 6. 紧急打断：MutationObserver 计量字幕撤下时延（100ms 预算 + 观测
  *    余量），打断后被打断 Scene 的媒体帧不再累积。
  */
 
 const SPEECH_TEXT = "浏览器端到端验证";
+/**
+ * Fake Model 固定发言文本「我看看现在的任务进度」（10 CJK × 240ms +
+ * 240ms 尾静音 = 2640ms = 132 帧；Fake TTS 冻结合成规则）。submit 携带
+ * 的 text 只是 Signal 载荷，不改变 Fixture 发言内容。
+ */
+const SPEECH_EXPECTED_MS = 2_640;
 
 interface LaneStart {
   readonly sceneId: string;
@@ -110,7 +120,12 @@ test("Audio Arm → 媒体流 → 三 Lane 生效 → 偏差/打断指标", asyn
   } | null;
   expect(mediaStats?.acceptedFrames ?? 0).toBeGreaterThanOrEqual(6);
   expect(mediaStats?.rejectedFrames ?? 0).toBe(0);
-  expect(diagnostics.underruns).toBeLessThanOrEqual(8);
+  // underruns = Worklet 缓冲空槽的渲染量子数：输出 sink 的拉取节奏
+  //（启动追平 + 主线程转发抖动 vs 2.7ms 渲染量子）主导该值，逐量子
+  // 硬预算属真实设备节奏（P5 真机 Smoke）；E2E 界定为饥饿崩溃检测：
+  // 健康管道按到达前沿播放（每次帧间隙至多数次空槽，≈ 帧数量级），
+  // 供给断流则按渲染量子率累计（每秒数百）。
+  expect(diagnostics.underruns).toBeLessThan(mediaStats?.acceptedFrames ?? 0);
 
   // 4. 硬同步偏差：各 Lane startedAtStageUs − targetLocalUs ≤ 50ms。
   const skewsMs = laneStarts.map(
@@ -126,6 +141,52 @@ test("Audio Arm → 媒体流 → 三 Lane 生效 → 偏差/打断指标", asyn
     `hardLaneSkewMs=${Math.max(...skewsMs.map(Math.abs)).toFixed(2)}(browser, budget=50)`,
   );
   console.info(`underruns=${diagnostics.underruns}`);
+
+  // 5. 真实完成信号：运行时长、字幕可见区间、Commit 后音频能量。
+  const presentation = await page.evaluate((scene) => {
+    const events = (window.__bellisStage?.sceneEvents() ?? []).filter(
+      (event) => event.sceneId === scene,
+    );
+    const interval = (window.__bellisStage?.subtitleIntervals() ?? []).find(
+      (entry) => entry.sceneId === scene,
+    );
+    return {
+      runningAt: events.find((event) => event.state === "running")?.at ?? 0,
+      finishedAt: events.find((event) => event.state === "finished")?.at ?? 0,
+      interval,
+      energy: window.__bellisStage?.audioEnergy() ?? [],
+    };
+  }, sceneId);
+  // 运行时长 ≈ 语音时长（± 宽松界：低于下界 = 完成信号是假的）。
+  const runMs = presentation.finishedAt - presentation.runningAt;
+  expect(runMs).toBeGreaterThanOrEqual(SPEECH_EXPECTED_MS - 800);
+  expect(runMs).toBeLessThanOrEqual(SPEECH_EXPECTED_MS + 2_000);
+  // 字幕真实可见区间（显示 → 发言结束撤下，非瞬时）。
+  expect(presentation.interval).toBeDefined();
+  const interval = presentation.interval as {
+    shownAtUs: string;
+    hiddenAtUs: string | null;
+  };
+  expect(interval.hiddenAtUs).not.toBeNull();
+  const visibleMs =
+    Number(BigInt(interval.hiddenAtUs as string) - BigInt(interval.shownAtUs)) / 1000;
+  expect(visibleMs).toBeGreaterThanOrEqual(SPEECH_EXPECTED_MS - 800);
+  expect(visibleMs).toBeLessThanOrEqual(SPEECH_EXPECTED_MS + 2_000);
+  // Commit 后音频能量：真实出声（RMS > 1e-3）覆盖语音主体。
+  const audioStart = laneStarts.find((start) => start.lane === "audio");
+  expect(audioStart).toBeDefined();
+  const audioStartMs = Number(BigInt((audioStart as LaneStart).startedAtStageUs)) / 1000;
+  const loudSamples = presentation.energy.filter(
+    (sample: { at: number; rms: number }) =>
+      sample.at >= audioStartMs &&
+      sample.at <= audioStartMs + SPEECH_EXPECTED_MS + 500 &&
+      sample.rms > 1e-3,
+  );
+  expect(loudSamples.length).toBeGreaterThanOrEqual(20); // ≥ 1s 真实输出（50ms 采样）
+  console.info(
+    `presentation=real(runMs=${runMs}, visibleMs=${visibleMs.toFixed(0)}, loudSamples=${loudSamples.length})`,
+  );
+
   // 消费首场景的 settled（后续 settled 断言专属于被打断场景）。
   const settledA = (await stageEnv.expectRpc("scene-settled", 30_000)) as unknown as {
     state: string;

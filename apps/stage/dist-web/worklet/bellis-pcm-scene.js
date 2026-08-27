@@ -25,8 +25,10 @@ var e = class {
 			underruns: 0,
 			fading: !1,
 			fadeRemaining: 0,
-			fadeTotal: 0
-		}, this.#n.set(e, n)), n.written + t.length > n.samples.length ? !1 : (n.samples.set(t, n.written), n.written += t.length, !0);
+			fadeTotal: 0,
+			ended: !1,
+			endedNotified: !1
+		}, this.#n.set(e, n)), n.written + t.length > n.samples.length || n.ended ? !1 : (n.samples.set(t, n.written), n.written += t.length, !0);
 	}
 	switchScene(e) {
 		this.#r = e;
@@ -45,18 +47,29 @@ var e = class {
 		if (r === void 0) return e.fill(0, 0, t), t;
 		let i = 0;
 		for (; i < t;) {
-			let n = r.written - r.read;
-			if (n <= 0) return e.fill(0, i, t), r.underruns += 1, t;
-			let a = Math.min(t - i, n), o = r.samples.subarray(r.read, r.read + a);
-			if (r.fading && r.fadeRemaining > 0) for (let t = 0; t < a; t += 1) {
+			let a = r.written - r.read;
+			if (a <= 0) return e.fill(0, i, t), r.ended ? this.#o(r, n) : r.underruns += 1, t;
+			let o = Math.min(t - i, a), s = r.samples.subarray(r.read, r.read + o);
+			if (r.fading && r.fadeRemaining > 0) for (let t = 0; t < o; t += 1) {
 				let n = Math.min(1, r.fadeRemaining / r.fadeTotal);
-				e[i + t] = Math.round((o[t] ?? 0) * n), --r.fadeRemaining;
+				e[i + t] = Math.round((s[t] ?? 0) * n), --r.fadeRemaining;
 			}
 			else if (r.fading) return e.fill(0, i, t), t;
-			else e.set(o, i);
-			r.read += a, i += a;
+			else e.set(s, i);
+			r.read += o, i += o, r.read >= r.written && r.ended && this.#o(r, n);
 		}
 		return i;
+	}
+	endScene(e) {
+		let t = this.#n.get(e);
+		return t === void 0 || (t.ended = !0, t.read >= t.written && (this.#o(t, e), !0));
+	}
+	drainEndedScenes() {
+		return this.#a.splice(0, this.#a.length);
+	}
+	#a = [];
+	#o(e, t) {
+		e.endedNotified || (e.endedNotified = !0, this.#a.push(t));
 	}
 	cancelScene(e, t = 480) {
 		let n = this.#n.get(e);
@@ -92,6 +105,13 @@ var e = class {
 				case "switch":
 					typeof t.sceneId == "string" && r.buffer.switchScene(t.sceneId);
 					break;
+				case "end":
+					typeof t.sceneId == "string" && (a.add(t.sceneId), r.buffer.endScene(t.sceneId) && this.port.postMessage({
+						v: n,
+						op: "ended",
+						sceneId: t.sceneId
+					}));
+					break;
 				case "cancel":
 					typeof t.sceneId == "string" && r.buffer.cancelScene(t.sceneId);
 					break;
@@ -113,6 +133,11 @@ var e = class {
 		let a = i.length, o = new Int16Array(a);
 		r.buffer.pull(o, a);
 		for (let e = 0; e < a; e += 1) i[e] = (o[e] ?? 0) / 32768;
+		for (let e of r.buffer.drainEndedScenes()) this.port.postMessage({
+			v: n,
+			op: "ended",
+			sceneId: e
+		});
 		let s = r.buffer.activeScene;
 		if (s !== null) {
 			let e = r.buffer.underrunCount(s);

@@ -74,4 +74,37 @@ describe("PcmSceneBuffer", () => {
     buffer.pull(out, 480);
     expect(out.every((v) => v === 0)).toBe(true);
   });
+
+  it("EOS：放完剩余样本后恰好一次报告耗尽，其后静音不计下越", () => {
+    const buffer = new PcmSceneBuffer();
+    buffer.appendFrame("s1", samplesOf(1000, 480));
+    buffer.appendFrame("s1", samplesOf(2000, 480));
+    buffer.switchScene("s1");
+    // EOS 在第一帧已放、第二帧未放时到达：不立即耗尽。
+    const out = new Int16Array(480);
+    buffer.pull(out, 480);
+    expect(buffer.endScene("s1")).toBe(false);
+    expect(buffer.drainEndedScenes()).toEqual([]);
+    // 放完第二帧：恰好一次耗尽报告。
+    buffer.pull(out, 480);
+    expect(out.every((v) => v === 2000)).toBe(true);
+    expect(buffer.drainEndedScenes()).toEqual(["s1"]);
+    // EOS 后静音是预期尾态：不累计下越、不重复报告。
+    buffer.pull(out, 480);
+    expect(out.every((v) => v === 0)).toBe(true);
+    expect(buffer.underrunCount("s1")).toBe(0);
+    expect(buffer.drainEndedScenes()).toEqual([]);
+  });
+
+  it("EOS：无样本或已放完 → 立即耗尽；EOS 后拒绝追加", () => {
+    const buffer = new PcmSceneBuffer();
+    expect(buffer.endScene("never-seen")).toBe(true); // 无样本
+    buffer.appendFrame("s1", samplesOf(1000, 480));
+    buffer.switchScene("s1");
+    const out = new Int16Array(480);
+    buffer.pull(out, 480);
+    expect(buffer.endScene("s1")).toBe(true); // 已放完
+    expect(buffer.drainEndedScenes()).toEqual(["s1"]);
+    expect(buffer.appendFrame("s1", samplesOf(1, 480))).toBe(false); // EOS 后拒绝
+  });
 });

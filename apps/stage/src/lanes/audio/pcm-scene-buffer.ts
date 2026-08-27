@@ -4,7 +4,8 @@
  *
  * - 每 Scene 一份线性 Int16 缓冲（写入按帧追加，容量 = maxBufferedUs 上限）；
  * - 播放按 Scene generation 原子切换：switchScene 后 pull 只读新 Scene；
- * - 下越输出静音并计数，不复用旧样本；
+ * - 下越输出静音并计数，不复用旧样本；EOS（endScene）后耗尽的静音是
+ *   预期尾态，不计下越，且每 Scene 恰好报告一次「已耗尽」；
  * - cancelScene 只清空目标 Scene 并做线性淡出，不影响其他 Scene；
  * - Commit 前数据可先写入（缓冲不是生效）；真正的出声由
  *   AudioWorkletNode 连接 + switchScene 决定。
@@ -24,6 +25,10 @@ interface SceneBuffer {
   fading: boolean;
   fadeRemaining: number;
   fadeTotal: number;
+  /** 流终止标记（endScene）：耗尽后输出静音不计下越。 */
+  ended: boolean;
+  /** 耗尽事件已入队（每 Scene 至多一次）。 */
+  endedNotified: boolean;
 }
 
 const FADE_OUT_SAMPLES_DEFAULT = 480; // 10ms @48k
@@ -61,10 +66,12 @@ export class PcmSceneBuffer {
         fading: false,
         fadeRemaining: 0,
         fadeTotal: 0,
+        ended: false,
+        endedNotified: false,
       };
       this.#scenes.set(sceneId, scene);
     }
-    if (scene.written + samples.length > scene.samples.length) {
+    if (scene.written + samples.length > scene.samples.length || scene.ended) {
       return false;
     }
     scene.samples.set(samples, scene.written);
@@ -92,7 +99,8 @@ export class PcmSceneBuffer {
 
   /**
    * 拉取 count 个样本写入 out（返回实际填充数）。活动 Scene 下越时输出
-   * 静音并计数；淡出中的样本乘线性衰减，衰减完即停（后续静音）。
+   * 静音并计数（EOS 后的静音是预期尾态，不计下越）；淡出中的样本乘
+   * 线性衰减，衰减完即停（后续静音）。
    */
   pull(out: Int16Array, count: number): number {
     const sceneId = this.#activeScene;
@@ -109,9 +117,13 @@ export class PcmSceneBuffer {
     while (filled < count) {
       const available = scene.written - scene.read;
       if (available <= 0) {
-        // 下越：静音填充，不复用旧样本。
         out.fill(0, filled, count);
-        scene.underruns += 1;
+        if (scene.ended) {
+          // EOS 后耗尽：预期尾态（播放完成），静音不计下越。
+          this.#markEnded(scene, sceneId);
+        } else {
+          scene.underruns += 1;
+        }
         return count;
       }
       const take = Math.min(count - filled, available);
@@ -130,8 +142,41 @@ export class PcmSceneBuffer {
       }
       scene.read += take;
       filled += take;
+      if (scene.read >= scene.written && scene.ended) {
+        this.#markEnded(scene, sceneId);
+      }
     }
     return filled;
+  }
+
+  /** 流终止（EOS）：返回是否已可立即报告耗尽（无样本或已放完）。 */
+  endScene(sceneId: string): boolean {
+    const scene = this.#scenes.get(sceneId);
+    if (scene === undefined) {
+      // 从未收到该 Scene 的帧：无内容可放，视为已耗尽。
+      return true;
+    }
+    scene.ended = true;
+    if (scene.read >= scene.written) {
+      this.#markEnded(scene, sceneId);
+      return true;
+    }
+    return false;
+  }
+
+  /** 取出已耗尽的 Scene 列表（每 Scene 至多报告一次）。 */
+  drainEndedScenes(): string[] {
+    return this.#ended.splice(0, this.#ended.length);
+  }
+
+  #ended: string[] = [];
+
+  #markEnded(scene: SceneBuffer, sceneId: string): void {
+    if (scene.endedNotified) {
+      return;
+    }
+    scene.endedNotified = true;
+    this.#ended.push(sceneId);
   }
 
   /** 取消目标 Scene：淡出预算后丢弃其样本（其他 Scene 不受影响）。 */

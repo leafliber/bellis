@@ -120,7 +120,12 @@ describe("compileActionFrame 黄金测试", () => {
     expect(result.plan.cues.map((cue) => cue.lane)).toEqual(["audio", "subtitle", "avatar"]);
     const avatarCue = result.plan.cues.find((cue) => cue.lane === "avatar");
     expect(avatarCue?.anchor).toBe("speech_start");
-    expect(avatarCue?.intent).toEqual({ intentId: AVATAR_INTENT.intentId, motion: "nod_agree" });
+    // durationMs 随意图透传：Stage Avatar Lane 的呈现窗口（真实完成信号）。
+    expect(avatarCue?.intent).toEqual({
+      intentId: AVATAR_INTENT.intentId,
+      motion: "nod_agree",
+      durationMs: AVATAR_INTENT.durationMs,
+    });
     expect(result.plan.scene.groups).toHaveLength(1);
     expect(result.plan.scene.groups[0]?.lanes).toEqual(["audio", "subtitle", "avatar"]);
   });
