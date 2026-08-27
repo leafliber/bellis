@@ -200,14 +200,14 @@ describe("StageMediaClient", () => {
   });
 });
 
-describe("StageMediaClient onStreamClosed（发言结束推导）", () => {
-  it("closeStream 携带边界：以首帧时刻 + 帧数推导结束时刻并映射本地域", async () => {
+describe("StageMediaClient onStreamClosed（发言时长推导）", () => {
+  it("closeStream 携带边界：时长 = (finalSequence+1) × 20ms（Commit 锚定）", async () => {
     const frames: InboundMediaFrame[] = [];
     const closures: {
       streamId: string;
       sceneId: string | null;
       finalSequence: bigint | null;
-      endLocalUs: bigint | null;
+      speechDurationUs: bigint | null;
     }[] = [];
     const clock = new VirtualClock();
     let socket: FakeSocket | null = null;
@@ -219,7 +219,6 @@ describe("StageMediaClient onStreamClosed（发言结束推导）", () => {
       },
       clock,
       audioContentTypes: [CONTENT_TYPE],
-      runtimeOffsetUs: () => 500_000n,
       onFrame: (frame) => frames.push(frame),
       onStreamClosed: (info) => closures.push(info),
     });
@@ -231,23 +230,23 @@ describe("StageMediaClient onStreamClosed（发言结束推导）", () => {
     );
     socket!.serverSend(frameBytes(0));
     socket!.serverSend(frameBytes(1));
-    // closed 边界 = 3（帧 0..3）：结束 = 1_000_000 + 4 × 20ms（Runtime 域），
-    // 映射本地域（runtime − offset 500ms）= 580_000。
+    // closed 边界 = 3（帧 0..3）：总时长 = 4 × 20ms（不含发送侧预缓冲
+    // 提前量——撤下时刻由 Lane 以 Commit 锚点 + 时长计算）。
     client.closeStream(STREAM, 3n);
     expect(closures).toEqual([
       {
         streamId: STREAM,
         sceneId: SCENE,
         finalSequence: 3n,
-        endLocalUs: 1_080_000n - 500_000n,
+        speechDurationUs: 4n * 20_000n,
       },
     ]);
     client.close();
   });
 
-  it("无边界/无帧：无偏移时不映射（null → 装配层保守立即撤下）", async () => {
+  it("无边界：时长退化为已验收帧数 × 20ms", async () => {
     const frames: InboundMediaFrame[] = [];
-    const closures: { endLocalUs: bigint | null; sceneId: string | null }[] = [];
+    const closures: { speechDurationUs: bigint | null; sceneId: string | null }[] = [];
     const clock = new VirtualClock();
     let socket: FakeSocket | null = null;
     const client = new StageMediaClient({
@@ -258,7 +257,6 @@ describe("StageMediaClient onStreamClosed（发言结束推导）", () => {
       },
       clock,
       audioContentTypes: [CONTENT_TYPE],
-      runtimeOffsetUs: () => null, // 时钟估计缺失：不做跨域比较
       onFrame: (frame) => frames.push(frame),
       onStreamClosed: (info) => closures.push(info),
     });
@@ -269,11 +267,53 @@ describe("StageMediaClient onStreamClosed（发言结束推导）", () => {
       () => true,
     );
     socket!.serverSend(frameBytes(0));
-    client.closeStream(STREAM); // 无边界：以最后验收帧 + 20ms 推导（Runtime 域）。
-    // Runtime 域时刻在无偏移时**不可映射**：返回 null，装配层保守立即
-    // 撤下（绝不做跨域比较）。
-    expect(closures.at(-1)?.endLocalUs).toBeNull();
+    client.closeStream(STREAM);
+    expect(closures.at(-1)?.speechDurationUs).toBe(1n * 20_000n);
     expect(closures.at(-1)?.sceneId).toBe(SCENE);
+    client.close();
+  });
+
+  it("closed 先于首帧（跨连接乱序）：边界内首帧验收时补发完成信号", async () => {
+    const frames: InboundMediaFrame[] = [];
+    const closures: {
+      streamId: string;
+      sceneId: string | null;
+      finalSequence: bigint | null;
+      speechDurationUs: bigint | null;
+    }[] = [];
+    const clock = new VirtualClock();
+    let socket: FakeSocket | null = null;
+    const client = new StageMediaClient({
+      sessionId: SESSION,
+      socketFactory: () => {
+        socket = new FakeSocket();
+        return socket;
+      },
+      clock,
+      audioContentTypes: [CONTENT_TYPE],
+      onFrame: (frame) => frames.push(frame),
+      onStreamClosed: (info) => closures.push(info),
+    });
+    client.connect();
+    socket!.serverOpen();
+    await client.handleAnnounce(
+      { streamId: STREAM, mediaKind: "audio", contentType: CONTENT_TYPE },
+      () => true,
+    );
+    // closed 先到（无任何帧元数据）：不触发也不丢失——挂起待补发。
+    client.closeStream(STREAM, 2n);
+    expect(closures).toHaveLength(0);
+    // 边界内首帧到达：Registry 合法接受（墓碑窗口），完成信号补发。
+    socket!.serverSend(frameBytes(0));
+    expect(frames).toHaveLength(1);
+    expect(closures).toEqual([
+      {
+        streamId: STREAM,
+        sceneId: SCENE,
+        finalSequence: 2n,
+        speechDurationUs: 3n * 20_000n,
+      },
+    ]);
     client.close();
   });
 });

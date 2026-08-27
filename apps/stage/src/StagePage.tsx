@@ -251,13 +251,13 @@ export function StagePage({ profile }: { profile: string }) {
             }
           },
           onStreamClosed: (info) => {
-            // 发言结束（closed 边界推导）：驱动音频 EOS（播放完成信号）
-            // 与字幕定时撤下（真实可见区间）。
+            // 发言结束（closed 边界推导的总时长，以 Commit 为锚）：驱动
+            // 音频 EOS（播放完成信号）与字幕定时撤下（真实可见区间）。
             if (info.sceneId === null) {
               return;
             }
             audioLane.endOfSpeech(info.sceneId);
-            subtitleLane.endOfSpeech(info.sceneId, info.endLocalUs);
+            subtitleLane.endOfSpeech(info.sceneId, info.speechDurationUs);
           },
           onDisconnected: () => {
             audioLane.clearAll();

@@ -426,13 +426,15 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 
 ### 8.2 AudioWorklet
 
-- Worklet 内维护有界 PCM Ring Buffer；下溢输出静音并计数，不复用旧样本
-  （EOS 后耗尽的静音是预期尾态，不计下越）；Worklet 放完全部样本时上报
-  `ended`（每 Scene 至多一次）——这是音频 Lane 的**真实完成信号**：
+- Worklet 内维护有界 PCM 帧块队列；**容量按当前未播占用执行**
+  （= maxBufferedUs）——已消费的帧块立即释放，长音频（> maxBufferedUs）
+  边播边补不会被截断；下溢输出静音并计数，不复用旧样本（EOS 后耗尽的
+  静音是预期尾态，不计下越）；Worklet 放完全部样本时上报 `ended`
+  （每 Scene 至多一次）——这是音频 Lane 的**真实完成信号**：
   `start()` 的 Promise 在 ended 回报时兑现（零帧流在 EOS 即完成；ended
   缺失时以「start + 已缓冲时长 + 宽限」为兜底截止，保证 scene.finished
-  有界）。EOS 经尾帧宽限窗（100ms）转发给 Worklet：closed 先于跨连接
-  尾帧到达时不丢尾帧；
+  有界）。closed 到达先进入 closing（100ms 尾帧宽限窗，期间跨连接尾帧
+  继续入账），宽限期过后才向 Worklet 转发 EOS 并拒绝后续追加；
 - Commit 前即使数据已到达也保持静音；
 - Commit 通过 Scene/Cue generation 原子切换播放；
 - Cancel 在预算内清空目标 Scene 样本并淡出，不能影响其他 Scene；
@@ -445,9 +447,12 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 - 文本直接来自同一 SpeechIntent；
 - 时间标记优先使用 Fake TTS 产出的句/词边界，不另做文本生成；
 - Commit 前不可见，Cancel 后在预算内撤下；
-- `start()` 的 Promise 在字幕**真实撤下**时兑现：发言结束时刻由
-  media.stream.closed 边界推导（首帧时刻 + 帧数 × 20ms，映射本地域），
-  到点隐藏；时刻不可得时保守立即撤下；可见性上限兜底保证有界；
+- `start()` 的 Promise 在字幕**真实撤下**时兑现：撤下时刻 = 生效目标
+  时刻（Commit 映射锚点）+ 发言总时长（media.stream.closed 边界推导：
+  (finalSequence+1) × 20ms，发送侧丢帧不消耗 sequence，故该值即送达
+  时长）——**预缓冲提前量不占用 Commit 后的可见时间**（Prepare 期间
+  不得产生用户副作用）；时长不可得时保守立即撤下；可见性上限兜底
+  保证有界；closed 先于首帧到达时由媒体客户端在首帧验收后补发；
 - DOM 内容使用文本节点，禁止把模型文本作为 HTML；
 - 处理长文本换行、空白、Emoji、CJK 和 Reduced Motion；
 - 字幕实际显示时刻进入 Scene Trace，不记录不必要的全文；
@@ -598,7 +603,7 @@ audioWorklet=started(frames=<N>)
 subtitle=visible(textNodes,releasedOnFinish)
 avatarAdapter=started(commands=<N>)
 hardLaneSkewMs=<number <= 50>(browser)
-underruns=<frames 为上界（饥饿崩溃检测；逐量子硬预算属真机 Smoke）>
+underruns=<number <= 8>
 presentation=real(runMs≈语音时长, visibleMs≈语音时长, loudSamples≥20)
 interruptLatencyMs=<number <= 100 + 观测余量>(browser)
 streamMarathon=ok(scenes=9+, opened>=11, rejected=0)

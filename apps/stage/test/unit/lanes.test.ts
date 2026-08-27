@@ -129,10 +129,16 @@ describe("AudioLaneAdapter", () => {
     await lane.prepare("s1", AUDIO_CUES, new AbortController().signal);
     const starting = lane.start("s1", 0n, AUDIO_CUES);
     lane.endOfSpeech("s1");
-    clock.advanceBy(100_000n); // 尾帧宽限 → end op
+    // 宽限窗内到达的跨连接尾帧：继续入账（closing ≠ EOS 已转发）。
+    const framesBefore = lane.bufferedFrames.get("s1") ?? 0;
+    lane.appendFrame("s1", new Int16Array(960));
+    expect(lane.bufferedFrames.get("s1")).toBe(framesBefore + 1);
+    clock.advanceBy(100_000n); // 尾帧宽限 → end op（此后拒绝追加）
     await Promise.resolve();
-    // 不驱动 ended：兜底 = start(0) + 20ms 播放 + 100ms EOS 宽限。
-    clock.advanceBy(1_020_000n);
+    lane.appendFrame("s1", new Int16Array(960));
+    expect(lane.bufferedFrames.get("s1")).toBe(framesBefore + 1);
+    // 不驱动 ended：兜底 = start(0) + 40ms 播放 + 100ms EOS 宽限。
+    clock.advanceBy(1_040_000n);
     await starting;
     expect(env.messages.some((m) => m.op === "end" && m.sceneId === "s1")).toBe(true);
     await lane.close();
@@ -209,7 +215,7 @@ const SUBTITLE_CUES: readonly Cue[] = [
 ];
 
 describe("SubtitleLaneAdapter", () => {
-  it("prepare 只创建不可见行；start 显示；endOfSpeech 到点撤下并完成；文本经文本节点", async () => {
+  it("prepare 只创建不可见行；start 显示；endOfSpeech 按时长撤下并完成；文本经文本节点", async () => {
     const doc = new FakeSubtitleDocument();
     const clock = new VirtualClock();
     const lane = new SubtitleLaneAdapter({ document: doc, clock });
@@ -219,19 +225,23 @@ describe("SubtitleLaneAdapter", () => {
     expect(line.visible).toBe(false);
     expect(line.text).toBe("我看看现在的任务进度");
     let started = false;
-    const starting = lane.start("s1", 0n, SUBTITLE_CUES).then(() => {
+    // 生效目标时刻 = 200ms（Commit 映射锚点；时钟此刻 0：预缓冲期）。
+    const starting = lane.start("s1", 200_000n, SUBTITLE_CUES).then(() => {
       started = true;
     });
     expect(line.visible).toBe(true);
     await Promise.resolve();
     expect(started).toBe(false); // 显示 ≠ 完成
-    // 发言结束（closed 边界推导的本地时刻）：600ms 后撤下。
-    lane.endOfSpeech("s1", clock.nowUs() + 600_000n);
+    // 发言时长 600ms（closed 边界推导）：撤下时刻 = 锚点 200ms + 600ms。
+    lane.endOfSpeech("s1", 600_000n);
     clock.advanceBy(300_000n);
     await Promise.resolve();
     expect(line.visible).toBe(true);
     expect(started).toBe(false);
     clock.advanceBy(300_000n);
+    await Promise.resolve();
+    expect(started).toBe(false); // 未到锚点+时长（800ms）
+    clock.advanceBy(200_000n);
     await starting;
     expect(started).toBe(true);
     expect(line.visible).toBe(false);

@@ -49,15 +49,18 @@ export interface StageMediaClientOptions {
   /** 校验通过的 PCM 帧（appendFrame 送入有界缓冲，不生效）。 */
   readonly onFrame: (frame: InboundMediaFrame) => void;
   /**
-   * Stream 关闭（media.stream.closed 处理后触发）：携带从已验收帧推导的
-   * 发言结束时刻（映射到 Stage 本地域；无帧或无时钟估计为 null）。
-   * 装配层据此驱动音频 EOS 与字幕定时撤下（Lane 真实完成信号）。
+   * Stream 关闭（media.stream.closed 处理后触发）：携带发言总时长
+   * （(finalSequence+1) × 20ms，无边界时退化为已验收帧数 × 20ms）。
+   * 时长以 **Commit 为锚**（字幕/Lane 从生效时刻起算），不含发送侧
+   * 预缓冲提前量。closed 先于首帧到达（跨连接乱序）时，在边界内
+   * 首帧验收后补发；从未有帧的流不触发（无可驱动的 Scene——该场景
+   * 由 Prepare 预缓冲超时兜底）。
    */
   readonly onStreamClosed?: (info: {
     readonly streamId: string;
     readonly sceneId: string | null;
     readonly finalSequence: bigint | null;
-    readonly endLocalUs: bigint | null;
+    readonly speechDurationUs: bigint | null;
   }) => void;
   /** 意外断线重连前的通知（装配层可清空 Lane 缓冲）。 */
   readonly onDisconnected?: (reason: string) => void;
@@ -86,17 +89,18 @@ const DEFAULT_DEADLINE_GRACE_US = 100_000n;
 /** announce 到媒体连接就绪的等待上限（超时放弃该 Stream 的 ready）。 */
 const READY_WAIT_TIMEOUT_MS = 2_000;
 
-/** 已验收帧的流元数据（发言结束时刻推导）。 */
+/** 已验收帧的流元数据（发言时长推导）。 */
 interface StreamMeta {
   sceneId: string | null;
-  firstTargetUs: bigint | null;
-  lastTargetUs: bigint | null;
+  acceptedFrames: number;
 }
 
 export class StageMediaClient {
   readonly #options: StageMediaClientOptions;
   readonly #registry: MediaStreamRegistry;
   readonly #streamMeta = new Map<string, StreamMeta>();
+  /** closed 先于首帧到达的待补发关闭（首帧验收时结算）。 */
+  readonly #pendingClosures = new Map<string, bigint | null>();
   #socket: StageSocket | null = null;
   #parser: MediaFrameParser | null = null;
   #connected = false;
@@ -202,37 +206,38 @@ export class StageMediaClient {
 
   /**
    * 关闭单个 Stream（Control media.stream.closed 到达时调用）：释放
-   * Registry 槽位（并发上限）与帧级状态。finalSequence 为关闭边界：
-   * closed 与帧跨连接乱序时，边界内严格连续的迟到尾帧仍可入账。随后以
-   * 已验收帧元数据推导发言结束时刻并触发 onStreamClosed（驱动 Lane 的
-   * 真实完成信号）。
+   * Registry 槽位（并发上限）与帧级状态（驻留期限以关闭时刻起算）。
+   * finalSequence 为关闭边界：closed 与帧跨连接乱序时，边界内严格连续
+   * 的迟到尾帧仍可入账。已验收过帧时以边界推导发言总时长并触发
+   * onStreamClosed（驱动 Lane 的真实完成信号）；closed 先于首帧到达时
+   * 挂起待补发（首帧验收时结算）。
    */
   closeStream(streamId: string, finalSequence?: bigint): void {
-    this.#registry.close(streamId, finalSequence === undefined ? undefined : { finalSequence });
+    this.#registry.close(streamId, {
+      ...(finalSequence === undefined ? {} : { finalSequence }),
+      closedAtUs: this.#options.clock.nowUs(),
+    });
     const meta = this.#streamMeta.get(streamId);
     if (meta === undefined) {
-      return; // 从未验收过帧：无可推导的结束时刻，也无可驱动的 Lane。
+      // 首帧尚未到达（跨连接乱序）：登记待补发，边界内首帧验收时结算。
+      this.#pendingClosures.set(streamId, finalSequence ?? null);
+      return;
     }
+    this.#emitStreamClosed(streamId, meta, finalSequence ?? null);
+  }
+
+  #emitStreamClosed(streamId: string, meta: StreamMeta, finalSequence: bigint | null): void {
     this.#streamMeta.delete(streamId);
-    const offsetUs = this.#options.runtimeOffsetUs?.() ?? null;
-    const endRuntimeUs = this.#speechEndRuntimeUs(meta, finalSequence ?? null);
+    this.#pendingClosures.delete(streamId);
     this.#options.onStreamClosed?.({
       streamId,
       sceneId: meta.sceneId,
-      finalSequence: finalSequence ?? null,
-      endLocalUs: endRuntimeUs !== null && offsetUs !== null ? endRuntimeUs - offsetUs : null,
+      finalSequence,
+      speechDurationUs:
+        finalSequence !== null
+          ? (finalSequence + 1n) * PHASE_2_PCM_FRAME_DURATION_US
+          : BigInt(meta.acceptedFrames) * PHASE_2_PCM_FRAME_DURATION_US,
     });
-  }
-
-  /** 发言结束（Runtime 域）：优先首帧时刻 + 边界帧数 × 20ms。 */
-  #speechEndRuntimeUs(meta: StreamMeta, finalSequence: bigint | null): bigint | null {
-    if (meta.firstTargetUs !== null && finalSequence !== null) {
-      return meta.firstTargetUs + (finalSequence + 1n) * PHASE_2_PCM_FRAME_DURATION_US;
-    }
-    if (meta.lastTargetUs !== null) {
-      return meta.lastTargetUs + PHASE_2_PCM_FRAME_DURATION_US;
-    }
-    return null;
   }
 
   /**
@@ -242,6 +247,7 @@ export class StageMediaClient {
   invalidateStreams(): void {
     this.#registry.closeAll();
     this.#streamMeta.clear();
+    this.#pendingClosures.clear();
   }
 
   #onMessage(data: string | Uint8Array): void {
@@ -280,26 +286,31 @@ export class StageMediaClient {
       // 帧级违规后该 Stream 状态不可信：关闭 Stream，连接保持。
       this.#registry.close(frame.header.streamId);
       this.#streamMeta.delete(frame.header.streamId);
+      this.#pendingClosures.delete(frame.header.streamId);
       return;
     }
     this.#stats = { ...this.#stats, acceptedFrames: this.#stats.acceptedFrames + 1 };
-    const targetUs =
-      frame.header.targetTimeUs === undefined ? null : BigInt(frame.header.targetTimeUs);
     const meta = this.#streamMeta.get(frame.header.streamId) ?? {
       sceneId: null,
-      firstTargetUs: null,
-      lastTargetUs: null,
+      acceptedFrames: 0,
     };
-    this.#streamMeta.set(frame.header.streamId, {
+    const updated: StreamMeta = {
       sceneId: frame.header.sceneId ?? meta.sceneId,
-      firstTargetUs: meta.firstTargetUs ?? targetUs,
-      lastTargetUs: targetUs ?? meta.lastTargetUs,
-    });
+      acceptedFrames: meta.acceptedFrames + 1,
+    };
+    this.#streamMeta.set(frame.header.streamId, updated);
+    const pendingFinal = this.#pendingClosures.get(frame.header.streamId);
+    if (pendingFinal !== undefined) {
+      // closed 先于首帧到达（跨连接乱序）：首帧已验收，现在结算完成信号
+      //（时长以边界推导；后续边界内尾帧继续入账，EOS 宽限窗覆盖）。
+      this.#emitStreamClosed(frame.header.streamId, updated, pendingFinal);
+    }
     this.#options.onFrame({
       streamId: frame.header.streamId,
       sceneId: frame.header.sceneId ?? null,
       sequence: result.lastSequence,
-      targetTimeUs: targetUs,
+      targetTimeUs:
+        frame.header.targetTimeUs === undefined ? null : BigInt(frame.header.targetTimeUs),
       samples: decodeInt16Le(frame.payload),
     });
   }
@@ -322,6 +333,7 @@ export class StageMediaClient {
     // Stream 状态随连接丢弃（不跨连接复活）。
     this.#registry.closeAll();
     this.#streamMeta.clear();
+    this.#pendingClosures.clear();
     this.#options.onDisconnected?.(reason);
     if (this.#closedByUser) {
       return;
@@ -378,6 +390,7 @@ export class StageMediaClient {
     this.#parser = null;
     this.#registry.closeAll();
     this.#streamMeta.clear();
+    this.#pendingClosures.clear();
     for (const waiter of this.#connectWaiters.splice(0)) {
       waiter();
     }

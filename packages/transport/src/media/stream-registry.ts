@@ -11,7 +11,8 @@ import type { MediaFrame, MediaKindName } from "./frame-codec.js";
  *   严格连续递增（重复/乱序/缺口都是 sequence_violation）、frameId 不重复。
  * - 关闭后的 Stream 不能复活；总 Stream 数与并发数有上限，frameId 集合
  *   随每 Stream 帧数上限有界。带边界的关闭只在「仍有尾帧可等」期间保留
- *   帧级状态：追平边界或首个违规即压缩为轻量墓碑（窗口不无限驻留）。
+ *   帧级状态：追平边界、首个违规（含错 Session 帧）或驻留期限届满即
+ *   压缩为轻量墓碑（窗口不无限驻留）。
  * - Deadline：Header.targetTimeUs 已过（含可配置宽限）且帧不再可用时拒绝。
  *   nowUs 由调用方注入（Runtime 单调微秒）。
  * - 连接关闭时 closeAll() 释放全部 Stream 状态。
@@ -36,6 +37,13 @@ export interface MediaStreamRegistryOptions {
   readonly maxFramesPerStream?: number;
   /** targetTimeUs 判定为过期的宽限（微秒），默认 0。 */
   readonly deadlineGraceUs?: bigint;
+  /**
+   * 带边界墓碑的驻留期限（微秒，默认 1s）：closed 与尾帧跨连接送达，
+   * 尾帧只可能在关闭后的短窗口内到达；期限届满后（以帧到达时的注入
+   * 时钟懒扫描压缩）帧级状态释放——「最后一帧永不到达且无后续违规帧」
+   * 时 frameIds 不再无限驻留。
+   */
+  readonly maxBoundaryWindowUs?: bigint;
 }
 
 export type MediaStreamOpenResult =
@@ -55,10 +63,13 @@ export interface CloseStreamOptions {
   /**
    * 关闭边界（可选）：closed 与帧跨连接送达无全局顺序——携带边界时，
    * sequence ≤ finalSequence 且严格连续的迟到帧仍可入账（尾帧乱序
-   * 不丢）。窗口生命周期有界：追平边界、或收到首个违规/越界帧即压缩
-   * 为轻量墓碑（后续一切帧拒绝）。缺省 = 立即关闭。
+   * 不丢）。窗口生命周期有界：追平边界、收到首个违规/越界帧、或
+   * closedAtUs 起算的驻留期限届满，任一即压缩为轻量墓碑（后续一切
+   * 帧拒绝）。缺省 = 立即关闭。
    */
   readonly finalSequence?: bigint;
+  /** 关闭时刻（调用方注入时钟；驻留期限的起算点，缺省不启用期限）。 */
+  readonly closedAtUs?: bigint;
 }
 
 interface StreamRecord {
@@ -71,6 +82,8 @@ interface StreamRecord {
   /** 关闭边界（null = 无待收尾帧；携带边界时保留 lastSequence 续收尾帧）。 */
   finalSequence: bigint | null;
   frameCount: number;
+  /** 带边界关闭的时刻（null = 未启用驻留期限）。 */
+  closedAtUs: bigint | null;
 }
 
 /**
@@ -86,10 +99,15 @@ function toTombstone(record: StreamRecord): void {
   record.lastSequence = null;
   record.frameIds.clear();
   record.frameCount = 0;
+  record.closedAtUs = null;
 }
 
 /** 带边界关闭：保留续收乱序尾帧所需的帧级状态（仅当仍有尾帧可等）。 */
-function toBoundaryTombstone(record: StreamRecord, finalSequence: bigint): void {
+function toBoundaryTombstone(
+  record: StreamRecord,
+  finalSequence: bigint,
+  closedAtUs: bigint | null,
+): void {
   const caughtUp = record.lastSequence !== null && record.lastSequence >= finalSequence;
   if (caughtUp || finalSequence < 0n) {
     toTombstone(record);
@@ -97,11 +115,13 @@ function toBoundaryTombstone(record: StreamRecord, finalSequence: bigint): void 
   }
   record.closed = true;
   record.finalSequence = finalSequence;
+  record.closedAtUs = closedAtUs;
 }
 
 const DEFAULT_MAX_OPEN_STREAMS = 8;
 const DEFAULT_MAX_TOTAL_STREAMS = 1024;
 const DEFAULT_MAX_FRAMES_PER_STREAM = 65_536;
+const DEFAULT_MAX_BOUNDARY_WINDOW_US = 1_000_000n;
 
 function reject(
   code: MediaStreamRejectCode,
@@ -116,7 +136,10 @@ export class MediaStreamRegistry {
   readonly #maxTotalStreams: number;
   readonly #maxFramesPerStream: number;
   readonly #deadlineGraceUs: bigint;
+  readonly #maxBoundaryWindowUs: bigint;
   readonly #streams = new Map<string, StreamRecord>();
+  /** 带边界且未压缩的墓碑（驻留期限懒扫描的候选集，O(1) 增删）。 */
+  readonly #boundaryOpen = new Set<string>();
   #totalStreams = 0;
 
   constructor(options: MediaStreamRegistryOptions) {
@@ -132,11 +155,15 @@ export class MediaStreamRegistry {
     if ((options.deadlineGraceUs ?? 0n) < 0n) {
       throw new RangeError("deadlineGraceUs must be non-negative");
     }
+    if ((options.maxBoundaryWindowUs ?? DEFAULT_MAX_BOUNDARY_WINDOW_US) < 0n) {
+      throw new RangeError("maxBoundaryWindowUs must be non-negative");
+    }
     this.#sessionId = options.sessionId;
     this.#maxOpenStreams = options.maxOpenStreams ?? DEFAULT_MAX_OPEN_STREAMS;
     this.#maxTotalStreams = options.maxTotalStreams ?? DEFAULT_MAX_TOTAL_STREAMS;
     this.#maxFramesPerStream = options.maxFramesPerStream ?? DEFAULT_MAX_FRAMES_PER_STREAM;
     this.#deadlineGraceUs = options.deadlineGraceUs ?? 0n;
+    this.#maxBoundaryWindowUs = options.maxBoundaryWindowUs ?? DEFAULT_MAX_BOUNDARY_WINDOW_US;
   }
 
   get sessionId(): string {
@@ -184,6 +211,7 @@ export class MediaStreamRegistry {
       closed: false,
       finalSequence: null,
       frameCount: 0,
+      closedAtUs: null,
     });
     this.#totalStreams += 1;
     return { status: "opened" };
@@ -194,10 +222,17 @@ export class MediaStreamRegistry {
    * frameId 去重、targetTimeUs Deadline 与帧数上限全部通过才算 accepted。
    */
   accept(frame: MediaFrame, nowUs: bigint | null): MediaFrameAcceptResult {
+    this.#sweepExpiredBoundaryWindows(nowUs);
+    const record = this.#streams.get(frame.header.streamId);
+    // Session 校验保持首位（§7 校验顺序不变）；但错 Session 的帧落在
+    // 已关闭 Stream 上同样终结尾帧窗口（不得绕过压缩）。
     if (frame.header.sessionId !== this.#sessionId) {
+      if (record !== undefined && record.closed) {
+        toTombstone(record);
+        this.#boundaryOpen.delete(record.streamId);
+      }
       return reject("session_mismatch", "frame belongs to a different session");
     }
-    const record = this.#streams.get(frame.header.streamId);
     if (record === undefined) {
       return reject("unknown_stream", "stream is not registered on this connection");
     }
@@ -208,6 +243,7 @@ export class MediaStreamRegistry {
       const result = reject(code, message);
       if (record.closed) {
         toTombstone(record);
+        this.#boundaryOpen.delete(record.streamId);
       }
       return result;
     };
@@ -261,6 +297,7 @@ export class MediaStreamRegistry {
     if (record.closed && record.finalSequence !== null && sequence === record.finalSequence) {
       // 追平边界：窗口使命完成（后续帧只可能越界），压缩为轻量墓碑。
       toTombstone(record);
+      this.#boundaryOpen.delete(record.streamId);
     }
     return { status: "accepted", lastSequence: sequence };
   }
@@ -281,7 +318,10 @@ export class MediaStreamRegistry {
     if (finalSequence === null) {
       toTombstone(record);
     } else {
-      toBoundaryTombstone(record, finalSequence);
+      toBoundaryTombstone(record, finalSequence, options?.closedAtUs ?? null);
+      if (record.finalSequence !== null) {
+        this.#boundaryOpen.add(streamId);
+      }
     }
     return { status: "closed" };
   }
@@ -290,6 +330,29 @@ export class MediaStreamRegistry {
   closeAll(): number {
     const count = this.#streams.size;
     this.#streams.clear();
+    this.#boundaryOpen.clear();
     return count;
+  }
+
+  /** 驻留期限届满的边界墓碑压缩（帧到达时懒扫描；时钟缺失时跳过）。 */
+  #sweepExpiredBoundaryWindows(nowUs: bigint | null): void {
+    if (nowUs === null || this.#boundaryOpen.size === 0) {
+      return;
+    }
+    for (const streamId of this.#boundaryOpen) {
+      const record = this.#streams.get(streamId);
+      if (record === undefined) {
+        this.#boundaryOpen.delete(streamId);
+        continue;
+      }
+      if (record.finalSequence === null) {
+        this.#boundaryOpen.delete(streamId);
+        continue;
+      }
+      if (record.closedAtUs !== null && nowUs - record.closedAtUs >= this.#maxBoundaryWindowUs) {
+        toTombstone(record);
+        this.#boundaryOpen.delete(streamId);
+      }
+    }
   }
 }

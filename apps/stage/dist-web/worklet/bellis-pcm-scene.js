@@ -16,26 +16,29 @@ var e = class {
 	get droppedScenes() {
 		return this.#i;
 	}
-	appendFrame(e, t) {
-		let n = this.#n.get(e);
-		return n === void 0 && (n = {
-			samples: new Int16Array(this.#e),
-			written: 0,
-			read: 0,
+	#a() {
+		return {
+			chunks: [],
+			chunkOffset: 0,
+			buffered: 0,
 			underruns: 0,
 			fading: !1,
 			fadeRemaining: 0,
 			fadeTotal: 0,
 			ended: !1,
 			endedNotified: !1
-		}, this.#n.set(e, n)), n.written + t.length > n.samples.length || n.ended ? !1 : (n.samples.set(t, n.written), n.written += t.length, !0);
+		};
+	}
+	appendFrame(e, t) {
+		let n = this.#n.get(e);
+		return n === void 0 && (n = this.#a(), this.#n.set(e, n)), n.ended || n.buffered + t.length > this.#e ? !1 : (n.chunks.push(t.slice()), n.buffered += t.length, !0);
 	}
 	switchScene(e) {
 		this.#r = e;
 	}
 	bufferedUs(e) {
 		let t = this.#n.get(e);
-		return t === void 0 ? 0n : BigInt(Math.floor((t.written - t.read) / this.#t * 1e6));
+		return t === void 0 ? 0n : BigInt(Math.floor(t.buffered / this.#t * 1e6));
 	}
 	underrunCount(e) {
 		return this.#n.get(e)?.underruns ?? 0;
@@ -47,36 +50,45 @@ var e = class {
 		if (r === void 0) return e.fill(0, 0, t), t;
 		let i = 0;
 		for (; i < t;) {
-			let a = r.written - r.read;
-			if (a <= 0) return e.fill(0, i, t), r.ended ? this.#o(r, n) : r.underruns += 1, t;
-			let o = Math.min(t - i, a), s = r.samples.subarray(r.read, r.read + o);
-			if (r.fading && r.fadeRemaining > 0) for (let t = 0; t < o; t += 1) {
+			if (r.buffered <= 0) return e.fill(0, i, t), r.ended ? this.#c(r, n) : r.underruns += 1, t;
+			let a = r.chunks[0];
+			if (a === void 0) return e.fill(0, i, t), r.ended || (r.underruns += 1), t;
+			let o = a.length - r.chunkOffset, s = Math.min(t - i, o);
+			if (r.fading && r.fadeRemaining > 0) for (let t = 0; t < s; t += 1) {
 				let n = Math.min(1, r.fadeRemaining / r.fadeTotal);
-				e[i + t] = Math.round((s[t] ?? 0) * n), --r.fadeRemaining;
+				e[i + t] = Math.round((a[r.chunkOffset + t] ?? 0) * n), --r.fadeRemaining;
 			}
 			else if (r.fading) return e.fill(0, i, t), t;
-			else e.set(s, i);
-			r.read += o, i += o, r.read >= r.written && r.ended && this.#o(r, n);
+			else e.set(a.subarray(r.chunkOffset, r.chunkOffset + s), i);
+			r.chunkOffset += s, r.buffered -= s, i += s, r.chunkOffset >= a.length && (r.chunks.shift(), r.chunkOffset = 0), r.buffered <= 0 && r.ended && this.#c(r, n);
 		}
 		return i;
 	}
-	endScene(e) {
-		let t = this.#n.get(e);
-		return t === void 0 || (t.ended = !0, t.read >= t.written && (this.#o(t, e), !0));
-	}
-	drainEndedScenes() {
-		return this.#a.splice(0, this.#a.length);
-	}
-	#a = [];
-	#o(e, t) {
-		e.endedNotified || (e.endedNotified = !0, this.#a.push(t));
-	}
 	cancelScene(e, t = 480) {
 		let n = this.#n.get(e);
-		n !== void 0 && (n.fading = !0, n.fadeRemaining = Math.min(t, n.written - n.read), n.fadeTotal = Math.max(1, n.fadeRemaining), n.fadeRemaining <= 0 && (this.#n.delete(e), this.#i += 1, this.#r === e && (this.#r = null)));
+		n !== void 0 && (n.fading = !0, n.fadeRemaining = Math.min(t, n.buffered), n.fadeTotal = Math.max(1, n.fadeRemaining), n.fadeRemaining <= 0 && this.#s(n, e));
 	}
+	endScene(e) {
+		let t = this.#n.get(e);
+		return t === void 0 || (t.ended = !0, t.buffered <= 0 && (this.#c(t, e), !0));
+	}
+	drainEndedScenes() {
+		return this.#o.splice(0, this.#o.length);
+	}
+	#o = [];
 	releaseScene(e) {
-		this.#n.delete(e) && (this.#i += 1), this.#r === e && (this.#r = null);
+		let t = this.#n.get(e);
+		if (t !== void 0) {
+			this.#s(t, e);
+			return;
+		}
+		this.#r === e && (this.#r = null);
+	}
+	#s(e, t) {
+		e.chunks = [], e.chunkOffset = 0, e.buffered = 0, this.#n.delete(t), this.#i += 1, this.#r === t && (this.#r = null);
+	}
+	#c(e, t) {
+		e.endedNotified || (e.endedNotified = !0, this.#o.push(t));
 	}
 }, t = globalThis.AudioWorkletProcessor, n = 1, r = { buffer: new e({
 	maxBufferedUs: 2000000n,

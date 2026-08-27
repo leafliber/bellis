@@ -43,10 +43,12 @@ interface SubtitleRecord {
   readonly line: SubtitleLine;
   text: string | null;
   visible: boolean;
+  /** 生效（Commit 映射）目标时刻——发言时长的锚点。 */
+  startTargetUs: bigint | null;
   shownAtUs: bigint | null;
   hiddenAtUs: bigint | null;
-  /** 先于 start 到达的发言结束时刻（closed 先于 commit 的乱序场景）。 */
-  pendingEndUs: bigint | null;
+  /** 先于 start 到达的发言时长（closed 先于 commit 的乱序场景）。 */
+  pendingDurationUs: bigint | null;
   completions: Array<() => void>;
   timers: AbortController[];
 }
@@ -104,23 +106,24 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
     return { ready: true };
   }
 
-  async start(sceneId: string, _atStageUs: bigint, _cues: readonly Cue[]): Promise<void> {
+  async start(sceneId: string, atStageUs: bigint, _cues: readonly Cue[]): Promise<void> {
     const record = this.#lines.get(sceneId);
     if (record === undefined) {
       return;
     }
     record.visible = true;
+    record.startTargetUs = atStageUs;
     record.shownAtUs = this.#clock.nowUs();
     record.line.setVisible(true);
     // 可见性上限兜底：endOfSpeech 永不到达时也必须有界撤下。
     this.#sleep(record, this.#clock.nowUs() + this.#maxVisibleUs, () => {
       this.#hide(sceneId, record);
     });
-    if (record.pendingEndUs !== null) {
-      // 发言结束先于 start 到达（closed 乱序）：立即按该时刻撤下。
-      const endUs = record.pendingEndUs;
-      record.pendingEndUs = null;
-      this.#sleep(record, endUs, () => this.#hide(sceneId, record));
+    if (record.pendingDurationUs !== null) {
+      // 发言结束先于 start 到达（closed 乱序）：按暂存时长撤下。
+      const durationUs = record.pendingDurationUs;
+      record.pendingDurationUs = null;
+      this.#scheduleHide(sceneId, record, durationUs);
     }
     await new Promise<void>((resolve) => {
       record.completions.push(resolve);
@@ -128,20 +131,27 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
   }
 
   /**
-   * 发言结束（media.stream.closed 边界推导的本地时刻）：到点隐藏并完成
-   * Lane。时刻已过或不可知 → 立即隐藏（保守撤下优于悬挂）。先于 start
-   * 到达时暂存，由 start 应用。
+   * 发言结束（media.stream.closed 边界推导的发言总时长）：撤下时刻 =
+   * 生效目标时刻 + 时长——**以 Commit 为锚**，不从可见时长中扣除发送
+   * 侧预缓冲提前量（Prepare 期间不得产生用户副作用，预缓冲不占用
+   * Commit 后的可见时间）。时长不可知 → 立即隐藏（保守撤下优于悬挂）。
+   * 先于 start 到达时暂存，由 start 应用。
    */
-  endOfSpeech(sceneId: string, endLocalUs: bigint | null): void {
+  endOfSpeech(sceneId: string, speechDurationUs: bigint | null): void {
     const record = this.#lines.get(sceneId);
     if (record === undefined) {
       return;
     }
-    const hideAt = endLocalUs === null ? this.#clock.nowUs() : endLocalUs;
     if (!record.visible) {
-      record.pendingEndUs = hideAt;
+      record.pendingDurationUs = speechDurationUs;
       return;
     }
+    this.#scheduleHide(sceneId, record, speechDurationUs);
+  }
+
+  #scheduleHide(sceneId: string, record: SubtitleRecord, durationUs: bigint | null): void {
+    const anchor = record.startTargetUs ?? record.shownAtUs ?? this.#clock.nowUs();
+    const hideAt = durationUs === null ? this.#clock.nowUs() : anchor + durationUs;
     this.#sleep(record, hideAt, () => {
       this.#hide(sceneId, record);
     });
@@ -175,9 +185,10 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
       line,
       text: null,
       visible: false,
+      startTargetUs: null,
       shownAtUs: null,
       hiddenAtUs: null,
-      pendingEndUs: null,
+      pendingDurationUs: null,
       completions: [],
       timers: [],
     };

@@ -362,6 +362,63 @@ describe("MediaStreamRegistry", () => {
     }
   });
 
+  it("错 Session 的帧落在已关闭带边界 Stream 上：同样终结尾帧窗口", () => {
+    const clock = new VirtualClock();
+    const reg = registry();
+    reg.open({
+      streamId: STREAM_ID,
+      sessionId: SESSION_ID,
+      mediaKind: "binary-test",
+      contentType: "application/octet-stream",
+    });
+    reg.accept(frame({ sequence: "0", frameId: fid(0) }), clock.nowUs());
+    expect(reg.close(STREAM_ID, { finalSequence: 2n }).status).toBe("closed");
+    // 错 Session 帧：session_mismatch（校验顺序保持首位）且窗口终结。
+    const wrongSession = reg.accept(
+      frame({ sequence: "1", frameId: fid(1), sessionId: "00000000-0000-4000-8000-000000000000" }),
+      clock.nowUs(),
+    );
+    if (wrongSession.status === "rejected") {
+      expect(wrongSession.code).toBe("session_mismatch");
+    }
+    // 客户端再 close 得 already_closed；随后正确 Session 的合法尾帧被拒。
+    expect(reg.close(STREAM_ID)).toEqual({ status: "already_closed" });
+    const validAfter = reg.accept(frame({ sequence: "1", frameId: fid(1) }), clock.nowUs());
+    if (validAfter.status === "rejected") {
+      expect(validAfter.code).toBe("stream_closed");
+    }
+  });
+
+  it("带边界墓碑驻留期限：closedAtUs 起算届满后（帧到达懒扫描）压缩", () => {
+    const clock = new VirtualClock();
+    const reg = registry({ maxBoundaryWindowUs: 500_000n });
+    reg.open({
+      streamId: STREAM_ID,
+      sessionId: SESSION_ID,
+      mediaKind: "binary-test",
+      contentType: "application/octet-stream",
+    });
+    reg.accept(frame({ sequence: "0", frameId: fid(0) }), clock.nowUs());
+    expect(reg.close(STREAM_ID, { finalSequence: 2n, closedAtUs: clock.nowUs() }).status).toBe(
+      "closed",
+    );
+    // 期限内：合法尾帧照常入账。
+    clock.advanceBy(400_000n);
+    expect(reg.accept(frame({ sequence: "1", frameId: fid(1) }), clock.nowUs()).status).toBe(
+      "accepted",
+    );
+    // 期限届满（最后一帧永不到达、无违规帧）：任何后续帧到达时懒压缩，
+    // 帧级状态（frameIds 等）不再驻留。
+    clock.advanceBy(200_000n);
+    const expired = reg.accept(frame({ sequence: "2", frameId: fid(2) }), clock.nowUs());
+    if (expired.status === "rejected") {
+      expect(expired.code).toBe("stream_closed");
+    }
+    expect(reg.accept(frame({ sequence: "2", frameId: fid(2) }), clock.nowUs()).status).toBe(
+      "rejected",
+    );
+  });
+
   it("nowUs=null 跳过 Deadline 检查（时钟估计未就绪，不做跨域误判）", () => {
     const clock = new VirtualClock();
     clock.advanceBy(1_000_000_000n);

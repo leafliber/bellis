@@ -64,6 +64,29 @@ describe("PcmSceneBuffer", () => {
     expect(buffer.appendFrame("s", samplesOf(1, 480))).toBe(false);
   });
 
+  it("容量按未播占用执行：边播边补不截断（累计写入可超上限）", () => {
+    const buffer = new PcmSceneBuffer({ maxBufferedUs: 20_000n }); // 960 样本 = 2 帧
+    buffer.switchScene("s1");
+    const out = new Int16Array(480);
+    // 132 帧（浏览器 E2E 语音 2640ms）：每追加即消费，占用恒 ≤ 2 帧。
+    let rejected = 0;
+    for (let i = 0; i < 132; i += 1) {
+      if (!buffer.appendFrame("s1", samplesOf(i, 480))) {
+        rejected += 1;
+        continue;
+      }
+      buffer.pull(out, 480);
+    }
+    expect(rejected).toBe(0); // 历史缺陷：累计 written 判容量 → 第 100 帧起全拒
+  });
+
+  it("未播占用仍受上限约束：不消费时超限拒绝", () => {
+    const buffer = new PcmSceneBuffer({ maxBufferedUs: 20_000n }); // 960 样本
+    expect(buffer.appendFrame("s1", samplesOf(1, 480))).toBe(true);
+    expect(buffer.appendFrame("s1", samplesOf(1, 480))).toBe(true);
+    expect(buffer.appendFrame("s1", samplesOf(1, 480))).toBe(false); // 未播满 2 帧
+  });
+
   it("releaseScene 释放并复位活动指针", () => {
     const buffer = new PcmSceneBuffer();
     buffer.appendFrame("s1", samplesOf(1, 480));

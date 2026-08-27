@@ -2,10 +2,12 @@
  * 音频场景缓冲（纯逻辑，无 Worklet/DOM 依赖——Node 单元测试与
  * AudioWorklet 处理器共用同一实现，不复制算法）。
  *
- * - 每 Scene 一份线性 Int16 缓冲（写入按帧追加，容量 = maxBufferedUs 上限）；
+ * - 每 Scene 一份帧块队列（写入按帧追加；容量按**当前未播占用**执行
+ *   = maxBufferedUs，已消费的帧块立即释放——累计写入量不占用容量，
+ *   长音频不会被静默截断）；
  * - 播放按 Scene generation 原子切换：switchScene 后 pull 只读新 Scene；
- * - 下越输出静音并计数，不复用旧样本；EOS（endScene）后耗尽的静音是
- *   预期尾态，不计下越，且每 Scene 恰好报告一次「已耗尽」；
+ * - 下越输出静音并计数，不复用旧样本（EOS 后耗尽的静音是预期尾态，
+ *   不计下越，且每 Scene 恰好报告一次「已耗尽」）；
  * - cancelScene 只清空目标 Scene 并做线性淡出，不影响其他 Scene；
  * - Commit 前数据可先写入（缓冲不是生效）；真正的出声由
  *   AudioWorkletNode 连接 + switchScene 决定。
@@ -18,9 +20,11 @@ export interface PcmSceneBufferOptions {
 }
 
 interface SceneBuffer {
-  samples: Int16Array;
-  written: number;
-  read: number;
+  /** 待播帧块队列（队首可能部分消费，见 chunkOffset）。 */
+  chunks: Int16Array[];
+  chunkOffset: number;
+  /** 当前未播样本数（容量执行的账目）。 */
+  buffered: number;
   underruns: number;
   fading: boolean;
   fadeRemaining: number;
@@ -54,28 +58,33 @@ export class PcmSceneBuffer {
     return this.#droppedScenes;
   }
 
-  /** 追加一帧（Int16 交织样本，mono）；超容量丢弃并返回 false。 */
+  #newScene(): SceneBuffer {
+    return {
+      chunks: [],
+      chunkOffset: 0,
+      buffered: 0,
+      underruns: 0,
+      fading: false,
+      fadeRemaining: 0,
+      fadeTotal: 0,
+      ended: false,
+      endedNotified: false,
+    };
+  }
+
+  /** 追加一帧（Int16 交织样本，mono）；超出未播容量或 EOS 后拒绝。 */
   appendFrame(sceneId: string, samples: Int16Array): boolean {
     let scene = this.#scenes.get(sceneId);
     if (scene === undefined) {
-      scene = {
-        samples: new Int16Array(this.#maxSamples),
-        written: 0,
-        read: 0,
-        underruns: 0,
-        fading: false,
-        fadeRemaining: 0,
-        fadeTotal: 0,
-        ended: false,
-        endedNotified: false,
-      };
+      scene = this.#newScene();
       this.#scenes.set(sceneId, scene);
     }
-    if (scene.written + samples.length > scene.samples.length || scene.ended) {
+    if (scene.ended || scene.buffered + samples.length > this.#maxSamples) {
       return false;
     }
-    scene.samples.set(samples, scene.written);
-    scene.written += samples.length;
+    // 复制入队：调用方的帧缓冲不驻留引用（Memory 共享边界）。
+    scene.chunks.push(samples.slice());
+    scene.buffered += samples.length;
     return true;
   }
 
@@ -84,13 +93,13 @@ export class PcmSceneBuffer {
     this.#activeScene = sceneId;
   }
 
-  /** 播放缓冲存量时长（微秒，按已写-已读）。 */
+  /** 播放缓冲存量时长（微秒，按未播占用）。 */
   bufferedUs(sceneId: string): bigint {
     const scene = this.#scenes.get(sceneId);
     if (scene === undefined) {
       return 0n;
     }
-    return BigInt(Math.floor(((scene.written - scene.read) / this.#sampleRateHz) * 1_000_000));
+    return BigInt(Math.floor((scene.buffered / this.#sampleRateHz) * 1_000_000));
   }
 
   underrunCount(sceneId: string): number {
@@ -115,8 +124,7 @@ export class PcmSceneBuffer {
     }
     let filled = 0;
     while (filled < count) {
-      const available = scene.written - scene.read;
-      if (available <= 0) {
+      if (scene.buffered <= 0) {
         out.fill(0, filled, count);
         if (scene.ended) {
           // EOS 后耗尽：预期尾态（播放完成），静音不计下越。
@@ -126,27 +134,56 @@ export class PcmSceneBuffer {
         }
         return count;
       }
+      const head = scene.chunks[0];
+      if (head === undefined) {
+        // 账目与队列失配是不可达状态；防御性按耗尽处理。
+        out.fill(0, filled, count);
+        if (!scene.ended) {
+          scene.underruns += 1;
+        }
+        return count;
+      }
+      const available = head.length - scene.chunkOffset;
       const take = Math.min(count - filled, available);
-      const source = scene.samples.subarray(scene.read, scene.read + take);
       if (scene.fading && scene.fadeRemaining > 0) {
         for (let i = 0; i < take; i += 1) {
           const factor = Math.min(1, scene.fadeRemaining / scene.fadeTotal);
-          out[filled + i] = Math.round((source[i] ?? 0) * factor);
+          out[filled + i] = Math.round((head[scene.chunkOffset + i] ?? 0) * factor);
           scene.fadeRemaining -= 1;
         }
       } else if (scene.fading) {
         out.fill(0, filled, count);
         return count;
       } else {
-        out.set(source, filled);
+        out.set(head.subarray(scene.chunkOffset, scene.chunkOffset + take), filled);
       }
-      scene.read += take;
+      scene.chunkOffset += take;
+      scene.buffered -= take;
       filled += take;
-      if (scene.read >= scene.written && scene.ended) {
+      if (scene.chunkOffset >= head.length) {
+        scene.chunks.shift();
+        scene.chunkOffset = 0;
+      }
+      if (scene.buffered <= 0 && scene.ended) {
         this.#markEnded(scene, sceneId);
       }
     }
     return filled;
+  }
+
+  /** 取消目标 Scene：淡出预算后丢弃其样本（其他 Scene 不受影响）。 */
+  cancelScene(sceneId: string, fadeSamples = FADE_OUT_SAMPLES_DEFAULT): void {
+    const scene = this.#scenes.get(sceneId);
+    if (scene === undefined) {
+      return;
+    }
+    scene.fading = true;
+    scene.fadeRemaining = Math.min(fadeSamples, scene.buffered);
+    scene.fadeTotal = Math.max(1, scene.fadeRemaining);
+    // 预算耗尽即整段丢弃：淡出样本已在缓冲内，后续 append 拒绝。
+    if (scene.fadeRemaining <= 0) {
+      this.#release(scene, sceneId);
+    }
   }
 
   /** 流终止（EOS）：返回是否已可立即报告耗尽（无样本或已放完）。 */
@@ -157,7 +194,7 @@ export class PcmSceneBuffer {
       return true;
     }
     scene.ended = true;
-    if (scene.read >= scene.written) {
+    if (scene.buffered <= 0) {
       this.#markEnded(scene, sceneId);
       return true;
     }
@@ -171,40 +208,34 @@ export class PcmSceneBuffer {
 
   #ended: string[] = [];
 
+  /** 释放一个 Scene 的全部缓冲（播放完成/连接关闭）。 */
+  releaseScene(sceneId: string): void {
+    const scene = this.#scenes.get(sceneId);
+    if (scene !== undefined) {
+      this.#release(scene, sceneId);
+      return;
+    }
+    if (this.#activeScene === sceneId) {
+      this.#activeScene = null;
+    }
+  }
+
+  #release(scene: SceneBuffer, sceneId: string): void {
+    scene.chunks = [];
+    scene.chunkOffset = 0;
+    scene.buffered = 0;
+    this.#scenes.delete(sceneId);
+    this.#droppedScenes += 1;
+    if (this.#activeScene === sceneId) {
+      this.#activeScene = null;
+    }
+  }
+
   #markEnded(scene: SceneBuffer, sceneId: string): void {
     if (scene.endedNotified) {
       return;
     }
     scene.endedNotified = true;
     this.#ended.push(sceneId);
-  }
-
-  /** 取消目标 Scene：淡出预算后丢弃其样本（其他 Scene 不受影响）。 */
-  cancelScene(sceneId: string, fadeSamples = FADE_OUT_SAMPLES_DEFAULT): void {
-    const scene = this.#scenes.get(sceneId);
-    if (scene === undefined) {
-      return;
-    }
-    scene.fading = true;
-    scene.fadeRemaining = Math.min(fadeSamples, scene.written - scene.read);
-    scene.fadeTotal = Math.max(1, scene.fadeRemaining);
-    // 预算耗尽即整段丢弃：淡出样本已在缓冲内，后续 append 拒绝。
-    if (scene.fadeRemaining <= 0) {
-      this.#scenes.delete(sceneId);
-      this.#droppedScenes += 1;
-      if (this.#activeScene === sceneId) {
-        this.#activeScene = null;
-      }
-    }
-  }
-
-  /** 释放一个 Scene 的全部缓冲（播放完成/连接关闭）。 */
-  releaseScene(sceneId: string): void {
-    if (this.#scenes.delete(sceneId)) {
-      this.#droppedScenes += 1;
-    }
-    if (this.#activeScene === sceneId) {
-      this.#activeScene = null;
-    }
   }
 }

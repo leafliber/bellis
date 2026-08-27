@@ -120,12 +120,10 @@ test("Audio Arm → 媒体流 → 三 Lane 生效 → 偏差/打断指标", asyn
   } | null;
   expect(mediaStats?.acceptedFrames ?? 0).toBeGreaterThanOrEqual(6);
   expect(mediaStats?.rejectedFrames ?? 0).toBe(0);
-  // underruns = Worklet 缓冲空槽的渲染量子数：输出 sink 的拉取节奏
-  //（启动追平 + 主线程转发抖动 vs 2.7ms 渲染量子）主导该值，逐量子
-  // 硬预算属真实设备节奏（P5 真机 Smoke）；E2E 界定为饥饿崩溃检测：
-  // 健康管道按到达前沿播放（每次帧间隙至多数次空槽，≈ 帧数量级），
-  // 供给断流则按渲染量子率累计（每秒数百）。
-  expect(diagnostics.underruns).toBeLessThan(mediaStats?.acceptedFrames ?? 0);
+  // underruns ≤ 8：缓冲占用按未播执行的修复后，完整语音（含 >2s 长音频）
+  // 预缓冲垫层全程保持，实测 0——历史缺陷（累计写入判容量 → 第 100 帧
+  // 起截断）曾以 82 次欠载的形式暴露（截断饿死播放），该界即回归防线。
+  expect(diagnostics.underruns).toBeLessThanOrEqual(8);
 
   // 4. 硬同步偏差：各 Lane startedAtStageUs − targetLocalUs ≤ 50ms。
   const skewsMs = laneStarts.map(

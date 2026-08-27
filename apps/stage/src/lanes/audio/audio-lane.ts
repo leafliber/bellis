@@ -55,6 +55,9 @@ interface AudioScene {
   /** start() 完成回调（播放真实完成 / EOS / 停止时兑现）。 */
   completions: Array<() => void>;
   startedAtUs: bigint | null;
+  /** closed 已到达（尾帧宽限窗计时中；期间继续接收尾帧）。 */
+  closing: boolean;
+  /** EOS 已转发给 Worklet（宽限期过后才置位；此后拒绝追加）。 */
   eos: boolean;
   ended: boolean;
   /** EOS 尾帧宽限窗与完成兜底的等待句柄。 */
@@ -124,6 +127,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
       waiters: [],
       completions: [],
       startedAtUs: null,
+      closing: false,
       eos: false,
       ended: false,
       timers: [],
@@ -195,21 +199,23 @@ export class AudioLaneAdapter implements StageLaneAdapter {
   }
 
   /**
-   * 流终止（media.stream.closed 到达）：经尾帧宽限窗后向 Worklet 转发
-   * EOS。零帧流立即完成；否则完成信号 = Worklet ended 回报，兜底截止
-   * = start 时刻 + 已缓冲时长 + 宽限。
+   * 流终止（media.stream.closed 到达）：先进入 closing（尾帧宽限窗，
+   * 期间跨连接尾帧继续入账），宽限期过后才向 Worklet 转发 EOS 并拒绝
+   * 后续追加。零帧流在宽限期后立即完成；否则完成信号 = Worklet ended
+   * 回报，兜底截止 = start 时刻 + 已缓冲时长 + 宽限。
    */
   endOfSpeech(sceneId: string): void {
     if (this.#closed) {
       return;
     }
     const record = this.#sceneOf(sceneId);
-    if (record.eos) {
+    if (record.closing || record.eos) {
       return;
     }
-    record.eos = true;
+    record.closing = true;
     const postEndAt = this.#clock.nowUs() + EOS_TAIL_GRACE_US;
     this.#sleep(postEndAt, record, () => {
+      record.eos = true;
       if (record.frames === 0 || record.ended) {
         this.#settle(sceneId, record);
         return;
@@ -231,8 +237,9 @@ export class AudioLaneAdapter implements StageLaneAdapter {
     if (record.eos && (record.frames === 0 || record.ended)) {
       return;
     }
-    if (record.eos) {
-      // EOS 已到但尾帧宽限窗未过：兜底截止（窗内 postEnd 仍会触发）。
+    if (record.closing || record.eos) {
+      // closed 已到（宽限窗计未过/已过未完成）：兜底截止，窗内的
+      // postEnd/ended 仍会正常触发完成。
       const deadline =
         record.startedAtUs + record.playedUs + EOS_TAIL_GRACE_US + EOS_COMPLETION_GRACE_US;
       this.#sleep(deadline, record, () => this.#settle(sceneId, record));
