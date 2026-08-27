@@ -43,13 +43,15 @@ function insertLifecycle(
     readonly occurredAtMs: number;
     readonly payload?: string;
     readonly payloadVersion?: number;
+    readonly aggregateSeq?: string;
+    readonly payloadSceneId?: string;
   },
 ): void {
   const payload =
     input.payload ??
     JSON.stringify({
       payloadVersion: input.payloadVersion ?? 1,
-      sceneId: sceneId(input.n),
+      sceneId: input.payloadSceneId ?? sceneId(input.n),
       cycleId: cycleId(input.n),
       from: "committing",
       ...(input.to === undefined ? {} : { to: input.to }),
@@ -60,10 +62,10 @@ function insertLifecycle(
         trace_id, occurred_at_ms, schema_version, payload_json)
      VALUES (?, ?, 'scene_lifecycle', ?, ?, ?, ?, 1, ?)`,
   ).run(
-    `lifecycle-upgrade-${input.n}-${input.occurredAtMs}`,
+    `lifecycle-upgrade-${input.n}-${input.occurredAtMs}-${input.aggregateSeq ?? "x"}`,
     SESSION_ID,
     `scene-lifecycle:${sceneId(input.n)}`,
-    String(input.occurredAtMs),
+    input.aggregateSeq ?? String(input.occurredAtMs),
     TRACE.traceId,
     input.occurredAtMs,
     payload,
@@ -222,6 +224,18 @@ describe("Migration 集成", () => {
         occurredAtMs: 2500,
         payloadVersion: 2, // 未知 payload 版本 → unknown（不静默当作已知格式）
       });
+      // aggregate sequence 权威（与写侧一致）：seq=2/completed 墙钟反而
+      // 更早（2800 < 3000）——墙钟排序会错误保留 running 行。
+      insertLifecycle(db, { n: 7, to: "running", occurredAtMs: 3000, aggregateSeq: "1" });
+      insertLifecycle(db, { n: 7, to: "completed", occurredAtMs: 2800, aggregateSeq: "2" });
+      // 伪 UUID payload（36 位形状但非十六进制）：不可信 → unknown，
+      // sceneId 归属回退 aggregate 前缀（绝不被采信为已知 running）。
+      insertLifecycle(db, {
+        n: 8,
+        to: "running",
+        occurredAtMs: 2900,
+        payloadSceneId: "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+      });
     } finally {
       db.close();
     }
@@ -236,6 +250,7 @@ describe("Migration 集成", () => {
           state: "scheduled",
           updatedAtMs: 2000,
           durable: true,
+          durableCycleId: cycleId(1),
         },
         {
           sceneId: sceneId(2),
@@ -243,9 +258,32 @@ describe("Migration 集成", () => {
           state: "running",
           updatedAtMs: 2100,
           durable: false,
+          durableCycleId: null,
         },
-        { sceneId: sceneId(4), cycleId: null, state: "unknown", updatedAtMs: 2300, durable: false },
-        { sceneId: sceneId(6), cycleId: null, state: "unknown", updatedAtMs: 2500, durable: false },
+        {
+          sceneId: sceneId(4),
+          cycleId: null,
+          state: "unknown",
+          updatedAtMs: 2300,
+          durable: false,
+          durableCycleId: null,
+        },
+        {
+          sceneId: sceneId(6),
+          cycleId: null,
+          state: "unknown",
+          updatedAtMs: 2500,
+          durable: false,
+          durableCycleId: null,
+        },
+        {
+          sceneId: sceneId(8),
+          cycleId: null,
+          state: "unknown",
+          updatedAtMs: 2900,
+          durable: false,
+          durableCycleId: null,
+        },
       ]);
     });
     const db2 = openState();
@@ -262,7 +300,7 @@ describe("Migration 集成", () => {
             "SELECT COUNT(*) AS n FROM session_records WHERE record_type = 'scene_lifecycle'",
           )
           .get(),
-      ).toEqual({ n: 7 });
+      ).toEqual({ n: 10 });
     } finally {
       db2.close();
     }

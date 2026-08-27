@@ -288,11 +288,19 @@ export class Phase2RuntimeHost {
       if (row.state === "committing" && row.sceneId !== committed.sceneId && !row.durable) {
         continue;
       }
-      const cycleId = row.cycleId ?? (row.sceneId === committed.sceneId ? committed.cycleId : null);
+      // cycleId 证据链：payload（可信时）→ durable 的 scenes 行（payload
+      // 不可验证但提交已落库）→ 锚点 Scene。durable 的 unknown 行据此
+      // 构造 v2 uncertain，绝不因证据不可验证而静默降级 v1；非 durable
+      // 且无任何 cycleId 证据 = 提交从未生效（无可驱动的 Stage 副作用）。
+      const cycleId =
+        row.cycleId ??
+        row.durableCycleId ??
+        (row.sceneId === committed.sceneId ? committed.cycleId : null);
       if (cycleId === null) {
         this.#options.logger?.log("warn", "phase2_recovery_evidence_incomplete", {
           sceneId: row.sceneId,
           state: row.state,
+          durable: row.durable,
         });
         continue;
       }

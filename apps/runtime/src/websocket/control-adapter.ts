@@ -569,15 +569,18 @@ export class ControlConnection {
       },
     );
     // Phase 2 装饰（同步，预加载恢复状态）：存在活动 Scene 对账视图时
-    // 升级 v2 形态；快照必须成功入队的不变量不受装饰影响。
+    // 升级 v2 形态。装饰失败 = 对账视图不可构造：**fail-closed**（调用方
+    // 以 1011 失败关闭）——继续发送 v1 冒充对账结果会让 Stage 停在对账
+    // 前的旧视图上（历史缺陷：吞错降级 v1）。
     if (this.#snapshotDecorator !== null) {
       try {
         snapshot = this.#snapshotDecorator(snapshot, this.#recoveryState, this.#phase2ActiveScenes);
       } catch (error) {
-        this.#logger.log("warn", "runtime_snapshot_decorate_failed", {
+        this.#logger.log("error", "runtime_snapshot_decorate_failed", {
           sessionId: this.#logical.sessionId,
           error: error instanceof Error ? error.message : "unknown",
         });
+        return false;
       }
     }
     const enqueued = session.enqueueServerMessage({

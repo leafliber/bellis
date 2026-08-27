@@ -760,14 +760,26 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
       state: string;
       updatedAtMs: number;
       durable: boolean;
+      durableCycleId: string | null;
     }>,
   ): ActiveSceneRow {
+    const durable = overrides.durable ?? true;
     return {
       sceneId: overrides.sceneId ?? RECOVERY.lastCommittedScene.sceneId,
-      cycleId: overrides.cycleId ?? RECOVERY.lastCommittedScene.cycleId,
+      // 显式 null 是有意义的（payload 不可验证），只有缺省才回退锚点。
+      cycleId:
+        overrides.cycleId === undefined ? RECOVERY.lastCommittedScene.cycleId : overrides.cycleId,
       state: overrides.state ?? "scheduled",
       updatedAtMs: overrides.updatedAtMs ?? 1000,
-      durable: overrides.durable ?? true,
+      durable,
+      durableCycleId:
+        overrides.durableCycleId === undefined
+          ? durable
+            ? ((overrides.cycleId === undefined
+                ? RECOVERY.lastCommittedScene.cycleId
+                : overrides.cycleId) ?? RECOVERY.lastCommittedScene.cycleId)
+            : null
+          : overrides.durableCycleId,
     };
   }
 
@@ -841,6 +853,38 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
       host.decorateSnapshot(baseSnapshot(), RECOVERY, [indexRow({ state: "unknown" })])
         .schemaVersion,
     ).toBe(2);
+  });
+
+  it("durable 的 unknown 行（cycleId 证据缺失）：以 scenes 行 cycleId 构造 v2 uncertain，绝不降级 v1", () => {
+    const host = createHost();
+    // 较早的 durable Scene 停在 unknown（payload 不可验证），最新提交
+    // Scene 已终态（索引无行）——cycleId 从 durable 的 scenes 行回退。
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+      indexRow({
+        sceneId: "44444444-4444-4444-8444-4444440000dd",
+        cycleId: null, // payload 不可验证：索引行无 cycleId
+        state: "unknown",
+        durable: true,
+        durableCycleId: "33333333-3333-4333-8333-33333333300d",
+        updatedAtMs: 700,
+      }),
+    ]);
+    expect(decorated.schemaVersion).toBe(2);
+    expect((activeOf(decorated) as { sceneId?: string } | null)?.sceneId).toBe(
+      "44444444-4444-4444-8444-4444440000dd",
+    );
+    // 非 durable 且无任何 cycleId 证据 = 提交从未生效（无可驱动的 Stage
+    // 副作用）：跳过并告警，不虚构视图。
+    const noEvidence = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+      indexRow({
+        sceneId: "44444444-4444-4444-8444-4444440000ee",
+        cycleId: null,
+        state: "unknown",
+        durable: false,
+        durableCycleId: null,
+      }),
+    ]);
+    expect(noEvidence.schemaVersion).toBe(1);
   });
 
   it("非锚点 committing 由 durable 位逐候选裁决：未 durable → 忽略（v1）；durable → 未证终态（v2）", () => {

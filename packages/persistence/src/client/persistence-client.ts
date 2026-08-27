@@ -79,7 +79,8 @@ export interface RecoveryState {
 
 /**
  * 活动 Scene 索引行（scene-execution.md §8 对账视图来源）。
- * durable = scenes 表存在已提交行（committing 歧义的裁决证据）。
+ * durable = scenes 表存在已提交行（committing 歧义的裁决证据）；
+ * durableCycleId = 该已提交行的 cycle_id（unknown 行的 cycleId 回退）。
  */
 export interface ActiveSceneRow {
   readonly sceneId: string;
@@ -87,6 +88,7 @@ export interface ActiveSceneRow {
   readonly state: string;
   readonly updatedAtMs: number;
   readonly durable: boolean;
+  readonly durableCycleId: string | null;
 }
 
 export interface AdvanceServerSeqInput {
