@@ -166,7 +166,8 @@ export const MediaStreamClosedPayloadSchema = extensibleJsonObject({
    * 关闭边界（可选）：发送侧已交送传输层的最大帧 Sequence。closed 经
    * Control 连接与帧（Media WebSocket）跨连接送达，无全局顺序保证——
    * 先到的 closed 只标记边界：sequence ≤ finalSequence 且严格连续的
-   * 迟到帧仍可入账，超出即拒。缺省 = 立即关闭（兼容既有语义）。
+   * 迟到帧仍可入账；追平边界或收到首个违规/越界帧后窗口终结（此后
+   * 一切帧拒绝，帧级状态立即释放）。缺省 = 立即关闭（兼容既有语义）。
    */
   finalSequence: DecimalStringSchema.optional(),
 });

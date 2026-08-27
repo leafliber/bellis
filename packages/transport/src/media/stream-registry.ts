@@ -10,7 +10,8 @@ import type { MediaFrame, MediaKindName } from "./frame-codec.js";
  * - 校验：Session 一致、Stream 已注册、contentType 一致、Sequence 从 0 起
  *   严格连续递增（重复/乱序/缺口都是 sequence_violation）、frameId 不重复。
  * - 关闭后的 Stream 不能复活；总 Stream 数与并发数有上限，frameId 集合
- *   随每 Stream 帧数上限有界。
+ *   随每 Stream 帧数上限有界。带边界的关闭只在「仍有尾帧可等」期间保留
+ *   帧级状态：追平边界或首个违规即压缩为轻量墓碑（窗口不无限驻留）。
  * - Deadline：Header.targetTimeUs 已过（含可配置宽限）且帧不再可用时拒绝。
  *   nowUs 由调用方注入（Runtime 单调微秒）。
  * - 连接关闭时 closeAll() 释放全部 Stream 状态。
@@ -54,7 +55,8 @@ export interface CloseStreamOptions {
   /**
    * 关闭边界（可选）：closed 与帧跨连接送达无全局顺序——携带边界时，
    * sequence ≤ finalSequence 且严格连续的迟到帧仍可入账（尾帧乱序
-   * 不丢），超出边界即拒。缺省 = 立即关闭。
+   * 不丢）。窗口生命周期有界：追平边界、或收到首个违规/越界帧即压缩
+   * 为轻量墓碑（后续一切帧拒绝）。缺省 = 立即关闭。
    */
   readonly finalSequence?: bigint;
 }
@@ -66,20 +68,35 @@ interface StreamRecord {
   lastSequence: bigint | null;
   readonly frameIds: Set<string>;
   closed: boolean;
-  /** 关闭边界（null = 立即关闭；携带边界时保留 lastSequence 续收尾帧）。 */
+  /** 关闭边界（null = 无待收尾帧；携带边界时保留 lastSequence 续收尾帧）。 */
   finalSequence: bigint | null;
   frameCount: number;
 }
 
-/** 关闭后只保留禁止复活的墓碑标记；带边界的关闭保留续收所需水位。 */
-function toTombstone(record: StreamRecord, finalSequence: bigint | null): void {
+/**
+ * 压缩为轻量墓碑（禁止复活）：帧级状态（lastSequence/frameIds/计数）全部
+ * 释放。带边界的关闭在两种情况下也立即压缩：
+ * - 关闭时已追平或超出边界（lastSequence ≥ finalSequence，无尾帧可等）；
+ * - 尾帧窗口内发生首个协议违规——窗口即终结（严格连续性意味着后续帧
+ *   永不可能合法入账，保留状态只剩内存占用）。
+ */
+function toTombstone(record: StreamRecord): void {
+  record.closed = true;
+  record.finalSequence = null;
+  record.lastSequence = null;
+  record.frameIds.clear();
+  record.frameCount = 0;
+}
+
+/** 带边界关闭：保留续收乱序尾帧所需的帧级状态（仅当仍有尾帧可等）。 */
+function toBoundaryTombstone(record: StreamRecord, finalSequence: bigint): void {
+  const caughtUp = record.lastSequence !== null && record.lastSequence >= finalSequence;
+  if (caughtUp || finalSequence < 0n) {
+    toTombstone(record);
+    return;
+  }
   record.closed = true;
   record.finalSequence = finalSequence;
-  if (finalSequence === null) {
-    record.lastSequence = null;
-    record.frameIds.clear();
-    record.frameCount = 0;
-  }
 }
 
 const DEFAULT_MAX_OPEN_STREAMS = 8;
@@ -184,15 +201,28 @@ export class MediaStreamRegistry {
     if (record === undefined) {
       return reject("unknown_stream", "stream is not registered on this connection");
     }
+    // 已关闭 Stream 的任何拒帧都终结尾帧窗口：严格连续性下后续帧不可能
+    // 再合法入账（缺口/越界/重复/迟到都无合法延续），保留帧级状态只剩
+    // 内存占用——立即压缩为轻量墓碑。
+    const rejectClosed = (code: MediaStreamRejectCode, message: string) => {
+      const result = reject(code, message);
+      if (record.closed) {
+        toTombstone(record);
+      }
+      return result;
+    };
     // 内容一致性与开放 Stream 同规（墓碑尾帧不得绕过）。
     if (frame.header.contentType !== record.contentType) {
-      return reject(
+      return rejectClosed(
         "content_type_mismatch",
         "frame contentType differs from the registered stream",
       );
     }
     if (frame.mediaKind !== record.mediaKind) {
-      return reject("media_kind_mismatch", "frame media kind differs from the registered stream");
+      return rejectClosed(
+        "media_kind_mismatch",
+        "frame media kind differs from the registered stream",
+      );
     }
     const sequence = parseDecimalString(frame.header.sequence);
     const expected = record.lastSequence === null ? 0n : record.lastSequence + 1n;
@@ -205,7 +235,7 @@ export class MediaStreamRegistry {
         sequence !== expected ||
         sequence > record.finalSequence
       ) {
-        return reject("stream_closed", "stream is closed; frames are no longer accepted");
+        return rejectClosed("stream_closed", "stream is closed; frames are no longer accepted");
       }
     } else if (sequence !== expected) {
       return reject(
@@ -214,20 +244,24 @@ export class MediaStreamRegistry {
       );
     }
     if (record.frameIds.has(frame.header.frameId)) {
-      return reject("duplicate_frame_id", "frameId was already used in this stream");
+      return rejectClosed("duplicate_frame_id", "frameId was already used in this stream");
     }
     if (frame.header.targetTimeUs !== undefined && nowUs !== null) {
       const targetUs = parseDecimalString(frame.header.targetTimeUs);
       if (nowUs - targetUs >= this.#deadlineGraceUs) {
-        return reject("deadline_exceeded", "frame target time has passed");
+        return rejectClosed("deadline_exceeded", "frame target time has passed");
       }
     }
     if (record.frameCount >= this.#maxFramesPerStream) {
-      return reject("frame_limit_reached", "stream exceeded its frame budget");
+      return rejectClosed("frame_limit_reached", "stream exceeded its frame budget");
     }
     record.lastSequence = sequence;
     record.frameIds.add(frame.header.frameId);
     record.frameCount += 1;
+    if (record.closed && record.finalSequence !== null && sequence === record.finalSequence) {
+      // 追平边界：窗口使命完成（后续帧只可能越界），压缩为轻量墓碑。
+      toTombstone(record);
+    }
     return { status: "accepted", lastSequence: sequence };
   }
 
@@ -241,8 +275,14 @@ export class MediaStreamRegistry {
       return { status: "already_closed" };
     }
     // 关闭即释放帧级状态（frameId 集合等），只留轻量墓碑防止复活；
-    // 带边界的关闭保留 lastSequence/计数以续收乱序尾帧（帧数上限不变）。
-    toTombstone(record, options?.finalSequence ?? null);
+    // 否则顺序创建大量流时 frameId 集合会驻留到 closeAll()。携带边界
+    // 且仍有尾帧可等时保留水位续收乱序尾帧（见 toBoundaryTombstone）。
+    const finalSequence = options?.finalSequence ?? null;
+    if (finalSequence === null) {
+      toTombstone(record);
+    } else {
+      toBoundaryTombstone(record, finalSequence);
+    }
     return { status: "closed" };
   }
 

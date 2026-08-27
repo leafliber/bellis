@@ -157,7 +157,13 @@ de ad be ef   payload（4 字节）
 - 关闭（Control `media.stream.closed` 或服务端主动）：关闭后的 Stream 不能
   复活（同 `streamId` 再注册被拒绝）。关闭时**立即释放帧级状态**
   （frameId 去重集合、Sequence 游标、帧计数），只保留轻量墓碑防止复活；
-  frameId 集合不会驻留到连接结束。
+  frameId 集合不会驻留到连接结束。唯一例外是**携带关闭边界**
+  （`finalSequence`，Phase 2）：closed 经 Control 与帧（Media）跨连接送达
+  无全局顺序，先到的 closed 保留水位继续验收 sequence ≤ 边界且严格连续
+  的迟到尾帧（其余校验与开放 Stream 完全一致）。尾帧窗口的生命周期有界：
+  追平边界、或收到首个违规/越界/迟到被拒帧即压缩为轻量墓碑（此后一切
+  帧拒绝，帧级状态立即释放）——帧级状态的驻留时间以「实际未达的尾帧」
+  为上界，不随连接驻留。
 - 资源上限（默认，可配置）：并发打开 Stream 8 个；单连接生命周期总 Stream
   1024 个。连接关闭时 `closeAll()` 释放全部状态。
 - **Media Stream 不重放**：重连 / Snapshot 后客户端必须重新注册 Stream。
