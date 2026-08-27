@@ -69,8 +69,9 @@ export interface ControlResumePlan {
   readonly recoveryState: RecoveryState | null;
   /**
    * Phase 2 跨进程对账证据（server 装配预加载）：活动 Scene 索引行
-   * （写侧同事务维护）。null = 无 Phase 2 装配或索引读取失败；快照
-   * 装饰据此在不虚构状态的前提下给出 uncertain 视图。
+   * （写侧同事务维护）。索引读取失败由 resume loader 上抛（1011 失败
+   * 关闭）——null 只可能来自无 Phase 2 装配或直连测试，Host 对 null
+   * 走保守 uncertain 视图，绝不误报 v1。
    */
   readonly phase2ActiveScenes?: readonly ActiveSceneRow[] | null;
   /**

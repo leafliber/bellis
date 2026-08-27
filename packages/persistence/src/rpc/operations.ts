@@ -224,6 +224,7 @@ const ActiveSceneRowSchema = z.object({
   cycleId: z.string().min(1).max(128).nullable(),
   state: z.string().min(1).max(32),
   updatedAtMs: z.number().int().nonnegative(),
+  durable: z.boolean(),
 });
 
 const ActiveScenesResultSchema = z.object({ scenes: z.array(ActiveSceneRowSchema) });

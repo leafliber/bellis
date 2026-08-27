@@ -191,15 +191,31 @@ function sceneIdFromLifecycleAggregate(aggregateId: string | undefined): string 
   return sceneId.length > 0 ? sceneId : null;
 }
 
-/** 活动 Scene 索引查询（跨进程恢复的对账权威来源）。 */
-export function listActiveScenes(
-  db: SqliteDatabase,
-  sessionId: string,
-): { sceneId: string; cycleId: string | null; state: string; updatedAtMs: number }[] {
+/**
+ * 活动 Scene 索引查询（跨进程恢复的对账权威来源）。
+ *
+ * durable = scenes 表存在同 Session 的已提交行：committing 状态的歧义
+ * （崩溃在 durable 前后）由它裁决——durable 的 committing 是「已提交但
+ * 后续生命周期未落库」（按未证终态处理），非 durable 的 committing 是
+ * 「提交从未生效」（Scene 从未存在，可安全忽略）。
+ */
+export interface ActiveSceneIndexRow {
+  readonly sceneId: string;
+  readonly cycleId: string | null;
+  readonly state: string;
+  readonly updatedAtMs: number;
+  readonly durable: boolean;
+}
+
+export function listActiveScenes(db: SqliteDatabase, sessionId: string): ActiveSceneIndexRow[] {
   return db
     .prepare(
-      `SELECT scene_id, cycle_id, state, updated_at_ms FROM active_scenes
-        WHERE session_id = ? ORDER BY updated_at_ms, scene_id`,
+      `SELECT a.scene_id, a.cycle_id, a.state, a.updated_at_ms,
+          CASE WHEN s.scene_id IS NULL THEN 0 ELSE 1 END AS durable
+        FROM active_scenes a
+        LEFT JOIN scenes s ON s.scene_id = a.scene_id AND s.session_id = a.session_id
+        WHERE a.session_id = ?
+        ORDER BY a.updated_at_ms, a.scene_id`,
     )
     .all(sessionId)
     .map((row) => {
@@ -212,6 +228,7 @@ export function listActiveScenes(
             : String(record["cycle_id"]),
         state: String(record["state"]),
         updatedAtMs: Number(record["updated_at_ms"]),
+        durable: Number(record["durable"]) === 1,
       };
     });
 }

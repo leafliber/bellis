@@ -227,8 +227,10 @@ async function loadControlResumePlan(
 }
 
 /**
- * Phase 2 跨进程对账证据预加载：存在落库 Scene 时读取其生命周期 Record
- * （同步快照装饰的输入）。读取失败不阻塞恢复（无证据按 uncertain 处理）。
+ * Phase 2 跨进程对账证据预加载：存在落库 Scene 时读取活动 Scene 索引
+ * （同步快照装饰的输入）。读取失败**向上传播**（连接以 1011 失败关闭）：
+ * 「无法证明」绝不能被误报成「没有活动 Scene」——数据库繁忙/Worker 故障
+ * 时静默回落 v1 会让 Stage 停在对账前的旧视图上。
  */
 async function loadControlResume(
   ctx: ServerContext,
@@ -242,15 +244,19 @@ async function loadControlResume(
   if (committed === undefined || committed === null) {
     return plan;
   }
+  // 活动 Scene 索引（写侧同事务维护的权威对账来源）：「任一未证终态
+  // 即 v2」不受记录窗口挤出影响——长期在途的旧 Scene 不会因新 Scene
+  // 流量被遗忘（历史缺陷：固定窗口无论升降序都可能遗漏）。失败上抛
+  // （1011 失败关闭）且必须回滚导出状态 claim：一次瞬态失败不可把
+  // 同进程导出状态不可逆消费掉（与 loadControlResumePlan 同一不变量）。
+  let activeScenes: Awaited<ReturnType<typeof ctx.persistence.listActiveScenes>>;
   try {
-    // 活动 Scene 索引（写侧同事务维护的权威对账来源）：「任一未证终态
-    // 即 v2」不受记录窗口挤出影响——长期在途的旧 Scene 不会因新 Scene
-    // 流量被遗忘（历史缺陷：固定窗口无论升降序都可能遗漏）。
-    const activeScenes = await ctx.persistence.listActiveScenes(logical.sessionId);
-    return { ...plan, phase2ActiveScenes: [...activeScenes] };
-  } catch {
-    return { ...plan, phase2ActiveScenes: null };
+    activeScenes = await ctx.persistence.listActiveScenes(logical.sessionId);
+  } catch (error) {
+    plan.claim?.rollback();
+    throw error;
   }
+  return { ...plan, phase2ActiveScenes: [...activeScenes] };
 }
 
 function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void {

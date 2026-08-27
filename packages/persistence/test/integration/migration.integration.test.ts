@@ -6,7 +6,16 @@ import { createPersistenceClientForTesting } from "../../src/client/persistence-
 import type { PersistenceClient } from "../../src/index.js";
 import { STATE_MIGRATIONS, TELEMETRY_MIGRATIONS } from "../../src/migrations/registry.js";
 import type { MigrationDefinition } from "../../src/migrations/definition.js";
-import { WORKER_FIXTURE, cleanupTempDataDirectory, createTempDataDirectory } from "../helpers.js";
+import {
+  SESSION_ID,
+  TRACE,
+  WORKER_FIXTURE,
+  cleanupTempDataDirectory,
+  createTempDataDirectory,
+  cycleId,
+  makeScene,
+  sceneId,
+} from "../helpers.js";
 
 /**
  * 真实 Worker + 真实临时 SQLite 文件的 Migration 集成测试（docs/protocols/persistence-and-recovery.md）：
@@ -23,6 +32,42 @@ function openState(): DatabaseSync {
   const db = new DatabaseSync(join(dataDirectory, "state.db"));
   db.exec("PRAGMA busy_timeout = 3000;");
   return db;
+}
+
+/** 原始生命周期 Record 落库（模拟 0003 之前构建的写侧形态）。 */
+function insertLifecycle(
+  db: DatabaseSync,
+  input: {
+    readonly n: number;
+    readonly to?: string;
+    readonly occurredAtMs: number;
+    readonly payload?: string;
+    readonly payloadVersion?: number;
+  },
+): void {
+  const payload =
+    input.payload ??
+    JSON.stringify({
+      payloadVersion: input.payloadVersion ?? 1,
+      sceneId: sceneId(input.n),
+      cycleId: cycleId(input.n),
+      from: "committing",
+      ...(input.to === undefined ? {} : { to: input.to }),
+    });
+  db.prepare(
+    `INSERT INTO session_records
+       (record_id, session_id, record_type, aggregate_id, aggregate_seq,
+        trace_id, occurred_at_ms, schema_version, payload_json)
+     VALUES (?, ?, 'scene_lifecycle', ?, ?, ?, ?, 1, ?)`,
+  ).run(
+    `lifecycle-upgrade-${input.n}-${input.occurredAtMs}`,
+    SESSION_ID,
+    `scene-lifecycle:${sceneId(input.n)}`,
+    String(input.occurredAtMs),
+    TRACE.traceId,
+    input.occurredAtMs,
+    payload,
+  );
 }
 
 async function withClient(
@@ -132,6 +177,95 @@ describe("Migration 集成", () => {
         trace: { traceId: "0123456789abcdef0123456789abcdef" },
       });
     });
+  });
+
+  it("v2 → v3 真实升级：0003 回填既有生命周期事实（五轮评审修复 2）", async () => {
+    dataDirectory = createTempDataDirectory("bellis-p2-mig-upgrade-");
+    // ---- 旧版构建（0001/0002）建库：提交 Scene A + 落库生命周期事实 ----
+    await withClient(
+      {
+        state: [
+          STATE_MIGRATIONS[0] as MigrationDefinition,
+          STATE_MIGRATIONS[1] as MigrationDefinition,
+        ],
+      },
+      async (client) => {
+        await client.migrate();
+        await client.ensureSession({ sessionId: SESSION_ID, createdAtMs: 1, trace: TRACE });
+        await client.commitScene({
+          sceneId: sceneId(1),
+          cycleId: cycleId(1),
+          sessionId: SESSION_ID,
+          scene: makeScene({ sceneId: sceneId(1), cycleId: cycleId(1) }),
+          idempotencyKey: "upgrade-1",
+          requestFingerprint: "fp-1",
+          watermarks: [],
+          outbox: [],
+          trace: TRACE,
+        });
+      },
+    );
+    // 生命周期 Record 以原始 SQL 落库：0003 之前的构建没有索引写侧
+    //（现 repo 的 appendRecord 在 v2 库会因 active_scenes 缺表而失败，
+    // 正如旧版二进制不含索引写侧）。
+    const db = openState();
+    try {
+      insertLifecycle(db, { n: 1, to: "scheduled", occurredAtMs: 2000 }); // 在途（已提交）
+      insertLifecycle(db, { n: 2, to: "running", occurredAtMs: 2100 }); // 在途（未提交）
+      insertLifecycle(db, { n: 3, to: "completed", occurredAtMs: 2200 }); // 终态 → 无行
+      insertLifecycle(db, { n: 4, occurredAtMs: 2300, payload: "not json" }); // 坏 payload → unknown
+      insertLifecycle(db, { n: 5, to: "scheduled", occurredAtMs: 1000 }); // 最新记录为终态
+      insertLifecycle(db, { n: 5, to: "completed", occurredAtMs: 2400 }); //   → 无行
+      insertLifecycle(db, {
+        n: 6,
+        to: "running",
+        occurredAtMs: 2500,
+        payloadVersion: 2, // 未知 payload 版本 → unknown（不静默当作已知格式）
+      });
+    } finally {
+      db.close();
+    }
+    // ---- 升级：完整注册表只应用 0003 并回填 ----
+    await withClient(undefined, async (client) => {
+      await client.migrate();
+      const active = await client.listActiveScenes(SESSION_ID);
+      expect(active).toEqual([
+        {
+          sceneId: sceneId(1),
+          cycleId: cycleId(1),
+          state: "scheduled",
+          updatedAtMs: 2000,
+          durable: true,
+        },
+        {
+          sceneId: sceneId(2),
+          cycleId: cycleId(2),
+          state: "running",
+          updatedAtMs: 2100,
+          durable: false,
+        },
+        { sceneId: sceneId(4), cycleId: null, state: "unknown", updatedAtMs: 2300, durable: false },
+        { sceneId: sceneId(6), cycleId: null, state: "unknown", updatedAtMs: 2500, durable: false },
+      ]);
+    });
+    const db2 = openState();
+    try {
+      expect(db2.prepare("SELECT version FROM schema_migrations ORDER BY version").all()).toEqual([
+        { version: 1 },
+        { version: 2 },
+        { version: 3 },
+      ]);
+      // 历史生命周期事实原样保留（回填只读不改写）。
+      expect(
+        db2
+          .prepare(
+            "SELECT COUNT(*) AS n FROM session_records WHERE record_type = 'scene_lifecycle'",
+          )
+          .get(),
+      ).toEqual({ n: 7 });
+    } finally {
+      db2.close();
+    }
   });
 
   it("telemetry.db 具备底座表且与 state.db 相互独立", async () => {

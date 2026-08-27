@@ -238,12 +238,18 @@ export class Phase2RuntimeHost {
    * 跨进程对账视图构造参数；无对账价值（无落库/索引为空）返回 null。
    *
    * 证据规则（scene-execution.md §8）：
-   * - 活动Scene 索引由持久化层在 scene_lifecycle Record 落库的同事务内
+   * - 活动 Scene 索引由持久化层在 scene_lifecycle Record 落库的同事务内
    *   维护（非终态 UPSERT、可证终态 DELETE、payload 不可验证保守保留
    *   为 unknown）——「任一未证终态」直接由索引回答，不受记录窗口
    *   挤出影响；
-   * - "committing" 存在落库歧义（崩溃可发生在 durable 前后）：只有
-   *   最后落库 Scene 以 RecoveryState 落库事实证明其已提交；
+   * - "committing" 存在落库歧义（崩溃可发生在 durable 前后）：lastCommittedScene
+   *   只证明最新提交者，不能证明其它 Scene 未提交——非锚点的 committing
+   *   行由索引行的 durable 位（scenes 表存在已提交行）逐候选裁决：
+   *   durable → 已提交但后续生命周期未落库（未证终态，计入）；非 durable
+   *   → 提交从未生效（Scene 从未存在，安全忽略）；
+   * - 索引不可读（null，防御路径：装配层 loader 失败已 fail-closed）：
+   *   「无法证明」绝不误报为「无活动」——存在最后落库 Scene 即以锚点
+   *   保守构造 v2 uncertain；
    * - unknown 状态 = payload 版本不可验证：绝不静默当作已知格式；
    *   无法构造合法视图（cycleId 未知且非锚点 Scene）时跳过并告警。
    */
@@ -261,9 +267,25 @@ export class Phase2RuntimeHost {
     if (committed === null) {
       return null;
     }
+    const uncertainView = (sceneId: string, cycleId: string) => ({
+      reason: "replay_gap" as const,
+      sessionStatus: "ready" as const,
+      runtimeVersion: this.#options.runtimeVersion ?? "unknown",
+      generatedAtMs: Date.now(),
+      activeScene: {
+        sceneId,
+        cycleId,
+        executionState: "uncertain" as const,
+        outcomeCertain: false,
+        requiresReprepare: true,
+      },
+    });
+    if (activeScenes === null) {
+      return uncertainView(committed.sceneId, committed.cycleId);
+    }
     const candidates: { sceneId: string; cycleId: string; updatedAtMs: number }[] = [];
-    for (const row of activeScenes ?? []) {
-      if (row.state === "committing" && row.sceneId !== committed.sceneId) {
+    for (const row of activeScenes) {
+      if (row.state === "committing" && row.sceneId !== committed.sceneId && !row.durable) {
         continue;
       }
       const cycleId = row.cycleId ?? (row.sceneId === committed.sceneId ? committed.cycleId : null);
@@ -282,19 +304,7 @@ export class Phase2RuntimeHost {
     const chosen = candidates.reduce((left, right) =>
       right.updatedAtMs > left.updatedAtMs ? right : left,
     );
-    return {
-      reason: "replay_gap",
-      sessionStatus: "ready",
-      runtimeVersion: this.#options.runtimeVersion ?? "unknown",
-      generatedAtMs: Date.now(),
-      activeScene: {
-        sceneId: chosen.sceneId,
-        cycleId: chosen.cycleId,
-        executionState: "uncertain",
-        outcomeCertain: false,
-        requiresReprepare: true,
-      },
-    };
+    return uncertainView(chosen.sceneId, chosen.cycleId);
   }
 
   submit(input: { signal: unknown; fixture: FakeModelFixture }): SubmissionOutcome {

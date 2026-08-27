@@ -759,6 +759,7 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
       cycleId: string | null;
       state: string;
       updatedAtMs: number;
+      durable: boolean;
     }>,
   ): ActiveSceneRow {
     return {
@@ -766,6 +767,7 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
       cycleId: overrides.cycleId ?? RECOVERY.lastCommittedScene.cycleId,
       state: overrides.state ?? "scheduled",
       updatedAtMs: overrides.updatedAtMs ?? 1000,
+      durable: overrides.durable ?? true,
     };
   }
 
@@ -783,9 +785,21 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
     expect(host.decorateSnapshot(baseSnapshot(), RECOVERY, []).schemaVersion).toBe(1);
   });
 
-  it("索引读取失败（null）→ 无证据可对账 → v1（不虚构）", () => {
+  it("索引不可读（null，防御路径）→ 无法证明≠无活动：以锚点保守 v2 uncertain", () => {
     const host = createHost();
-    expect(host.decorateSnapshot(baseSnapshot(), RECOVERY, null).schemaVersion).toBe(1);
+    // 装配层 loader 失败已 fail-closed（1011）；Host 对 null 仍走保守
+    // 路径：存在最后落库 Scene 就绝不误报 v1。
+    const decorated = host.decorateSnapshot(baseSnapshot(), RECOVERY, null);
+    expect(decorated.schemaVersion).toBe(2);
+    expect(activeOf(decorated)?.executionState).toBe("uncertain");
+    expect((activeOf(decorated) as { sceneId?: string } | null)?.sceneId).toBe(
+      RECOVERY.lastCommittedScene.sceneId,
+    );
+    // 无落库 Scene 且索引不可读 → 无可对账对象 → v1。
+    expect(
+      host.decorateSnapshot(baseSnapshot(), { ...RECOVERY, lastCommittedScene: null }, null)
+        .schemaVersion,
+    ).toBe(1);
   });
 
   it("uncertain 状态行保持对账视图 → v2", () => {
@@ -829,17 +843,37 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
     ).toBe(2);
   });
 
-  it("非锚点 Scene 的 committing 不作为对账依据（落库歧义）→ v1；锚点 committing → v2", () => {
+  it("非锚点 committing 由 durable 位逐候选裁决：未 durable → 忽略（v1）；durable → 未证终态（v2）", () => {
     const host = createHost();
+    // 提交从未生效（scenes 表无行，崩溃在 durable 之前）：Scene 从未
+    // 存在，安全忽略。
     expect(
       host.decorateSnapshot(baseSnapshot(), RECOVERY, [
         indexRow({
           sceneId: "44444444-4444-4444-8444-4444440000cc",
           cycleId: "33333333-3333-4333-8333-33333333300c",
           state: "committing",
+          durable: false,
         }),
       ]).schemaVersion,
     ).toBe(1);
+    // 已 durable 但后续生命周期 Record 未落库（崩溃窗口 / 写入失败，
+    // 之后其它 Scene 成为最后提交者）：lastCommittedScene 只证明最新
+    // 提交者，不证明此 Scene 未提交——按未证终态计入。
+    const durableStuck = host.decorateSnapshot(baseSnapshot(), RECOVERY, [
+      indexRow({
+        sceneId: "44444444-4444-4444-8444-4444440000cc",
+        cycleId: "33333333-3333-4333-8333-33333333300c",
+        state: "committing",
+        durable: true,
+        updatedAtMs: 800,
+      }),
+    ]);
+    expect(durableStuck.schemaVersion).toBe(2);
+    expect((activeOf(durableStuck) as { sceneId?: string } | null)?.sceneId).toBe(
+      "44444444-4444-4444-8444-4444440000cc",
+    );
+    // 锚点 committing（最后提交者本身）：RecoveryState 已证其 durable。
     expect(
       host.decorateSnapshot(baseSnapshot(), RECOVERY, [indexRow({ state: "committing" })])
         .schemaVersion,
