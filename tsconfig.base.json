@@ -28,7 +28,9 @@
       "@bellis/testkit": ["./packages/testkit/src/index.ts"],
       "@bellis/transport": ["./packages/transport/src/index.ts"],
       "@bellis/transport/browser": ["./packages/transport/src/browser/index.ts"],
-      "@bellis/persistence": ["./packages/persistence/src/index.ts"]
+      "@bellis/persistence": ["./packages/persistence/src/index.ts"],
+      "@bellis/tool-runtime": ["./packages/tool-runtime/src/index.ts"],
+      "@bellis/decision-loop": ["./packages/decision-loop/src/index.ts"]
     }
   }
 }

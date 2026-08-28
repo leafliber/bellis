@@ -1,0 +1,38 @@
+{
+  "name": "@bellis/tool-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tool Registry、DAG 编译、并行调度、资源锁、权限与缓存（Phase 3 / P3）",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src test",
+    "format:check": "oxfmt --check src test"
+  },
+  "dependencies": {
+    "@bellis/contracts": "workspace:*",
+    "@bellis/observability": "workspace:*",
+    "ajv": "8.20.0"
+  },
+  "devDependencies": {
+    "@bellis/testkit": "workspace:*",
+    "fast-check": "4.9.0",
+    "vitest": "4.1.11"
+  }
+}

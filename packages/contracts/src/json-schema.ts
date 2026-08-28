@@ -16,6 +16,16 @@ import { SceneExecutionStateSchema, ScenePlanSchema } from "./scene/scene-plan.j
 import { StageCapabilitiesSchema } from "./stage/stage-capabilities.js";
 import { AudienceBatchSchema } from "./signal/audience-batch.js";
 import { SignalSchema } from "./signal/signal.js";
+import { IngestedSignalSchema } from "./signal/ingested-signal.js";
+import { CycleSnapshotSchema, RecentUtteranceSchema } from "./decision/cycle-snapshot.js";
+import {
+  ToolCacheSourceSchema,
+  ToolExecutionModeSchema,
+  ToolOutcomeSchema,
+  ToolResultSchema,
+  ToolRunStateSchema,
+  ToolSemanticSchema,
+} from "./decision/tool-run.js";
 import { OutboxMessageSchema } from "./session/outbox-message.js";
 import {
   Phase1SessionSnapshotSchema,
@@ -29,6 +39,16 @@ import {
   Phase2SignalAcceptedPayloadSchema,
   SceneLifecyclePayloadSchema,
 } from "./session/phase-2-records.js";
+import {
+  Phase3BatchSealedPayloadSchema,
+  Phase3CycleAdoptedPayloadSchema,
+  Phase3CycleFinishedPayloadSchema,
+  Phase3ModelRequestPayloadSchema,
+  Phase3SignalIngestedPayloadSchema,
+  Phase3ToolRunPayloadSchema,
+  Phase3TurnFinishedPayloadSchema,
+  Phase3TurnStartedPayloadSchema,
+} from "./session/phase-3-records.js";
 import {
   ClientControlEnvelopeSchema,
   ControlEnvelopeSchema,
@@ -78,6 +98,15 @@ export const CONTRACT_SCHEMA_ENTRIES = {
   "action-frame": ActionFrameSchema,
   "tool-call": ToolCallSchema,
   "decision-packet": DecisionPacketSchema,
+  "ingested-signal": IngestedSignalSchema,
+  "recent-utterance": RecentUtteranceSchema,
+  "cycle-snapshot": CycleSnapshotSchema,
+  "tool-execution-mode": ToolExecutionModeSchema,
+  "tool-semantic": ToolSemanticSchema,
+  "tool-run-state": ToolRunStateSchema,
+  "tool-outcome": ToolOutcomeSchema,
+  "tool-cache-source": ToolCacheSourceSchema,
+  "tool-result": ToolResultSchema,
   cue: CueSchema,
   scene: SceneSchema,
   "scene-plan": ScenePlanSchema,
@@ -88,6 +117,14 @@ export const CONTRACT_SCHEMA_ENTRIES = {
   "phase2-decision-packet-payload": Phase2DecisionPacketPayloadSchema,
   "phase2-scene-plan-compiled-payload": Phase2ScenePlanCompiledPayloadSchema,
   "scene-lifecycle-payload": SceneLifecyclePayloadSchema,
+  "phase3-signal-ingested-payload": Phase3SignalIngestedPayloadSchema,
+  "phase3-batch-sealed-payload": Phase3BatchSealedPayloadSchema,
+  "phase3-turn-started-payload": Phase3TurnStartedPayloadSchema,
+  "phase3-turn-finished-payload": Phase3TurnFinishedPayloadSchema,
+  "phase3-cycle-adopted-payload": Phase3CycleAdoptedPayloadSchema,
+  "phase3-cycle-finished-payload": Phase3CycleFinishedPayloadSchema,
+  "phase3-model-request-payload": Phase3ModelRequestPayloadSchema,
+  "phase3-tool-run-payload": Phase3ToolRunPayloadSchema,
   "phase1-session-snapshot": Phase1SessionSnapshotSchema,
   "phase2-session-snapshot": Phase2SessionSnapshotSchema,
   "session-snapshot-union": SessionSnapshotUnionSchema,

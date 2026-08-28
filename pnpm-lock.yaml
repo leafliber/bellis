@@ -126,6 +126,25 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@26.2.0)(vite@8.2.2(@types/node@26.2.0))
 
+  packages/decision-loop:
+    dependencies:
+      '@bellis/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@bellis/tool-runtime':
+        specifier: workspace:*
+        version: link:../tool-runtime
+    devDependencies:
+      '@bellis/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@26.2.0)(vite@8.2.2(@types/node@26.2.0))
+
   packages/observability:
     dependencies:
       '@bellis/contracts':
@@ -189,6 +208,28 @@ importers:
         specifier: workspace:*
         version: link:../contracts
     devDependencies:
+      fast-check:
+        specifier: 4.9.0
+        version: 4.9.0
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@26.2.0)(vite@8.2.2(@types/node@26.2.0))
+
+  packages/tool-runtime:
+    dependencies:
+      '@bellis/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@bellis/observability':
+        specifier: workspace:*
+        version: link:../observability
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+    devDependencies:
+      '@bellis/testkit':
+        specifier: workspace:*
+        version: link:../testkit
       fast-check:
         specifier: 4.9.0
         version: 4.9.0

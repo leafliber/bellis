@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "string",
+  "enum": [
+    "succeeded",
+    "failed",
+    "dependency_failed",
+    "timeout",
+    "cancelled",
+    "denied"
+  ]
+}
