@@ -23,7 +23,6 @@ import { insertSceneRow, lastCommittedScene, nextCommitOrdinal } from "../reposi
 import {
   adoptPhase3Cycle,
   appendPhase3Signal,
-  markPhase3Consumed,
   markUncertainToolRuns,
   phase3ToolCacheGet,
   phase3ToolCacheSet,

@@ -105,6 +105,16 @@ export class SignalPipeline {
     this.#options.store.markConsumed(sequence);
   }
 
+  /** Turn 终态回调转发（宿主接 Loop.onTurnSettled）。 */
+  notifyOwnerIdle(): void {
+    this.#trigger.notifyOwnerIdle();
+  }
+
+  /** 未采用 Batch 回插队首（宿主接 Loop.onUnadoptedReturn）。 */
+  requeueFront(batches: readonly AudienceBatch[]): void {
+    this.#trigger.requeueFront(batches);
+  }
+
   async close(): Promise<void> {
     if (this.#closed) {
       return;

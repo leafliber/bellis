@@ -163,6 +163,72 @@ const RAW_PHASE_2_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
     help: "Scene 执行终态计数（result=completed|cancelled|failed|uncertain）。",
     labels: ["result"],
   },
+  // Phase 3 决策域（phase-3-development-guide.md §13）：
+  // signalId/turnId/cycleId/toolRunId/用户 ID 与错误正文只进 Trace 字段。
+  {
+    name: "bellis_signal_ingress_total",
+    kind: "counter",
+    help: "Signal 入库计数（result/priority_class 有界目录）。",
+    labels: ["result", "priority_class"],
+  },
+  {
+    name: "bellis_audience_batch_latency_ms",
+    kind: "histogram",
+    help: "弹幕批次封窗时延（trigger=deadline|count|token_budget|byte_budget|urgent_bypass|close）。",
+    labels: ["trigger"],
+    buckets: [5, 25, 50, 100, 200, 350, 500, 1000],
+  },
+  {
+    name: "bellis_decision_turns_total",
+    kind: "counter",
+    help: "决策 Turn 终态计数（result=completed|cancelled|failed|degraded）。",
+    labels: ["result"],
+  },
+  {
+    name: "bellis_decision_cycles_total",
+    kind: "counter",
+    help: "决策 Cycle 采用计数（result=adopted|degraded|failed）。",
+    labels: ["result"],
+  },
+  {
+    name: "bellis_decision_interrupt_total",
+    kind: "counter",
+    help: "紧急打断触发计数。",
+    labels: [],
+  },
+  {
+    name: "bellis_decision_mailbox_merged_total",
+    kind: "counter",
+    help: "Mailbox 溢出合并计数。",
+    labels: [],
+  },
+  {
+    name: "bellis_model_ttft_ms",
+    kind: "histogram",
+    help: "模型首 token 时延（provider/result）。",
+    labels: ["provider", "result"],
+    buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000],
+  },
+  {
+    name: "bellis_model_request_duration_ms",
+    kind: "histogram",
+    help: "模型请求总时延（provider/result）。",
+    labels: ["provider", "result"],
+    buckets: [50, 100, 250, 500, 1000, 2500, 5000, 10000],
+  },
+  {
+    name: "bellis_tool_runs_total",
+    kind: "counter",
+    help: "Tool Run 计数（tool/result/cache 有界目录）。",
+    labels: ["tool", "result", "cache"],
+  },
+  {
+    name: "bellis_tool_duration_ms",
+    kind: "histogram",
+    help: "Tool 执行时长（tool/result）。",
+    labels: ["tool", "result"],
+    buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000],
+  },
 ];
 
 function freezeDefinition(definition: MetricDefinition): MetricDefinition {

@@ -65,6 +65,12 @@ export interface TestRuntimeOptions {
   readonly outbox?: Record<string, unknown>;
   /** Phase 2 演出装配（enabled=true 时创建 Phase2RuntimeHost）。 */
   readonly phase2?: { readonly enabled: true; readonly sessionId?: string };
+  /** Phase 3 决策装配（依赖 phase2；phase3.model 组可覆盖）。 */
+  readonly phase3?: {
+    readonly enabled: true;
+    readonly sessionId?: string;
+    readonly model?: Record<string, unknown>;
+  };
 }
 
 /** 启动测试 Runtime（随机空闲端口、TS Worker、无检查点观察器）。 */
@@ -92,6 +98,9 @@ export async function startTestRuntime(options: TestRuntimeOptions): Promise<Run
         : { shutdownGraceMs: options.shutdownGraceMs }),
       ...(options.outbox === undefined ? {} : { outbox: options.outbox }),
       ...(options.phase2 === undefined ? {} : { phase2: options.phase2 }),
+      ...(options.phase3 === undefined
+        ? {}
+        : { phase3: { ...options.phase3, model: { paceMs: 120, ...options.phase3.model } } }),
       ...(Object.keys(mergedLimits).length === 0 ? {} : { limits: mergedLimits }),
     },
     persistenceWorker: WORKER_FIXTURE,

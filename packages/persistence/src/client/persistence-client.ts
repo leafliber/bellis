@@ -580,13 +580,13 @@ export function createPersistenceClientForTesting(
     },
     async phase3ReadDecisionState(
       sessionId: string,
-      options?: { readonly markUncertain?: boolean },
+      query?: { readonly markUncertain?: boolean },
     ): Promise<Phase3DecisionState> {
       requireMigrated();
       return channel.call<"phase3_read_decision_state">(
         {
           operation: "phase3_read_decision_state",
-          input: { sessionId, markUncertain: options?.markUncertain ?? false },
+          input: { sessionId, markUncertain: query?.markUncertain ?? false },
         },
         internalTrace(),
       );

@@ -139,6 +139,34 @@ const RuntimeConfigSchema = z
           .optional(),
       })
       .prefault({}),
+    /**
+     * Phase 3 决策循环（开发/测试/Demo 装配，默认关闭）：启用后
+     * startRuntime 在 Phase 2 演出宿主之上创建 Phase3DecisionHost
+     *（Signal Pipeline + Decision Loop + Tool Runtime）；依赖 phase2
+     * 同时启用（共享演出提交边界）。生产默认不装配任何模拟输入入口。
+     */
+    phase3: z
+      .object({
+        enabled: z.boolean().default(false),
+        sessionId: UuidSchema.optional(),
+        model: z
+          .object({
+            /** demo-scripted：本地脚本注入（Demo 默认）；openai-compatible：真实适配器。 */
+            provider: z.enum(["demo-scripted", "openai-compatible"]).default("demo-scripted"),
+            model: z.string().min(1).max(128).default("demo-scripted"),
+            /** OpenAI-compatible 基地址（如 https://api.example.com/v1）。 */
+            baseUrl: z.string().min(1).max(512).optional(),
+            /**
+             * API Key 环境变量名（Credential Port：配置只存变量名，
+             * 密钥值绝不进入配置/日志/Prompt）。
+             */
+            apiKeyEnv: z.string().min(1).max(128).default("BELLIS_MODEL_API_KEY"),
+            /** 事件间隔毫秒（demo-scripted 节奏；中断演示）。 */
+            paceMs: PositiveInt(60_000).default(0),
+          })
+          .prefault({}),
+      })
+      .prefault({}),
   })
   .superRefine((config, ctx) => {
     // 跨字段约束：P1 ControlSession 构造要求 Replay Window 容量不超过

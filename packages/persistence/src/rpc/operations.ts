@@ -2,7 +2,6 @@ import {
   DecimalStringSchema,
   IngestedSignalSchema,
   OutboxMessageSchema,
-  Phase3CycleAdoptedPayloadSchema,
   ScenePlanSchema,
   SceneSchema,
   SessionRecordSchema,

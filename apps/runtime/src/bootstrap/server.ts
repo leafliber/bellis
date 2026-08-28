@@ -20,6 +20,8 @@ import type { ConnectionMetrics } from "../websocket/connection-metrics.js";
 import { ControlConnection } from "../websocket/control-adapter.js";
 import type { ClientControlEnvelope } from "@bellis/contracts";
 import type { Phase2RuntimeHost } from "../application/phase-2/host.js";
+import type { Phase3DecisionHost } from "../application/phase-3/host.js";
+import { registerPhase3SignalRoutes } from "../routes/phase3-signals.js";
 import { MediaConnection } from "../websocket/media-adapter.js";
 import type { ControlResumePlan } from "../websocket/control-adapter.js";
 import type { LogicalSession } from "../websocket/session-store.js";
@@ -48,6 +50,8 @@ export interface ServerContext {
   readonly connections: ConnectionMetrics;
   /** Phase 2 演出宿主（显式启用的开发/Demo 装配；缺省不挂接）。 */
   readonly phase2?: Phase2RuntimeHost;
+  /** Phase 3 决策宿主（phase2+phase3 同时启用；缺省不挂接）。 */
+  readonly phase3?: Phase3DecisionHost;
 }
 
 const UNAUTHORIZED_CLOSE = 1008;
@@ -169,6 +173,9 @@ export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> 
   registerVersionRoute(app, baseRoutes);
   registerOpenApiRoute(app, baseRoutes);
   registerAuthRoute(app, { ...baseRoutes, sessions: ctx.sessions });
+  if (ctx.phase3 !== undefined) {
+    registerPhase3SignalRoutes(app, { ...baseRoutes, sessions: ctx.sessions, phase3: ctx.phase3 });
+  }
   if (ctx.config.phase2.stageDistDir !== undefined) {
     registerStageStatic(app, ctx.config.phase2.stageDistDir);
   }

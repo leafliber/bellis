@@ -285,7 +285,10 @@ export class DecisionLoop implements TurnOwnerPort {
       cycleCount: turn.adoptedCount,
       ...(turn.finishReason === undefined ? {} : { reason: turn.finishReason }),
     });
-    if (unadopted.length > 0) {
+    // failed = 基础设施故障：不回插（避免失败-重试死循环）；输入仍在
+    // 持久化存储中，由宿主运维显式对账。cancelled/提前结束的未采用
+    // 输入回插队首（区间连续性保持）。
+    if (unadopted.length > 0 && turn.result !== "failed") {
       this.#options.onUnadoptedReturn?.(unadopted);
     }
     this.#options.onTurnSettled?.(turn.turnId, turn.result);

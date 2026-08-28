@@ -29,6 +29,9 @@ importers:
       '@bellis/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@bellis/decision-loop':
+        specifier: workspace:*
+        version: link:../../packages/decision-loop
       '@bellis/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -38,6 +41,9 @@ importers:
       '@bellis/scene-runtime':
         specifier: workspace:*
         version: link:../../packages/scene-runtime
+      '@bellis/tool-runtime':
+        specifier: workspace:*
+        version: link:../../packages/tool-runtime
       '@bellis/transport':
         specifier: workspace:*
         version: link:../../packages/transport

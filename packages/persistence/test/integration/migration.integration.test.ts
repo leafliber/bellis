@@ -97,7 +97,7 @@ describe("Migration 集成", () => {
     const db = openState();
     try {
       const rows = db.prepare("SELECT version FROM schema_migrations").all();
-      expect(rows).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+      expect(rows).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
       expect(
         db.prepare("SELECT name FROM sqlite_master WHERE name = 'sessions'").get(),
       ).toBeDefined();
@@ -292,6 +292,7 @@ describe("Migration 集成", () => {
         { version: 1 },
         { version: 2 },
         { version: 3 },
+        { version: 4 },
       ]);
       // 历史生命周期事实原样保留（回填只读不改写）。
       expect(
