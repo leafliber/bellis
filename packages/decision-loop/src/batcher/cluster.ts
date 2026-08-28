@@ -117,7 +117,7 @@ export function clusterSignals(
       participants: group.users.size,
       examples: group.examples,
     }))
-    .sort((a, b) => b.count - a.count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
+    .toSorted((a, b) => b.count - a.count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
     .slice(0, limits.maxTopics);
   const tokenEstimate =
     highlights.reduce((sum, message) => sum + estimateTokens(message.text), 0) +

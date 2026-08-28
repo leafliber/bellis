@@ -99,7 +99,7 @@ export class AudienceBatcher {
     this.#lastSealedTo = consumed;
     const ordered = [...pending]
       .filter((entry) => BigInt(entry.sequence) > consumed)
-      .sort((a, b) => (BigInt(a.sequence) < BigInt(b.sequence) ? -1 : 1));
+      .toSorted((a, b) => (BigInt(a.sequence) < BigInt(b.sequence) ? -1 : 1));
     for (const ingested of ordered) {
       this.onIngested(ingested);
     }

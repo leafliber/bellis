@@ -3,11 +3,7 @@ import type { Signal } from "@bellis/contracts";
 import { InMemorySignalStore, SignalIngress } from "../../src/index.js";
 import type { IngestedSignal } from "@bellis/contracts";
 
-function signal(
-  id: string,
-  priority = 100,
-  payload: Record<string, unknown> = { text: "冲" },
-): Signal {
+function signal(id: string, priority = 100, payload: Signal["payload"] = { text: "冲" }): Signal {
   return {
     schemaVersion: 1,
     id,

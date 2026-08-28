@@ -19,6 +19,15 @@ export type {
 } from "./registry/definition.js";
 export { buildToolModelSpec } from "./registry/model-spec.js";
 export type { ToolModelSpec } from "./registry/model-spec.js";
+export { ToolRegistry } from "./registry/registry.js";
+export type { RegisteredTool } from "./registry/registry.js";
+export { MAX_DAG_DEPTH, MAX_DAG_NODES, compileDag } from "./dag/compiler.js";
+export { checkPermission, hashIdempotencyKey } from "./permissions/gate.js";
+export type { ConfirmationPort, PermissionVerdict } from "./permissions/gate.js";
+export { ToolCache, stableStringify } from "./cache/tool-cache.js";
+export type { ToolCacheStore } from "./cache/tool-cache.js";
+export { StandardToolRuntime } from "./runtime.js";
+export type { StandardToolRuntimeOptions, ToolRunEvent } from "./runtime.js";
 export type {
   DagCompileIssue,
   DagCompileResult,

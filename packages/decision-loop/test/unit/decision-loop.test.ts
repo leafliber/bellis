@@ -141,10 +141,12 @@ describe("DecisionLoop", () => {
   it("after_tools without tool calls degrades to a safety packet", async () => {
     const ctx = makeLoop({
       scripts: [
-        { type: "speech", delta: "我想调工具" },
-        { type: "next", next: "after_tools" },
-        { type: "final" },
-      ].map((event) => event as ModelStreamEvent),
+        [
+          { type: "speech", delta: "我想调工具" },
+          { type: "next", next: "after_tools" },
+          { type: "final" },
+        ] as ModelStreamEvent[],
+      ],
     });
     ctx.loop.startTurn(batchOf(1, 1), "normal_batch");
     await waitFor(() => ctx.settled.length > 0);

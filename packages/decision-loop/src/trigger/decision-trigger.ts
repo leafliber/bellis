@@ -95,7 +95,7 @@ export function mergeBatches(older: AudienceBatch, newer: AudienceBatch): Audien
       participants: topic.participants,
       examples: topic.examples.slice(0, MERGE_LIMITS.maxExamples),
     }))
-    .sort((a, b) => b.count - a.count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
+    .toSorted((a, b) => b.count - a.count || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0))
     .slice(0, MERGE_LIMITS.maxTopics);
   return {
     schemaVersion: 1,
