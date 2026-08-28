@@ -50,11 +50,34 @@ describe("PcmSceneBuffer", () => {
     expect(out[0]!).toBe(1000); // factor=1 起点
     expect(out[120]!).toBeLessThan(1000);
     expect(out[240]!).toBe(0);
+    expect(out.every((value) => value >= 0)).toBe(true); // 淡出不得越零反相
+    expect(buffer.activeScene).toBeNull();
+    expect(buffer.bufferedUs("s1")).toBe(0n);
+    expect(buffer.appendFrame("s1", samplesOf(1000, 480))).toBe(false); // Cancel 尾帧拒绝
     // s2 完好：切换后正常读。
     buffer.switchScene("s2");
     const out2 = new Int16Array(4800);
     buffer.pull(out2, 4800);
     expect(out2.every((v) => v === 5000)).toBe(true);
+  });
+
+  it("Prepare 后、Commit 前取消：立即释放未生效缓冲并拒绝迟到尾帧", () => {
+    const buffer = new PcmSceneBuffer();
+    buffer.appendFrame("prepared", samplesOf(1000, 9600));
+    expect(buffer.bufferedUs("prepared")).toBe(200_000n);
+    buffer.cancelScene("prepared");
+    expect(buffer.bufferedUs("prepared")).toBe(0n);
+    expect(buffer.activeScene).toBeNull();
+    expect(buffer.appendFrame("prepared", samplesOf(1000, 960))).toBe(false);
+    buffer.switchScene("prepared");
+    expect(buffer.activeScene).toBeNull();
+    buffer.clearAll();
+    expect(buffer.appendFrame("prepared", samplesOf(1000, 960))).toBe(true);
+    buffer.switchScene("empty");
+    expect(buffer.activeScene).toBe("empty");
+    buffer.cancelScene("empty");
+    expect(buffer.activeScene).toBeNull();
+    expect(buffer.appendFrame("empty", samplesOf(1000, 960))).toBe(false);
   });
 
   it("容量上限：超限帧拒绝", () => {

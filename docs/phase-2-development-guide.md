@@ -420,7 +420,10 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
   帧丢弃重同步并计入 `droppedByLimit`）；未来音频预算跟随
   stage.capabilities.audio.maxBufferedUs 动态更新；
 - Stream 生命周期：帧流完成或 Scene 终态即发送 media.stream.closed
-  （either-direction）释放 Stage Registry 并发槽位；
+  （either-direction）释放 Stage Registry 并发槽位；closed 边界窗口的
+  Deadline 使用 Runtime 映射域，1s 驻留期限使用 Stage 本地单调域；
+  Stage Client 维持真实到期 Timer（收帧懒扫描仅作兜底），静默连接也会
+  清理 frameId/Sequence 水位与待补发关闭状态；
 - Control Cancel 优先于 Media 发送，取消后不再产生新帧；
 - 不把 PCM、全文或敏感输入写入日志。
 
@@ -437,7 +440,10 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
   继续入账），宽限期过后才向 Worklet 转发 EOS 并拒绝后续追加；
 - Commit 前即使数据已到达也保持静音；
 - Commit 通过 Scene/Cue generation 原子切换播放；
-- Cancel 在预算内清空目标 Scene 样本并淡出，不能影响其他 Scene；
+- Cancel 对已生效 Scene 在预算内单调淡出至零并立即释放，对未生效的
+  Prepare 缓冲直接释放；主线程与 Worklet 都保留连接代际内的 Cancel
+  墓碑，拒绝跨 Control/Media 通道乱序到达的尾帧与迟到 switch，不能
+  重建已停止 Scene，也不能影响其他 Scene；
 - Worklet 与主线程消息协议版本化，拒绝未知版本和超限 Buffer；
 - 单元逻辑可在普通测试环境验证，真实 AudioWorklet 用 Chromium Smoke 验证；
 - 若使用 SharedArrayBuffer，必须同时配置并测试 COOP/COEP；Phase 2 不强制采用。

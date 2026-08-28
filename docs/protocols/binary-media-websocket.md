@@ -152,7 +152,8 @@ de ad be ef   payload（4 字节）
   5. `frameId` 在 Stream 内唯一（`duplicate_frame_id`）——与 Sequence 顺序
      是两个独立约束。
   6. `targetTimeUs` 已过（含可配置宽限，默认 0）且帧不可再用 →
-     `deadline_exceeded`。比较基准是 Runtime 单调时钟（注入的 nowUs）。
+     `deadline_exceeded`。比较基准是 Runtime 单调时钟（Stage 经 Offset
+     Estimator 映射）；该时钟只用于 Deadline，不得用于本地资源驻留期限。
   7. 单 Stream 帧数上限（默认 65536，`frame_limit_reached`）。
 - 关闭（Control `media.stream.closed` 或服务端主动）：关闭后的 Stream 不能
   复活（同 `streamId` 再注册被拒绝）。关闭时**立即释放帧级状态**
@@ -162,9 +163,10 @@ de ad be ef   payload（4 字节）
   无全局顺序，先到的 closed 保留水位继续验收 sequence ≤ 边界且严格连续
   的迟到尾帧（其余校验与开放 Stream 完全一致）。尾帧窗口的生命周期有界：
   追平边界、收到首个违规/越界/迟到被拒帧、错 Session 帧、或关闭时刻起算
-  的驻留期限（默认 1s，帧到达时懒扫描）届满——任一即压缩为轻量墓碑
-  （此后一切帧拒绝，帧级状态立即释放）。帧级状态的驻留以「实际未达的
-  尾帧 × 驻留期限」为上界，不随连接无限驻留。
+  的驻留期限（默认 1s）届满——任一即压缩为轻量墓碑（此后一切帧拒绝，
+  帧级状态立即释放）。驻留期限严格使用**接收端本地单调时钟域**；Stage
+  Client 按最近到期时刻维持一个真实 Timer，接收路径另作懒扫描兜底，因而
+  最后一帧永不到达且连接后续静默时也会释放，不随连接无限驻留。
 - 资源上限（默认，可配置）：并发打开 Stream 8 个；单连接生命周期总 Stream
   1024 个。连接关闭时 `closeAll()` 释放全部状态。
 - **Media Stream 不重放**：重连 / Snapshot 后客户端必须重新注册 Stream。

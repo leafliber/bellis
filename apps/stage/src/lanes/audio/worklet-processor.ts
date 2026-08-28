@@ -75,7 +75,6 @@ class PcmSceneProcessor extends ProcessorBase {
       switch (message.op) {
         case "frame":
           if (typeof message.sceneId === "string" && message.samples instanceof Int16Array) {
-            sceneIds.add(message.sceneId);
             const accepted = state.buffer.appendFrame(message.sceneId, message.samples);
             if (!accepted) {
               this.port.postMessage({ v: PROTOCOL_VERSION, op: "error", code: "buffer_full" });
@@ -89,7 +88,6 @@ class PcmSceneProcessor extends ProcessorBase {
           break;
         case "end":
           if (typeof message.sceneId === "string") {
-            sceneIds.add(message.sceneId);
             if (state.buffer.endScene(message.sceneId)) {
               this.port.postMessage({ v: PROTOCOL_VERSION, op: "ended", sceneId: message.sceneId });
             }
@@ -101,10 +99,7 @@ class PcmSceneProcessor extends ProcessorBase {
           }
           break;
         case "clear":
-          for (const sceneId of sceneIds) {
-            state.buffer.releaseScene(sceneId);
-          }
-          sceneIds.clear();
+          state.buffer.clearAll();
           break;
         default:
           this.port.postMessage({ v: PROTOCOL_VERSION, op: "error", code: "unknown_op" });
@@ -126,6 +121,9 @@ class PcmSceneProcessor extends ProcessorBase {
     // EOS 耗尽上报（播放完成信号；每 Scene 至多一次）。
     for (const endedSceneId of state.buffer.drainEndedScenes()) {
       this.port.postMessage({ v: PROTOCOL_VERSION, op: "ended", sceneId: endedSceneId });
+      // 完成回报入队后即可释放零样本 Scene 记录；否则每场留下一个空
+      // SceneBuffer，长期连接会随累计场次数增长。
+      state.buffer.releaseScene(endedSceneId);
     }
     const active = state.buffer.activeScene;
     if (active !== null) {
@@ -138,8 +136,5 @@ class PcmSceneProcessor extends ProcessorBase {
     return true;
   }
 }
-
-/** 并行 sceneId 集合：clear 时枚举释放（PcmSceneBuffer 不暴露键枚举）。 */
-const sceneIds = new Set<string>();
 
 registerProcessor("bellis-pcm-scene", PcmSceneProcessor);

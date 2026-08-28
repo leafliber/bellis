@@ -86,11 +86,15 @@ requiresReprepare=true）。
   opened=11 仍零拒绝帧）；closed 携带 finalSequence 关闭边界（≥0 才携带；取消路径在取消前
   捕获边界）——与帧跨 WebSocket 乱序时边界内迟到尾帧仍入账且全量
   校验（内容/去重/Deadline 同规）；closed 入队失败按 Session 隔离
-  保留重发，Stage 控制代际变化即失效全部媒体槽位（不遗留）；
+  保留重发；边界 Deadline 使用 Runtime 映射域、驻留期限使用 Stage 本地
+  单调域，真实 Timer 保证连接静默时也按 1s 压缩窗口；Stage 控制代际
+  变化即失效全部媒体槽位（不遗留）；
 - Stage 侧 Deadline 检查经时钟偏移映射后同域比较（宽限 100ms；
   估计未就绪跳过——不做跨域误判）；
-- 断线即停：Stage 连接代际变化时 running Scene 的 Lane 副作用本地
-  停止（音频淡出/字幕行移除/Avatar stop），对账交由协议；
+- 断线/取消即停：Stage 连接代际变化时 running Scene 的 Lane 副作用本地
+  停止（音频淡出/字幕行移除/Avatar stop），音频淡出严格止于零并释放
+  缓冲；未生效 Prepare 缓冲立即释放，取消后迟到媒体帧不得重建 Scene，
+  对账交由协议；
 - 角色与 Session 隔离：演出回执仅 clientType=stage 的绑定连接可提交；
   首个 stage hello 决定归属 Session（改绑拒绝）；Media WS 仅归属
   Session 可承载 Phase 2 出站；

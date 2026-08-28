@@ -41,6 +41,8 @@ export class PcmSceneBuffer {
   readonly #maxSamples: number;
   readonly #sampleRateHz: number;
   readonly #scenes = new Map<string, SceneBuffer>();
+  /** Cancel 墓碑：拒绝控制/媒体跨连接乱序造成的迟到追加与切换。 */
+  readonly #cancelledScenes = new Set<string>();
   #activeScene: string | null = null;
   #droppedScenes = 0;
 
@@ -74,6 +76,9 @@ export class PcmSceneBuffer {
 
   /** 追加一帧（Int16 交织样本，mono）；超出未播容量或 EOS 后拒绝。 */
   appendFrame(sceneId: string, samples: Int16Array): boolean {
+    if (this.#cancelledScenes.has(sceneId)) {
+      return false;
+    }
     let scene = this.#scenes.get(sceneId);
     if (scene === undefined) {
       scene = this.#newScene();
@@ -90,6 +95,9 @@ export class PcmSceneBuffer {
 
   /** 原子切换播放的 Scene generation（AudioWorklet 侧在 Commit 时刻调用）。 */
   switchScene(sceneId: string): void {
+    if (this.#cancelledScenes.has(sceneId)) {
+      return;
+    }
     this.#activeScene = sceneId;
   }
 
@@ -144,15 +152,21 @@ export class PcmSceneBuffer {
         return count;
       }
       const available = head.length - scene.chunkOffset;
-      const take = Math.min(count - filled, available);
-      if (scene.fading && scene.fadeRemaining > 0) {
+      let take = Math.min(count - filled, available);
+      if (scene.fading) {
+        // 淡出绝不能越过预算：旧实现按整个 AudioWorklet quantum 递减，
+        // fadeRemaining 过零后产生负增益（反相音频），且永不释放缓冲。
+        take = Math.min(take, scene.fadeRemaining);
+      }
+      if (scene.fading && take > 0) {
         for (let i = 0; i < take; i += 1) {
-          const factor = Math.min(1, scene.fadeRemaining / scene.fadeTotal);
+          const factor = scene.fadeRemaining / scene.fadeTotal;
           out[filled + i] = Math.round((head[scene.chunkOffset + i] ?? 0) * factor);
           scene.fadeRemaining -= 1;
         }
       } else if (scene.fading) {
         out.fill(0, filled, count);
+        this.#release(scene, sceneId);
         return count;
       } else {
         out.set(head.subarray(scene.chunkOffset, scene.chunkOffset + take), filled);
@@ -164,6 +178,11 @@ export class PcmSceneBuffer {
         scene.chunks.shift();
         scene.chunkOffset = 0;
       }
+      if (scene.fading && scene.fadeRemaining <= 0) {
+        out.fill(0, filled, count);
+        this.#release(scene, sceneId);
+        return count;
+      }
       if (scene.buffered <= 0 && scene.ended) {
         this.#markEnded(scene, sceneId);
       }
@@ -173,21 +192,30 @@ export class PcmSceneBuffer {
 
   /** 取消目标 Scene：淡出预算后丢弃其样本（其他 Scene 不受影响）。 */
   cancelScene(sceneId: string, fadeSamples = FADE_OUT_SAMPLES_DEFAULT): void {
+    this.#cancelledScenes.add(sceneId);
     const scene = this.#scenes.get(sceneId);
     if (scene === undefined) {
+      if (this.#activeScene === sceneId) {
+        this.#activeScene = null;
+      }
+      return;
+    }
+    // Prepare 后、Commit 前尚未生效的缓冲没有用户可听副作用，无需淡出；
+    // 若等待 pull 才释放，该 Scene 永远不会成为 active，缓冲会永久驻留。
+    if (this.#activeScene !== sceneId || fadeSamples <= 0 || scene.buffered <= 0) {
+      this.#release(scene, sceneId);
       return;
     }
     scene.fading = true;
     scene.fadeRemaining = Math.min(fadeSamples, scene.buffered);
     scene.fadeTotal = Math.max(1, scene.fadeRemaining);
-    // 预算耗尽即整段丢弃：淡出样本已在缓冲内，后续 append 拒绝。
-    if (scene.fadeRemaining <= 0) {
-      this.#release(scene, sceneId);
-    }
   }
 
   /** 流终止（EOS）：返回是否已可立即报告耗尽（无样本或已放完）。 */
   endScene(sceneId: string): boolean {
+    if (this.#cancelledScenes.has(sceneId)) {
+      return true;
+    }
     const scene = this.#scenes.get(sceneId);
     if (scene === undefined) {
       // 从未收到该 Scene 的帧：无内容可放，视为已耗尽。
@@ -218,6 +246,15 @@ export class PcmSceneBuffer {
     if (this.#activeScene === sceneId) {
       this.#activeScene = null;
     }
+  }
+
+  /** 连接代际变化：释放全部缓冲与 Cancel 墓碑。 */
+  clearAll(): void {
+    for (const [sceneId, scene] of this.#scenes) {
+      this.#release(scene, sceneId);
+    }
+    this.#cancelledScenes.clear();
+    this.#activeScene = null;
   }
 
   #release(scene: SceneBuffer, sceneId: string): void {

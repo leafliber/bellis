@@ -389,7 +389,7 @@ describe("MediaStreamRegistry", () => {
     }
   });
 
-  it("带边界墓碑驻留期限：closedAtUs 起算届满后（帧到达懒扫描）压缩", () => {
+  it("带边界墓碑驻留期限：宿主可按 next expiry 定时压缩，无需等待后续帧", () => {
     const clock = new VirtualClock();
     const reg = registry({ maxBoundaryWindowUs: 500_000n });
     reg.open({
@@ -402,14 +402,17 @@ describe("MediaStreamRegistry", () => {
     expect(reg.close(STREAM_ID, { finalSequence: 2n, closedAtUs: clock.nowUs() }).status).toBe(
       "closed",
     );
+    expect(reg.nextBoundaryExpiryUs()).toBe(500_000n);
     // 期限内：合法尾帧照常入账。
     clock.advanceBy(400_000n);
     expect(reg.accept(frame({ sequence: "1", frameId: fid(1) }), clock.nowUs()).status).toBe(
       "accepted",
     );
-    // 期限届满（最后一帧永不到达、无违规帧）：任何后续帧到达时懒压缩，
-    // 帧级状态（frameIds 等）不再驻留。
+    // 期限届满（最后一帧永不到达、无违规帧）：宿主定时调用即可压缩，
+    // 不依赖新的媒体帧来触发清理。
     clock.advanceBy(200_000n);
+    expect(reg.sweepExpiredBoundaryWindows(clock.nowUs())).toBe(1);
+    expect(reg.nextBoundaryExpiryUs()).toBeNull();
     const expired = reg.accept(frame({ sequence: "2", frameId: fid(2) }), clock.nowUs());
     if (expired.status === "rejected") {
       expect(expired.code).toBe("stream_closed");
@@ -417,6 +420,23 @@ describe("MediaStreamRegistry", () => {
     expect(reg.accept(frame({ sequence: "2", frameId: fid(2) }), clock.nowUs()).status).toBe(
       "rejected",
     );
+  });
+
+  it("Deadline 与墓碑期限使用独立时钟域：Runtime 偏移不提前关闭尾帧窗口", () => {
+    const reg = registry({ maxBoundaryWindowUs: 1_000_000n, deadlineGraceUs: 100_000n });
+    reg.open({
+      streamId: STREAM_ID,
+      sessionId: SESSION_ID,
+      mediaKind: "binary-test",
+      contentType: "application/octet-stream",
+    });
+    expect(reg.close(STREAM_ID, { finalSequence: 0n, closedAtUs: 0n }).status).toBe("closed");
+    // Runtime 域领先本地 2s；Deadline 目标仍在未来，而墓碑本地域尚未推进。
+    // 历史缺陷把 2s Runtime now 与 0 本地 closedAt 相减，首帧立即过期。
+    expect(reg.accept(frame({ targetTimeUs: "10000000" }), 2_000_000n, 0n)).toEqual({
+      status: "accepted",
+      lastSequence: 0n,
+    });
   });
 
   it("nowUs=null 跳过 Deadline 检查（时钟估计未就绪，不做跨域误判）", () => {

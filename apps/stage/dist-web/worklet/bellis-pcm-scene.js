@@ -3,20 +3,21 @@ var e = class {
 	#e;
 	#t;
 	#n = /* @__PURE__ */ new Map();
-	#r = null;
-	#i = 0;
+	#r = /* @__PURE__ */ new Set();
+	#i = null;
+	#a = 0;
 	constructor(e = {}) {
 		this.#t = e.sampleRateHz ?? 48e3;
 		let t = e.maxBufferedUs ?? 2000000n;
 		this.#e = Number(t * BigInt(this.#t) / 1000000n);
 	}
 	get activeScene() {
-		return this.#r;
-	}
-	get droppedScenes() {
 		return this.#i;
 	}
-	#a() {
+	get droppedScenes() {
+		return this.#a;
+	}
+	#o() {
 		return {
 			chunks: [],
 			chunkOffset: 0,
@@ -30,11 +31,12 @@ var e = class {
 		};
 	}
 	appendFrame(e, t) {
+		if (this.#r.has(e)) return !1;
 		let n = this.#n.get(e);
-		return n === void 0 && (n = this.#a(), this.#n.set(e, n)), n.ended || n.buffered + t.length > this.#e ? !1 : (n.chunks.push(t.slice()), n.buffered += t.length, !0);
+		return n === void 0 && (n = this.#o(), this.#n.set(e, n)), n.ended || n.buffered + t.length > this.#e ? !1 : (n.chunks.push(t.slice()), n.buffered += t.length, !0);
 	}
 	switchScene(e) {
-		this.#r = e;
+		this.#r.has(e) || (this.#i = e);
 	}
 	bufferedUs(e) {
 		let t = this.#n.get(e);
@@ -44,51 +46,66 @@ var e = class {
 		return this.#n.get(e)?.underruns ?? 0;
 	}
 	pull(e, t) {
-		let n = this.#r;
+		let n = this.#i;
 		if (n === null) return e.fill(0, 0, t), t;
 		let r = this.#n.get(n);
 		if (r === void 0) return e.fill(0, 0, t), t;
 		let i = 0;
 		for (; i < t;) {
-			if (r.buffered <= 0) return e.fill(0, i, t), r.ended ? this.#c(r, n) : r.underruns += 1, t;
+			if (r.buffered <= 0) return e.fill(0, i, t), r.ended ? this.#l(r, n) : r.underruns += 1, t;
 			let a = r.chunks[0];
 			if (a === void 0) return e.fill(0, i, t), r.ended || (r.underruns += 1), t;
 			let o = a.length - r.chunkOffset, s = Math.min(t - i, o);
-			if (r.fading && r.fadeRemaining > 0) for (let t = 0; t < s; t += 1) {
-				let n = Math.min(1, r.fadeRemaining / r.fadeTotal);
+			if (r.fading && (s = Math.min(s, r.fadeRemaining)), r.fading && s > 0) for (let t = 0; t < s; t += 1) {
+				let n = r.fadeRemaining / r.fadeTotal;
 				e[i + t] = Math.round((a[r.chunkOffset + t] ?? 0) * n), --r.fadeRemaining;
 			}
-			else if (r.fading) return e.fill(0, i, t), t;
+			else if (r.fading) return e.fill(0, i, t), this.#c(r, n), t;
 			else e.set(a.subarray(r.chunkOffset, r.chunkOffset + s), i);
-			r.chunkOffset += s, r.buffered -= s, i += s, r.chunkOffset >= a.length && (r.chunks.shift(), r.chunkOffset = 0), r.buffered <= 0 && r.ended && this.#c(r, n);
+			if (r.chunkOffset += s, r.buffered -= s, i += s, r.chunkOffset >= a.length && (r.chunks.shift(), r.chunkOffset = 0), r.fading && r.fadeRemaining <= 0) return e.fill(0, i, t), this.#c(r, n), t;
+			r.buffered <= 0 && r.ended && this.#l(r, n);
 		}
 		return i;
 	}
 	cancelScene(e, t = 480) {
+		this.#r.add(e);
 		let n = this.#n.get(e);
-		n !== void 0 && (n.fading = !0, n.fadeRemaining = Math.min(t, n.buffered), n.fadeTotal = Math.max(1, n.fadeRemaining), n.fadeRemaining <= 0 && this.#s(n, e));
+		if (n === void 0) {
+			this.#i === e && (this.#i = null);
+			return;
+		}
+		if (this.#i !== e || t <= 0 || n.buffered <= 0) {
+			this.#c(n, e);
+			return;
+		}
+		n.fading = !0, n.fadeRemaining = Math.min(t, n.buffered), n.fadeTotal = Math.max(1, n.fadeRemaining);
 	}
 	endScene(e) {
+		if (this.#r.has(e)) return !0;
 		let t = this.#n.get(e);
-		return t === void 0 || (t.ended = !0, t.buffered <= 0 && (this.#c(t, e), !0));
+		return t === void 0 || (t.ended = !0, t.buffered <= 0 && (this.#l(t, e), !0));
 	}
 	drainEndedScenes() {
-		return this.#o.splice(0, this.#o.length);
+		return this.#s.splice(0, this.#s.length);
 	}
-	#o = [];
+	#s = [];
 	releaseScene(e) {
 		let t = this.#n.get(e);
 		if (t !== void 0) {
-			this.#s(t, e);
+			this.#c(t, e);
 			return;
 		}
-		this.#r === e && (this.#r = null);
+		this.#i === e && (this.#i = null);
 	}
-	#s(e, t) {
-		e.chunks = [], e.chunkOffset = 0, e.buffered = 0, this.#n.delete(t), this.#i += 1, this.#r === t && (this.#r = null);
+	clearAll() {
+		for (let [e, t] of this.#n) this.#c(t, e);
+		this.#r.clear(), this.#i = null;
 	}
 	#c(e, t) {
-		e.endedNotified || (e.endedNotified = !0, this.#o.push(t));
+		e.chunks = [], e.chunkOffset = 0, e.buffered = 0, this.#n.delete(t), this.#a += 1, this.#i === t && (this.#i = null);
+	}
+	#l(e, t) {
+		e.endedNotified || (e.endedNotified = !0, this.#s.push(t));
 	}
 }, t = globalThis.AudioWorkletProcessor, n = 1, r = { buffer: new e({
 	maxBufferedUs: 2000000n,
@@ -108,7 +125,7 @@ var e = class {
 			}
 			switch (t.op) {
 				case "frame":
-					typeof t.sceneId == "string" && t.samples instanceof Int16Array && (a.add(t.sceneId), r.buffer.appendFrame(t.sceneId, t.samples) || this.port.postMessage({
+					typeof t.sceneId == "string" && t.samples instanceof Int16Array && (r.buffer.appendFrame(t.sceneId, t.samples) || this.port.postMessage({
 						v: n,
 						op: "error",
 						code: "buffer_full"
@@ -118,18 +135,17 @@ var e = class {
 					typeof t.sceneId == "string" && r.buffer.switchScene(t.sceneId);
 					break;
 				case "end":
-					typeof t.sceneId == "string" && (a.add(t.sceneId), r.buffer.endScene(t.sceneId) && this.port.postMessage({
+					typeof t.sceneId == "string" && r.buffer.endScene(t.sceneId) && this.port.postMessage({
 						v: n,
 						op: "ended",
 						sceneId: t.sceneId
-					}));
+					});
 					break;
 				case "cancel":
 					typeof t.sceneId == "string" && r.buffer.cancelScene(t.sceneId);
 					break;
 				case "clear":
-					for (let e of a) r.buffer.releaseScene(e);
-					a.clear();
+					r.buffer.clearAll();
 					break;
 				default: this.port.postMessage({
 					v: n,
@@ -149,7 +165,7 @@ var e = class {
 			v: n,
 			op: "ended",
 			sceneId: e
-		});
+		}), r.buffer.releaseScene(e);
 		let s = r.buffer.activeScene;
 		if (s !== null) {
 			let e = r.buffer.underrunCount(s);
@@ -162,6 +178,6 @@ var e = class {
 		}
 		return !0;
 	}
-}, a = /* @__PURE__ */ new Set();
+};
 registerProcessor("bellis-pcm-scene", i);
 //#endregion

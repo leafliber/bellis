@@ -75,6 +75,8 @@ export class AudioLaneAdapter implements StageLaneAdapter {
   readonly #clock: MonotonicClock;
   readonly #minPreparedFrames: number;
   readonly #scenes = new Map<string, AudioScene>();
+  /** 已停止 Scene 墓碑：拒绝 Cancel/Media 跨通道乱序到达的尾帧。 */
+  readonly #stoppedScenes = new Set<string>();
   #armed = false;
   #underruns = 0;
   #closed = false;
@@ -141,6 +143,9 @@ export class AudioLaneAdapter implements StageLaneAdapter {
     _cues: readonly Cue[],
     signal: AbortSignal,
   ): Promise<LanePrepareResult> {
+    if (this.#stoppedScenes.has(sceneId)) {
+      return { ready: false, reason: "cancelled" };
+    }
     if (!this.#armed) {
       return { ready: false, reason: "audio_not_armed" };
     }
@@ -170,7 +175,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
 
   /** Media WS 帧到达：送入 Worklet 缓冲（不生效），达标时放行 prepare。 */
   appendFrame(sceneId: string, samples: Int16Array): void {
-    if (this.#closed) {
+    if (this.#closed || this.#stoppedScenes.has(sceneId)) {
       return;
     }
     const record = this.#sceneOf(sceneId);
@@ -205,7 +210,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
    * 回报，兜底截止 = start 时刻 + 已缓冲时长 + 宽限。
    */
   endOfSpeech(sceneId: string): void {
-    if (this.#closed) {
+    if (this.#closed || this.#stoppedScenes.has(sceneId)) {
       return;
     }
     const record = this.#sceneOf(sceneId);
@@ -229,6 +234,9 @@ export class AudioLaneAdapter implements StageLaneAdapter {
   }
 
   async start(sceneId: string, _atStageUs: bigint, _cues: readonly Cue[]): Promise<void> {
+    if (this.#stoppedScenes.has(sceneId)) {
+      return;
+    }
     // Commit 生效时刻：原子切换播放 generation；Promise 在播放真实
     // 完成（ended / EOS 零帧 / 兜底截止 / 停止）时兑现。
     const record = this.#sceneOf(sceneId);
@@ -250,6 +258,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
   }
 
   async stop(sceneId: string, _reason: string): Promise<void> {
+    this.#stoppedScenes.add(sceneId);
     this.#environment.postToWorklet({ v: 1, op: "cancel", sceneId });
     const record = this.#scenes.get(sceneId);
     if (record !== undefined) {
@@ -259,6 +268,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
   }
 
   async finish(sceneId: string): Promise<void> {
+    this.#stoppedScenes.add(sceneId);
     this.#environment.postToWorklet({ v: 1, op: "cancel", sceneId });
     const record = this.#scenes.get(sceneId);
     if (record !== undefined) {
@@ -274,6 +284,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
       this.#settle(sceneId, record);
     }
     this.#scenes.clear();
+    this.#stoppedScenes.clear();
   }
 
   async close(): Promise<void> {

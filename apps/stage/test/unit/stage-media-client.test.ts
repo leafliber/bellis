@@ -54,7 +54,11 @@ const STREAM = "99999999-9999-4999-8999-999999999999";
 const SCENE = "44444444-4444-4444-8444-444444444444";
 const CONTENT_TYPE = "audio/pcm-s16le-48000-mono";
 
-function frameBytes(sequence: number, samplesValue = 0x0102): Uint8Array {
+function frameBytes(
+  sequence: number,
+  samplesValue = 0x0102,
+  firstTargetUs = 1_000_000n,
+): Uint8Array {
   const payload = new Uint8Array(1920);
   for (let i = 0; i < payload.length; i += 2) {
     payload[i] = samplesValue & 0xff;
@@ -70,7 +74,7 @@ function frameBytes(sequence: number, samplesValue = 0x0102): Uint8Array {
         sessionId: SESSION,
         sceneId: SCENE,
         sequence: String(sequence),
-        targetTimeUs: String(1_000_000n + BigInt(sequence) * 20_000n),
+        targetTimeUs: String(firstTargetUs + BigInt(sequence) * 20_000n),
         durationUs: "20000",
         contentType: CONTENT_TYPE,
         traceId: "0123456789abcdef0123456789abcdef",
@@ -291,6 +295,9 @@ describe("StageMediaClient onStreamClosed（发言时长推导）", () => {
       },
       clock,
       audioContentTypes: [CONTENT_TYPE],
+      // 生产环境 Runtime(hrtime) 与 Stage(performance.now) 原点差距很大；
+      // closed 驻留期限必须仍使用本地域，不能被该偏移提前耗尽。
+      runtimeOffsetUs: () => 2_000_000n,
       onFrame: (frame) => frames.push(frame),
       onStreamClosed: (info) => closures.push(info),
     });
@@ -304,7 +311,7 @@ describe("StageMediaClient onStreamClosed（发言时长推导）", () => {
     client.closeStream(STREAM, 2n);
     expect(closures).toHaveLength(0);
     // 边界内首帧到达：Registry 合法接受（墓碑窗口），完成信号补发。
-    socket!.serverSend(frameBytes(0));
+    socket!.serverSend(frameBytes(0, 0x0102, 10_000_000n));
     expect(frames).toHaveLength(1);
     expect(closures).toEqual([
       {
@@ -314,6 +321,47 @@ describe("StageMediaClient onStreamClosed（发言时长推导）", () => {
         speechDurationUs: 3n * 20_000n,
       },
     ]);
+    // 其余尾帧继续验收，但不得重建完成元数据；重复 closed 也不重复回调。
+    socket!.serverSend(frameBytes(1, 0x0102, 10_000_000n));
+    socket!.serverSend(frameBytes(2, 0x0102, 10_000_000n));
+    client.closeStream(STREAM, 2n);
+    expect(frames).toHaveLength(3);
+    expect(closures).toHaveLength(1);
+    client.close();
+  });
+
+  it("closed-first 后连接静默：本地定时器到期关闭窗口，不等待下一帧触发清理", async () => {
+    const frames: InboundMediaFrame[] = [];
+    const closures: unknown[] = [];
+    const clock = new VirtualClock();
+    let socket: FakeSocket | null = null;
+    const client = new StageMediaClient({
+      sessionId: SESSION,
+      socketFactory: () => {
+        socket = new FakeSocket();
+        return socket;
+      },
+      clock,
+      audioContentTypes: [CONTENT_TYPE],
+      runtimeOffsetUs: () => 2_000_000n,
+      onFrame: (frame) => frames.push(frame),
+      onStreamClosed: (info) => closures.push(info),
+    });
+    client.connect();
+    socket!.serverOpen();
+    await client.handleAnnounce(
+      { streamId: STREAM, mediaKind: "audio", contentType: CONTENT_TYPE },
+      () => true,
+    );
+    client.closeStream(STREAM, 2n);
+    clock.advanceBy(1_000_000n);
+    await Promise.resolve();
+    await Promise.resolve();
+    // 窗口已由 Timer 压缩；此帧即使 Deadline 仍有效也不能复活 Stream。
+    socket!.serverSend(frameBytes(0, 0x0102, 10_000_000n));
+    expect(frames).toHaveLength(0);
+    expect(closures).toHaveLength(0);
+    expect(client.stats.rejectedFrames).toBe(1);
     client.close();
   });
 });

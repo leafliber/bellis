@@ -14,7 +14,8 @@ import type { MediaFrame, MediaKindName } from "./frame-codec.js";
  *   帧级状态：追平边界、首个违规（含错 Session 帧）或驻留期限届满即
  *   压缩为轻量墓碑（窗口不无限驻留）。
  * - Deadline：Header.targetTimeUs 已过（含可配置宽限）且帧不再可用时拒绝。
- *   nowUs 由调用方注入（Runtime 单调微秒）。
+ *   deadlineNowUs 由调用方注入（Runtime 单调微秒）；墓碑驻留期限使用
+ *   独立的 boundaryNowUs（接收端本地单调微秒），两个时钟域不得混用。
  * - 连接关闭时 closeAll() 释放全部 Stream 状态。
  * - Phase 1 Payload 只是测试字节；audio/viseme 是为后续阶段保留的枚举位。
  */
@@ -39,9 +40,9 @@ export interface MediaStreamRegistryOptions {
   readonly deadlineGraceUs?: bigint;
   /**
    * 带边界墓碑的驻留期限（微秒，默认 1s）：closed 与尾帧跨连接送达，
-   * 尾帧只可能在关闭后的短窗口内到达；期限届满后（以帧到达时的注入
-   * 时钟懒扫描压缩）帧级状态释放——「最后一帧永不到达且无后续违规帧」
-   * 时 frameIds 不再无限驻留。
+   * 尾帧只可能在关闭后的短窗口内到达；期限届满后由宿主定时扫描压缩，
+   * 接收路径扫描仅作兜底，帧级状态不会因「最后一帧永不到达且无后续
+   * 违规帧」而无限驻留。
    */
   readonly maxBoundaryWindowUs?: bigint;
 }
@@ -138,7 +139,7 @@ export class MediaStreamRegistry {
   readonly #deadlineGraceUs: bigint;
   readonly #maxBoundaryWindowUs: bigint;
   readonly #streams = new Map<string, StreamRecord>();
-  /** 带边界且未压缩的墓碑（驻留期限懒扫描的候选集，O(1) 增删）。 */
+  /** 带边界且未压缩的墓碑（驻留期限定时/接收扫描的候选集，O(1) 增删）。 */
   readonly #boundaryOpen = new Set<string>();
   #totalStreams = 0;
 
@@ -185,6 +186,27 @@ export class MediaStreamRegistry {
     return record !== undefined && !record.closed;
   }
 
+  /** 是否仍在等待 closed 边界内的迟到尾帧。 */
+  isBoundaryOpen(streamId: string): boolean {
+    return this.#boundaryOpen.has(streamId);
+  }
+
+  /** 最近一个可定时清理的边界窗口到期时刻（调用方本地单调时钟域）。 */
+  nextBoundaryExpiryUs(): bigint | null {
+    let next: bigint | null = null;
+    for (const streamId of this.#boundaryOpen) {
+      const closedAtUs = this.#streams.get(streamId)?.closedAtUs ?? null;
+      if (closedAtUs === null) {
+        continue;
+      }
+      const expiresAtUs = closedAtUs + this.#maxBoundaryWindowUs;
+      if (next === null || expiresAtUs < next) {
+        next = expiresAtUs;
+      }
+    }
+    return next;
+  }
+
   /** 注册 Stream（对应 Control media.stream.open 被 accepted 之后）。 */
   open(input: OpenStreamInput): MediaStreamOpenResult {
     if (input.sessionId !== this.#sessionId) {
@@ -221,8 +243,12 @@ export class MediaStreamRegistry {
    * 接受一帧：Session/注册状态、contentType、Sequence 严格连续递增、
    * frameId 去重、targetTimeUs Deadline 与帧数上限全部通过才算 accepted。
    */
-  accept(frame: MediaFrame, nowUs: bigint | null): MediaFrameAcceptResult {
-    this.#sweepExpiredBoundaryWindows(nowUs);
+  accept(
+    frame: MediaFrame,
+    deadlineNowUs: bigint | null,
+    boundaryNowUs: bigint | null = deadlineNowUs,
+  ): MediaFrameAcceptResult {
+    this.sweepExpiredBoundaryWindows(boundaryNowUs);
     const record = this.#streams.get(frame.header.streamId);
     // Session 校验保持首位（§7 校验顺序不变）；但错 Session 的帧落在
     // 已关闭 Stream 上同样终结尾帧窗口（不得绕过压缩）。
@@ -282,9 +308,9 @@ export class MediaStreamRegistry {
     if (record.frameIds.has(frame.header.frameId)) {
       return rejectClosed("duplicate_frame_id", "frameId was already used in this stream");
     }
-    if (frame.header.targetTimeUs !== undefined && nowUs !== null) {
+    if (frame.header.targetTimeUs !== undefined && deadlineNowUs !== null) {
       const targetUs = parseDecimalString(frame.header.targetTimeUs);
-      if (nowUs - targetUs >= this.#deadlineGraceUs) {
+      if (deadlineNowUs - targetUs >= this.#deadlineGraceUs) {
         return rejectClosed("deadline_exceeded", "frame target time has passed");
       }
     }
@@ -334,11 +360,15 @@ export class MediaStreamRegistry {
     return count;
   }
 
-  /** 驻留期限届满的边界墓碑压缩（帧到达时懒扫描；时钟缺失时跳过）。 */
-  #sweepExpiredBoundaryWindows(nowUs: bigint | null): void {
+  /**
+   * 驻留期限届满的边界墓碑压缩。接收路径会调用本方法作兜底懒扫描；
+   * 长时间无帧时，宿主必须按 nextBoundaryExpiryUs() 安排定时调用。
+   */
+  sweepExpiredBoundaryWindows(nowUs: bigint | null): number {
     if (nowUs === null || this.#boundaryOpen.size === 0) {
-      return;
+      return 0;
     }
+    let swept = 0;
     for (const streamId of this.#boundaryOpen) {
       const record = this.#streams.get(streamId);
       if (record === undefined) {
@@ -352,7 +382,9 @@ export class MediaStreamRegistry {
       if (record.closedAtUs !== null && nowUs - record.closedAtUs >= this.#maxBoundaryWindowUs) {
         toTombstone(record);
         this.#boundaryOpen.delete(streamId);
+        swept += 1;
       }
     }
+    return swept;
   }
 }

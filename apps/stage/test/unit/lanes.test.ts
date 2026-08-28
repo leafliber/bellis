@@ -173,8 +173,15 @@ describe("AudioLaneAdapter", () => {
     await Promise.resolve();
     expect(started).toBe(true); // 取消路径不悬挂 scene.finished
     expect(env.messages).toContainEqual({ v: 1, op: "cancel", sceneId: "s1" });
+    const frameMessages = env.messages.filter((message) => message.op === "frame").length;
+    lane.appendFrame("s1", new Int16Array(960)); // Cancel 后在途媒体尾帧
+    lane.endOfSpeech("s1"); // closed 也不得重建主线程 Scene 记录
+    expect(env.messages.filter((message) => message.op === "frame")).toHaveLength(frameMessages);
+    expect(lane.bufferedFrames.has("s1")).toBe(false);
     lane.clearAll();
     expect(env.messages.at(-1)?.op).toBe("clear");
+    lane.appendFrame("s1", new Int16Array(960)); // 新连接代际清除 Cancel 墓碑
+    expect(lane.bufferedFrames.get("s1")).toBe(1);
     await lane.close();
   });
 });

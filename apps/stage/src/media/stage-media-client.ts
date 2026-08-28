@@ -100,13 +100,16 @@ export class StageMediaClient {
   readonly #registry: MediaStreamRegistry;
   readonly #streamMeta = new Map<string, StreamMeta>();
   /** closed 先于首帧到达的待补发关闭（首帧验收时结算）。 */
-  readonly #pendingClosures = new Map<string, bigint | null>();
+  readonly #pendingClosures = new Map<string, bigint>();
+  /** 已发出完成信号的 Stream：尾帧继续验收，但不重建/重复发出元数据。 */
+  readonly #closureEmitted = new Set<string>();
   #socket: StageSocket | null = null;
   #parser: MediaFrameParser | null = null;
   #connected = false;
   #closedByUser = false;
   #reconnectAttempt = 0;
   #reconnectTimer: AbortController | null = null;
+  #boundarySweepTimer: AbortController | null = null;
   #connectWaiters: Array<() => void> = [];
   #stats: StageMediaStats = {
     acceptedFrames: 0,
@@ -213,14 +216,23 @@ export class StageMediaClient {
    * 挂起待补发（首帧验收时结算）。
    */
   closeStream(streamId: string, finalSequence?: bigint): void {
-    this.#registry.close(streamId, {
+    const closedAtUs = this.#options.clock.nowUs();
+    const closed = this.#registry.close(streamId, {
       ...(finalSequence === undefined ? {} : { finalSequence }),
-      closedAtUs: this.#options.clock.nowUs(),
+      // 驻留期限属于 Stage 本地单调域；不得与 Runtime Deadline 域混用。
+      closedAtUs,
     });
+    this.#scheduleBoundarySweep();
+    if (closed.status !== "closed") {
+      return;
+    }
     const meta = this.#streamMeta.get(streamId);
     if (meta === undefined) {
-      // 首帧尚未到达（跨连接乱序）：登记待补发，边界内首帧验收时结算。
-      this.#pendingClosures.set(streamId, finalSequence ?? null);
+      // 只有仍可验收尾帧的边界窗口才可能补发。无边界关闭已经是硬墓碑，
+      // 登记 pending 只会把永不可达状态保留到连接关闭。
+      if (finalSequence !== undefined && this.#registry.isBoundaryOpen(streamId)) {
+        this.#pendingClosures.set(streamId, finalSequence);
+      }
       return;
     }
     this.#emitStreamClosed(streamId, meta, finalSequence ?? null);
@@ -229,6 +241,7 @@ export class StageMediaClient {
   #emitStreamClosed(streamId: string, meta: StreamMeta, finalSequence: bigint | null): void {
     this.#streamMeta.delete(streamId);
     this.#pendingClosures.delete(streamId);
+    this.#closureEmitted.add(streamId);
     this.#options.onStreamClosed?.({
       streamId,
       sceneId: meta.sceneId,
@@ -245,9 +258,11 @@ export class StageMediaClient {
    * 任务（Stream 不跨连接复活）——Registry 槽位同步清空，不遗留。
    */
   invalidateStreams(): void {
+    this.#cancelBoundarySweep("media_streams_invalidated");
     this.#registry.closeAll();
     this.#streamMeta.clear();
     this.#pendingClosures.clear();
+    this.#closureEmitted.clear();
   }
 
   #onMessage(data: string | Uint8Array): void {
@@ -278,33 +293,38 @@ export class StageMediaClient {
   }
 
   #acceptFrame(frame: MediaFrame): void {
+    const localNowUs = this.#options.clock.nowUs();
     const offsetUs = this.#options.runtimeOffsetUs?.() ?? null;
-    const nowUs = offsetUs === null ? null : this.#options.clock.nowUs() + offsetUs;
-    const result = this.#registry.accept(frame, nowUs);
+    const deadlineNowUs = offsetUs === null ? null : localNowUs + offsetUs;
+    const result = this.#registry.accept(frame, deadlineNowUs, localNowUs);
     if (result.status === "rejected") {
       this.#stats = { ...this.#stats, rejectedFrames: this.#stats.rejectedFrames + 1 };
       // 帧级违规后该 Stream 状态不可信：关闭 Stream，连接保持。
       this.#registry.close(frame.header.streamId);
       this.#streamMeta.delete(frame.header.streamId);
       this.#pendingClosures.delete(frame.header.streamId);
+      this.#scheduleBoundarySweep();
       return;
     }
     this.#stats = { ...this.#stats, acceptedFrames: this.#stats.acceptedFrames + 1 };
-    const meta = this.#streamMeta.get(frame.header.streamId) ?? {
-      sceneId: null,
-      acceptedFrames: 0,
-    };
-    const updated: StreamMeta = {
-      sceneId: frame.header.sceneId ?? meta.sceneId,
-      acceptedFrames: meta.acceptedFrames + 1,
-    };
-    this.#streamMeta.set(frame.header.streamId, updated);
-    const pendingFinal = this.#pendingClosures.get(frame.header.streamId);
-    if (pendingFinal !== undefined) {
-      // closed 先于首帧到达（跨连接乱序）：首帧已验收，现在结算完成信号
-      //（时长以边界推导；后续边界内尾帧继续入账，EOS 宽限窗覆盖）。
-      this.#emitStreamClosed(frame.header.streamId, updated, pendingFinal);
+    if (!this.#closureEmitted.has(frame.header.streamId)) {
+      const meta = this.#streamMeta.get(frame.header.streamId) ?? {
+        sceneId: null,
+        acceptedFrames: 0,
+      };
+      const updated: StreamMeta = {
+        sceneId: frame.header.sceneId ?? meta.sceneId,
+        acceptedFrames: meta.acceptedFrames + 1,
+      };
+      this.#streamMeta.set(frame.header.streamId, updated);
+      const pendingFinal = this.#pendingClosures.get(frame.header.streamId);
+      if (pendingFinal !== undefined) {
+        // closed 先于首帧到达（跨连接乱序）：首帧已验收，现在结算完成信号
+        //（时长以边界推导；后续边界内尾帧继续入账，EOS 宽限窗覆盖）。
+        this.#emitStreamClosed(frame.header.streamId, updated, pendingFinal);
+      }
     }
+    this.#scheduleBoundarySweep();
     this.#options.onFrame({
       streamId: frame.header.streamId,
       sceneId: frame.header.sceneId ?? null,
@@ -313,6 +333,47 @@ export class StageMediaClient {
         frame.header.targetTimeUs === undefined ? null : BigInt(frame.header.targetTimeUs),
       samples: decodeInt16Le(frame.payload),
     });
+  }
+
+  /**
+   * Registry 不持有时钟/Timer；Stage 宿主按最近边界到期时刻维持一个
+   * 全局等待。即使连接从此再无媒体帧，frameId 集合也会到期释放。
+   */
+  #scheduleBoundarySweep(): void {
+    const expiresAtUs = this.#registry.nextBoundaryExpiryUs();
+    if (expiresAtUs === null) {
+      this.#cancelBoundarySweep("no_boundary_windows");
+      this.#pruneExpiredClosureTracking();
+      return;
+    }
+    this.#cancelBoundarySweep("boundary_sweep_rescheduled");
+    const timer = new AbortController();
+    this.#boundarySweepTimer = timer;
+    void this.#options.clock.sleepUntil(expiresAtUs, timer.signal).then(
+      () => {
+        if (this.#boundarySweepTimer !== timer) {
+          return;
+        }
+        this.#boundarySweepTimer = null;
+        this.#registry.sweepExpiredBoundaryWindows(this.#options.clock.nowUs());
+        this.#pruneExpiredClosureTracking();
+        this.#scheduleBoundarySweep();
+      },
+      () => {},
+    );
+  }
+
+  #pruneExpiredClosureTracking(): void {
+    for (const streamId of this.#pendingClosures.keys()) {
+      if (!this.#registry.isBoundaryOpen(streamId)) {
+        this.#pendingClosures.delete(streamId);
+      }
+    }
+  }
+
+  #cancelBoundarySweep(reason: string): void {
+    this.#boundarySweepTimer?.abort(new Error(reason));
+    this.#boundarySweepTimer = null;
   }
 
   #handleClosed(reason: string): void {
@@ -331,9 +392,11 @@ export class StageMediaClient {
     this.#parser?.reset();
     this.#parser = null;
     // Stream 状态随连接丢弃（不跨连接复活）。
+    this.#cancelBoundarySweep("media_socket_closed");
     this.#registry.closeAll();
     this.#streamMeta.clear();
     this.#pendingClosures.clear();
+    this.#closureEmitted.clear();
     this.#options.onDisconnected?.(reason);
     if (this.#closedByUser) {
       return;
@@ -388,9 +451,11 @@ export class StageMediaClient {
     }
     this.#parser?.reset();
     this.#parser = null;
+    this.#cancelBoundarySweep("stage_media_close");
     this.#registry.closeAll();
     this.#streamMeta.clear();
     this.#pendingClosures.clear();
+    this.#closureEmitted.clear();
     for (const waiter of this.#connectWaiters.splice(0)) {
       waiter();
     }
