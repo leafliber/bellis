@@ -170,6 +170,25 @@ export class DecisionTrigger {
     return this.#mailbox;
   }
 
+  /**
+   * 批次回插队首（区间序早于现有 FIFO）：Turn 失败/正常结束时有
+   * 未采用 Batch（下一轮未见输入）时由宿主调用——维持采用顺序。
+   */
+  requeueFront(batches: readonly AudienceBatch[]): void {
+    if (this.#closed || batches.length === 0) {
+      return;
+    }
+    this.#mailbox.unshift(...batches);
+    while (this.#mailbox.length > this.#mailboxCapacity) {
+      const oldest = this.#mailbox[0];
+      const second = this.#mailbox[1];
+      if (oldest === undefined || second === undefined) {
+        break;
+      }
+      this.#mailbox.splice(0, 2, mergeBatches(oldest, second));
+    }
+  }
+
   #submitInterrupt(urgent: AudienceBatch): void {
     const reclaimed = this.#options.owner.cancelActiveTurn();
     const parts = [...reclaimed, ...this.#mailbox, urgent];

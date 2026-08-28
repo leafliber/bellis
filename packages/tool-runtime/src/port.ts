@@ -87,6 +87,14 @@ export interface ToolRuntime {
   registerTool(declaration: ToolDeclaration, handler: ToolHandler): void;
   hasTool(name: string): boolean;
   listDeclarations(): readonly ToolDeclaration[];
+  /**
+   * Draft 7 Schema 校验（Stream Assembler 的候选调用门槛）：
+   * 名称不存在 → ok:false（unknown_tool 由调用方区分）。
+   */
+  validateArguments(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): { readonly ok: true } | { readonly ok: false; readonly error: string };
   compileDag(calls: readonly ToolCall[]): DagCompileResult;
   executeDag(dag: DagCompileResult, context: ToolExecutionContext): Promise<ToolDagExecution>;
   close(reason: string): Promise<void>;

@@ -12,6 +12,15 @@ export type {
   ModelStreamEvent,
   ModelToolSpec,
 } from "./model/provider.js";
+export { ScriptedModelProvider } from "./model/scripted-provider.js";
+export { StreamAssembler } from "./model/stream-assembler.js";
+export type {
+  AssemblerError,
+  AssemblerErrorCode,
+  AssemblerOutcome,
+  ModelUsage,
+  ToolArgumentValidator,
+} from "./model/stream-assembler.js";
 export type {
   CycleAdoptionInput,
   CycleAdoptionPort,
@@ -19,6 +28,12 @@ export type {
   PerformanceSubmitContext,
   PerformanceSubmitResult,
 } from "./loop/ports.js";
+export { DecisionLoop, DEFAULT_DECISION_LOOP_CONFIG } from "./loop/decision-loop.js";
+export type { DecisionLoopConfig, DecisionLoopOptions, TurnResult } from "./loop/decision-loop.js";
+export type { DecisionAuditPort } from "./loop/audit.js";
+export { buildSafetyPacket, DEFAULT_DEGRADATION_POLICY } from "./loop/degradation.js";
+export type { DegradationPolicy, DegradationReason } from "./loop/degradation.js";
+export { buildModelRequest, packetDigest, MAX_PROMPT_CHARS } from "./loop/request-assembly.js";
 
 export type { LoopLogger, LoopMetrics } from "./observability.js";
 
