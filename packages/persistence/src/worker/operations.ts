@@ -20,6 +20,17 @@ import {
   nextAggregateSeq,
 } from "../repositories/session-records.js";
 import { insertSceneRow, lastCommittedScene, nextCommitOrdinal } from "../repositories/scenes.js";
+import {
+  adoptPhase3Cycle,
+  appendPhase3Signal,
+  markPhase3Consumed,
+  markUncertainToolRuns,
+  phase3ToolCacheGet,
+  phase3ToolCacheSet,
+  readPhase3DecisionState,
+  recordPhase3ToolRunEvent,
+  restorePhase3Signals,
+} from "../repositories/phase3.js";
 import { advanceWatermarks, readWatermarks } from "../repositories/watermarks.js";
 import {
   findIdempotencyKey,
@@ -209,6 +220,100 @@ export class WorkerOperationRuntime {
           operation,
           result: readOutboxStatusCounts(this.databases.state),
         };
+      case "phase3_append_signal": {
+        const phase3Input = input as OperationInputs["phase3_append_signal"];
+        return {
+          operation,
+          result: appendPhase3Signal(this.databases.state, {
+            sessionId: phase3Input.sessionId,
+            signal: phase3Input.signal,
+            priorityClass: phase3Input.priorityClass,
+            receivedAtMs: phase3Input.receivedAtMs,
+            normalCapacity: phase3Input.normalCapacity,
+            urgentCapacity: phase3Input.urgentCapacity,
+          }),
+        };
+      }
+      case "phase3_restore_signals":
+        return {
+          operation,
+          result: restorePhase3Signals(
+            this.databases.state,
+            (input as OperationInputs["phase3_restore_signals"]).sessionId,
+          ),
+        };
+      case "phase3_adopt_cycle": {
+        const phase3Input = input as OperationInputs["phase3_adopt_cycle"];
+        adoptPhase3Cycle(this.databases.state, {
+          sessionId: phase3Input.sessionId,
+          turnId: phase3Input.turnId,
+          cycleId: phase3Input.cycleId,
+          cycleIndex: phase3Input.cycleIndex,
+          batchId: phase3Input.batchId,
+          watermarkFrom: phase3Input.watermarkFrom,
+          watermarkTo: phase3Input.watermarkTo,
+          next: phase3Input.next,
+          degraded: phase3Input.degraded,
+          packetDigest: phase3Input.packetDigest,
+          traceId: context.trace.traceId,
+          toolRuns: phase3Input.toolRuns,
+          nowMs: this.databases.nowMs(),
+          recordId: () => this.databases.newRecordId(randomUUID),
+        });
+        return { operation, result: undefined };
+      }
+      case "phase3_tool_run_event": {
+        const phase3Input = input as OperationInputs["phase3_tool_run_event"];
+        recordPhase3ToolRunEvent(this.databases.state, {
+          sessionId: phase3Input.sessionId,
+          toolRunId: phase3Input.toolRunId,
+          cycleId: phase3Input.cycleId,
+          toolName: phase3Input.toolName,
+          transition: phase3Input.transition,
+          state: phase3Input.state,
+          durationMs: phase3Input.durationMs,
+          errorCode: phase3Input.errorCode,
+          cacheSource: phase3Input.cacheSource,
+          resultSummaryJson:
+            phase3Input.resultSummary === null || phase3Input.resultSummary === undefined
+              ? null
+              : JSON.stringify(phase3Input.resultSummary),
+          nowMs: this.databases.nowMs(),
+        });
+        return { operation, result: undefined };
+      }
+      case "phase3_read_decision_state": {
+        const phase3Input = input as OperationInputs["phase3_read_decision_state"];
+        const nowMs = this.databases.nowMs();
+        const uncertainMarked = phase3Input.markUncertain
+          ? markUncertainToolRuns(this.databases.state, phase3Input.sessionId, nowMs)
+          : 0;
+        const state = readPhase3DecisionState(this.databases.state, phase3Input.sessionId);
+        return { operation, result: { ...state, uncertainMarked } };
+      }
+      case "phase3_tool_cache_get": {
+        const phase3Input = input as OperationInputs["phase3_tool_cache_get"];
+        const payloadJson = phase3ToolCacheGet(
+          this.databases.state,
+          phase3Input.cacheKey,
+          this.databases.nowMs(),
+        );
+        return {
+          operation,
+          result: { payload: payloadJson === null ? null : (JSON.parse(payloadJson) as unknown) },
+        };
+      }
+      case "phase3_tool_cache_set": {
+        const phase3Input = input as OperationInputs["phase3_tool_cache_set"];
+        phase3ToolCacheSet(this.databases.state, {
+          cacheKey: phase3Input.cacheKey,
+          toolName: phase3Input.toolName,
+          payloadJson: JSON.stringify(phase3Input.payload),
+          ttlMs: phase3Input.ttlMs,
+          nowMs: this.databases.nowMs(),
+        });
+        return { operation, result: undefined };
+      }
     }
   }
 

@@ -47,6 +47,15 @@ export type {
   RetryOutboxInput,
 } from "./client/persistence-client.js";
 export { createPersistenceClient } from "./client/persistence-client.js";
+export type {
+  Phase3AdoptCycleInput,
+  Phase3AppendSignalInput,
+  Phase3AppendSignalOutcome,
+  Phase3DecisionState,
+  Phase3RestoreState,
+  Phase3ToolCacheSetInput,
+  Phase3ToolRunEventInput,
+} from "./client/persistence-client.js";
 
 export { createOutboxDispatcher } from "./outbox/dispatcher.js";
 export type {

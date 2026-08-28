@@ -2,10 +2,12 @@ import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import type {
+  IngestedSignal,
   OutboxMessage,
   Scene,
   ScenePlan,
   SessionRecord,
+  Signal,
   TraceContext,
 } from "@bellis/contracts";
 import { createNoopLogger } from "@bellis/observability";
@@ -140,6 +142,85 @@ export interface OutboxRetryDisposition {
   readonly disposition: "retry" | "dead";
 }
 
+export interface Phase3AppendSignalInput {
+  readonly sessionId: string;
+  readonly signal: Signal;
+  readonly priorityClass: "normal" | "urgent";
+  readonly receivedAtMs: number;
+  readonly normalCapacity: number;
+  readonly urgentCapacity: number;
+}
+
+export type Phase3AppendSignalOutcome =
+  | { readonly result: "accepted" | "deduplicated"; readonly sequence: bigint }
+  | { readonly result: "rejected"; readonly reason: "normal_capacity" | "urgent_capacity" };
+
+export interface Phase3RestoreState {
+  readonly pending: readonly IngestedSignal[];
+  readonly lastAssigned: bigint;
+  readonly consumed: bigint;
+}
+
+export interface Phase3AdoptCycleInput {
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly cycleId: string;
+  readonly cycleIndex: number;
+  readonly batchId: string;
+  readonly watermarkFrom: bigint;
+  readonly watermarkTo: bigint;
+  readonly next: "finish" | "after_tools" | "continue";
+  readonly degraded: boolean;
+  readonly packetDigest: string;
+  readonly toolRuns: readonly {
+    readonly toolRunId: string;
+    readonly toolName: string;
+    readonly idempotencyKeyHash: string | null;
+  }[];
+}
+
+export interface Phase3ToolRunEventInput {
+  readonly sessionId: string;
+  readonly toolRunId: string;
+  readonly cycleId: string;
+  readonly toolName: string;
+  readonly transition: "started" | "finished";
+  readonly state: string;
+  readonly durationMs?: number | null;
+  readonly errorCode?: string | null;
+  readonly cacheSource?: string | null;
+  readonly resultSummary?: unknown;
+}
+
+export interface Phase3DecisionState {
+  readonly consumed: bigint;
+  readonly cycles: readonly {
+    readonly cycleId: string;
+    readonly turnId: string;
+    readonly cycleIndex: number;
+    readonly watermarkTo: bigint;
+    readonly degraded: boolean;
+    readonly next: string;
+  }[];
+  readonly toolRuns: readonly {
+    readonly toolRunId: string;
+    readonly cycleId: string;
+    readonly toolName: string;
+    readonly state: string;
+    readonly idempotencyKeyHash: string | null;
+    readonly cacheSource: string | null;
+    readonly errorCode: string | null;
+  }[];
+  readonly uncertainMarked: number;
+}
+
+export interface Phase3ToolCacheSetInput {
+  readonly cacheKey: string;
+  readonly toolName: string;
+  readonly payload: unknown;
+  readonly ttlMs: number;
+}
+
 export interface PersistenceClient {
   migrate(signal?: AbortSignal): Promise<void>;
   ensureSession(input: EnsureSessionInput): Promise<void>;
@@ -154,6 +235,21 @@ export interface PersistenceClient {
   completeOutbox(input: CompleteOutboxInput): Promise<void>;
   retryOutbox(input: RetryOutboxInput): Promise<OutboxRetryDisposition>;
   readOutboxStats(): Promise<OutboxStats>;
+  /** Phase 3（ADR 0004）：Signal 入库（事务内分配序号 + 去重）。 */
+  phase3AppendSignal(
+    input: Phase3AppendSignalInput & { readonly trace: TraceContext },
+  ): Promise<Phase3AppendSignalOutcome>;
+  phase3RestoreSignals(sessionId: string): Promise<Phase3RestoreState>;
+  phase3AdoptCycle(input: Phase3AdoptCycleInput & { readonly trace: TraceContext }): Promise<void>;
+  phase3ToolRunEvent(
+    input: Phase3ToolRunEventInput & { readonly trace: TraceContext },
+  ): Promise<void>;
+  phase3ReadDecisionState(
+    sessionId: string,
+    options?: { readonly markUncertain?: boolean },
+  ): Promise<Phase3DecisionState>;
+  phase3ToolCacheGet(cacheKey: string): Promise<unknown>;
+  phase3ToolCacheSet(input: Phase3ToolCacheSetInput): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -430,6 +526,85 @@ export function createPersistenceClientForTesting(
         internalTrace(),
       );
       return result;
+    },
+    async phase3AppendSignal(
+      input: Phase3AppendSignalInput & { readonly trace: TraceContext },
+    ): Promise<Phase3AppendSignalOutcome> {
+      requireMigrated();
+      const { trace: _trace, ...payload } = input;
+      return channel.call<"phase3_append_signal">(
+        { operation: "phase3_append_signal", input: payload },
+        input.trace,
+      );
+    },
+    async phase3RestoreSignals(sessionId: string): Promise<Phase3RestoreState> {
+      requireMigrated();
+      return channel.call<"phase3_restore_signals">(
+        { operation: "phase3_restore_signals", input: { sessionId } },
+        internalTrace(),
+      );
+    },
+    async phase3AdoptCycle(
+      input: Phase3AdoptCycleInput & { readonly trace: TraceContext },
+    ): Promise<void> {
+      requireMigrated();
+      const { trace: _trace, ...payload } = input;
+      await channel.call<"phase3_adopt_cycle">(
+        { operation: "phase3_adopt_cycle", input: payload },
+        input.trace,
+      );
+    },
+    async phase3ToolRunEvent(
+      input: Phase3ToolRunEventInput & { readonly trace: TraceContext },
+    ): Promise<void> {
+      requireMigrated();
+      const { trace: _trace, ...payload } = input;
+      await channel.call<"phase3_tool_run_event">(
+        {
+          operation: "phase3_tool_run_event",
+          input: {
+            sessionId: payload.sessionId,
+            toolRunId: payload.toolRunId,
+            cycleId: payload.cycleId,
+            toolName: payload.toolName,
+            transition: payload.transition,
+            state: payload.state,
+            durationMs: payload.durationMs ?? null,
+            errorCode: payload.errorCode ?? null,
+            cacheSource: payload.cacheSource ?? null,
+            resultSummary: payload.resultSummary ?? null,
+          },
+        },
+        input.trace,
+      );
+    },
+    async phase3ReadDecisionState(
+      sessionId: string,
+      options?: { readonly markUncertain?: boolean },
+    ): Promise<Phase3DecisionState> {
+      requireMigrated();
+      return channel.call<"phase3_read_decision_state">(
+        {
+          operation: "phase3_read_decision_state",
+          input: { sessionId, markUncertain: options?.markUncertain ?? false },
+        },
+        internalTrace(),
+      );
+    },
+    async phase3ToolCacheGet(cacheKey: string): Promise<unknown> {
+      requireMigrated();
+      const result = await channel.call<"phase3_tool_cache_get">(
+        { operation: "phase3_tool_cache_get", input: { cacheKey } },
+        internalTrace(),
+      );
+      return result.payload;
+    },
+    async phase3ToolCacheSet(input: Phase3ToolCacheSetInput): Promise<void> {
+      requireMigrated();
+      await channel.call<"phase3_tool_cache_set">(
+        { operation: "phase3_tool_cache_set", input },
+        internalTrace(),
+      );
     },
     async close(): Promise<void> {
       await channel.close(defaultDeadlineMs);
