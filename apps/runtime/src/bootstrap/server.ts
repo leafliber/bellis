@@ -10,6 +10,7 @@ import { registerAuthRoute } from "../routes/auth.js";
 import type { OriginAllowlist, RequestTraceStore } from "../routes/context.js";
 import { registerHealthRoutes } from "../routes/health.js";
 import { registerOpenApiRoute } from "../routes/openapi.js";
+import { registerStageStatic } from "../routes/stage-static.js";
 import { registerVersionRoute } from "../routes/version.js";
 import type { LocalSessionService } from "../auth/local-session.js";
 import type { RuntimeStatus } from "./lifecycle.js";
@@ -17,6 +18,8 @@ import type { RuntimeConfig } from "./config.js";
 import { normalizeHostHeader } from "./config.js";
 import type { ConnectionMetrics } from "../websocket/connection-metrics.js";
 import { ControlConnection } from "../websocket/control-adapter.js";
+import type { ClientControlEnvelope } from "@bellis/contracts";
+import type { Phase2RuntimeHost } from "../application/phase-2/host.js";
 import { MediaConnection } from "../websocket/media-adapter.js";
 import type { ControlResumePlan } from "../websocket/control-adapter.js";
 import type { LogicalSession } from "../websocket/session-store.js";
@@ -43,6 +46,8 @@ export interface ServerContext {
   readonly origins: OriginAllowlist;
   readonly requestTraces: RequestTraceStore;
   readonly connections: ConnectionMetrics;
+  /** Phase 2 演出宿主（显式启用的开发/Demo 装配；缺省不挂接）。 */
+  readonly phase2?: Phase2RuntimeHost;
 }
 
 const UNAUTHORIZED_CLOSE = 1008;
@@ -164,6 +169,9 @@ export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> 
   registerVersionRoute(app, baseRoutes);
   registerOpenApiRoute(app, baseRoutes);
   registerAuthRoute(app, { ...baseRoutes, sessions: ctx.sessions });
+  if (ctx.config.phase2.stageDistDir !== undefined) {
+    registerStageStatic(app, ctx.config.phase2.stageDistDir);
+  }
 
   registerWebSocketRoutes(app, ctx);
   return app;
@@ -189,7 +197,7 @@ function resolveWsSession(ctx: ServerContext, request: FastifyRequest): LogicalS
  * 读取失败只是**回滚**导出状态的 claim——故障解除后的下一次重连仍能
  * 正常恢复，绝不能让一次瞬态失败把同进程导出状态不可逆消费掉。
  */
-async function loadControlResume(
+async function loadControlResumePlan(
   ctx: ServerContext,
   logical: LogicalSession,
 ): Promise<ControlResumePlan> {
@@ -218,7 +226,41 @@ async function loadControlResume(
   return { recoveryState: null };
 }
 
+/**
+ * Phase 2 跨进程对账证据预加载：存在落库 Scene 时读取活动 Scene 索引
+ * （同步快照装饰的输入）。读取失败**向上传播**（连接以 1011 失败关闭）：
+ * 「无法证明」绝不能被误报成「没有活动 Scene」——数据库繁忙/Worker 故障
+ * 时静默回落 v1 会让 Stage 停在对账前的旧视图上。
+ */
+async function loadControlResume(
+  ctx: ServerContext,
+  logical: LogicalSession,
+): Promise<ControlResumePlan> {
+  const plan = await loadControlResumePlan(ctx, logical);
+  if (ctx.phase2 === undefined) {
+    return plan;
+  }
+  const committed = plan.recoveryState?.lastCommittedScene;
+  if (committed === undefined || committed === null) {
+    return plan;
+  }
+  // 活动 Scene 索引（写侧同事务维护的权威对账来源）：「任一未证终态
+  // 即 v2」不受记录窗口挤出影响——长期在途的旧 Scene 不会因新 Scene
+  // 流量被遗忘（历史缺陷：固定窗口无论升降序都可能遗漏）。失败上抛
+  // （1011 失败关闭）且必须回滚导出状态 claim：一次瞬态失败不可把
+  // 同进程导出状态不可逆消费掉（与 loadControlResumePlan 同一不变量）。
+  let activeScenes: Awaited<ReturnType<typeof ctx.persistence.listActiveScenes>>;
+  try {
+    activeScenes = await ctx.persistence.listActiveScenes(logical.sessionId);
+  } catch (error) {
+    plan.claim?.rollback();
+    throw error;
+  }
+  return { ...plan, phase2ActiveScenes: [...activeScenes] };
+}
+
 function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void {
+  const phase2 = ctx.phase2;
   app.get("/ws/v1/control", { websocket: true }, (socket, request) => {
     if (!ctx.status.ready) {
       socket.close(NOT_READY_CLOSE, "not_ready");
@@ -233,8 +275,8 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
       socket.close(UNAUTHORIZED_CLOSE, "session already has a control connection");
       return;
     }
-    // ControlConnection 同步挂接 Socket 监听并内部缓冲 resume 解析期间的
-    // 入站消息（Upgrade 与异步加载之间零丢失）。
+    // Phase 2 演出宿主（clientType=stage 的连接在 hello 后绑定，见
+    // ControlConnection；Media 出站在 MediaConnection 创建后立即绑定）。
     const connection = new ControlConnection({
       socket,
       logical,
@@ -255,7 +297,34 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
         sendFlushTimeoutMs: ctx.config.limits.sendFlushTimeoutMs,
       },
       loadResume: () => loadControlResume(ctx, logical),
+      ...(phase2 === undefined
+        ? {}
+        : {
+            onStageMessage: (envelope: ClientControlEnvelope, nowUs: bigint) => {
+              // 入站归属（Phase 2 隔离）：只有当前绑定的 Stage 连接的
+              // 演出回执进入状态机（被拒绝改绑的连接不产生副作用）。
+              if (phase2.ownsConnection(connection)) {
+                phase2.handleStageMessage(envelope, nowUs);
+              }
+            },
+            onStageHello: (clientType: unknown) => {
+              if (clientType === "stage") {
+                phase2.attachConnection(connection, logical.sessionId);
+              }
+            },
+            snapshotDecorator: (snapshot, recoveryState, sceneLifecycle) =>
+              // Session 归属（隔离）：装饰只对绑定的 Stage Session 生效——
+              // 其它 Session/overlay 的快照绝不携带全局 Director 的活动态。
+              phase2.ownsSession(logical.sessionId)
+                ? phase2.decorateSnapshot(snapshot, recoveryState, sceneLifecycle)
+                : snapshot,
+          }),
     });
+    if (phase2 !== undefined) {
+      socket.on("close", () => {
+        phase2.detachConnection(connection);
+      });
+    }
     connection.start();
   });
 
@@ -275,6 +344,12 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
       socket.close(UNAUTHORIZED_CLOSE, "session already has a media connection");
       return;
     }
+    // Phase 2 隔离：只有当前绑定的 Stage Session 可以承载演出媒体出站；
+    // 其它 Session 的 Media WS 不进入 Phase 2 Host（不接收 PCM）。
+    if (phase2 !== undefined && !phase2.acceptsMediaSession(logical.sessionId)) {
+      socket.close(UNAUTHORIZED_CLOSE, "phase2 media requires the bound stage session");
+      return;
+    }
     const connection = new MediaConnection({
       socket,
       logical,
@@ -286,6 +361,12 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
         maxPayloadBytes: ctx.config.limits.maxMediaPayloadBytes,
       },
     });
+    if (phase2 !== undefined) {
+      phase2.attachMediaConnection(connection);
+      socket.on("close", () => {
+        phase2.detachMediaConnection(connection);
+      });
+    }
     connection.start();
   });
 }

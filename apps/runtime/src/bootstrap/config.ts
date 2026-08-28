@@ -1,5 +1,6 @@
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { UuidSchema } from "@bellis/contracts";
 import type { LogLevel } from "@bellis/observability";
 
 /**
@@ -107,6 +108,35 @@ const RuntimeConfigSchema = z
     persistence: z
       .object({
         defaultDeadlineMs: PositiveInt(120_000).default(10_000),
+      })
+      .prefault({}),
+    /**
+     * Phase 2 演出链路（开发/测试/Demo 装配，默认关闭）：启用后
+     * startRuntime 创建 Phase2RuntimeHost 并挂接 Stage 连接；生产默认
+     * 路径不装配任何 Phase 2 输入入口（docs/phase-2-development-guide.md §9.1）。
+     */
+    phase2: z
+      .object({
+        enabled: z.boolean().default(false),
+        sessionId: UuidSchema.optional(),
+        /**
+         * Stage 浏览器应用的静态产物目录（开发/Demo 装配）：提供时以
+         * /stage/* 挂载（SPA 回退 index.html），形成可启动产品链路。
+         */
+        stageDistDir: z.string().min(1).optional(),
+        /**
+         * 崩溃窗口故障注入（仅开发/Demo 崩溃测试装配，docs/phase-2-
+         * development-guide.md §10.2）：Director 到达指定窗口时 SIGKILL
+         * 自身。生产配置禁止出现该字段。
+         */
+        faultPoint: z
+          .enum([
+            "before_durable_commit",
+            "after_durable_commit",
+            "after_stage_commit",
+            "after_cancel_sent",
+          ])
+          .optional(),
       })
       .prefault({}),
   })

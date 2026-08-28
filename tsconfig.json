@@ -6,6 +6,7 @@
     { "path": "./packages/testkit" },
     { "path": "./packages/transport" },
     { "path": "./packages/persistence" },
+    { "path": "./packages/scene-runtime" },
     { "path": "./apps/runtime" }
   ]
 }

@@ -398,6 +398,56 @@ describe("恢复读取失败与强制快照（二轮评审修复 3）", () => {
     },
   );
 
+  it("listActiveScenes 失败（Phase 2 索引不可读）：1011 失败关闭，绝不静默回落 v1", async () => {
+    const directory = tempDirectory("bellis-p4-rr3-index-");
+    const base = await createMigratedBaseClient(directory);
+    baseClients.push(base);
+    let armed = false;
+    const handle = await startTestRuntime({
+      dataDirectory: directory,
+      phase2: { enabled: true },
+      persistenceClient: wrapPersistenceClient(base, {
+        listActiveScenes: (sessionId: string) =>
+          armed
+            ? Promise.reject(new PersistenceError("database_busy", "injected index unreadable"))
+            : base.listActiveScenes(sessionId),
+      }),
+    });
+    try {
+      const token = handle.issueStartupToken().token;
+      const exchange = await fetch(`http://127.0.0.1:${handle.status.port}/api/v1/auth/exchange`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: originFor(handle) },
+        body: JSON.stringify({ startupToken: token }),
+      });
+      const { sessionId } = (await exchange.json()) as { sessionId: string };
+      const cookie = cookieFrom(exchange);
+
+      const first = await connectedClient(handle, cookie, sessionId);
+      await first.waitForType("server.ready");
+      // 预置已提交 Scene：lastCommittedScene 非空，resume loader 才会读取索引。
+      await handle.commitFakeScene({ ...SCENE_INPUT, sessionId });
+      first.terminate();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // 索引读取失败：loader 上抛 → 1011。「无法证明」不得被误报成
+      // 「没有活动 Scene」（v1 快照会让 Stage 停在对账前的旧视图上）。
+      armed = true;
+      const client = await connectedClient(handle, cookie, sessionId);
+      const closeCode = await client.closed();
+      expect(closeCode).toBe(1011);
+      expect(client.received.length).toBe(0);
+
+      // 故障解除后重连正常恢复（无生命周期记录 → 索引为空 → v1 快照）。
+      armed = false;
+      const recovered = await connectedClient(handle, cookie, sessionId);
+      await recovered.waitForType("server.ready");
+      recovered.close();
+    } finally {
+      await handle.close();
+    }
+  });
+
   it("resume 连接未携带 lastAck：强制快照，绝不静默进入 active", async () => {
     const handle = await startTestRuntime({ dataDirectory: tempDirectory("bellis-p4-rr3-noack-") });
     try {

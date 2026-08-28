@@ -1,7 +1,13 @@
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
-import type { OutboxMessage, Scene, SessionRecord, TraceContext } from "@bellis/contracts";
+import type {
+  OutboxMessage,
+  Scene,
+  ScenePlan,
+  SessionRecord,
+  TraceContext,
+} from "@bellis/contracts";
 import { createNoopLogger } from "@bellis/observability";
 import type { LoggerPort } from "@bellis/observability";
 import type {
@@ -44,6 +50,8 @@ export interface CommitSceneInput {
   readonly sessionId: string;
   /** 完整版本化 Scene Payload；Worker 验证 sceneId/cycleId 一致后写入 scenes.payload_json。 */
   readonly scene: Scene;
+  /** Phase 2 兼容新增：完整编译计划写入 scenes.plan_json（Migration 0002）。 */
+  readonly plan?: ScenePlan;
   readonly idempotencyKey: string;
   /** 请求摘要：同一幂等键携带不同摘要时返回冲突错误。 */
   readonly requestFingerprint: string;
@@ -69,6 +77,20 @@ export interface RecoveryState {
   } | null;
 }
 
+/**
+ * 活动 Scene 索引行（scene-execution.md §8 对账视图来源）。
+ * durable = scenes 表存在已提交行（committing 歧义的裁决证据）；
+ * durableCycleId = 该已提交行的 cycle_id（unknown 行的 cycleId 回退）。
+ */
+export interface ActiveSceneRow {
+  readonly sceneId: string;
+  readonly cycleId: string | null;
+  readonly state: string;
+  readonly updatedAtMs: number;
+  readonly durable: boolean;
+  readonly durableCycleId: string | null;
+}
+
 export interface AdvanceServerSeqInput {
   readonly sessionId: string;
   readonly latestServerSeq: bigint;
@@ -79,6 +101,10 @@ export interface ListRecordsInput {
   readonly sessionId?: string;
   readonly traceId?: string;
   readonly aggregateId?: string;
+  /** 按 recordType 过滤（如 scene_lifecycle 专用窗口）。 */
+  readonly recordType?: string;
+  /** 排序方向（默认 asc；desc 取最近窗口）。 */
+  readonly order?: "asc" | "desc";
   readonly limit?: number;
 }
 
@@ -122,6 +148,8 @@ export interface PersistenceClient {
   advanceServerSeq(input: AdvanceServerSeqInput): Promise<bigint>;
   readRecoveryState(sessionId: string): Promise<RecoveryState>;
   listRecords(input: ListRecordsInput): Promise<SessionRecord[]>;
+  /** 活动 Scene 索引查询（跨进程恢复对账的权威来源）。 */
+  listActiveScenes(sessionId: string): Promise<readonly ActiveSceneRow[]>;
   claimOutbox(input: ClaimOutboxInput): Promise<OutboxMessage[]>;
   completeOutbox(input: CompleteOutboxInput): Promise<void>;
   retryOutbox(input: RetryOutboxInput): Promise<OutboxRetryDisposition>;
@@ -322,6 +350,17 @@ export function createPersistenceClientForTesting(
       );
       return result;
     },
+    async listActiveScenes(sessionId: string): Promise<readonly ActiveSceneRow[]> {
+      requireMigrated();
+      const result = await channel.call<"list_active_scenes">(
+        {
+          operation: "list_active_scenes",
+          input: { sessionId },
+        },
+        internalTrace(),
+      );
+      return result.scenes as ActiveSceneRow[];
+    },
     async listRecords(input: ListRecordsInput): Promise<SessionRecord[]> {
       requireMigrated();
       const result = await channel.call<"list_records">(
@@ -331,6 +370,8 @@ export function createPersistenceClientForTesting(
             ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
             ...(input.traceId === undefined ? {} : { traceId: input.traceId }),
             ...(input.aggregateId === undefined ? {} : { aggregateId: input.aggregateId }),
+            ...(input.recordType === undefined ? {} : { recordType: input.recordType }),
+            ...(input.order === undefined ? {} : { order: input.order }),
             ...(input.limit === undefined ? {} : { limit: input.limit }),
           },
         },

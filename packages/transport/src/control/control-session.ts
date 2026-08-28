@@ -50,17 +50,23 @@ import type { TransportFailure } from "../errors.js";
  */
 const TRANSIENT_SERVER_TYPES: ReadonlySet<string> = new Set(["heartbeat.pong", "clock.pong"]);
 
-/** 服务端消息类型的默认优先级（docs/phase-1-reference.md）。 */
+/** 服务端消息类型的默认优先级（docs/phase-1-reference.md；Phase 2 扩展见 scene-execution.md）。 */
 const DEFAULT_SERVER_PRIORITIES: Readonly<Record<string, SendPriority>> = {
   error: 1,
   "scene.committed": 1,
   "scene.cancelled": 1,
+  // Phase 2：Commit 与取消属于安全关键消息，永不淘汰（scene-execution.md）。
+  "scene.commit": 1,
+  "scene.cancel": 1,
   "server.hello": 2,
   "server.ready": 2,
   "session.snapshot": 2,
   "heartbeat.pong": 2,
   "clock.pong": 2,
   "media.stream.closed": 2,
+  // Phase 2：媒体控制与 Scene 准备命令（scene-execution.md）。
+  "scene.prepare": 2,
+  "media.stream.announce": 2,
   "scene.prepared": 3,
 };
 

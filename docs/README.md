@@ -7,7 +7,8 @@
 - [系统架构设计](./architecture-plan.md)：产品能力、领域模型和长期里程碑。
 - [技术选型基线](./technology-selection.md)：运行时、前端、存储、插件与发布技术栈。
 - [Phase 1 完成态参考](./phase-1-reference.md)：已经交付的基础协议、公开入口、验收证据和后续兼容边界。
-- [Phase 2 开发指南](./phase-2-development-guide.md)：当前阶段“演出纵向链路”的范围、工作包、Gate 和验收方式。
+- [Phase 2 开发指南](./phase-2-development-guide.md)：阶段“演出纵向链路”的范围、工作包、Gate 和验收方式（完成态）。
+- [Phase 2 完成态参考](./phase-2-reference.md)：Phase 2 交付形态、验收证据与已知边界。
 
 ## 稳定协议
 

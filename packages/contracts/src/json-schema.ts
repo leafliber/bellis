@@ -12,11 +12,23 @@ import { ToolCallSchema } from "./decision/tool-call.js";
 import { ErrorEnvelopeSchema } from "./errors/error-envelope.js";
 import { SceneSchema } from "./scene/scene.js";
 import { CueSchema } from "./scene/cue.js";
+import { SceneExecutionStateSchema, ScenePlanSchema } from "./scene/scene-plan.js";
+import { StageCapabilitiesSchema } from "./stage/stage-capabilities.js";
 import { AudienceBatchSchema } from "./signal/audience-batch.js";
 import { SignalSchema } from "./signal/signal.js";
 import { OutboxMessageSchema } from "./session/outbox-message.js";
-import { Phase1SessionSnapshotSchema } from "./session/session-snapshot.js";
+import {
+  Phase1SessionSnapshotSchema,
+  Phase2SessionSnapshotSchema,
+  SessionSnapshotUnionSchema,
+} from "./session/session-snapshot.js";
 import { SessionRecordSchema } from "./session/session-record.js";
+import {
+  Phase2DecisionPacketPayloadSchema,
+  Phase2ScenePlanCompiledPayloadSchema,
+  Phase2SignalAcceptedPayloadSchema,
+  SceneLifecyclePayloadSchema,
+} from "./session/phase-2-records.js";
 import {
   ClientControlEnvelopeSchema,
   ControlEnvelopeSchema,
@@ -68,8 +80,17 @@ export const CONTRACT_SCHEMA_ENTRIES = {
   "decision-packet": DecisionPacketSchema,
   cue: CueSchema,
   scene: SceneSchema,
+  "scene-plan": ScenePlanSchema,
+  "scene-execution-state": SceneExecutionStateSchema,
+  "stage-capabilities": StageCapabilitiesSchema,
   "session-record": SessionRecordSchema,
+  "phase2-signal-accepted-payload": Phase2SignalAcceptedPayloadSchema,
+  "phase2-decision-packet-payload": Phase2DecisionPacketPayloadSchema,
+  "phase2-scene-plan-compiled-payload": Phase2ScenePlanCompiledPayloadSchema,
+  "scene-lifecycle-payload": SceneLifecyclePayloadSchema,
   "phase1-session-snapshot": Phase1SessionSnapshotSchema,
+  "phase2-session-snapshot": Phase2SessionSnapshotSchema,
+  "session-snapshot-union": SessionSnapshotUnionSchema,
   "outbox-message": OutboxMessageSchema,
   "server-control-envelope": ServerControlEnvelopeSchema,
   "client-control-envelope": ClientControlEnvelopeSchema,

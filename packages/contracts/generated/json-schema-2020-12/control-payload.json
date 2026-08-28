@@ -247,125 +247,296 @@
           "type": "object",
           "properties": {
             "snapshot": {
-              "type": "object",
-              "properties": {
-                "schemaVersion": {
-                  "type": "number",
-                  "const": 1
-                },
-                "reason": {
-                  "type": "string",
-                  "enum": [
-                    "initial",
-                    "replay_gap",
-                    "requested"
-                  ]
-                },
-                "sessionId": {
-                  "type": "string",
-                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-                },
-                "sessionStatus": {
-                  "type": "string",
-                  "enum": [
-                    "starting",
-                    "ready",
-                    "draining"
-                  ]
-                },
-                "latestServerSeq": {
-                  "type": "string",
-                  "pattern": "^(?:0|[1-9][0-9]{0,29})$"
-                },
-                "signalWatermarks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "source": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 64
-                      },
-                      "watermark": {
-                        "type": "string",
-                        "pattern": "^(?:0|[1-9][0-9]{0,29})$"
-                      }
-                    },
-                    "required": [
-                      "source",
-                      "watermark"
-                    ],
-                    "additionalProperties": {
-                      "$ref": "#/$defs/__schema0"
-                    }
-                  }
-                },
-                "lastCommittedScene": {
+              "anyOf": [
+                {
                   "type": "object",
                   "properties": {
-                    "sceneId": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "initial",
+                        "replay_gap",
+                        "requested"
+                      ]
+                    },
+                    "sessionId": {
                       "type": "string",
                       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
                     },
-                    "cycleId": {
+                    "sessionStatus": {
                       "type": "string",
-                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      "enum": [
+                        "starting",
+                        "ready",
+                        "draining"
+                      ]
                     },
-                    "status": {
+                    "latestServerSeq": {
                       "type": "string",
-                      "const": "committed"
+                      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
                     },
-                    "committedAtMs": {
+                    "signalWatermarks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "watermark": {
+                            "type": "string",
+                            "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "watermark"
+                        ],
+                        "additionalProperties": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      }
+                    },
+                    "lastCommittedScene": {
+                      "type": "object",
+                      "properties": {
+                        "sceneId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "cycleId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "status": {
+                          "type": "string",
+                          "const": "committed"
+                        },
+                        "committedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "sceneId",
+                        "cycleId",
+                        "status",
+                        "committedAtMs"
+                      ],
+                      "additionalProperties": {
+                        "$ref": "#/$defs/__schema0"
+                      }
+                    },
+                    "activeScene": {
+                      "type": "null"
+                    },
+                    "openMediaStreams": {
+                      "maxItems": 0,
+                      "type": "array",
+                      "items": {}
+                    },
+                    "runtimeVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "generatedAtMs": {
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
                     }
                   },
                   "required": [
-                    "sceneId",
-                    "cycleId",
-                    "status",
-                    "committedAtMs"
+                    "schemaVersion",
+                    "reason",
+                    "sessionId",
+                    "sessionStatus",
+                    "latestServerSeq",
+                    "signalWatermarks",
+                    "activeScene",
+                    "openMediaStreams",
+                    "runtimeVersion",
+                    "generatedAtMs"
                   ],
                   "additionalProperties": {
                     "$ref": "#/$defs/__schema0"
                   }
                 },
-                "activeScene": {
-                  "type": "null"
-                },
-                "openMediaStreams": {
-                  "maxItems": 0,
-                  "type": "array",
-                  "items": {}
-                },
-                "runtimeVersion": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 64
-                },
-                "generatedAtMs": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
+                {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "const": 2
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "initial",
+                        "replay_gap",
+                        "requested"
+                      ]
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    },
+                    "sessionStatus": {
+                      "type": "string",
+                      "enum": [
+                        "starting",
+                        "ready",
+                        "draining"
+                      ]
+                    },
+                    "latestServerSeq": {
+                      "type": "string",
+                      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                    },
+                    "signalWatermarks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "watermark": {
+                            "type": "string",
+                            "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "watermark"
+                        ],
+                        "additionalProperties": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      }
+                    },
+                    "lastCommittedScene": {
+                      "type": "object",
+                      "properties": {
+                        "sceneId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "cycleId": {
+                          "type": "string",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        },
+                        "status": {
+                          "type": "string",
+                          "const": "committed"
+                        },
+                        "committedAtMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "sceneId",
+                        "cycleId",
+                        "status",
+                        "committedAtMs"
+                      ],
+                      "additionalProperties": {
+                        "$ref": "#/$defs/__schema0"
+                      }
+                    },
+                    "activeScene": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "sceneId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                            },
+                            "cycleId": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                            },
+                            "executionState": {
+                              "type": "string",
+                              "enum": [
+                                "preparing",
+                                "ready",
+                                "scheduled",
+                                "running",
+                                "completed",
+                                "cancelled",
+                                "failed",
+                                "uncertain"
+                              ]
+                            },
+                            "outcomeCertain": {
+                              "type": "boolean"
+                            },
+                            "requiresReprepare": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "sceneId",
+                            "cycleId",
+                            "executionState",
+                            "outcomeCertain",
+                            "requiresReprepare"
+                          ],
+                          "additionalProperties": {
+                            "$ref": "#/$defs/__schema0"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "openMediaStreams": {
+                      "maxItems": 0,
+                      "type": "array",
+                      "items": {}
+                    },
+                    "runtimeVersion": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "generatedAtMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "reason",
+                    "sessionId",
+                    "sessionStatus",
+                    "latestServerSeq",
+                    "signalWatermarks",
+                    "activeScene",
+                    "openMediaStreams",
+                    "runtimeVersion",
+                    "generatedAtMs"
+                  ],
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema0"
+                  }
                 }
-              },
-              "required": [
-                "schemaVersion",
-                "reason",
-                "sessionId",
-                "sessionStatus",
-                "latestServerSeq",
-                "signalWatermarks",
-                "activeScene",
-                "openMediaStreams",
-                "runtimeVersion",
-                "generatedAtMs"
-              ],
-              "additionalProperties": {
-                "$ref": "#/$defs/__schema0"
-              }
+              ]
             }
           },
           "required": [
@@ -599,6 +770,10 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 256
+            },
+            "finalSequence": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
             }
           },
           "required": [
@@ -672,6 +847,807 @@
           },
           "required": [
             "error"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "stage.capabilities"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "capabilities": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "audio": {
+                  "type": "object",
+                  "properties": {
+                    "contentTypes": {
+                      "minItems": 1,
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "maxBufferedUs": {
+                      "type": "string",
+                      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                    }
+                  },
+                  "required": [
+                    "contentTypes",
+                    "maxBufferedUs"
+                  ],
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                },
+                "subtitle": {
+                  "type": "object",
+                  "properties": {
+                    "supported": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "supported"
+                  ],
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                },
+                "avatar": {
+                  "type": "object",
+                  "properties": {
+                    "adapter": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "motions": {
+                      "maxItems": 64,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "expressions": {
+                      "maxItems": 64,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    }
+                  },
+                  "required": [
+                    "adapter",
+                    "motions",
+                    "expressions"
+                  ],
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "audio",
+                "subtitle",
+                "avatar"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            }
+          },
+          "required": [
+            "capabilities"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.prepare"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "type": "object",
+              "properties": {
+                "schemaVersion": {
+                  "type": "number",
+                  "const": 1
+                },
+                "scene": {
+                  "type": "object",
+                  "properties": {
+                    "schemaVersion": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "sceneId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    },
+                    "cycleId": {
+                      "type": "string",
+                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    },
+                    "groups": {
+                      "minItems": 1,
+                      "maxItems": 16,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "schemaVersion": {
+                            "type": "number",
+                            "const": 1
+                          },
+                          "groupId": {
+                            "type": "string",
+                            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                          },
+                          "lanes": {
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "audio",
+                                "subtitle",
+                                "avatar",
+                                "game",
+                                "overlay"
+                              ]
+                            }
+                          },
+                          "level": {
+                            "type": "string",
+                            "enum": [
+                              "hard",
+                              "soft",
+                              "detached"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "schemaVersion",
+                          "groupId",
+                          "lanes",
+                          "level"
+                        ],
+                        "additionalProperties": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      }
+                    },
+                    "deadlineMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "interruptPolicy": {
+                      "type": "string",
+                      "enum": [
+                        "finish",
+                        "fade",
+                        "immediate"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "schemaVersion",
+                    "sceneId",
+                    "cycleId",
+                    "groups",
+                    "deadlineMs",
+                    "interruptPolicy"
+                  ],
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                },
+                "cues": {
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "schemaVersion": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "cueId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                      },
+                      "lane": {
+                        "type": "string",
+                        "enum": [
+                          "audio",
+                          "subtitle",
+                          "avatar",
+                          "game",
+                          "overlay"
+                        ]
+                      },
+                      "anchor": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "offsetMs": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "intent": {
+                        "$ref": "#/$defs/__schema0"
+                      }
+                    },
+                    "required": [
+                      "schemaVersion",
+                      "cueId",
+                      "lane",
+                      "anchor",
+                      "offsetMs",
+                      "intent"
+                    ],
+                    "additionalProperties": {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "schemaVersion",
+                "scene",
+                "cues"
+              ],
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "prepareDeadlineUs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            }
+          },
+          "required": [
+            "plan",
+            "prepareDeadlineUs"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.ready"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "lanes": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lane": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ready",
+                      "unavailable"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "cueIds": {
+                    "maxItems": 64,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                    }
+                  }
+                },
+                "required": [
+                  "lane",
+                  "status",
+                  "cueIds"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              }
+            },
+            "preparedAtStageUs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "lanes",
+            "preparedAtStageUs"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.commit"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "commitAtRuntimeUs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "commitAtRuntimeUs"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.started"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "lanes": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lane": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  },
+                  "startedAtStageUs": {
+                    "type": "string",
+                    "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                  },
+                  "startedAtRuntimeUs": {
+                    "type": "string",
+                    "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                  }
+                },
+                "required": [
+                  "lane",
+                  "startedAtStageUs",
+                  "startedAtRuntimeUs"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              }
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "lanes"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.finished"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "lanes": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lane": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "failed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "finishedAtStageUs": {
+                    "type": "string",
+                    "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+                  }
+                },
+                "required": [
+                  "lane",
+                  "outcome",
+                  "finishedAtStageUs"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              }
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "lanes"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.cancel"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "reason"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "scene.cancel.ack"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cycleId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "lanes": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "lane": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "subtitle",
+                      "avatar",
+                      "game",
+                      "overlay"
+                    ]
+                  },
+                  "stopped": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "lane",
+                  "stopped"
+                ],
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              }
+            },
+            "stoppedAtStageUs": {
+              "type": "string",
+              "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+            }
+          },
+          "required": [
+            "sceneId",
+            "cycleId",
+            "lanes",
+            "stoppedAtStageUs"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "media.stream.announce"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "mediaKind": {
+              "type": "string",
+              "enum": [
+                "audio",
+                "viseme"
+              ]
+            },
+            "contentType": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "sceneId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "cueId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          },
+          "required": [
+            "streamId",
+            "mediaKind",
+            "contentType"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "payload"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "media.stream.ready"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "streamId": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          },
+          "required": [
+            "streamId"
           ],
           "additionalProperties": {
             "$ref": "#/$defs/__schema0"

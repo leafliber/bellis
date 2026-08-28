@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Phase1SessionSnapshotSchema } from "@bellis/contracts";
-import { buildSessionSnapshot } from "../../src/index.js";
+import { Phase1SessionSnapshotSchema, Phase2SessionSnapshotSchema } from "@bellis/contracts";
+import { buildPhase2SessionSnapshot, buildSessionSnapshot } from "../../src/index.js";
 
 describe("buildSessionSnapshot", () => {
   const state = {
@@ -48,6 +48,50 @@ describe("buildSessionSnapshot", () => {
         { ...state, sessionId: "not-a-uuid" },
         { reason: "requested", sessionStatus: "ready", runtimeVersion: "v", generatedAtMs: 1 },
       ),
+    ).toThrow();
+  });
+
+  it("Phase 2 快照：v1 字段原样 + activeScene 对账视图（schemaVersion 2）", () => {
+    const snapshot = buildPhase2SessionSnapshot(state, {
+      reason: "replay_gap",
+      sessionStatus: "ready",
+      runtimeVersion: "0.1.0-test",
+      generatedAtMs: 1,
+      activeScene: {
+        sceneId: "22222222-2222-4222-8222-222222222222",
+        cycleId: "33333333-3333-4333-8333-333333333333",
+        executionState: "uncertain",
+        outcomeCertain: false,
+        requiresReprepare: true,
+      },
+    });
+    expect(snapshot.schemaVersion).toBe(2);
+    expect(snapshot.activeScene).toEqual({
+      sceneId: "22222222-2222-4222-8222-222222222222",
+      cycleId: "33333333-3333-4333-8333-333333333333",
+      executionState: "uncertain",
+      outcomeCertain: false,
+      requiresReprepare: true,
+    });
+    expect(snapshot.latestServerSeq).toBe("9007199254740993");
+    expect(Phase2SessionSnapshotSchema.safeParse(snapshot).success).toBe(true);
+  });
+
+  it("Phase 2 快照：非法执行状态被 Schema 拒绝（8 状态之外不可上线）", () => {
+    expect(() =>
+      buildPhase2SessionSnapshot(state, {
+        reason: "replay_gap",
+        sessionStatus: "ready",
+        runtimeVersion: "v",
+        generatedAtMs: 1,
+        activeScene: {
+          sceneId: "22222222-2222-4222-8222-222222222222",
+          cycleId: "33333333-3333-4333-8333-333333333333",
+          executionState: "committing" as never,
+          outcomeCertain: true,
+          requiresReprepare: false,
+        },
+      }),
     ).toThrow();
   });
 });

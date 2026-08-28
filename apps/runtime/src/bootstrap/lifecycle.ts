@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { MonotonicClock } from "@bellis/contracts";
+import type { MonotonicClock, SessionRecord } from "@bellis/contracts";
 import type {
   OutboxDispatcher,
   PersistenceCheckpointObserver,
@@ -17,6 +17,9 @@ import type {
 import { createInMemoryMetrics, createPinoLogger } from "@bellis/observability";
 import { SystemMonotonicClock } from "@bellis/transport";
 import { FakeSceneCommitService } from "../application/commit-fake-scene.js";
+import { PHASE_2_PCM_CONTENT_TYPE } from "@bellis/contracts";
+import { Phase2RuntimeHost } from "../application/phase-2/host.js";
+import { PersistenceSceneRepository } from "../application/phase-2/stage-port-adapter.js";
 import type {
   ControlBroadcast,
   FakeSceneCommitInput,
@@ -25,6 +28,11 @@ import type {
 import { createRecordingOutboxPublisher } from "../application/outbox-publisher.js";
 import type { OutboxDeliveryRecord } from "../application/outbox-publisher.js";
 import { LocalSessionService } from "../auth/local-session.js";
+import {
+  Phase2DecisionPacketPayloadSchema,
+  Phase2ScenePlanCompiledPayloadSchema,
+  Phase2SignalAcceptedPayloadSchema,
+} from "@bellis/contracts";
 import { StartupTokenService } from "../auth/startup-token.js";
 import { ApplicationError } from "../errors/mapping.js";
 import { RequestTraceStore, createOriginAllowlist } from "../routes/context.js";
@@ -119,6 +127,8 @@ export interface RuntimeHandle {
   readonly status: RuntimeStatus;
   /** 签发一次性启动 Token（测试/开发装配用；原值只在此返回，不落日志）。 */
   issueStartupToken(): { token: string; expiresAtMs: number };
+  /** Phase 2 演出宿主（显式启用时非 null；开发/Demo 装配入口）。 */
+  readonly phase2: Phase2RuntimeHost | null;
   /** Fake Scene Commit Application Port（仅协议验证；无外部副作用）。 */
   commitFakeScene(
     input: FakeSceneCommitInput,
@@ -126,6 +136,8 @@ export interface RuntimeHandle {
   ): Promise<FakeSceneCommitResult>;
   /** 读取逻辑 Session 的恢复状态（Scene/Watermark/Server Seq）。 */
   readSessionRecovery(sessionId: string): Promise<RecoveryState>;
+  /** 按 trace 根查询 Session Record（Trace 连续性验证；不含帧内容）。 */
+  listRecordsByTrace(traceId: string): Promise<readonly SessionRecord[]>;
   /** Phase 1 发布者的脱敏交付记录（含允许的重复交付）。 */
   outboxDeliveries(): readonly OutboxDeliveryRecord[];
   /** 逻辑 Session 的媒体帧聚合计数（不含帧内容）。 */
@@ -177,6 +189,22 @@ function mergeSignals(signals: readonly AbortSignal[]): {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Phase 2 审计 Record 的版本化 payload Schema 注册表（recordType → Schema）。 */
+const PHASE_2_AUDIT_PAYLOAD_SCHEMAS = {
+  phase2_signal_accepted: Phase2SignalAcceptedPayloadSchema,
+  phase2_decision_packet: Phase2DecisionPacketPayloadSchema,
+  phase2_scene_plan_compiled: Phase2ScenePlanCompiledPayloadSchema,
+} as const;
+
+function phase2AuditPayloadSchemaFor(recordType: string) {
+  const schema =
+    PHASE_2_AUDIT_PAYLOAD_SCHEMAS[recordType as keyof typeof PHASE_2_AUDIT_PAYLOAD_SCHEMAS];
+  if (schema === undefined) {
+    throw new Error(`phase2_audit_payload_unknown_record_type:${recordType}`);
+  }
+  return schema;
 }
 
 export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHandle> {
@@ -283,6 +311,105 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
   });
   const sessions = new LocalSessionService({ tokens, store, persistence, logger });
 
+  // Phase 2 演出宿主（显式启用的开发/Demo 装配；生产默认不创建）。
+  const startupTraceId = crypto.randomUUID().replaceAll("-", "").slice(0, 31) + "0";
+  let phase2Host: Phase2RuntimeHost | null = null;
+  // Phase 2 当前逻辑 Session（审计 Record 的 sessionId；Stage 连接后更新）。
+  let phase2SessionId = config.phase2.sessionId ?? "00000000-0000-4000-8000-000000000000";
+  if (config.phase2.enabled) {
+    const phase2Repository = new PersistenceSceneRepository({
+      client: {
+        commitScene: async (input) => persistence.commitScene(input as never),
+        appendRecord: async (input) => persistence.appendRecord(input as never),
+      },
+      traceId: startupTraceId,
+      newRecordId: () => crypto.randomUUID(),
+    });
+    phase2Host = new Phase2RuntimeHost({
+      sessionId: config.phase2.sessionId ?? "00000000-0000-4000-8000-000000000000",
+      capabilities: {
+        schemaVersion: 1,
+        audio: {
+          contentTypes: [PHASE_2_PCM_CONTENT_TYPE],
+          maxBufferedUs: "2000000",
+        },
+        subtitle: { supported: true },
+        avatar: { adapter: "fake-demo", motions: ["nod_agree"], expressions: ["happy"] },
+      },
+      clock,
+      wallClockMs: () => Date.now(),
+      compileIds: { nextId: () => crypto.randomUUID() },
+      recordId: () => crypto.randomUUID(),
+      repository: phase2Repository,
+      logger,
+      metrics,
+      runtimeVersion: config.runtimeVersion,
+      ...(config.phase2.faultPoint === undefined
+        ? {}
+        : {
+            directorFaultHook: (point) => {
+              if (point === config.phase2.faultPoint) {
+                // 崩溃窗口注入：before/after durable 窗口必须同步死亡
+                // （DB 写入竞态决定落库事实）；stage 出站窗口（commit/
+                // cancel 已入队）延迟 50ms 让消息先写出到达 Stage，命中
+                // 「已发出」语义；随后制造无清理路径的硬崩溃现场。
+                logger.log("info", "phase2_fault_window_injected", { point });
+                const flushDelayMs =
+                  point === "after_stage_commit" || point === "after_cancel_sent" ? 50 : 0;
+                if (flushDelayMs === 0) {
+                  process.kill(process.pid, "SIGKILL");
+                  return;
+                }
+                const timer = setTimeout(() => {
+                  process.kill(process.pid, "SIGKILL");
+                }, flushDelayMs);
+                timer.unref?.();
+              }
+            },
+          }),
+      // 版本化审计 Record（Signal 接受/决策包/编译结果；不含发言全文）。
+      // payload 必须通过对应 recordType 的版本化 Schema（SessionRecord 的
+      // 闭合约定），非法 payload 显式失败而非落任意 JSON。
+      // traceId：提交链根（Signal→决策→编译共用，由 Service 传入）；
+      // 缺省回落装配级 startup 根。
+      audit: {
+        append: async (record) => {
+          const payloadCheck = phase2AuditPayloadSchemaFor(record.recordType).safeParse(
+            record.payload,
+          );
+          if (!payloadCheck.success) {
+            throw new Error(
+              `phase2_audit_payload_invalid:${record.recordType}:${payloadCheck.error.issues[0]?.code ?? "unknown"}`,
+            );
+          }
+          const traceId = record.traceId ?? startupTraceId;
+          await persistence.appendRecord({
+            record: {
+              schemaVersion: 1,
+              recordId: crypto.randomUUID(),
+              sessionId: phase2SessionId,
+              recordType: record.recordType,
+              aggregateId: record.aggregateId,
+              traceId,
+              occurredAtMs: Date.now(),
+              payload: record.payload,
+            },
+            trace: { traceId },
+          });
+        },
+      },
+      // Stage 连接出现即绑定真实逻辑 Session：生命周期/审计 Record 携带
+      // 真实 sessionId（Record Schema 要求 UUID，占位值会被持久化层拒绝）。
+      onSessionIdResolved: (sessionId) => {
+        phase2SessionId = sessionId;
+        phase2Repository.bindSessionId(sessionId);
+      },
+    });
+    if (config.phase2.sessionId !== undefined) {
+      phase2Repository.bindSessionId(config.phase2.sessionId);
+    }
+  }
+
   let app: Awaited<ReturnType<typeof buildServer>> | null = null;
   let dispatcher: OutboxDispatcher | null = null;
   try {
@@ -313,6 +440,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       origins,
       requestTraces,
       connections,
+      ...(phase2Host === null ? {} : { phase2: phase2Host }),
     });
     await app.listen({
       host: config.host === "localhost" ? "127.0.0.1" : config.host,
@@ -363,6 +491,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
    * 期间既不得继续执行已有 Commit 任务，也不得继续领取/发布 Outbox。
    */
   const closeSteps: Array<{ name: string; run: () => Promise<void> | void }> = [
+    {
+      name: "phase2-host",
+      run: () => phase2Host?.close() ?? Promise.resolve(),
+    },
     {
       name: "stop-listen",
       run: () => {
@@ -474,6 +606,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
     instanceId,
     status,
     issueStartupToken: () => tokens.issue(),
+    phase2: phase2Host,
     commitFakeScene: (input, signal) => {
       if (closeStarted || status.phase !== "ready") {
         return Promise.reject(new ApplicationError("not_ready", "runtime is shutting down"));
@@ -489,6 +622,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       return tracked;
     },
     readSessionRecovery: (sessionId) => persistence.readRecoveryState(sessionId),
+    listRecordsByTrace: (traceId) =>
+      persistence.listRecords({ traceId, limit: 64 }).then((records) => [...records]),
     outboxDeliveries: () => publisher.records(),
     mediaFrameStats: (sessionId) => {
       const logical = store.resolveById(sessionId);

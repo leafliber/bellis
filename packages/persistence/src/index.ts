@@ -35,6 +35,7 @@ export type {
   CompleteOutboxInput,
   EnsureSessionInput,
   ListRecordsInput,
+  ActiveSceneRow,
   OutboxRetryDisposition,
   OutboxRetryPolicyConfig,
   OutboxStats,

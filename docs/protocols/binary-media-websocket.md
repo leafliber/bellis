@@ -1,17 +1,18 @@
 # Binary Media WebSocket 协议（/ws/v1/media）
 
-> 状态：Phase 1 冻结 v1（实现：`@bellis/transport` P1）
+> 状态：Phase 1 冻结 v1 + Phase 2 兼容扩展（实现：`@bellis/transport`）
 > 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
-> 姊妹文档：[Control WebSocket](./control-websocket.md)
+> 姊妹文档：[Control WebSocket](./control-websocket.md) · [Scene Execution](./scene-execution.md)
 >
 > 本文档中的全部 `hex media-frame` 代码块由
 > `packages/transport/test/unit/protocol-docs.test.ts` 自动验证。
 
-## 1. 范围声明（Phase 1）
+## 1. 范围声明
 
-Phase 1 只用**随机测试字节**验证传输、顺序与资源限制语义。Payload 不是
-可播放音频、viseme 数据或任何真实媒体；`audio` / `viseme` 只是为后续阶段
-保留的 kind 枚举位。TTS、AudioWorklet、Live2D 不在本阶段。
+Phase 1 只用**随机测试字节**验证传输、顺序与资源限制语义（`binary-test`）。
+Phase 2 激活 `audio` kind：Runtime → Stage 方向的 Fake TTS PCM 流
+（§10；控制流程见 [Scene Execution §7](./scene-execution.md)）。
+`viseme` 仍为保留枚举位；TTS 真实 Provider、口型数据属于后续阶段。
 
 ## 2. 字节布局（冻结）
 
@@ -39,11 +40,11 @@ Phase 1 只用**随机测试字节**验证传输、顺序与资源限制语义�
 
 ## 3. Media Kind 与 Flags
 
-| kind 字节 | 名称 | Phase 1 用途 |
+| kind 字节 | 名称 | 用途 |
 | --- | --- | --- |
-| 0x01 | `audio` | 保留（后续阶段 PCM/编码音频） |
+| 0x01 | `audio` | Phase 2：Runtime → Stage 的 PCM 音频（§10；client → server 方向仍为保留位） |
 | 0x02 | `viseme` | 保留（后续阶段口型数据） |
-| 0x03 | `binary-test` | 随机测试字节 |
+| 0x03 | `binary-test` | 随机测试字节（仅 client → server 测试） |
 
 - 未知 kind 字节（0x00、≥0x04）稳定拒绝（`invalid_media_kind`）。
 - Flags v1 恒为 0；任何非零 flags 稳定拒绝（`bad_flags`）。后续版本语义
@@ -151,12 +152,21 @@ de ad be ef   payload（4 字节）
   5. `frameId` 在 Stream 内唯一（`duplicate_frame_id`）——与 Sequence 顺序
      是两个独立约束。
   6. `targetTimeUs` 已过（含可配置宽限，默认 0）且帧不可再用 →
-     `deadline_exceeded`。比较基准是 Runtime 单调时钟（注入的 nowUs）。
+     `deadline_exceeded`。比较基准是 Runtime 单调时钟（Stage 经 Offset
+     Estimator 映射）；该时钟只用于 Deadline，不得用于本地资源驻留期限。
   7. 单 Stream 帧数上限（默认 65536，`frame_limit_reached`）。
 - 关闭（Control `media.stream.closed` 或服务端主动）：关闭后的 Stream 不能
   复活（同 `streamId` 再注册被拒绝）。关闭时**立即释放帧级状态**
   （frameId 去重集合、Sequence 游标、帧计数），只保留轻量墓碑防止复活；
-  frameId 集合不会驻留到连接结束。
+  frameId 集合不会驻留到连接结束。唯一例外是**携带关闭边界**
+  （`finalSequence`，Phase 2）：closed 经 Control 与帧（Media）跨连接送达
+  无全局顺序，先到的 closed 保留水位继续验收 sequence ≤ 边界且严格连续
+  的迟到尾帧（其余校验与开放 Stream 完全一致）。尾帧窗口的生命周期有界：
+  追平边界、收到首个违规/越界/迟到被拒帧、错 Session 帧、或关闭时刻起算
+  的驻留期限（默认 1s）届满——任一即压缩为轻量墓碑（此后一切帧拒绝，
+  帧级状态立即释放）。驻留期限严格使用**接收端本地单调时钟域**；Stage
+  Client 按最近到期时刻维持一个真实 Timer，接收路径另作懒扫描兜底，因而
+  最后一帧永不到达且连接后续静默时也会释放，不随连接无限驻留。
 - 资源上限（默认，可配置）：并发打开 Stream 8 个；单连接生命周期总 Stream
   1024 个。连接关闭时 `closeAll()` 释放全部状态。
 - **Media Stream 不重放**：重连 / Snapshot 后客户端必须重新注册 Stream。
@@ -181,4 +191,46 @@ onMediaBinaryMessage(chunks):   # 一条 WS 消息可能分片送达
 
 onMediaClose / onControlClose:
   parser.reset(); registry.closeAll()
+```
+
+## 10. Runtime → Stage 音频流（Phase 2）
+
+Phase 2 的音频主要是 Runtime → Stage 方向。控制流程（announce → ready →
+帧发送 → 取消）与三重发送限制见 [Scene Execution §7](./scene-execution.md)；
+本节冻结帧层事实（已由真实 Chromium E2E 验证：`MediaConnection.sendFrame`
+编码 BELL v1 出站、浏览器 `StageMediaClient` 入站校验后送入
+AudioWorklet 有界缓冲，实测 26 帧 / 0 下越）：
+
+- 布局与 §2 完全一致（magic/version/kind=0x01/flags=0/长度/Header/Payload），
+  不因方向变化新增字段。
+- Stage 侧入站校验复用 `MediaStreamRegistry`（浏览器入口
+  `@bellis/transport/browser`）：session 一致、contentType/kind 与
+  announce 一致、`sequence` 从 0 严格连续、frameId 唯一、单 Stream 帧数
+  上限；注册由 Control 通道的 `media.stream.announce` /
+  `media.stream.ready` 驱动。
+- Phase 2 PCM 基线：`contentType` = `audio/pcm-s16le-48000-mono`，
+  48 kHz / mono / S16LE / 20 ms 帧（960 样本 = 1920 字节）；常量由
+  `@bellis/contracts` 导出（`PHASE_2_PCM_*`）。
+- 重连不恢复：Stage 侧 Stream 状态随连接丢弃，必须重新 announce。
+
+音频帧示例（Header 423 字节，Payload = `DE AD BE EF` 演示字节）：
+
+```json
+{"schemaVersion":1,"streamId":"99999999-9999-4999-8999-999999999999","frameId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","sessionId":"11111111-1111-4111-8111-111111111111","sceneId":"44444444-4444-4444-8444-444444444444","cueId":"55555555-5555-4555-8555-555555555555","sequence":"0","targetTimeUs":"1755648000000000","durationUs":"20000","contentType":"audio/pcm-s16le-48000-mono","traceId":"0123456789abcdef0123456789abcdef"}
+```
+
+```hex media-frame-valid-audio
+42454c4c01010000a70100007b22736368656d6156657273696f6e223a312c2273747265616d4964223a2239393939393939392d393939392d343939392d383939392d393939393939393939393939222c226672616d654964223a2261616161616161612d616161612d346161612d386161612d616161616161616161616161222c2273657373696f6e4964223a2231313131313131312d313131312d343131312d383131312d313131313131313131313131222c227363656e654964223a2234343434343434342d343434342d343434342d383434342d343434343434343434343434222c226375654964223a2235353535353535352d353535352d343535352d383535352d353535353535353535353535222c2273657175656e6365223a2230222c2274617267657454696d655573223a2231373535363438303030303030303030222c226475726174696f6e5573223a223230303030222c22636f6e74656e7454797065223a22617564696f2f70636d2d7331366c652d34383030302d6d6f6e6f222c2274726163654964223a223031323334353637383961626364656630313233343536373839616263646566227ddeadbeef
+```
+
+拆解：
+
+```text
+42 45 4c 4c   magic "BELL"
+01            version 1
+01            media kind = audio
+00 00         flags = 0（LE）
+a7 01 00 00   header length = 0x01a7 = 423（LE）
+…423 字节…     UTF-8 JSON Header（含 sceneId/cueId/targetTimeUs/durationUs）
+de ad be ef   payload（演示字节）
 ```

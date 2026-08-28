@@ -1,7 +1,13 @@
 import { MediaStreamClosedPayloadSchema, MediaStreamOpenPayloadSchema } from "@bellis/contracts";
-import type { ClientControlEnvelope, MonotonicClock, TraceContext } from "@bellis/contracts";
+import type {
+  ClientControlEnvelope,
+  MonotonicClock,
+  Phase1SessionSnapshot,
+  Phase2SessionSnapshot,
+  TraceContext,
+} from "@bellis/contracts";
 import { parseDecimalString } from "@bellis/contracts";
-import type { RecoveryState, PersistenceClient } from "@bellis/persistence";
+import type { ActiveSceneRow, RecoveryState, PersistenceClient } from "@bellis/persistence";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 import { CONTROL_CLOSE_CODES, ControlSession, decodeControlMessage } from "@bellis/transport";
 import type { ControlEffect, ControlLogicalState, ServerEnqueueResult } from "@bellis/transport";
@@ -62,6 +68,13 @@ export interface ControlResumePlan {
   /** 预加载的 P2 恢复状态（Replay Gap 快照内容；可能为 null）。 */
   readonly recoveryState: RecoveryState | null;
   /**
+   * Phase 2 跨进程对账证据（server 装配预加载）：活动 Scene 索引行
+   * （写侧同事务维护）。索引读取失败由 resume loader 上抛（1011 失败
+   * 关闭）——null 只可能来自无 Phase 2 装配或直连测试，Host 对 null
+   * 走保守 uncertain 视图，绝不误报 v1。
+   */
+  readonly phase2ActiveScenes?: readonly ActiveSceneRow[] | null;
+  /**
    * 导出状态的事务式消费句柄（三轮评审修复 1）：恢复读取、水位对账
    * 与 ControlSession 构造全部成功后 commit；任何失败或初始化期间连接
    * 关闭必须 rollback（原样归还，后续重连仍可恢复）。
@@ -85,6 +98,29 @@ export interface ControlConnectionOptions {
    * 抛错**（连接以 1011 失败关闭），不得降级为全新 Session。
    */
   readonly loadResume: () => Promise<ControlResumePlan>;
+  /**
+   * Phase 2 演出消息回调（兼容新增）：stage.capabilities / scene.ready /
+   * scene.started / scene.finished / scene.cancel.ack / media.stream.ready
+   * 交给应用层（Phase2PerformanceService 的 StagePort 适配器）；未注册时
+   * 这些消息按未知业务类型静默忽略（不影响 Phase 1 行为）。
+   */
+  readonly onStageMessage?: (envelope: ClientControlEnvelope, nowUs: bigint) => void;
+  /**
+   * client.hello 回调（Phase 2 连接归属）：hello 通过校验后以 payload 的
+   * clientType 调用；应用层据此只把 clientType=stage 的连接绑定为演出
+   * Stage（Phase 1 观察者连接不进入 Phase 2 装配）。
+   */
+  readonly onStageHello?: (clientType: unknown) => void;
+  /**
+   * Phase 2 快照装饰（同步）：v1 快照构造后调用，存在活动 Scene 对账
+   * 视图时升级 schemaVersion 2；异常时回落 v1 形态（不丢快照事实）。
+   * 第三参为跨进程生命周期证据（无 Phase 2 装配时为 null）。
+   */
+  readonly snapshotDecorator?: (
+    snapshot: Phase1SessionSnapshot,
+    recoveryState: RecoveryState,
+    activeScenes: readonly ActiveSceneRow[] | null,
+  ) => Phase1SessionSnapshot | Phase2SessionSnapshot;
 }
 
 type SendWaiter = (outcome: BroadcastOutcome) => void;
@@ -108,12 +144,23 @@ export class ControlConnection {
   readonly #runtimeVersion: string;
   readonly #limits: ControlLimits;
   readonly #resumeLoader: () => Promise<ControlResumePlan>;
+  readonly #stageMessageHandler: ((envelope: ClientControlEnvelope, nowUs: bigint) => void) | null;
+  readonly #stageHelloHandler: ((clientType: unknown) => void) | null;
+  readonly #snapshotDecorator:
+    | ((
+        snapshot: Phase1SessionSnapshot,
+        recoveryState: RecoveryState,
+        activeScenes: readonly ActiveSceneRow[] | null,
+      ) => Phase1SessionSnapshot | Phase2SessionSnapshot)
+    | null;
   readonly #pumpAbort = new AbortController();
   readonly #sendWaiters = new Map<string, SendWaiter[]>();
   /** 连接代际标识（二轮评审修复 4）：prepared/committed 必须同代际送达。 */
   readonly connectionId = crypto.randomUUID();
   #session: ControlSession | null = null;
   #recoveryState: RecoveryState | null = null;
+  /** Phase 2 活动 Scene 索引（预加载；无装配/读取失败为 null）。 */
+  #phase2ActiveScenes: readonly ActiveSceneRow[] | null = null;
   /** 本连接是否以 resume 恢复（决定无 lastAck 时是否强制快照）。 */
   #resumedSession = false;
   /** resume 解析期间的入站缓冲（同步挂监听，零丢失）。 */
@@ -123,6 +170,8 @@ export class ControlConnection {
   #finished = false;
   #lastPersistedSeq = 0n;
   #helloHandled = false;
+  /** 本连接 hello 声明的 clientType（Phase 2 演出消息的归属判据）。 */
+  #clientType: unknown = null;
   #snapshotEnqueued = false;
 
   constructor(options: ControlConnectionOptions) {
@@ -136,6 +185,9 @@ export class ControlConnection {
     this.#runtimeVersion = options.runtimeVersion;
     this.#limits = options.limits;
     this.#resumeLoader = options.loadResume;
+    this.#stageMessageHandler = options.onStageMessage ?? null;
+    this.#stageHelloHandler = options.onStageHello ?? null;
+    this.#snapshotDecorator = options.snapshotDecorator ?? null;
     // 注意：不在构造器清空 exportedControlState——loader 稍后读取它
     // （构造先于异步加载执行，提前清空会丢失同进程 resume 状态）。
     options.logical.control = this;
@@ -193,6 +245,7 @@ export class ControlConnection {
         return;
       }
       this.#recoveryState = plan.recoveryState;
+      this.#phase2ActiveScenes = plan.phase2ActiveScenes ?? null;
       this.#resumedSession = plan.resume !== undefined;
       // 恢复水位对账（二轮评审修复 2）：任何 Replay/新消息上线前，先把
       // 上条连接已分配的最大 Seq 补落库。advanceServerSeq 幂等接受相等。
@@ -305,6 +358,34 @@ export class ControlConnection {
    * 在线上反超尚未写出的 prepared（P3）。返回写出结果与**本连接代际**；
    * `onlyConnectionId` 指定其它代际时拒绝发布（二轮评审修复 4）。
    */
+  /**
+   * Phase 2 演出命令发送（scene.prepare/commit/cancel/媒体声明，兼容新增）：
+   * 同 broadcast 的入队路径，但同步返回是否入队成功（StagePort 适配器
+   * 需要即时判定"确定性发送失败"）。仅由 Phase 2 装配使用。
+   */
+  sendPhase2Message(message: {
+    readonly type: string;
+    readonly payload: unknown;
+    readonly traceId: string;
+  }): boolean {
+    const session = this.#session;
+    if (session === null) {
+      return false;
+    }
+    const result: ServerEnqueueResult = session.enqueueServerMessage({
+      type: message.type,
+      payload: message.payload,
+      messageId: crypto.randomUUID(),
+      trace: { traceId: message.traceId },
+      sentAtUs: this.#clock.nowUs(),
+    });
+    if (result.status !== "queued") {
+      return false;
+    }
+    void this.#pump();
+    return true;
+  }
+
   async broadcast(
     message: {
       readonly type: string;
@@ -416,6 +497,12 @@ export class ControlConnection {
       try {
         if (accepted.envelope.type === "client.hello") {
           this.#helloHandled = true;
+          this.#clientType = (accepted.envelope.payload as { clientType?: unknown }).clientType;
+          // 连接归属（Phase 2）：hello 通过校验后按 clientType 交给应用层
+          // 决定是否绑定为演出 Stage（观察者连接不进入 Phase 2）。
+          this.#stageHelloHandler?.(
+            (accepted.envelope.payload as { clientType?: unknown }).clientType,
+          );
           // 先快照后 ready（快照内容来自预加载状态，同步可用）；快照必须
           // 成功入队，否则 1011 失败关闭（不得静默进入 active）。
           if (snapshotDecision !== null && snapshotDecision.required) {
@@ -472,12 +559,30 @@ export class ControlConnection {
     if (this.#recoveryState === null) {
       return false;
     }
-    const snapshot = buildSessionSnapshot(this.#recoveryState, {
-      reason: "replay_gap",
-      sessionStatus: "ready",
-      runtimeVersion: this.#runtimeVersion,
-      generatedAtMs: Date.now(),
-    });
+    let snapshot: Phase1SessionSnapshot | Phase2SessionSnapshot = buildSessionSnapshot(
+      this.#recoveryState,
+      {
+        reason: "replay_gap",
+        sessionStatus: "ready",
+        runtimeVersion: this.#runtimeVersion,
+        generatedAtMs: Date.now(),
+      },
+    );
+    // Phase 2 装饰（同步，预加载恢复状态）：存在活动 Scene 对账视图时
+    // 升级 v2 形态。装饰失败 = 对账视图不可构造：**fail-closed**（调用方
+    // 以 1011 失败关闭）——继续发送 v1 冒充对账结果会让 Stage 停在对账
+    // 前的旧视图上（历史缺陷：吞错降级 v1）。
+    if (this.#snapshotDecorator !== null) {
+      try {
+        snapshot = this.#snapshotDecorator(snapshot, this.#recoveryState, this.#phase2ActiveScenes);
+      } catch (error) {
+        this.#logger.log("error", "runtime_snapshot_decorate_failed", {
+          sessionId: this.#logical.sessionId,
+          error: error instanceof Error ? error.message : "unknown",
+        });
+        return false;
+      }
+    }
     const enqueued = session.enqueueServerMessage({
       type: "session.snapshot",
       payload: { snapshot },
@@ -523,7 +628,12 @@ export class ControlConnection {
     }
     if (envelope.type === "media.stream.closed") {
       const payload = MediaStreamClosedPayloadSchema.parse(envelope.payload);
-      this.#logical.mediaStreams.close(payload.streamId);
+      this.#logical.mediaStreams.close(
+        payload.streamId,
+        payload.finalSequence === undefined
+          ? undefined
+          : { finalSequence: BigInt(payload.finalSequence) },
+      );
       // 双向消息类型：服务端回执确认（Stream 关闭后不能复活）。
       session.enqueueServerMessage({
         type: "media.stream.closed",
@@ -531,6 +641,45 @@ export class ControlConnection {
         trace: { traceId: envelope.trace.traceId },
         sentAtUs: nowUs,
       });
+      return;
+    }
+    // Phase 2 演出回执（scene-execution.md）：Envelope 已通过全量校验，
+    // 应用层按 type 分发；未知业务类型静默忽略。
+    const STAGE_MESSAGE_TYPES: readonly string[] = [
+      "stage.capabilities",
+      "scene.ready",
+      "scene.started",
+      "scene.finished",
+      "scene.cancel.ack",
+      "media.stream.ready",
+    ];
+    if (STAGE_MESSAGE_TYPES.includes(envelope.type)) {
+      // 连接归属（Phase 2 隔离）：Phase 2 装配下只有 hello 声明
+      // clientType=stage 的连接才能提交演出回执；观察者/其它角色连接
+      // 发送即协议违例——拒绝转发并显式回执错误（绝不进入 Phase 2
+      // 状态机）。未装配 Phase 2 时维持 Phase 1 的静默忽略语义。
+      if (this.#stageMessageHandler !== null && this.#clientType !== "stage") {
+        this.#logger.log("warn", "runtime_stage_message_rejected", {
+          sessionId: this.#logical.sessionId,
+          type: envelope.type,
+          clientType: String(this.#clientType),
+        });
+        session.enqueueServerMessage({
+          type: "error",
+          payload: {
+            error: {
+              code: "invalid_message",
+              message: `stage message ${envelope.type} requires a clientType=stage connection`,
+              retryable: false,
+              traceId: envelope.trace.traceId,
+            },
+          },
+          trace: { traceId: envelope.trace.traceId },
+          sentAtUs: nowUs,
+        });
+        return;
+      }
+      this.#stageMessageHandler?.(envelope, nowUs);
     }
   }
 
