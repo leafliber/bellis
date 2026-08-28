@@ -935,9 +935,11 @@ docs/
 
 ### Milestone 1：可说、可看、可打断
 
-当前 Phase 2 只实现本 Milestone 的确定性演出骨架；范围边界和工作包见
-[Phase 2 开发指南](./phase-2-development-guide.md)。真实 Signal Hub、LLM
-Provider 与流式 TTS 在后续阶段接入。
+Phase 2 已完成本 Milestone 的确定性演出骨架；完成事实见
+[Phase 2 完成态参考](./phase-2-reference.md)。当前 Phase 3 接入模拟 Signal
+Pipeline、单 Provider Decision Loop 与 Tool Runtime，范围边界和工作包见
+[Phase 3 开发指南](./phase-3-development-guide.md)。真实流式 TTS Provider
+仍留在后续能力切片。
 
 - Signal Hub 与一个模拟弹幕输入。
 - 单 Provider LLM Decision Loop。
