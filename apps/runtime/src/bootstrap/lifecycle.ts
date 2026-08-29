@@ -431,12 +431,21 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
             clock,
             paceUs: BigInt(modelConfig.paceMs) * 1_000n,
           });
-    // 决策域 Session 必须先存在（adoption 事务的 Record 有外键约束）。
-    await persistence.ensureSession({
-      sessionId: config.phase3.sessionId ?? phase2SessionId,
-      createdAtMs: Date.now(),
-      trace: { traceId: crypto.randomUUID().replaceAll("-", "").slice(0, 32) },
-    });
+    // 决策域 Session 必须先存在（adoption 事务的 Record 有外键约束）；
+    // 重启恢复时 Session 已存在（createdAtMs 不同会冲突）——以恢复读取的
+    // 事实为准：已存在即复用，不覆盖元数据。
+    try {
+      await persistence.ensureSession({
+        sessionId: config.phase3.sessionId ?? phase2SessionId,
+        createdAtMs: Date.now(),
+        trace: { traceId: crypto.randomUUID().replaceAll("-", "").slice(0, 32) },
+      });
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code !== "session_conflict") {
+        throw error;
+      }
+    }
     phase3Host = new Phase3DecisionHost({
       sessionId: config.phase3.sessionId ?? phase2SessionId,
       clock,

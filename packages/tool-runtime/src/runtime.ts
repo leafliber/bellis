@@ -48,6 +48,8 @@ export interface ToolRunEvent {
   readonly durationMs?: number;
   readonly errorCode?: string;
   readonly idempotencyKeyHash?: string;
+  /** 命中来源（审计事实：命中缓存仍生成 Tool Run 并标记来源）。 */
+  readonly cacheSource?: "l0" | "l1" | "l2";
 }
 
 export interface StandardToolRuntimeOptions {
@@ -126,6 +128,11 @@ export class StandardToolRuntime implements ToolRuntime {
 
   get isClosed(): boolean {
     return this.#closed;
+  }
+
+  /** 缓存统计（审计/测试视图）。 */
+  get cacheStats(): { hits: number; misses: number; l1Size: number } {
+    return this.#cache.stats;
   }
 
   async executeDag(
@@ -246,6 +253,7 @@ export class StandardToolRuntime implements ToolRuntime {
           : { state: result.outcome as "failed" | "timeout" | "cancelled" | "denied" }),
         durationMs,
         ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+        ...(result.cacheSource === undefined ? {} : { cacheSource: result.cacheSource }),
         ...(node.call.idempotencyKey === undefined
           ? {}
           : { idempotencyKeyHash: hashIdempotencyKey(node.call.idempotencyKey) }),

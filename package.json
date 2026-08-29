@@ -21,7 +21,8 @@
     "demo:phase1": "node scripts/phase-1-demo.mjs",
     "demo:phase2": "node scripts/phase-2-demo.mjs",
     "demo:phase2:crash": "node scripts/phase-2-crash-windows.mjs",
-    "test:browser": "pnpm --filter @bellis/stage test:browser"
+    "test:browser": "pnpm --filter @bellis/stage test:browser",
+    "demo:phase3": "node scripts/phase-3-demo.mjs"
   },
   "devDependencies": {
     "@types/node": "26.2.0",

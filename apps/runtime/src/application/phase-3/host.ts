@@ -8,6 +8,7 @@ import {
   type DecisionLoopConfig,
   type IngestResult,
   type ModelProvider,
+  type PerformancePort,
   type TurnOwnerPort,
   type TurnResult,
 } from "@bellis/decision-loop";
@@ -112,6 +113,27 @@ function lateBoundOwner(): LateBoundOwner {
   };
 }
 
+/** Demo/验收证据快照（phase-3-development-guide.md §10.2 证据行来源）。 */
+export interface Phase3Evidence {
+  readonly requested: number;
+  readonly adopted: number;
+  readonly degraded: number;
+  readonly toolRuns: readonly {
+    readonly toolRunId: string;
+    readonly toolName: string;
+    readonly outcome: string | null;
+    readonly cacheSource: string | null;
+    readonly startedAtUs: bigint | null;
+    readonly finishedAtUs: bigint | null;
+  }[];
+  readonly sceneSpans: readonly {
+    readonly sceneId: string;
+    readonly submittedAtUs: bigint;
+    readonly settledAtUs: bigint | null;
+  }[];
+  readonly ingest: readonly { readonly result: string; readonly sequence: string | null }[];
+}
+
 export class Phase3DecisionHost {
   readonly #options: Phase3HostOptions;
   readonly #signalStore: DurableSignalStore;
@@ -127,6 +149,17 @@ export class Phase3DecisionHost {
     requeueFront(batches: readonly AudienceBatch[]): void;
   };
   readonly demoState = createDemoToolState();
+  readonly #evidence = {
+    requested: 0,
+    adopted: 0,
+    degraded: 0,
+    toolRuns: new Map<
+      string,
+      { toolName: string; outcome: string | null; cacheSource: string | null; startedAtUs: bigint | null; finishedAtUs: bigint | null }
+    >(),
+    sceneSpans: [] as { sceneId: string; submittedAtUs: bigint; settledAtUs: bigint | null }[],
+    ingest: [] as { result: string; sequence: string | null }[],
+  };
   #sessionId: string;
   #started = false;
   #closed = false;
@@ -159,6 +192,22 @@ export class Phase3DecisionHost {
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
       onRunEvent: (event) => {
+        const tracked = this.#evidence.toolRuns.get(event.toolRunId) ?? {
+          toolName: event.toolName,
+          outcome: null,
+          cacheSource: null,
+          startedAtUs: null,
+          finishedAtUs: null,
+        };
+        if (event.transition === "started") {
+          tracked.startedAtUs = options.clock.nowUs();
+        }
+        if (event.transition === "finished") {
+          tracked.finishedAtUs = options.clock.nowUs();
+          tracked.outcome = event.state ?? "succeeded";
+          tracked.cacheSource = event.cacheSource ?? null;
+        }
+        this.#evidence.toolRuns.set(event.toolRunId, tracked);
         this.#audit.toolRun({
           toolRunId: event.toolRunId,
           cycleId: event.cycleId,
@@ -196,10 +245,24 @@ export class Phase3DecisionHost {
     const settledTurns: { turnId: string; result: TurnResult }[] = [];
     this.#loop = new DecisionLoop({
       sessionId: this.#sessionId,
-      provider: options.provider,
+      provider: {
+        name: options.provider.name,
+        streamDecision: (request, signal) => {
+          this.#evidence.requested += 1;
+          return options.provider.streamDecision(request, signal);
+        },
+      },
       tools: this.#tools,
-      adoption: this.#adoption,
-      performance: new PerformancePortAdapter(this.#performance),
+      adoption: {
+        adoptCycle: async (input) => {
+          await this.#adoption.adoptCycle(input);
+          this.#evidence.adopted += 1;
+          if (input.degraded) {
+            this.#evidence.degraded += 1;
+          }
+        },
+      },
+      performance: this.#instrumentedPerformance(),
       clock: options.clock,
       ids: {
         turnId: () => randomUUID(),
@@ -283,7 +346,59 @@ export class Phase3DecisionHost {
   }
 
   ingest(input: unknown): Promise<IngestResult> {
-    return this.#pipeline.ingest(input);
+    const result = this.#pipeline.ingest(input);
+    void result.then((value) => {
+      this.#evidence.ingest.push({
+        result: value.result,
+        sequence:
+          value.result === "accepted" || value.result === "deduplicated"
+            ? value.sequence.toString(10)
+            : null,
+      });
+    });
+    return result;
+  }
+
+  /** 证据快照（Demo/验收）。 */
+  evidence(): Phase3Evidence {
+    return {
+      requested: this.#evidence.requested,
+      adopted: this.#evidence.adopted,
+      degraded: this.#evidence.degraded,
+      toolRuns: [...this.#evidence.toolRuns.entries()].map(([toolRunId, entry]) => ({
+        toolRunId,
+        ...entry,
+      })),
+      sceneSpans: this.#evidence.sceneSpans.map((span) => ({ ...span })),
+      ingest: this.#evidence.ingest.map((entry) => ({ ...entry })),
+    };
+  }
+
+  #instrumentedPerformance(): PerformancePort {
+    const adapter = new PerformancePortAdapter(this.#performance);
+    return {
+      submitDecision: (packet, context) => {
+        const result = adapter.submitDecision(packet, context);
+        if (result.kind === "scene_submitted") {
+          const span = {
+            sceneId: result.sceneId,
+            submittedAtUs: this.#options.clock.nowUs(),
+            settledAtUs: null as bigint | null,
+          };
+          this.#evidence.sceneSpans.push(span);
+          void result.done.finally(() => {
+            span.settledAtUs = this.#options.clock.nowUs();
+          });
+        }
+        return result;
+      },
+      interruptActiveScenes: (reason: string) => adapter.interruptActiveScenes(reason),
+    };
+  }
+
+  /** 决策域恢复投影（Demo/验收：水位、Cycle、Tool Run 状态）。 */
+  async readDecisionState() {
+    return this.#signalStore.readDecisionState();
   }
 
   /** Stage 连接出现：绑定真实逻辑 Session（Phase 2 规则）。 */
