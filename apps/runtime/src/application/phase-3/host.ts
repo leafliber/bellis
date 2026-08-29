@@ -155,7 +155,13 @@ export class Phase3DecisionHost {
     degraded: 0,
     toolRuns: new Map<
       string,
-      { toolName: string; outcome: string | null; cacheSource: string | null; startedAtUs: bigint | null; finishedAtUs: bigint | null }
+      {
+        toolName: string;
+        outcome: string | null;
+        cacheSource: string | null;
+        startedAtUs: bigint | null;
+        finishedAtUs: bigint | null;
+      }
     >(),
     sceneSpans: [] as { sceneId: string; submittedAtUs: bigint; settledAtUs: bigint | null }[],
     ingest: [] as { result: string; sequence: string | null }[],

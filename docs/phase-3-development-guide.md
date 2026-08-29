@@ -1,9 +1,10 @@
 # Bellis Phase 3 开发指南：Decision Loop
 
-> 文档状态：规划基线 v1
-> 阶段状态：待实施
+> 文档状态：完成态（实现事实见 Phase 3 完成态参考）
+> 阶段状态：已完成（Gate 2 通过）
 > 起始基线：`f77d6e0`（`main`，Phase 2 已合并）
 > 上游基线：[Phase 2 完成态参考](./phase-2-reference.md)
+> 完成态参考：[Phase 3 完成态参考](./phase-3-reference.md)
 > 上位设计：[系统架构设计](./architecture-plan.md) · [技术选型基线](./technology-selection.md)
 > 既有约束：[ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md) · [ADR 0002](./adr/0002-node-26-baseline.md) · [ADR 0003](./adr/0003-phase-2-scene-wire-and-browser-boundary.md)
 
