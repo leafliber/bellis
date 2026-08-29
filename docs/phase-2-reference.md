@@ -3,6 +3,7 @@
 > 文档状态：完成态 v1（Gate 2 通过）  
 > 实施指南：[Phase 2 开发指南](./phase-2-development-guide.md)（含工作包分解与验收标准）  
 > 上游基线：[Phase 1 完成态参考](./phase-1-reference.md)  
+> 后续实施：[Phase 3 开发指南](./phase-3-development-guide.md)
 > 协议：[Scene Execution](./protocols/scene-execution.md) · [Control WebSocket](./protocols/control-websocket.md) · [Binary Media WebSocket](./protocols/binary-media-websocket.md)  
 > 决策：[ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md) · [ADR 0002](./adr/0002-node-26-baseline.md) · [ADR 0003](./adr/0003-phase-2-scene-wire-and-browser-boundary.md)
 
@@ -115,4 +116,6 @@ requiresReprepare=true）。
 - `bellis_stage_*` 指标上报通道（现以 E2E 证据行承载）；
 - 真实 Cubism Adapter（浏览器路径为 Recording+DOM 徽标；未授权资源
   不进仓库）；
-- 真实 TTS Provider/LLM/Signal Hub（Phase 3+）。
+- 真实 TTS Provider（Phase 3 仍沿用确定性 PCM 路径验证决策并行）；
+- ModelProvider、Signal Pipeline、Decision Loop 与 Tool Runtime 已移交
+  [Phase 3 开发指南](./phase-3-development-guide.md)。

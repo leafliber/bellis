@@ -279,6 +279,20 @@ export class Phase2PerformanceService {
       return { kind: "invalid_packet" };
     }
     const packet: DecisionPacket = model.packet;
+    return this.submitDecision(packet, traceId);
+  }
+
+  /**
+   * Phase 3 演出提交边界（phase-3-development-guide.md §9.1）：接收
+   * 「已采用 DecisionPacket」，复用 Action Compiler、Fake TTS/媒体发送器、
+   * Scene Director 与 Started/Finished/Cancel 回执。Phase 2 的
+   * submit(Fake Signal + Fixture) 入口保留为兼容包装，同一条内部路径。
+   */
+  submitDecision(packet: DecisionPacket, traceId?: string): SubmissionOutcome {
+    const rootTraceId =
+      traceId !== undefined && TraceIdSchema.safeParse(traceId).success
+        ? traceId
+        : this.#newTraceId();
     void this.#audit(
       "phase2_decision_packet",
       `cycle:${packet.cycleId}`,
@@ -287,7 +301,7 @@ export class Phase2PerformanceService {
         cycleId: packet.cycleId,
         accepted: true,
       },
-      traceId,
+      rootTraceId,
     );
     const compile: CompileResult = compileActionFrame({
       frame: packet.action,
@@ -307,9 +321,9 @@ export class Phase2PerformanceService {
       };
     }
     const sceneId = compile.plan.scene.sceneId;
-    this.#stagePort.registerScene(sceneId, compile.plan.scene.cycleId, traceId);
+    this.#stagePort.registerScene(sceneId, compile.plan.scene.cycleId, rootTraceId);
     // durable commit 与生命周期 Record 携带同一 trace 根（跨层连续）。
-    this.#options.repository.bindSceneTrace?.(sceneId, traceId);
+    this.#options.repository.bindSceneTrace?.(sceneId, rootTraceId);
     void this.#audit(
       "phase2_scene_plan_compiled",
       `scene:${sceneId}`,
@@ -320,9 +334,9 @@ export class Phase2PerformanceService {
         cueCount: compile.plan.cues.length,
         lanes: [...new Set(compile.plan.cues.map((cue) => cue.lane))],
       },
-      traceId,
+      rootTraceId,
     );
-    this.#announceSpeechStream(compile.plan, traceId);
+    this.#announceSpeechStream(compile.plan, rootTraceId);
     this.#activeScenes.set(sceneId, {
       cycleId: compile.plan.scene.cycleId,
       startedAt: null,

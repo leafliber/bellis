@@ -9,6 +9,8 @@
 - [Phase 1 完成态参考](./phase-1-reference.md)：已经交付的基础协议、公开入口、验收证据和后续兼容边界。
 - [Phase 2 开发指南](./phase-2-development-guide.md)：阶段“演出纵向链路”的范围、工作包、Gate 和验收方式（完成态）。
 - [Phase 2 完成态参考](./phase-2-reference.md)：Phase 2 交付形态、验收证据与已知边界。
+- [Phase 3 开发指南](./phase-3-development-guide.md)：阶段“Decision Loop”的范围、工作包、Gate 和验收方式（完成态）。
+- [Phase 3 完成态参考](./phase-3-reference.md)：Phase 3 交付形态、验收证据与已知边界。
 
 ## 稳定协议
 
@@ -16,12 +18,14 @@
 - [Binary Media WebSocket](./protocols/binary-media-websocket.md)
 - [Persistence & Recovery](./protocols/persistence-and-recovery.md)
 
-协议文档描述已经实现并受测试保护的行为。Phase 2 尚未完成的协议扩展只记录在开发指南中；通过 Contracts Gate、实现和协议一致性测试后，才写入稳定协议文档。
+协议文档只描述已经实现并受测试保护的行为。当前阶段尚未完成的扩展只记录在开发指南中；通过 Contracts Gate、实现和协议一致性测试后，才写入稳定协议文档。
 
 ## 架构决策
 
 - [ADR 0001：Canonical Core and Wire Contracts](./adr/0001-canonical-core-and-wire-contracts.md)
 - [ADR 0002：Node.js 26 基线](./adr/0002-node-26-baseline.md)
+- [ADR 0003：Phase 2 Scene Wire and Browser Boundary](./adr/0003-phase-2-scene-wire-and-browser-boundary.md)
+- [ADR 0004：Phase 3 决策边界](./adr/0004-phase-3-decision-boundaries.md)
 
 新增或改变冻结边界时创建新 ADR，不回写历史 ADR 的原始决策来掩盖变化。
 

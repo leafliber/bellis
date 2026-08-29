@@ -38,6 +38,8 @@ export {
   AudienceTopicSchema,
 } from "./signal/audience-batch.js";
 export type { AudienceBatch, AudienceMessage, AudienceTopic } from "./signal/audience-batch.js";
+export { IngestedSignalSchema, SignalPriorityClassSchema } from "./signal/ingested-signal.js";
+export type { IngestedSignal, SignalPriorityClass } from "./signal/ingested-signal.js";
 
 export { ActionFrameSchema } from "./decision/action-frame.js";
 export type { ActionFrame } from "./decision/action-frame.js";
@@ -64,6 +66,24 @@ export type {
   SpeechIntent,
   SyncPolicy,
 } from "./decision/intents.js";
+export { CycleSnapshotSchema, RecentUtteranceSchema } from "./decision/cycle-snapshot.js";
+export type { CycleSnapshot, RecentUtterance } from "./decision/cycle-snapshot.js";
+export {
+  ToolCacheSourceSchema,
+  ToolExecutionModeSchema,
+  ToolOutcomeSchema,
+  ToolResultSchema,
+  ToolRunStateSchema,
+  ToolSemanticSchema,
+} from "./decision/tool-run.js";
+export type {
+  ToolCacheSource,
+  ToolExecutionMode,
+  ToolOutcome,
+  ToolResult,
+  ToolRunState,
+  ToolSemantic,
+} from "./decision/tool-run.js";
 
 export { CueLaneSchema, CueSchema } from "./scene/cue.js";
 export type { Cue, CueLane } from "./scene/cue.js";
@@ -103,6 +123,27 @@ export type {
   Phase2SignalAcceptedPayload,
   SceneLifecyclePayload,
 } from "./session/phase-2-records.js";
+export { PHASE_3_AUDIT_PAYLOAD_VERSION } from "./session/phase-3-records.js";
+export {
+  Phase3BatchSealedPayloadSchema,
+  Phase3CycleAdoptedPayloadSchema,
+  Phase3CycleFinishedPayloadSchema,
+  Phase3ModelRequestPayloadSchema,
+  Phase3SignalIngestedPayloadSchema,
+  Phase3ToolRunPayloadSchema,
+  Phase3TurnFinishedPayloadSchema,
+  Phase3TurnStartedPayloadSchema,
+} from "./session/phase-3-records.js";
+export type {
+  Phase3BatchSealedPayload,
+  Phase3CycleAdoptedPayload,
+  Phase3CycleFinishedPayload,
+  Phase3ModelRequestPayload,
+  Phase3SignalIngestedPayload,
+  Phase3ToolRunPayload,
+  Phase3TurnFinishedPayload,
+  Phase3TurnStartedPayload,
+} from "./session/phase-3-records.js";
 
 export {
   CONTROL_MESSAGE_TYPE_PATTERN,

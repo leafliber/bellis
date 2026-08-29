@@ -1,0 +1,37 @@
+{
+  "name": "@bellis/decision-loop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Signal Pipeline、Decision Trigger 与 Decision Loop（Phase 3 / P1、P2）",
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "lint": "oxlint src test",
+    "format:check": "oxfmt --check src test"
+  },
+  "dependencies": {
+    "@bellis/contracts": "workspace:*",
+    "@bellis/tool-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@bellis/testkit": "workspace:*",
+    "fast-check": "4.9.0",
+    "vitest": "4.1.11"
+  }
+}

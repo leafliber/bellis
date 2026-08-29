@@ -8,6 +8,8 @@
   "references": [
     { "path": "../../packages/contracts" },
     { "path": "../../packages/observability" },
+    { "path": "../../packages/tool-runtime" },
+    { "path": "../../packages/decision-loop" },
     { "path": "../../packages/transport" },
     { "path": "../../packages/persistence" },
     { "path": "../../packages/scene-runtime" }

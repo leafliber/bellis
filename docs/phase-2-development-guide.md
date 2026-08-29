@@ -3,6 +3,7 @@
 > 文档状态：完成态 v1（Gate 2 通过；实现事实见 [Phase 2 完成态参考](./phase-2-reference.md)）  
 > 阶段状态：完成  
 > 上游基线：[Phase 1 完成态参考](./phase-1-reference.md)  
+> 后续实施：[Phase 3 开发指南](./phase-3-development-guide.md)
 > 上位设计：[系统架构设计](./architecture-plan.md) · [技术选型基线](./technology-selection.md)  
 > 决策约束：[ADR 0001](./adr/0001-canonical-core-and-wire-contracts.md) · [ADR 0002](./adr/0002-node-26-baseline.md) · [ADR 0003](./adr/0003-phase-2-scene-wire-and-browser-boundary.md)
 

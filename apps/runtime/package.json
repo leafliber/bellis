@@ -28,8 +28,10 @@
   },
   "dependencies": {
     "@bellis/contracts": "workspace:*",
+    "@bellis/decision-loop": "workspace:*",
     "@bellis/observability": "workspace:*",
     "@bellis/persistence": "workspace:*",
+    "@bellis/tool-runtime": "workspace:*",
     "@bellis/transport": "workspace:*",
     "@fastify/cookie": "11.1.2",
     "@fastify/websocket": "11.3.0",

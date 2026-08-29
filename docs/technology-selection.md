@@ -688,6 +688,8 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 
 ### 阶段三：Decision Loop
 
+当前实施拆分、契约 Gate 与验收标准见 [Phase 3 开发指南](./phase-3-development-guide.md)。
+
 - 实现 Audience Batcher 和 Decision Trigger。
 - 接入 ModelProvider、流式解析和错误降级。
 - 实现 Tool Runtime、并行 DAG、权限和缓存。

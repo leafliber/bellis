@@ -32,6 +32,34 @@ class RecordingClient implements PersistenceClient {
     throw new Error("not implemented in recording client");
   }
 
+  phase3AppendSignal(): Promise<never> {
+    throw new Error("not implemented in recording client");
+  }
+
+  phase3RestoreSignals(): Promise<never> {
+    throw new Error("not implemented in recording client");
+  }
+
+  phase3AdoptCycle(): Promise<void> {
+    throw new Error("not implemented in recording client");
+  }
+
+  phase3ToolRunEvent(): Promise<void> {
+    throw new Error("not implemented in recording client");
+  }
+
+  phase3ReadDecisionState(): Promise<never> {
+    throw new Error("not implemented in recording client");
+  }
+
+  phase3ToolCacheGet(): Promise<never> {
+    throw new Error("not implemented in recording client");
+  }
+
+  phase3ToolCacheSet(): Promise<void> {
+    throw new Error("not implemented in recording client");
+  }
+
   ensureSession(): Promise<void> {
     throw new Error("not implemented in recording client");
   }
