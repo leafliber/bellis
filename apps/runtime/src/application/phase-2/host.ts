@@ -1,3 +1,4 @@
+import type { SpeechProvider } from "../performance/speech-provider.js";
 import type {
   ActiveSceneState,
   MonotonicClock,
@@ -47,6 +48,7 @@ export interface Phase2HostOptions {
   readonly compileIds: CompileIdSource;
   readonly recordId: () => string;
   readonly repository: SceneRepositoryPort;
+  readonly speechProvider?: SpeechProvider;
   readonly logger?: LoggerPort;
   readonly metrics?: MetricsPort;
   readonly audit?: Phase2AuditPort;
@@ -94,6 +96,7 @@ export class Phase2RuntimeHost {
       },
     };
     this.#service = new Phase2PerformanceService({
+      ...(options.speechProvider === undefined ? {} : { speechProvider: options.speechProvider }),
       sessionId: options.sessionId,
       capabilities: options.capabilities,
       clock: options.clock,

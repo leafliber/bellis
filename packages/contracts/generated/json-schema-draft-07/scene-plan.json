@@ -148,6 +148,11 @@
           "$ref": "#/definitions/__schema0"
         }
       }
+    },
+    "softTimeoutMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 60000
     }
   },
   "required": [

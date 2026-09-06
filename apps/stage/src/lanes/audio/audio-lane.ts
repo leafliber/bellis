@@ -21,10 +21,21 @@ import type { LanePrepareResult, StageLaneAdapter } from "../lane-registry.js";
 
 export interface WorkletMessage {
   readonly v: 1;
-  readonly op: "frame" | "switch" | "cancel" | "clear" | "error" | "stats" | "end" | "ended";
+  readonly op:
+    | "frame"
+    | "switch"
+    | "cancel"
+    | "clear"
+    | "error"
+    | "stats"
+    | "end"
+    | "ended"
+    | "started";
   readonly sceneId?: string;
   readonly samples?: Int16Array;
   readonly underruns?: number;
+  readonly renderedAtAudioSeconds?: number;
+  readonly startedAtStageUs?: bigint;
   readonly code?: string;
 }
 
@@ -55,6 +66,7 @@ interface AudioScene {
   /** start() 完成回调（播放真实完成 / EOS / 停止时兑现）。 */
   completions: Array<() => void>;
   startedAtUs: bigint | null;
+  onStarted?: ((atStageUs?: bigint) => void) | undefined;
   /** closed 已到达（尾帧宽限窗计时中；期间继续接收尾帧）。 */
   closing: boolean;
   /** EOS 已转发给 Worklet（宽限期过后才置位；此后拒绝追加）。 */
@@ -89,6 +101,12 @@ export class AudioLaneAdapter implements StageLaneAdapter {
       if (message.op === "stats" && message.underruns !== undefined) {
         this.#underruns = message.underruns;
         return;
+      }
+      if (message.op === "started" && typeof message.sceneId === "string") {
+        const record = this.#scenes.get(message.sceneId);
+        const callback = record?.onStarted;
+        if (record !== undefined) record.onStarted = undefined;
+        callback?.(message.startedAtStageUs ?? this.#clock.nowUs());
       }
       if (message.op === "ended" && typeof message.sceneId === "string") {
         // Worklet 放完全部样本：播放真实完成信号。
@@ -233,7 +251,12 @@ export class AudioLaneAdapter implements StageLaneAdapter {
     });
   }
 
-  async start(sceneId: string, _atStageUs: bigint, _cues: readonly Cue[]): Promise<void> {
+  async start(
+    sceneId: string,
+    _atStageUs: bigint,
+    _cues: readonly Cue[],
+    onStarted?: (atStageUs?: bigint) => void,
+  ): Promise<void> {
     if (this.#stoppedScenes.has(sceneId)) {
       return;
     }
@@ -241,6 +264,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
     // 完成（ended / EOS 零帧 / 兜底截止 / 停止）时兑现。
     const record = this.#sceneOf(sceneId);
     record.startedAtUs = this.#clock.nowUs();
+    record.onStarted = onStarted;
     this.#environment.postToWorklet({ v: 1, op: "switch", sceneId });
     if (record.eos && (record.frames === 0 || record.ended)) {
       return;
@@ -298,6 +322,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
   }
 
   #settle(sceneId: string, record: AudioScene): void {
+    record.onStarted = undefined;
     for (const timer of record.timers.splice(0)) {
       timer.abort(new Error(`audio_settled:${sceneId}`));
     }

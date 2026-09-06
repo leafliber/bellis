@@ -29,7 +29,7 @@ import {
   type SceneRepositoryPort,
 } from "@bellis/scene-runtime";
 import { runFakeModel, type FakeModelFixture } from "./fake-model.js";
-import { synthesizeSpeech } from "./fake-tts.js";
+import type { SpeechProvider } from "../performance/speech-provider.js";
 import { RuntimeMediaSender, type OutboundMediaFrame } from "./media-sender.js";
 import { ControlStagePortAdapter, type ControlChannel } from "./stage-port-adapter.js";
 
@@ -96,6 +96,7 @@ export interface Phase2PerformanceServiceOptions {
   readonly directorFaultHook?: (point: DirectorFaultPoint) => void;
   /** 媒体出站通道（缺省不编排 PCM 流，纯 Control 链路仍可用）。 */
   readonly mediaChannel?: MediaOutboundChannel;
+  readonly speechProvider?: SpeechProvider;
   readonly mediaStartLeadUs?: bigint;
   /** Signal/决策/编译事实审计（缺省仅日志）。 */
   readonly audit?: Phase2AuditPort;
@@ -137,7 +138,10 @@ export class Phase2PerformanceService {
   readonly #mediaSender: RuntimeMediaSender;
   readonly #mediaStartLeadUs: bigint;
   #sessionId: string;
-  readonly #activeScenes = new Map<string, { cycleId: string; startedAt: bigint | null }>();
+  readonly #activeScenes = new Map<
+    string,
+    { cycleId: string; startedAt: bigint | null; starts: Map<string, bigint> }
+  >();
   /** 已 announce、等待 media.stream.ready 的流（≤ 活跃 Scene 上限，有界）。 */
   readonly #pendingStreams = new Map<string, PendingStream>();
   /** sceneId → 已 announce 的 Stream（终态/完成时发送 media.stream.closed）。 */
@@ -284,7 +288,7 @@ export class Phase2PerformanceService {
 
   /**
    * Phase 3 演出提交边界（phase-3-development-guide.md §9.1）：接收
-   * 「已采用 DecisionPacket」，复用 Action Compiler、Fake TTS/媒体发送器、
+   * 「已采用 DecisionPacket」，复用 Action Compiler、SpeechProvider/媒体发送器、
    * Scene Director 与 Started/Finished/Cancel 回执。Phase 2 的
    * submit(Fake Signal + Fixture) 入口保留为兼容包装，同一条内部路径。
    */
@@ -340,6 +344,7 @@ export class Phase2PerformanceService {
     this.#activeScenes.set(sceneId, {
       cycleId: compile.plan.scene.cycleId,
       startedAt: null,
+      starts: new Map(),
     });
     let handle: SceneHandle;
     try {
@@ -530,16 +535,12 @@ export class Phase2PerformanceService {
           }
         }
         const active = this.#activeScenes.get(started.sceneId);
-        if (active !== undefined && active.startedAt === null && reports.length > 0) {
-          active.startedAt = reports[0]!.startedAtRuntimeUs;
-          // 起始偏差指标（同一 Scene 内各 Lane 相对首 Lane）。
-          const base = reports[0]!.startedAtRuntimeUs;
+        if (active !== undefined) {
           for (const report of reports) {
-            const skewUs = report.startedAtRuntimeUs - base;
-            this.#options.metrics
-              ?.histogram("bellis_scene_start_skew_ms", { lane: report.lane })
-              .observe(Number(skewUs / 1000n));
+            if (!active.starts.has(report.lane))
+              active.starts.set(report.lane, report.startedAtRuntimeUs);
           }
+          active.startedAt ??= reports[0]?.startedAtRuntimeUs ?? null;
         }
         this.#director.notifyStarted(started.sceneId, reports);
       }
@@ -547,6 +548,18 @@ export class Phase2PerformanceService {
     }
     if (type === "scene.finished") {
       const finished = payload as { sceneId?: unknown; lanes?: unknown };
+      if (typeof finished.sceneId === "string") {
+        const active = this.#activeScenes.get(finished.sceneId);
+        if (active !== undefined && active.starts.size > 1) {
+          const base = [...active.starts.values()].reduce((a, b) => (a < b ? a : b));
+          for (const [lane, atUs] of active.starts) {
+            this.#options.metrics
+              ?.histogram("bellis_scene_start_skew_ms", { lane })
+              .observe(Number(atUs - base) / 1000);
+          }
+          active.starts.clear();
+        }
+      }
       if (typeof finished.sceneId === "string" && Array.isArray(finished.lanes)) {
         const reports: LaneFinishReport[] = [];
         for (const lane of finished.lanes) {
@@ -652,7 +665,13 @@ export class Phase2PerformanceService {
     this.#pendingStreams.delete(streamId);
     this.#mediaSender.startSpeechStream({
       plan: pending.plan,
-      tts: synthesizeSpeech(pending.speech),
+      tts: {
+        frames: (signal) => {
+          const provider = this.#options.speechProvider;
+          if (provider === undefined) throw new Error("speech_provider_not_configured");
+          return provider.stream(pending.speech, signal);
+        },
+      },
       audioCueId: pending.audioCueId,
       streamId,
       sessionId: pending.sessionId,

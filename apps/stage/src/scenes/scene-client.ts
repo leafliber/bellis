@@ -14,7 +14,7 @@ import type { LaneRegistry } from "../lanes/lane-registry.js";
  * - Prepare 失败的 Lane 以 unavailable + 稳定原因码上报，由 Runtime 决定；
  * - Commit 目标时刻已过（超容忍窗口）→ late_commit（scene.finished failed），
  *   绝不按过期时刻启动 hard lane；
- * - 每条 Lane 完成即单 Lane 上报 started；全部 Lane 完成后整包 finished；
+ * - 每条 Lane 实际开始确认后单 Lane 上报 started；全部 Lane 完成后整包 finished；
  * - 连接代际变化时未 Commit 的准备缓存全部丢弃；不确定结果的 Scene 不重播。
  */
 
@@ -35,6 +35,7 @@ interface PreparedScene {
   readonly controller: AbortController;
   scheduled: ReturnType<CueTimeline["schedule"]> | null;
   /** 逐 Lane 完成聚合（本 Scene 私有，不跨 Scene 串扰）。 */
+  readonly unavailable: Map<CueLane, string>;
   readonly laneFinishes: Map<CueLane, { outcome: "completed" | "failed"; reason?: string }>;
 }
 
@@ -165,6 +166,7 @@ export class SceneClient {
       controller: new AbortController(),
       scheduled: null,
       laneFinishes: new Map(),
+      unavailable: new Map(),
     };
     this.#scenes.set(sceneId, scene);
     this.#emit(sceneId, "preparing");
@@ -174,15 +176,51 @@ export class SceneClient {
       [...laneGroups.entries()].map(async ([lane, cues]) => {
         const adapter = this.#lanes.get(lane);
         if (adapter === undefined) {
+          scene.unavailable.set(lane, "lane_not_available");
           return { lane, status: "unavailable", reason: "lane_not_available", cueIds: [] } as const;
         }
         if (scene.controller.signal.aborted) {
           return { lane, status: "unavailable", reason: "cancelled", cueIds: [] } as const;
         }
-        const outcome = await adapter.prepare(sceneId, cues, scene.controller.signal).catch(() => ({
+        const laneAbort = new AbortController();
+        const timer = new AbortController();
+        const hard = scenePlan.scene.groups.some(
+          (group) => group.level === "hard" && group.lanes.includes(lane),
+        );
+        const budgetMs = hard
+          ? scenePlan.scene.deadlineMs
+          : Math.min(scenePlan.scene.deadlineMs, scenePlan.softTimeoutMs ?? 500);
+        const signal = AbortSignal.any([scene.controller.signal, laneAbort.signal]);
+        // 先启动准备，零预算仍允许已就绪的 Adapter 返回结果。
+        let preparing: ReturnType<typeof adapter.prepare>;
+        try {
+          preparing = adapter.prepare(sceneId, cues, signal);
+        } catch {
+          preparing = Promise.resolve({ ready: false, reason: "prepare_failed" });
+        }
+        const timeout = this.#clock
+          .sleepUntil(this.#clock.nowUs() + BigInt(budgetMs) * 1000n, timer.signal)
+          .then(
+            () => ({ ready: false, reason: "prepare_timeout" }),
+            () => ({ ready: false, reason: "cancelled" }),
+          );
+        let onAbort!: () => void;
+        const cancelled = new Promise<{ ready: boolean; reason: string }>((resolve) => {
+          onAbort = () => resolve({ ready: false, reason: "cancelled" });
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        });
+        const outcome = await Promise.race([preparing, timeout, cancelled]).catch(() => ({
           ready: false,
           reason: "prepare_failed",
         }));
+        signal.removeEventListener("abort", onAbort);
+        timer.abort();
+        if (!outcome.ready) {
+          scene.unavailable.set(lane, outcome.reason ?? "unavailable");
+          laneAbort.abort();
+          void adapter.stop(sceneId, "prepare_unavailable").catch(() => undefined);
+        }
         return {
           lane,
           status: outcome.ready ? ("ready" as const) : ("unavailable" as const),
@@ -208,7 +246,7 @@ export class SceneClient {
   /** scene.commit：映射目标时刻并调度；过晚则 late_commit。 */
   handleCommit(sceneId: string, commitAtRuntimeUs: bigint): void {
     const scene = this.#scenes.get(sceneId);
-    if (scene === undefined || (scene.state !== "ready" && scene.state !== "preparing")) {
+    if (scene === undefined || scene.state !== "ready") {
       // 未 prepare / 已终态的 commit 属于协议违例或旧代际消息：本地拒绝，
       // 不伪造 cycleId 上报（§7.3「旧连接 generation 的 Commit 全部拒绝」）。
       this.#emit(sceneId, "cancelled", "unknown_scene_commit_ignored");
@@ -238,26 +276,38 @@ export class SceneClient {
       [...laneGroups.keys()].map((lane) => ({
         lane,
         critical: criticalLanes.has(lane),
+        onDropped: () => this.#laneFinished(scene, lane, "failed", "late_dropped"),
         fire: ({ late }: { late: boolean }) => {
-          const startedAtStageUs = this.#clock.nowUs();
-          this.#onLaneStarted?.({
-            sceneId,
-            lane,
-            targetLocalUs,
-            startedAtStageUs,
-            late,
-          });
-          this.#send("scene.started", {
-            sceneId,
-            cycleId: scene.plan.scene.cycleId,
-            lanes: [
-              {
-                lane,
-                startedAtStageUs: startedAtStageUs.toString(),
-                startedAtRuntimeUs: (startedAtStageUs + estimate.runtimeOffsetUs).toString(),
-              },
-            ],
-          });
+          if (scene.controller.signal.aborted) return;
+          const unavailable = scene.unavailable.get(lane);
+          if (unavailable !== undefined) {
+            this.#laneFinished(scene, lane, "failed", unavailable);
+            return;
+          }
+          let reported = false;
+          const onStarted = (confirmedAtUs?: bigint) => {
+            if (reported || scene.controller.signal.aborted || !this.#scenes.has(sceneId)) return;
+            reported = true;
+            const startedAtStageUs = confirmedAtUs ?? this.#clock.nowUs();
+            this.#onLaneStarted?.({
+              sceneId,
+              lane,
+              targetLocalUs,
+              startedAtStageUs,
+              late,
+            });
+            this.#send("scene.started", {
+              sceneId,
+              cycleId: scene.plan.scene.cycleId,
+              lanes: [
+                {
+                  lane,
+                  startedAtStageUs: startedAtStageUs.toString(),
+                  startedAtRuntimeUs: (startedAtStageUs + estimate.runtimeOffsetUs).toString(),
+                },
+              ],
+            });
+          };
           if (scene.state === "scheduled") {
             scene.state = "running";
             this.#emit(sceneId, "running");
@@ -273,7 +323,7 @@ export class SceneClient {
             return;
           }
           void adapter
-            .start(sceneId, targetLocalUs, laneGroups.get(lane) ?? [])
+            .start(sceneId, targetLocalUs, laneGroups.get(lane) ?? [], onStarted)
             .then(() => this.#laneFinished(scene, lane, "completed"))
             .catch(() => this.#laneFinished(scene, lane, "failed", "lane_error"));
         },
@@ -334,7 +384,7 @@ export class SceneClient {
     outcome: "completed" | "failed",
     reason?: string,
   ): void {
-    if (!this.#scenes.has(scene.plan.scene.sceneId)) {
+    if (scene.controller.signal.aborted || !this.#scenes.has(scene.plan.scene.sceneId)) {
       return; // 已取消/终态：迟到完成不改写结果。
     }
     scene.laneFinishes.set(lane, { outcome, ...(reason === undefined ? {} : { reason }) });

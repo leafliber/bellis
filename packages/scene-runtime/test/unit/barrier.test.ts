@@ -22,27 +22,20 @@ function makeBarrier(): PrepareBarrier {
 }
 
 describe("PrepareBarrier", () => {
-  it("hard 未全部报告 → pending；soft 未报告不阻塞（超时后）", () => {
+  it("rejects a missing hard lane in a completed bulk report", () => {
     const barrier = makeBarrier();
     barrier.reportLane({ lane: "audio", status: "ready", cueIds: [] });
-    expect(barrier.judge(0n, 0n)).toEqual({ verdict: "pending" });
-    // soft 超时但 hard 缺 subtitle：仍 pending。
-    expect(barrier.judge(600_000n, 0n)).toEqual({ verdict: "pending" });
+    expect(barrier.judge()).toMatchObject({
+      verdict: "hard_unavailable",
+      missingHardLanes: ["subtitle"],
+    });
   });
 
-  it("hard 全 ready → 等 soft 到超时后 ready；soft 缺席被记录", () => {
+  it("records missing soft lanes without owning a second timeout", () => {
     const barrier = makeBarrier();
     barrier.reportLane({ lane: "audio", status: "ready", cueIds: [] });
     barrier.reportLane({ lane: "subtitle", status: "ready", cueIds: [] });
-    // hard 全部就绪但 soft（avatar）未报告且未超时：继续等待。
-    expect(barrier.judge(0n, 0n)).toEqual({ verdict: "pending" });
-    // soft 超时后结算：缺席被记录，不阻塞。
-    const verdict = barrier.judge(500_000n, 0n);
-    expect(verdict.verdict).toBe("ready");
-    if (verdict.verdict === "ready") {
-      expect(verdict.absentLanes).toEqual(["avatar"]);
-      expect(verdict.unavailable).toHaveLength(0);
-    }
+    expect(barrier.judge()).toMatchObject({ verdict: "ready", absentLanes: ["avatar"] });
   });
 
   it("soft lane 全部报告：无需等到超时即可 ready", () => {

@@ -1,5 +1,7 @@
 # Bellis Phase 3 开发指南：Decision Loop
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。 本文保留历史决策/实施过程；与新决策冲突的描述不再作为当前实现要求。
+
 > 文档状态：历史实施计划（当前事实见 [Phase 3 完成态参考](./phase-3-reference.md)）
 > 阶段状态：核心已交付；原定 Gate 2 的子任务 P99 性能验收尚未完成，见 [构建与验收状态](./build-and-validation.md)
 > 起始基线：`f77d6e0`（`main`，Phase 2 已合并）
@@ -12,7 +14,7 @@
 
 本文保留阶段三的原始工作包与验收目标，不表示所有目标均已证明。以下为历史实施顺序；当前事实及剩余验收以完成态参考为准：
 
-1. Gate 0 复验 Phase 2，并在 P0 冻结 Cycle、模型流、Tool DAG 和持久化语义；
+1. Gate 0 复验 Phase 2，并在 P0 冻结 Cycle、模型流、Tool 调用列表 和持久化语义；
 2. P1 Signal Pipeline、P2 Model/Decision Loop、P3 Tool Runtime 从同一 Gate Commit 开始；
 3. Gate 1 复核三个核心包的公开边界后，由 P4 接入 Runtime 与 Phase 2 演出链路；
 4. P5 完成恢复、压力测试、真实浏览器纵向验证和 `pnpm demo:phase3`；
@@ -27,7 +29,7 @@ Phase 3 对应 [技术选型基线 §20](./technology-selection.md) 的“阶段
 - 接收模拟直播输入，形成有水位、可审计的 Audience Batch；
 - 由 Decision Trigger 启动 Turn，并由单一 Decision Loop 拥有最终决策权；
 - 通过 `ModelProvider` 消费流式模型事件，规范化为唯一的 `DecisionPacket`；
-- 将本 Cycle 的 Action 与 Tool DAG 并行交给既有演出链路和 Tool Runtime；
+- 将本 Cycle 的 Action 与 Tool 调用列表 并行交给既有演出链路和 Tool Runtime；
 - 把工具结果带入下一 Cycle，直到 `finish`、取消、预算耗尽或确定性降级；
 - 在重启、断流、超时和重复输入下保持水位、幂等与副作用边界可证明。
 
@@ -47,7 +49,7 @@ Simulated Audience Signals
   → exactly one validated DecisionPacket + ActionFrame
   → durable Cycle adoption
   ├─→ Phase 2 Performance Port → Scene Director → Stage
-  └─→ Tool Runtime → parallel DAG / locks / timeout / cache
+  └─→ Tool Runtime → parallel calls / locks / timeout / cache
         → Tool Results → next Cycle
   → final ActionFrame → Scene Director → Stage
   → Session Records / Trace / Metrics / recovery evidence
@@ -63,11 +65,11 @@ Simulated Audience Signals
 | 紧急 Signal 到 Trigger 入队 P99 | ≤ 50 ms | 不等待普通窗口；不包含外部模型延迟 |
 | 每个模型请求的最终 DecisionPacket | 恰好 1 个 | 合法包或确定性安全包，禁止重复 final |
 | 每个最终 DecisionPacket 的 ActionFrame | 恰好 1 个 | 继续遵守 ADR 0001 的单一发言来源 |
-| Tool DAG 无依赖节点并行 | 100% 可证明 | 虚拟时钟与集成 Trace 同时证明真实重叠 |
+| Tool 调用列表 无依赖节点并行 | 100% 可证明 | 虚拟时钟与集成 Trace 同时证明真实重叠 |
 | Cycle/Tool/Scene 取消传播 | P99 ≤ 100 ms | 从 interrupt 接收到可中断子任务停止 |
 | 未通过最终校验前的外部副作用 | 0 | 可提前 Prepare；Scene Commit 和可变 Tool 必须等待 Cycle adoption |
 | 重启后非幂等 Tool 自动重放 | 0 | `uncertain` 结果只能显式对账或新调用 |
-| 有界资源 | 全部显式且可测 | Signal、Batch、Mailbox、模型片段、Tool DAG、结果和缓存均有上限 |
+| 有界资源 | 全部显式且可测 | Signal、Batch、Mailbox、模型片段、Tool 调用列表、结果和缓存均有上限 |
 | Phase 1/2 回归 | 0 个失败 | 既有 Demo、协议、浏览器与恢复语义保持兼容 |
 
 外部 Provider 的网络 TTFT 和总时延只记录、不作为离线 CI 硬 Gate。Phase 3 的确定性验收使用脚本化 ModelProvider 和本地 OpenAI-compatible 测试服务器；真实账号 Smoke 必须显式启用且不能成为合并前置。
@@ -81,7 +83,7 @@ Simulated Audience Signals
 - Turn/Cycle 状态机、三类忙碌输入模式、预算和父子取消域；
 - 自有 `ModelProvider` Port、脚本化 Provider、OpenAI-compatible Adapter 和流式规范化；
 - 一次请求一个 ActionFrame、非法输出的确定性安全帧和单 Provider 降级；
-- Tool Registry、DAG 校验、并行执行、资源锁、权限、Deadline、取消和有界结果；
+- Tool Registry、调用列表校验、并行执行、资源锁、权限、Deadline、取消和有界结果；
 - Tool L0/L1 缓存以及需要跨重启保留的 L2 SQLite 缓存；
 - Decision Cycle、Audience Batch、Tool Run、结果和 Signal 水位的版本化记录；
 - 从 Phase 2 Fake 应用服务中抽出可复用的演出提交 Port，同时保留 Phase 2 Demo 兼容入口；
@@ -214,7 +216,7 @@ pnpm test:browser
 4. `ModelProvider`、`ModelRequest`、`ModelStreamEvent` 与最终包规范化边界；
 5. 流式稳定片段允许启动哪些 Prepare，以及失配、断流和取消时如何回收；
 6. Tool 定义、调用依赖、结果、权限、执行策略、缓存策略和错误的版本化形态；
-7. `next=finish/after_tools/continue` 与 Tool DAG 的一致性规则；
+7. `next=finish/after_tools/continue` 与 Tool 调用列表 的一致性规则；
 8. Cycle adoption、Signal 水位、Session Record、Tool Run 和 Scene Commit 的事务边界；
 9. `noOp`、仅 Avatar、仅 Tool 或 Scene 编译拒绝时如何推进水位；
 10. 崩溃后模型请求、幂等 Tool、非幂等 Tool 和未提交 Prepare 的恢复判定。
@@ -248,7 +250,7 @@ Phase 2 的 Scene Commit 可以随事务推进 Signal 水位，但 Phase 3 存�
 - 将要执行的 Tool Run 身份与幂等信息；
 - 必要的 Outbox/审计记录。
 
-采用前允许模型流解析、TTS/动作资源 Prepare 和纯内存 DAG 编译；采用失败必须取消全部 Prepare，不推进水位、不执行可变 Tool、不提交 Scene。采用成功后，Scene Commit 和 Tool 执行可并行，各自记录真实结果。
+采用前允许模型流解析、TTS/动作资源 Prepare 和纯内存调用列表编译；采用失败必须取消全部 Prepare，不推进水位、不执行可变 Tool、不提交 Scene。采用成功后，Scene Commit 和 Tool 执行可并行，各自记录真实结果。
 
 ### 5.5 P0 交付
 
@@ -378,13 +380,13 @@ Cycle: snapshot → requesting → validating → adopting
 
 同名冲突、非法 Schema、无界 Timeout 或声明矛盾必须在注册期失败，不等模型调用后才猜测。
 
-### 8.2 DAG 编译
+### 8.2 独立调用列表编译（ADR 0007 修订）
 
-- `toolRunId` 在 Cycle 内唯一，依赖只能引用同包已存在节点；
-- 拒绝环、缺失依赖、超 8 节点、深度超限和不合法的 keyed resource；
-- 只有依赖成功且策略允许的节点进入 ready；
-- 依赖失败时下游得到明确 `dependency_failed`，不能读取不存在结果；
-- DAG 排序、错误顺序和 Trace 输出必须确定性。
+- `toolRunId` 在 Cycle 内唯一，每包最多 8 个调用；
+- 非空或非法 `dependsOn` 返回 `dependencies_unsupported`，需要前一步结果时进入下一 Cycle；
+- 校验工具存在性与 keyed resource；参数 Schema 在规范化和执行入口检查；
+- 保持输入、错误与 Trace 顺序确定，不维护通用拓扑层、深度和环检测；
+- `compileDag`/`executeDag` 保留源码兼容名称，不能据此推导通用 DAG 能力。
 
 ### 8.3 调度、锁与取消
 
@@ -394,7 +396,7 @@ Cycle: snapshot → requesting → validating → adopting
 - 锁等待受 Deadline/Abort 控制，取消后立即从队列移除；
 - Runtime 总并发、每 Provider 并发和每资源等待队列都有独立上限；
 - Tool 返回后先做 JSON-safe、大小、Schema 和敏感字段处理，再进入下一 Cycle；
-- background 任务不阻塞下一 Cycle，但仍受 Session 关闭和审计约束。
+- background 任务不阻塞下一 Cycle；前台结果返回后 Runtime 继续调度，父取消与 close 结算全部已接受任务。
 
 ### 8.4 权限与副作用
 
@@ -443,8 +445,13 @@ authenticated dev signal input
 - 一 Session 一 Loop 所有者，关闭顺序从 Ingress 向子任务传播后再关闭 DB/Socket；
 - Provider API Key 只由 Credential Port 提供，不进入浏览器、Prompt 记录或错误响应；
 - 生产默认不开放模拟输入；显式 Phase 3 开发配置才启用。
+- 工具注册由入口注入，Host 缺省目录为空；详细 evidence 缺省关闭，启用后按固定容量淘汰。
+
+Trigger Mailbox 是唯一等待队列。Loop 同步登记接受的 Turn，取消中的 Turn 释放前不接受新 Turn；连续 urgent 在 Mailbox 合并等待。
 
 ### 9.3 持久化与恢复
+
+恢复事实与审计分开：Tool started 落库成功后才调用工具，finished 落库成功后才返回结算结果。关键写入失败必须传播，不能由尽力审计回调吞掉；结束写失败保留 running 供恢复标记 uncertain。
 
 至少记录：
 
@@ -452,7 +459,7 @@ authenticated dev signal input
 - Audience Batch 与水位；
 - Turn/Cycle started、最终采用包摘要、降级和终态；
 - 模型 Provider、TTFT、总耗时、Token/缓存元数据（不记录密钥和原始敏感 body）；
-- Tool DAG、每个 Tool Run 的状态、缓存、错误、幂等键摘要和有界结果摘要；
+- Tool 调用列表、每个 Tool Run 的状态、缓存、错误、幂等键摘要和有界结果摘要；
 - Cycle adoption、Scene 关联与取消原因。
 
 重启规则：
@@ -469,8 +476,8 @@ authenticated dev signal input
 ### 10.1 测试矩阵
 
 - **Schema/契约**：新对象双 dialect、成功/失败 Fixture、版本不兼容；
-- **单元**：Batcher、Trigger、Stream Assembler、Cycle 状态机、DAG、锁、权限、缓存；
-- **性质**：水位单调、至多一个 final、DAG 无死锁、取消后无等待者、缓存键稳定；
+- **单元**：Batcher、Trigger、Stream Assembler、Cycle 状态机、调用列表、锁、权限、缓存；
+- **性质**：水位单调、至多一个 final、调用列表调度无死锁、取消后无等待者、缓存键稳定；
 - **集成**：本地 OpenAI-compatible Server、真实 DB Worker、Phase 2 Performance Port、Control/Media WS；
 - **浏览器**：真实 Chromium Stage 中 Cycle 1 提示语、Tool overlap、Cycle 2 最终回答；
 - **恢复**：adoption 前后、Tool 启动前后、结果落库前后、Scene Commit 前后；
@@ -560,7 +567,7 @@ flowchart TD
 - Phase 2 全量基线通过；
 - Signal 水位、Batch 边界和 Cycle adoption 无歧义；
 - Model Stream 私有事件与规范 DecisionPacket 边界明确；
-- Tool DAG、权限、缓存、幂等和结果预算明确；
+- Tool 调用列表、权限、缓存、幂等和结果预算明确；
 - `noOp` Cycle 可原子推进水位；
 - 崩溃矩阵明确哪些状态可重试、不可重试或 uncertain；
 - 新 Schema 已生成双 dialect 并通过等价 Fixture。
@@ -568,9 +575,9 @@ flowchart TD
 ### 12.2 Gate 1：核心组件公开边界
 
 - Signal Pipeline、Decision Loop、Tool Runtime 都只通过包根公开 Port 交互；
-- 所有队列、流片段、DAG、锁、结果和缓存均有容量/Deadline/Abort/Close；
+- 所有队列、流片段、调用列表、锁、结果和缓存均有容量/Deadline/Abort/Close；
 - 每请求至多一个 final、每 final 恰好一个 ActionFrame 的性质测试通过；
-- DAG 并行、资源串行、权限 fail-closed 和取消无泄漏；
+- 调用列表并行、资源串行、权限 fail-closed 和取消无泄漏；
 - Provider Adapter 不拥有循环和副作用；
 - Phase 2 演出抽取方案可以保持现有 Demo 原路径兼容。
 
@@ -638,7 +645,7 @@ sessionId / traceId
 - 不以“流式”名义在最终包校验前播放语音或执行可变 Tool；
 - 不把 Tool Result 拼进 system prompt；它必须是标明来源和预算的不可信数据块；
 - 不把普通 Promise race 当取消；失败分支必须真正 Abort 并释放锁/等待者；
-- 不用 `Promise.all` 执行含资源冲突的 Tool；先编译 DAG 和租约；
+- 不用 `Promise.all` 执行含资源冲突的 Tool；先校验调用列表并取得资源锁；
 - 不缓存完整模型决策；Tool 缓存必须包含版本与 Context revision；
 - 不用模型二次“修 JSON”掩盖 Adapter/Schema 错误；
 - 不在 Phase 3 顺带建设 Memory、Presence、平台插件或游戏输入；

@@ -1,5 +1,7 @@
 # Binary Media WebSocket 协议（/ws/v1/media）
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](../adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 状态：Phase 1 冻结 v1 + Phase 2 兼容扩展（实现：`@bellis/transport`）
 > 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
 > 姊妹文档：[Control WebSocket](./control-websocket.md) · [Scene Execution](./scene-execution.md)
@@ -10,7 +12,7 @@
 ## 1. 范围声明
 
 Phase 1 只用**随机测试字节**验证传输、顺序与资源限制语义（`binary-test`）。
-Phase 2 激活 `audio` kind：Runtime → Stage 方向的 Fake TTS PCM 流
+Phase 2 激活 `audio` kind：Runtime → Stage 方向的 PCM 流（通过流式 SpeechProvider 注入；开发入口使用 Fake Provider）
 （§10；控制流程见 [Scene Execution §7](./scene-execution.md)）。
 `viseme` 仍为保留枚举位；TTS 真实 Provider、口型数据属于后续阶段。
 

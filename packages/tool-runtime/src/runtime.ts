@@ -61,10 +61,21 @@ export interface StandardToolRuntimeOptions {
   readonly confirmation?: ConfirmationPort | null;
   readonly logger?: LoggerPort;
   readonly metrics?: MetricsPort;
+  /** Recovery facts: awaited before handler invocation and before result publication. */
+  readonly persistRunEvent?: (
+    event: ToolRunEvent & { transition: "started" | "finished" },
+  ) => Promise<void>;
+  /** Optional, best-effort observer; never owns execution state. */
   readonly onRunEvent?: (event: ToolRunEvent) => void;
 }
 
-type NodeState = "pending" | "running" | "done";
+const basicResult = (node: DagNodePlan, outcome: "cancelled" | "failed"): ToolResult => ({
+  schemaVersion: 1,
+  toolRunId: node.call.toolRunId,
+  toolName: node.call.toolName,
+  outcome,
+  truncated: false,
+});
 
 export class StandardToolRuntime implements ToolRuntime {
   readonly #options: StandardToolRuntimeOptions;
@@ -74,6 +85,11 @@ export class StandardToolRuntime implements ToolRuntime {
   readonly #validators = new Map<string, (data: unknown) => boolean>();
   #closed = false;
   #inFlight = new Set<Promise<unknown>>();
+  readonly #controllers = new Set<AbortController>();
+  readonly #wakeSchedulers = new Set<() => void>();
+  readonly #heldLocks = new Set<string>();
+  readonly #toolRunning = new Map<string, number>();
+  #runningCount = 0;
 
   constructor(options: StandardToolRuntimeOptions) {
     this.#options = options;
@@ -122,8 +138,9 @@ export class StandardToolRuntime implements ToolRuntime {
 
   async close(reason: string): Promise<void> {
     this.#closed = true;
+    for (const controller of this.#controllers) controller.abort(new Error(reason));
+    for (const wake of this.#wakeSchedulers) wake();
     await Promise.allSettled(this.#inFlight);
-    void reason;
   }
 
   get isClosed(): boolean {
@@ -139,265 +156,176 @@ export class StandardToolRuntime implements ToolRuntime {
     dag: DagCompileResult,
     context: ToolExecutionContext,
   ): Promise<ToolDagExecution> {
-    if (!dag.ok) {
-      throw new Error("executeDag requires a compiled DAG (compileDag ok)");
+    if (!dag.ok || dag.nodes.some((node) => node.dependsOn.length > 0)) {
+      throw new Error("executeDag requires an independent call plan");
     }
-    if (this.#closed) {
-      throw new Error("tool runtime is closed");
-    }
+    if (this.#closed) throw new Error("tool runtime is closed");
+    const controller = new AbortController();
+    const signal = AbortSignal.any([context.signal, controller.signal]);
+    const executionContext = { ...context, signal };
+    this.#controllers.add(controller);
     const l0 = new Map<string, JsonValue>();
-    const states = new Map<string, NodeState>();
-    const results = new Map<string, ToolResult>();
-    const heldLocks = new Set<string>();
-    const toolRunning = new Map<string, number>();
-    const startedAtUs = new Map<string, bigint>();
-    const pending: DagNodePlan[] = [...dag.nodes];
-    for (const node of dag.nodes) {
-      states.set(node.call.toolRunId, "pending");
-      this.#options.onRunEvent?.({
+    const shared = new Map<string, Promise<ToolResult>>();
+    const pending = [...dag.nodes];
+    const running = new Set<Promise<void>>();
+    const slots = dag.nodes.map(() => {
+      let resolve!: (value: ToolResult) => void;
+      let reject!: (error: unknown) => void;
+      const promise = new Promise<ToolResult>((yes, no) => {
+        resolve = yes;
+        reject = no;
+      });
+      return { promise, resolve, reject };
+    });
+    const byId = new Map(dag.nodes.map((node, index) => [node.call.toolRunId, slots[index]!]));
+    // Background rejection can occur before the caller receives its handles.
+    for (const slot of slots) void slot.promise.catch(() => undefined);
+    let wake: (() => void) | null = null;
+    const notify = () => {
+      wake?.();
+      wake = null;
+    };
+    this.#wakeSchedulers.add(notify);
+    signal.addEventListener("abort", notify);
+    const run = async (node: DagNodePlan): Promise<void> => {
+      const base = {
         toolRunId: node.call.toolRunId,
         cycleId: context.cycleId,
         toolName: node.call.toolName,
-        transition: "planned",
-      });
-    }
-
-    const backgroundWaiters = new Map<string, (() => void)[]>();
-    const notifyBackground = (toolRunId: string): void => {
-      const waiters = backgroundWaiters.get(toolRunId);
-      if (waiters !== undefined) {
-        backgroundWaiters.delete(toolRunId);
-        for (const waiter of waiters) {
-          waiter();
-        }
-      }
-    };
-
-    const nodeFlights = new Map<string, Promise<ToolResult>>();
-    const startNode = async (node: DagNodePlan): Promise<void> => {
-      // L0 single-flight：同 Cycle 内相同归一化输入的并行节点共享一次
-      // 执行与结果处理（结果按各自 toolRunId 复制）。
-      const dedupeKey = ToolCache.cacheable(node.declaration)
-        ? ToolCache.keyOf(node.declaration, node.call.arguments as Record<string, unknown>)
-        : null;
-      if (dedupeKey !== null) {
-        const existing = nodeFlights.get(dedupeKey);
-        if (existing !== undefined) {
-          const shared = await existing;
-          const result: ToolResult = {
-            schemaVersion: 1,
-            toolRunId: node.call.toolRunId,
-            toolName: shared.toolName,
-            outcome: shared.outcome,
-            truncated: shared.truncated,
-            ...(shared.value === undefined ? {} : { value: shared.value }),
-            ...(shared.errorCode === undefined ? {} : { errorCode: shared.errorCode }),
-            ...(shared.outcome === "succeeded" ? { cacheSource: "l0" as const } : {}),
-          };
-          states.set(node.call.toolRunId, "done");
-          results.set(node.call.toolRunId, result);
-          notifyBackground(node.call.toolRunId);
-          return;
-        }
-      }
-      states.set(node.call.toolRunId, "running");
-      startedAtUs.set(node.call.toolRunId, this.#options.clock.nowUs());
-      if (node.lockKey !== null) {
-        heldLocks.add(node.lockKey);
-      }
-      toolRunning.set(node.call.toolName, (toolRunning.get(node.call.toolName) ?? 0) + 1);
-      this.#options.onRunEvent?.({
-        toolRunId: node.call.toolRunId,
-        cycleId: context.cycleId,
-        toolName: node.call.toolName,
-        transition: "started",
-      });
-      const run = this.#runNode(node, context, l0);
-      if (dedupeKey !== null) {
-        nodeFlights.set(dedupeKey, run);
-        void run.finally(() => nodeFlights.delete(dedupeKey)).catch(() => undefined);
-      }
-      const result = await run;
-      const startedUs = startedAtUs.get(node.call.toolRunId) ?? 0n;
-      const durationMs = Number((this.#options.clock.nowUs() - startedUs) / 1000n);
-      if (node.lockKey !== null) {
-        heldLocks.delete(node.lockKey);
-      }
-      toolRunning.set(
-        node.call.toolName,
-        Math.max(0, (toolRunning.get(node.call.toolName) ?? 1) - 1),
-      );
-      states.set(node.call.toolRunId, "done");
-      results.set(node.call.toolRunId, result);
-      notifyBackground(node.call.toolRunId);
-      this.#options.metrics
-        ?.counter("bellis_tool_runs_total", {
-          tool: node.declaration.name,
-          result: result.outcome,
-          cache: result.cacheSource === undefined ? "miss" : result.cacheSource,
-        })
-        .inc();
-      this.#options.metrics
-        ?.histogram("bellis_tool_duration_ms", {
-          tool: node.declaration.name,
-          result: result.outcome,
-        })
-        .observe(durationMs);
-      this.#options.onRunEvent?.({
-        toolRunId: node.call.toolRunId,
-        cycleId: context.cycleId,
-        toolName: node.call.toolName,
-        transition: "finished",
-        ...(result.outcome === "succeeded"
-          ? { state: "succeeded" as const }
-          : { state: result.outcome as "failed" | "timeout" | "cancelled" | "denied" }),
-        durationMs,
-        ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
-        ...(result.cacheSource === undefined ? {} : { cacheSource: result.cacheSource }),
-        ...(node.call.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKeyHash: hashIdempotencyKey(node.call.idempotencyKey) }),
-      });
-    };
-
-    const pump = (): void => {
-      if (context.signal.aborted) {
-        // 取消优先：未启动节点一律 cancelled（不给依赖失败结算）。
-        for (const node of pending) {
-          states.set(node.call.toolRunId, "done");
-          results.set(node.call.toolRunId, {
-            schemaVersion: 1,
-            toolRunId: node.call.toolRunId,
-            toolName: node.call.toolName,
-            outcome: "cancelled",
-            truncated: false,
-          });
-          notifyBackground(node.call.toolRunId);
-        }
-        pending.length = 0;
-        return;
-      }
-      for (const node of pending.slice()) {
-        if (states.get(node.call.toolRunId) !== "pending") {
-          continue;
-        }
-        // 依赖失败（或依赖结果非 succeeded）→ dependency_failed，不读取不存在结果。
-        const dependencies = node.dependsOn
-          .map((id) => results.get(id))
-          .filter((value): value is ToolResult => value !== undefined);
-        const allResolved = node.dependsOn.every((id) => results.has(id));
-        if (allResolved && dependencies.some((dep) => dep.outcome !== "succeeded")) {
-          pending.splice(pending.indexOf(node), 1);
-          states.set(node.call.toolRunId, "done");
-          const failed: ToolResult = {
-            schemaVersion: 1,
-            toolRunId: node.call.toolRunId,
-            toolName: node.call.toolName,
-            outcome: "dependency_failed",
-            errorCode: "dependency_failed",
-            truncated: false,
-          };
-          results.set(node.call.toolRunId, failed);
-          notifyBackground(node.call.toolRunId);
-          this.#options.onRunEvent?.({
-            toolRunId: node.call.toolRunId,
-            cycleId: context.cycleId,
-            toolName: node.call.toolName,
-            transition: "finished",
-            state: "dependency_failed",
-          });
-          continue;
-        }
-        if (!allResolved) {
-          continue;
-        }
-        const total = [...states.values()].filter((state) => state === "running").length;
-        if (total >= context.maxParallelTools) {
-          break;
-        }
-        const toolCount = toolRunning.get(node.call.toolName) ?? 0;
-        if (toolCount >= node.declaration.maxConcurrency) {
-          continue;
-        }
-        if (node.lockKey !== null && heldLocks.has(node.lockKey)) {
-          continue;
-        }
-        pending.splice(pending.indexOf(node), 1);
-        const run = startNode(node);
-        this.#inFlight.add(run);
-        void run.finally(() => this.#inFlight.delete(run)).catch(() => undefined);
-      }
-    };
-
-    const foregroundDone = (): boolean =>
-      dag.nodes
-        .filter((node) => node.declaration.executionMode !== "background")
-        .every((node) => states.get(node.call.toolRunId) === "done");
-
-    pump();
-    while (!foregroundDone()) {
-      if (context.signal.aborted) {
-        // 取消：未启动节点立即 cancelled，运行中的由各自 Abort 域结算。
-        for (const node of pending) {
-          states.set(node.call.toolRunId, "done");
-          results.set(node.call.toolRunId, {
-            schemaVersion: 1,
-            toolRunId: node.call.toolRunId,
-            toolName: node.call.toolName,
-            outcome: "cancelled",
-            truncated: false,
-          });
-          notifyBackground(node.call.toolRunId);
-        }
-        pending.length = 0;
-      }
-      if (this.#inFlight.size === 0) {
-        // 无可推进且无在途：死锁防御（理论不可达——环已在编译期拒绝）。
-        for (const node of pending) {
-          states.set(node.call.toolRunId, "done");
-          results.set(node.call.toolRunId, {
-            schemaVersion: 1,
-            toolRunId: node.call.toolRunId,
-            toolName: node.call.toolName,
-            outcome: "failed",
-            errorCode: "scheduler_stalled",
-            truncated: false,
-          });
-          notifyBackground(node.call.toolRunId);
-        }
-        pending.length = 0;
-        break;
-      }
-      // 等待任一在途节点结算后再推进（真实等待，非忙等）。
-      await Promise.race(this.#inFlight);
-      pump();
-    }
-
-    const foreground = dag.nodes
-      .filter((node) => node.declaration.executionMode !== "background")
-      .map((node) => results.get(node.call.toolRunId))
-      .filter((value): value is ToolResult => value !== undefined);
-    const background = dag.nodes
-      .filter((node) => node.declaration.executionMode === "background")
-      .map(
-        (node) =>
-          new Promise<ToolResult>((resolve) => {
-            const settled = results.get(node.call.toolRunId);
-            if (settled !== undefined) {
-              resolve(settled);
-              return;
+      };
+      const startedUs = this.#options.clock.nowUs();
+      const slot = byId.get(node.call.toolRunId)!;
+      try {
+        this.#observe({ ...base, transition: "planned" });
+        let result: ToolResult;
+        if (signal.aborted) {
+          result = basicResult(node, "cancelled");
+        } else {
+          const started = { ...base, transition: "started" as const };
+          await this.#options.persistRunEvent?.(started);
+          this.#observe(started);
+          if (signal.aborted) {
+            result = basicResult(node, "cancelled");
+          } else {
+            const key = ToolCache.cacheable(node.declaration)
+              ? ToolCache.keyOf(node.declaration, node.call.arguments as Record<string, unknown>)
+              : null;
+            const existing = key === null ? undefined : shared.get(key);
+            if (existing !== undefined) {
+              const value = await existing;
+              result = {
+                schemaVersion: 1,
+                toolRunId: node.call.toolRunId,
+                toolName: node.call.toolName,
+                outcome: value.outcome,
+                truncated: value.truncated,
+                ...(value.value === undefined ? {} : { value: value.value }),
+                ...(value.errorCode === undefined ? {} : { errorCode: value.errorCode }),
+                ...(value.outcome === "succeeded" ? { cacheSource: "l0" as const } : {}),
+              };
+            } else {
+              const operation = this.#runNode(node, executionContext, l0);
+              if (key !== null) shared.set(key, operation);
+              result = await operation;
             }
-            const waiters = backgroundWaiters.get(node.call.toolRunId) ?? [];
-            waiters.push(() => {
-              const result = results.get(node.call.toolRunId);
-              if (result !== undefined) {
-                resolve(result);
-              }
+          }
+        }
+        const durationMs = Number((this.#options.clock.nowUs() - startedUs) / 1000n);
+        const finished = {
+          ...base,
+          transition: "finished" as const,
+          state: result.outcome,
+          durationMs,
+          ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+          ...(result.cacheSource === undefined ? {} : { cacheSource: result.cacheSource }),
+          ...(node.call.idempotencyKey === undefined
+            ? {}
+            : { idempotencyKeyHash: hashIdempotencyKey(node.call.idempotencyKey) }),
+        };
+        await this.#options.persistRunEvent?.(finished);
+        this.#observe(finished);
+        this.#options.metrics
+          ?.counter("bellis_tool_runs_total", {
+            tool: node.call.toolName,
+            result: result.outcome,
+            cache: result.cacheSource ?? "miss",
+          })
+          .inc();
+        this.#options.metrics
+          ?.histogram("bellis_tool_duration_ms", {
+            tool: node.call.toolName,
+            result: result.outcome,
+          })
+          .observe(durationMs);
+        slot.resolve(result);
+      } catch (error) {
+        // No success escapes an unconfirmed lifecycle write. Other pending work stops.
+        this.#options.logger?.log("error", "tool_execution_fact_failed", {
+          ...base,
+          error: error instanceof Error ? error.message : "unknown",
+        });
+        controller.abort(error);
+        slot.reject(error);
+      }
+    };
+    const drive = async (): Promise<void> => {
+      try {
+        while (pending.length > 0 || running.size > 0) {
+          for (const node of pending.slice()) {
+            const count = this.#toolRunning.get(node.call.toolName) ?? 0;
+            if (
+              !signal.aborted &&
+              (this.#runningCount >= context.maxParallelTools ||
+                count >= node.declaration.maxConcurrency ||
+                (node.lockKey !== null && this.#heldLocks.has(node.lockKey)))
+            )
+              continue;
+            pending.splice(pending.indexOf(node), 1);
+            const acquired = !signal.aborted;
+            this.#runningCount += 1;
+            this.#toolRunning.set(node.call.toolName, count + 1);
+            if (acquired && node.lockKey !== null) this.#heldLocks.add(node.lockKey);
+            const task = run(node).finally(() => {
+              this.#runningCount -= 1;
+              this.#toolRunning.set(
+                node.call.toolName,
+                (this.#toolRunning.get(node.call.toolName) ?? 1) - 1,
+              );
+              if (acquired && node.lockKey !== null) this.#heldLocks.delete(node.lockKey);
+              running.delete(task);
+              for (const awaken of this.#wakeSchedulers) awaken();
             });
-            backgroundWaiters.set(node.call.toolRunId, waiters);
-          }),
-      );
-    return { results: foreground, background };
+            running.add(task);
+          }
+          if (pending.length > 0 || running.size > 0)
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+            });
+        }
+      } finally {
+        signal.removeEventListener("abort", notify);
+        this.#wakeSchedulers.delete(notify);
+        this.#controllers.delete(controller);
+      }
+    };
+    const driver = drive();
+    this.#inFlight.add(driver);
+    void driver.finally(() => this.#inFlight.delete(driver)).catch(() => undefined);
+    const foreground = dag.nodes.flatMap((node, index) =>
+      node.declaration.executionMode === "background" ? [] : [slots[index]!.promise],
+    );
+    const background = dag.nodes.flatMap((node, index) =>
+      node.declaration.executionMode === "background" ? [slots[index]!.promise] : [],
+    );
+    return { results: await Promise.all(foreground), background };
+  }
+
+  #observe(event: ToolRunEvent): void {
+    try {
+      this.#options.onRunEvent?.(event);
+    } catch {
+      this.#options.logger?.log("warn", "tool_observer_failed", { toolRunId: event.toolRunId });
+    }
   }
 
   async #runNode(
@@ -473,6 +401,16 @@ export class StandardToolRuntime implements ToolRuntime {
         cacheSource: cached.source,
       };
     }
+    if (context.signal.aborted) {
+      return {
+        schemaVersion: 1,
+        toolRunId: call.toolRunId,
+        toolName: call.toolName,
+        outcome: "cancelled",
+        errorCode: "aborted",
+        truncated: false,
+      };
+    }
     // 执行域：节点 Abort = 父域 + 超时；失败分支真正 Abort handler。
     const nodeAbort = new AbortController();
     const onParentAbort = () => nodeAbort.abort(context.signal.reason);
@@ -501,11 +439,14 @@ export class StandardToolRuntime implements ToolRuntime {
         truncated: false,
       };
     }
-    const handlerPromise: Promise<{ readonly value: unknown }> = registered.handler({
-      arguments: args,
-      context: { ...context, signal: nodeAbort.signal },
-      deadlineUs,
-      idempotencyKey: permission.idempotencyKey,
+    const handlerPromise: Promise<{ readonly value: unknown }> = Promise.resolve().then(() => {
+      nodeAbort.signal.throwIfAborted();
+      return registered.handler({
+        arguments: args,
+        context: { ...context, signal: nodeAbort.signal },
+        deadlineUs,
+        idempotencyKey: permission.idempotencyKey,
+      });
     });
     const guardedHandler = handlerPromise.catch((error: unknown) => ({
       thrown: error instanceof Error ? error.message : "tool handler failed",

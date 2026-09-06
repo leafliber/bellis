@@ -16,6 +16,7 @@ export interface TimelineScheduleItem {
   readonly lane: string;
   /** 关键（hard）Lane：迟到仍触发并标记 late；非关键：超容忍窗口丢弃。 */
   readonly critical: boolean;
+  readonly onDropped?: () => void;
   readonly fire: (info: { late: boolean; lateByUs: bigint }) => void;
 }
 
@@ -95,6 +96,7 @@ export class CueTimeline {
             if (lateBy > this.#lateToleranceUs) {
               if (!item.critical) {
                 this.#droppedTotal += 1;
+                item.onDropped?.();
                 return;
               }
               item.fire({ late: true, lateByUs: lateBy });

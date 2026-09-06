@@ -106,6 +106,7 @@ const runtime: RuntimeHandle = await startRuntime({
   config: {
     dataDirectory,
     runtimeVersion: "0.1.0-harness",
+    ...(mode === "seq-delay" ? { limits: { seqReservationSize: 1 } } : {}),
     port: 0,
   },
   ...(observer === undefined ? {} : { checkpointObserver: observer }),

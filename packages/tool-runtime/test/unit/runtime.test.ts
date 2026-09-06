@@ -153,41 +153,21 @@ describe("StandardToolRuntime", () => {
     expect(first && second && first.endUs <= second.startUs).toBe(true);
   });
 
-  it("runs dependent tools in order and propagates dependency failure", async () => {
+  it("refuses unsupported dependency plans before any handler executes", async () => {
     const clock = new VirtualClock();
-    const order: string[] = [];
-    const okHandler: ToolHandler = async (input) => {
-      order.push(`ok:${String(input.arguments.step)}`);
-      return { value: { step: input.arguments.step } };
-    };
-    const boomMessage = "tool exploded";
-    const failHandler: ToolHandler = async () => {
-      throw new Error(boomMessage);
-    };
+    let calls = 0;
     const runtime = makeRuntime(clock, [
-      { declaration: declaration(), handler: okHandler },
       {
-        declaration: declaration({ name: "broken", cache: null, semantic: "idempotent" }),
-        handler: failHandler,
+        declaration: declaration(),
+        handler: async () => {
+          calls += 1;
+          return { value: null };
+        },
       },
     ]);
-    const chained = await runtime.executeDag(
-      runtime.compileDag([call(RUN(1), "broken"), call(RUN(2), "probe", { step: 1 }, [RUN(1)])]),
-      context(),
-    );
-    expect(chained.results[0]?.outcome).toBe("failed");
-    expect(chained.results[1]?.outcome).toBe("dependency_failed");
-    expect(order).toEqual([]);
-
-    const ordered = await runtime.executeDag(
-      runtime.compileDag([
-        call(RUN(1), "probe", { step: "a" }),
-        call(RUN(2), "probe", { step: "b" }, [RUN(1)]),
-      ]),
-      context(),
-    );
-    expect(ordered.results.every((result) => result.outcome === "succeeded")).toBe(true);
-    expect(order).toEqual(["ok:a", "ok:b"]);
+    const plan = runtime.compileDag([call(RUN(1)), call(RUN(2), "probe", {}, [RUN(1)])]);
+    await expect(runtime.executeDag(plan, context())).rejects.toThrow(/independent/);
+    expect(calls).toBe(0);
   });
 
   it("denies capability-missing, unconfirmed and unkeyed non-idempotent tools (fail closed)", async () => {
@@ -266,7 +246,12 @@ describe("StandardToolRuntime", () => {
     const parent = new AbortController();
     const runtime = makeRuntime(clock, [
       {
-        declaration: declaration({ name: "chained_a", cache: null, semantic: "idempotent" }),
+        declaration: declaration({
+          name: "chained_a",
+          maxConcurrency: 1,
+          cache: null,
+          semantic: "idempotent",
+        }),
         handler: async (input) => {
           await clock.sleepUntil(clock.nowUs() + 100_000n, input.context.signal);
           return { value: null };
@@ -274,7 +259,7 @@ describe("StandardToolRuntime", () => {
       },
     ]);
     const dagPromise = runtime.executeDag(
-      runtime.compileDag([call(RUN(1), "chained_a"), call(RUN(2), "chained_a", {}, [RUN(1)])]),
+      runtime.compileDag([call(RUN(1), "chained_a"), call(RUN(2), "chained_a")]),
       context({ signal: parent.signal }),
     );
     await flush();
@@ -385,4 +370,99 @@ describe("StandardToolRuntime", () => {
     expect(backgroundResult.outcome).toBe("succeeded");
     await runtime.close("test");
   });
+});
+
+describe("task lifetime and durable facts", () => {
+  it("continues queued background work after returning foreground results", async () => {
+    const clock = new VirtualClock();
+    const calls: string[] = [];
+    const runtime = makeRuntime(clock, [
+      {
+        declaration: declaration({
+          executionMode: "background",
+          semantic: "idempotent",
+          cache: null,
+          maxConcurrency: 1,
+        }),
+        handler: async (input) => {
+          calls.push(input.context.cycleId);
+          await clock.sleepUntil(clock.nowUs() + 10_000n, input.context.signal);
+          return { value: null };
+        },
+      },
+    ]);
+    const execution = await runtime.executeDag(
+      runtime.compileDag([call(RUN(1)), call(RUN(2))]),
+      context(),
+    );
+    await flush();
+    expect(calls).toHaveLength(1);
+    clock.advanceBy(10_000n);
+    await flush();
+    expect(calls).toHaveLength(2);
+    clock.advanceBy(10_000n);
+    expect((await Promise.all(execution.background)).map((result) => result.outcome)).toEqual([
+      "succeeded",
+      "succeeded",
+    ]);
+    await runtime.close("test");
+  });
+
+  it("close cancels both running and queued background tasks", async () => {
+    const clock = new VirtualClock();
+    let calls = 0;
+    const runtime = makeRuntime(clock, [
+      {
+        declaration: declaration({
+          executionMode: "background",
+          semantic: "idempotent",
+          cache: null,
+          maxConcurrency: 1,
+        }),
+        handler: async (input) => {
+          calls += 1;
+          await clock.sleepUntil(1_000_000n, input.context.signal);
+          return { value: null };
+        },
+      },
+    ]);
+    const execution = await runtime.executeDag(
+      runtime.compileDag([call(RUN(1)), call(RUN(2))]),
+      context(),
+    );
+    await flush();
+    await runtime.close("shutdown");
+    expect(calls).toBe(1);
+    expect(
+      (await Promise.all(execution.background)).every((result) => result.outcome === "cancelled"),
+    ).toBe(true);
+    expect(clock.pendingCount()).toBe(0);
+  });
+
+  it.each(["started", "finished"] as const)(
+    "does not hide a failed %s fact",
+    async (transition) => {
+      const clock = new VirtualClock();
+      let effects = 0;
+      const observed: string[] = [];
+      const runtime = new StandardToolRuntime({
+        clock,
+        wallClockMs: () => 0,
+        persistRunEvent: async (event) => {
+          if (event.transition === transition) throw new Error("db_unavailable");
+        },
+        onRunEvent: (event) => observed.push(event.transition),
+      });
+      runtime.registerTool(declaration({ cache: null }), async () => {
+        effects += 1;
+        return { value: true };
+      });
+      await expect(
+        runtime.executeDag(runtime.compileDag([call(RUN(1))]), context()),
+      ).rejects.toThrow("db_unavailable");
+      expect(effects).toBe(transition === "started" ? 0 : 1);
+      expect(observed).not.toContain("finished");
+      await runtime.close("test");
+    },
+  );
 });

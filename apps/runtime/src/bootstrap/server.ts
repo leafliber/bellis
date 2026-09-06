@@ -294,6 +294,7 @@ function registerWebSocketRoutes(app: FastifyInstance, ctx: ServerContext): void
       connections: ctx.connections,
       persistence: ctx.persistence,
       limits: {
+        seqReservationSize: ctx.config.limits.seqReservationSize,
         heartbeatIntervalMs: ctx.config.limits.heartbeatIntervalMs,
         helloTimeoutMs: ctx.config.limits.helloTimeoutMs,
         replayWindowCapacity: ctx.config.limits.replayWindowCapacity,

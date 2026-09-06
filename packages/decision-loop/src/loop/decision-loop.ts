@@ -122,6 +122,7 @@ export class DecisionLoop implements TurnOwnerPort {
   #chain: Promise<unknown> = Promise.resolve();
   #closed = false;
   readonly #backgroundTasks = new Set<Promise<unknown>>();
+  readonly #taskControllers = new Set<AbortController>();
 
   constructor(options: DecisionLoopOptions) {
     this.#options = options;
@@ -166,10 +167,7 @@ export class DecisionLoop implements TurnOwnerPort {
       return false;
     }
     if (this.#turn !== null) {
-      if (trigger !== "interrupt") {
-        return false;
-      }
-      this.cancelActiveTurn();
+      return false; // Trigger owns the only waiting queue, including interrupts.
     }
     const turn: TurnState = {
       turnId: this.#options.ids.turnId(),
@@ -187,7 +185,9 @@ export class DecisionLoop implements TurnOwnerPort {
       lastConsumedTo: BigInt(batch.watermarkFrom) - 1n,
       result: null,
     };
-    // Turn 转换串行：前一个 runTurn 完成后才启动新 Turn。
+    this.#turn = turn; // Ownership starts at acceptance, before the first microtask.
+    this.#taskControllers.add(turn.abort);
+    // Only the accepted Turn is scheduled; no hidden pending Turn queue.
     this.#chain = this.#chain
       .then(() => this.#runTurn(turn))
       .catch((error: unknown) => {
@@ -195,7 +195,9 @@ export class DecisionLoop implements TurnOwnerPort {
           turnId: turn.turnId,
           error: error instanceof Error ? error.message : "unknown",
         });
-        this.#turn = null;
+        if (this.#turn === turn) this.#turn = null;
+        turn.abort.abort(error);
+        this.#taskControllers.delete(turn.abort);
         turn.result ??= "failed";
         this.#options.onTurnSettled?.(turn.turnId, turn.result);
       });
@@ -213,11 +215,12 @@ export class DecisionLoop implements TurnOwnerPort {
 
   /** Session 关闭：取消活跃 Turn、等待全部子任务与后台 Tool 释放。 */
   async close(reason: string): Promise<void> {
-    if (this.#closed) {
-      return;
+    if (!this.#closed) {
+      this.#closed = true;
+      this.cancelActiveTurn();
+      for (const controller of this.#taskControllers) controller.abort(new Error(reason));
+      await this.#options.performance.interruptActiveScenes(reason);
     }
-    this.#closed = true;
-    this.cancelActiveTurn();
     await this.#chain;
     const background = [...this.#backgroundTasks];
     this.#backgroundTasks.clear();
@@ -226,11 +229,10 @@ export class DecisionLoop implements TurnOwnerPort {
   }
 
   async #runTurn(turn: TurnState): Promise<void> {
-    this.#turn = turn;
     // A finished Turn can still have a playing Scene. Urgent input must also
     // cancel that performance when the model loop is already idle. Serialize
     // this before the new decision so it cannot cancel the new Turn's output.
-    if (turn.trigger === "interrupt") {
+    if (turn.trigger === "interrupt" && !turn.abort.signal.aborted) {
       await this.#options.performance.interruptActiveScenes("urgent_interrupt");
     }
     this.#options.audit?.turnStarted({
@@ -277,7 +279,9 @@ export class DecisionLoop implements TurnOwnerPort {
       }
     }
     turn.result ??= turn.degraded ? "degraded" : "completed";
-    this.#turn = null;
+    if (this.#turn === turn) this.#turn = null;
+    const background = [...this.#backgroundTasks];
+    void Promise.allSettled(background).then(() => this.#taskControllers.delete(turn.abort));
     const unadopted: AudienceBatch[] = [...turn.merged];
     if (turn.snapshotBatch !== null) {
       unadopted.unshift(turn.snapshotBatch);
@@ -506,8 +510,10 @@ export class DecisionLoop implements TurnOwnerPort {
       degradedPacket = true;
       degradedDetail = "after_tools without foreground tool calls";
     }
+    let compiledTools: ReturnType<ToolRuntime["compileDag"]> | null = null;
     if (!degradedPacket && packet.toolCalls.length > 0) {
       const dag = this.#options.tools.compileDag(packet.toolCalls);
+      compiledTools = dag;
       if (!dag.ok) {
         packet = buildSafetyPacket(cycleId, "invalid_packet", this.#options.degradationPolicy);
         degradedPacket = true;
@@ -571,6 +577,7 @@ export class DecisionLoop implements TurnOwnerPort {
         },
       ].slice(-8);
     }
+    if (turn.abort.signal.aborted || this.#closed) return { kind: "cancel" };
     // ── dispatching：Scene 与 Tool 并行（不变量 5；不等待 Scene done）──
     let sceneSubmitted = false;
     const sceneResult = this.#options.performance.submitDecision(packet, {
@@ -585,8 +592,8 @@ export class DecisionLoop implements TurnOwnerPort {
       this.#trackBackground(sceneResult.done.then((outcome) => outcome));
     }
     if (packet.toolCalls.length > 0) {
-      const dag = this.#options.tools.compileDag(packet.toolCalls);
-      if (dag.ok) {
+      const dag = compiledTools;
+      if (dag?.ok) {
         const execution = await this.#options.tools.executeDag(dag, {
           traceId,
           sessionId: this.#options.sessionId,

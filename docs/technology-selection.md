@@ -1,5 +1,7 @@
 # Bellis Autonomous Live：技术选型基线
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 文档状态：实现技术基线 v1
 >
 > 产品形态：本地 Runtime + 浏览器 Studio + OBS Stage
@@ -274,8 +276,8 @@ interface DecisionPacket {
 核心异步调度使用原生 Promise、`AbortController`、Deadline、优先级队列和 Capability Semaphore：
 
 - Base Context、World Snapshot、Audience Batch、Memory Context 并行构建。
-- 多个 Memory Provider 使用 `Promise.allSettled` 并行读取。
-- Tool 按依赖关系组成 DAG，无依赖节点并行执行。
+- Phase 4 首先验证单个 Memory Provider；多 Provider 有界并发属于后续扩展。
+- 当前 Tool 只接受最多 8 个无显式依赖的调用；按资源与并发上限调度，需要前一步结果时进入下一 Cycle。通用 DAG 待真实需求证明。
 - Tool 调用和本次短句的 TTS/Live2D 准备可以并行。
 - 每项任务携带 Deadline 和 Cancellation Token。
 - 未影响当前决策的工作移出关键路径。
@@ -455,7 +457,7 @@ Memory 插件和 Persona 的当前代码入口为 [`@bellis/contracts/memory`](.
 
 当前仓库有契约与独立 Iris Provider 原型，Memory Gateway、Context Builder、Persona Runtime 和宿主 Observe Outbox 尚待 Phase 4 实施；没有已交付的宿主纵向链路。当前 Port 含 capabilities/provideContext 与可选 observe/reportUsage/start/stop；Memory Tool 接口需要 P0 单独冻结，不能把规划示例当成已导出类型。
 
-Phase 4 通过本地 Provider、HTTP/gRPC 或 MCP Adapter 贡献声明式记忆，再适配到宿主的通用 Context 贡献。Builder 拥有排序、预算、来源和隐私过滤。多个 Provider 共用 150–250ms 前台 Deadline；Observe/Usage 由后台宿主 Outbox 调用，成功仅代表对端持久接收，失败由宿主重试。完整规划及兼容规则见 [Phase 4 指南](./phase-4-development-guide.md) 和 [ADR 0006](./adr/0006-documentation-and-delivery-boundaries.md)。
+Phase 4A 复用 `providers/memory-iris`，通过独立安装的 TypeScript SDK/公共 HTTP API 接入 Iris；Core API/Worker 与存储独立部署，Bellis 不依赖其内部模块。Builder 拥有排序、预算、来源和公开输出隐私过滤。前台总 Deadline 默认 200ms、上限 250ms；Observe/Usage 由后台宿主 Outbox 调用，成功仅代表对端持久接收，失败由宿主重试。Phase 4B 再扩展多 Provider 与 MCP；真实 Iris 本机验收为独立必需 Gate。完整计划及来源 hash/兼容差异见 [Phase 4 指南](./phase-4-development-guide.md)、[调研记录](./phase-4-iris-integration-research.md) 和 [ADR 0008](./adr/0008-iris-phase4-integration.md)。
 
 ## 13. 插件模型与隔离
 
@@ -648,7 +650,7 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 
 - 实现 Audience Batcher 和 Decision Trigger。
 - 接入 ModelProvider、流式解析和错误降级。
-- 实现 Tool Runtime、并行 DAG、权限和缓存。
+- 实现 Tool Runtime、独立调用列表并发、权限、取消、可等待执行事实和缓存。
 - 实现每次请求对应一个 ActionFrame 的不变量。
 
 ### 阶段四：记忆和主动表现
@@ -656,8 +658,8 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 当前实施拆分、契约 Gate 与验收标准见 [Phase 4 构建指南](./phase-4-development-guide.md)。
 
 - 实现 Context Contribution Pipeline。
-- 实现 MemoryProvider 和 MCP v2 Adapter。
-- 实现 Memory Observe Outbox。
+- Phase 4A 接入 Iris MemoryProvider/PersonaSource、Context Manifest、Usage 与实际确认后的 Observe Outbox，完成受控 Memory Tools 和真实服务恢复验收。
+- Phase 4B 扩展多 Provider 和 MCP Adapter。
 - 实现 Avatar Mixer、Presence Engine 和资源仲裁。
 
 ### 阶段五：游戏和产品交付

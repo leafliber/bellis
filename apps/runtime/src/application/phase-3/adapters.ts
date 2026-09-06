@@ -353,22 +353,6 @@ export class Phase3AuditRecorder implements DecisionAuditPort {
       },
       payload.toolRunId,
     );
-    // 状态投影（phase3_tool_runs 行）与 Record 同步维护。
-    if (payload.transition !== "planned") {
-      void this.#persistence
-        .phase3ToolRunEvent({
-          sessionId: this.#sessionId,
-          toolRunId: payload.toolRunId,
-          cycleId: payload.cycleId,
-          toolName: payload.toolName,
-          transition: payload.transition,
-          state: payload.state ?? (payload.transition === "started" ? "running" : "succeeded"),
-          ...(payload.durationMs === undefined ? {} : { durationMs: payload.durationMs }),
-          ...(payload.errorCode === undefined ? {} : { errorCode: payload.errorCode }),
-          trace: { traceId: normalizeTrace(payload.toolRunId) },
-        })
-        .catch(() => undefined);
-    }
   }
 
   #append(

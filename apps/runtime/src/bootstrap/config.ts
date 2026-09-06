@@ -73,6 +73,7 @@ const RuntimeConfigSchema = z
     shutdownGraceMs: PositiveInt(120_000).default(10_000),
     limits: z
       .object({
+        seqReservationSize: PositiveInt(65_536).default(1024),
         heartbeatIntervalMs: PositiveInt(600_000).default(30_000),
         helloTimeoutMs: PositiveInt(600_000).default(10_000),
         replayWindowCapacity: PositiveInt(100_000).default(512),

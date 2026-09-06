@@ -1,5 +1,7 @@
 # Bellis Phase 3 完成态参考：Decision Loop
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 文档状态：已交付核心参考（原 Gate 2 子任务 P99 验收仍开放）
 > 实施指南：[Phase 3 开发指南](./phase-3-development-guide.md)（含工作包分解与验收标准）  
 > 上游基线：[Phase 2 完成态参考](./phase-2-reference.md)  
@@ -22,7 +24,7 @@ Simulated Audience Signals
   → exactly one validated DecisionPacket（或唯一确定性安全包）
   → durable Cycle adoption（原子:cycle 行+水位+tool_runs planned+Record）
   ├─→ Phase 2 Performance Port（submitDecision 稳定边界）→ Scene Director → Stage
-  └─→ Tool Runtime（DAG 编译/并行/锁/权限/缓存/取消）→ Tool Results
+  └─→ Tool Runtime（独立调用列表/并行/锁/权限/缓存/取消/可等待执行事实）→ Tool Results
         → 下一 Cycle（固定新水位,不改历史快照）
   → Session Records / Trace / Metrics / 恢复投影
 ```
@@ -36,9 +38,9 @@ Simulated Audience Signals
 | --- | --- |
 | `packages/contracts` | IngestedSignal/SignalPriorityClass、CycleSnapshot/RecentUtterance、ToolExecutionMode/ToolSemantic/ToolRunState/ToolOutcome/ToolCacheSource/ToolResult、8 个 `phase3_*` 审计 Payload（双 JSON Schema 生成物 + Zod/Ajv2020/AjvDraft7 三方 Fixture 等价） |
 | `packages/decision-loop` | SignalIngress（串行入库）、InMemorySignalStore、AudienceBatcher（自适应窗口/五种封窗触发/urgent 旁路/区间连续）、确定性聚类（归一化分组/权重/审计保留）、DecisionTrigger（四路分类;interrupt 回收未采用 Batch 合并区间并集;requeueFront;Mailbox 溢出合并）、SignalPipeline（恢复/单调时钟循环/关闭传播）、ModelProvider Port + 事件契约、ScriptedModelProvider、StreamAssembler（事件规则强制/工具参数 JSON+Schema/终包复核）、确定性降级、有界请求组装、SHA-256 包摘要、DecisionLoop（Turn/Cycle 状态机/预算/Deadline/空转/超时真 Abort/adoption 失败不推进/Scene∥Tool 分派/取消树/未采用回插） |
-| `packages/tool-runtime` | ToolDeclaration 注册期校验（声明矛盾/无界 Timeout/同名冲突）、DAG 编译（dependsOn/环/背景依赖/超 8 节点/深度 4/keyed 锁键/参数 Schema）、StandardToolRuntime（parallel_read 并行/exclusive/keyed 串行/总并发+每 Tool 上限/Deadline+真 Abort/取消传播/依赖失败显式化）、权限门（Capability 逐次/confirm fail closed/非幂等必须幂等键）、L0 single-flight + L1 LRU + L2 Port、结果 JSON-safe/结构化截断/敏感脱敏、background 不阻塞 |
+| `packages/tool-runtime` | ToolDeclaration 注册期校验（声明矛盾/无界 Timeout/同名冲突）、调用列表校验（最多 8 节点；非空或非法 dependsOn 拒绝；keyed 锁键/参数 Schema）、StandardToolRuntime（parallel_read 并行/exclusive/keyed 串行/总并发+每 Tool 上限/Deadline+真 Abort/取消传播/开始和结束事实落库失败显式化）、权限门（Capability 逐次/confirm fail closed/非幂等必须幂等键）、L0 single-flight + L1 LRU + L2 Port、结果 JSON-safe/结构化截断/敏感脱敏、background 不阻塞前台返回，Runtime 保持调度至全部结算 |
 | `packages/persistence` | Migration 0004（决策表）+ 0005（来源去重/无损序号索引）、7 个 RPC 操作（append/restore/adopt_cycle/tool_run_event/read_decision_state/cache_get/cache_set;双侧 Schema 编解码）、adoptCycle 原子事务（重放幂等）、恢复时 running→uncertain |
-| `apps/runtime` | PerformancePort 稳定边界（Phase2PerformanceService.submitDecision;Phase 2 submit 兼容包装）、PerformancePortAdapter、Phase3DecisionHost（总装+证据采集+恢复投影）、Demo 工具集（并行只读/缓存/keyed 脱敏/非幂等独占/后台/确认 fail-closed 六种执行模式）、Durable 适配器族、OpenAI-compatible 适配器（原生 fetch+SSE;不引入 SDK）、DemoScriptedProvider（IPC 脚本注入+节奏）、dev 信号路由（Session Cookie 鉴权;默认关闭）、phase3 配置组 |
+| `apps/runtime` | PerformancePort 稳定边界（Phase2PerformanceService.submitDecision;Phase 2 submit 兼容包装）、PerformancePortAdapter、Phase3DecisionHost（总装+可选有界证据采集+恢复投影；无工具注入时空目录）、Demo 工具集（并行只读/缓存/keyed 脱敏/非幂等独占/后台/确认 fail-closed 六种执行模式）、Durable 适配器族、OpenAI-compatible 适配器（原生 fetch+SSE;不引入 SDK）、DemoScriptedProvider（IPC 脚本注入+节奏）、dev 信号路由（Session Cookie 鉴权;默认关闭）、phase3 配置组 |
 | `packages/observability` | §13 指标目录全部注册（signal/batch/turns/cycles/model_ttft/duration/tool_runs/tool_duration/interrupt/mailbox_merged） |
 | `scripts` | `phase-3-demo.mjs`/`phase-3-demo-child.mjs`（真实子进程+协议 Stage 客户端;8 场景+稳定证据行） |
 
@@ -75,7 +77,7 @@ recovery=ok(nonIdempotentReplay=0)
 - **契约**：新 Schema 三方等价（209 用例）;Migration 0004/0005 升级、来源去重和数值位数边界断言;
 - **单元/性质**：Ingress 去重/容量/序号;Batcher 窗口/封窗/区间连续
   （fast-check 30 轮随机到达）;Trigger 分类/合并/回收;Assembler 18 例
-  非法流矩阵;Loop 两 Cycle/降级/adoption 失败/中断/预算/关闭;DAG 8 例;
+  非法流矩阵;Loop 两 Cycle/降级/adoption 失败/中断/预算/关闭;工具编译校验;
   Runtime 21 例（重叠/串行/取消/缓存/截断/脱敏/后台）;
 - **集成**：真实 DB Worker 下 phase3 决策纵向 4 例;OpenAI-compatible
   适配器本地 SSE 契约 3 例（speech/tool_calls/HTTP 拒绝;请求映射与密钥头）;
@@ -98,6 +100,10 @@ recovery=ok(nonIdempotentReplay=0)
 | 高优先级不静默丢失 | urgent 保留容量独立 + 立即旁路测试 |
 | 取消结构化传播 | 中断测试（模型流 Abort/未启动节点 cancelled/Scene 经 Director） |
 | 测试与生产同路径 | Scripted/Fake 只替换外部能力;Demo 走真实 Runtime/DB/WS |
+
+Turn 在 startTurn 接受时同步占有 Loop；唯一等待队列是 Trigger Mailbox，连续 interrupt 在旧 Turn 释放前合并等待。关闭取消全部已接受 Turn 与后台工具，不能事后启动模型。工具 started/finished 使用持久化 Port，审计观察者不能决定恢复事实。
+
+`compileDag` / `executeDag` 和 Demo 的 `toolDag` 文本标签保留源码/脚本兼容，当前能力是独立调用列表。详细 evidence 缺省关闭，启用时容量上限 4096，Demo 显式选择 1024。
 
 ## 5. 已知边界（后续阶段）
 

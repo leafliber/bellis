@@ -109,8 +109,14 @@ describe("phase3 decision loop vertical", () => {
     // 工具结果进入 Cycle 2 请求（prompt 含上一轮结果）。
     expect(provider.requests[1]?.prompt).toContain("lookup_quest → succeeded");
     expect(provider.requests[1]?.prompt).toContain("read_stage → succeeded");
-    // 两只读工具真实执行（一次 DAG）。
-    expect(host.demoState.questResult).toMatchObject({ chapter: 3 });
+    // 两只读工具真实执行并完成恢复事实落库。
+    expect(provider.requests[1]?.prompt).toContain("chapter");
+    const durable = await host.readDecisionState();
+    expect(
+      durable.toolRuns
+        .filter((run) => run.toolRunId === TOOL_A || run.toolRunId === TOOL_B)
+        .map((run) => run.state),
+    ).toEqual(["succeeded", "succeeded"]);
   });
 
   it("deduplicates repeated signals without a second sequence", async () => {

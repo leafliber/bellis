@@ -1,5 +1,7 @@
 # ADR 0005：Memory Provider 插件缝与 Persona 归属——由外部记忆系统接管人格记忆
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./0007-task-ownership-and-runtime-scope.md) 为准。 本文保留历史决策/实施过程；与新决策冲突的描述不再作为当前实现要求。
+
 > 状态：Accepted（历史决策保留）；决策 4 的提交时机，以及 ACK、容量、分类和 Persona 更新解释由 [ADR 0006](./0006-documentation-and-delivery-boundaries.md) 修正。以下保留原始决策供追溯。
 >
 > 日期：2026-09-05（初版）/ 2026-09-05（决策 6 修订）

@@ -4,11 +4,24 @@
 Bellis `MemoryProvider` and `PersonaSource` while depending only on
 `@bellis/contracts/memory` and the published `@iris-memory/sdk`.
 
+Bellis Phase 4A now owns host integration and adapter compatibility work; Core
+Phase 11 remains deferred in the Core release plan. This package is a prototype,
+not a verified integration with the current Core. See the
+[Phase 4 plan](../../docs/phase-4-development-guide.md),
+[integration research](../../docs/phase-4-iris-integration-research.md), and
+[ADR 0008](../../docs/adr/0008-iris-phase4-integration.md) for the required fixes.
+In particular, Core's release manifest reports Schema 14 while its capability
+source still reports 11, and candidate content hashes are not uniformly hashes
+of the returned text. The unchanged compatibility matrix is historical evidence,
+not acceptance of the current Core.
+
 The adapter preserves Core candidate IDs, revisions, hashes, placement, privacy
 labels, source references and route degradation. Persona data remains structured
 and is hash-verified before being cached. Observe and Usage await the remote
 acknowledgment; the host's background Outbox owns durable retry, outside the
 active reply path. Legacy queued rows are retained for recovery/reconciliation.
+
+Bellis ADR 0007 narrows the required Memory response to version, provider/request identity and bounded blocks. Iris continues returning its real mapping, route, watermark and persona metadata via `IrisContextContribution`; other retrieval providers can omit that metadata and do not need to fabricate a persona revision. PersonaSource remains an independent port.
 
 ## Category mapping
 

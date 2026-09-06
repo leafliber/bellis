@@ -256,3 +256,16 @@ describe("DecisionLoop", () => {
     expect(ctx.settled[0]?.result).toBe("cancelled");
   });
 });
+
+describe("accepted task ownership regressions", () => {
+  it("owns an accepted Turn synchronously and cannot start it after close", async () => {
+    const ctx = makeLoop({ scripts: [cycleTwoScript] });
+    expect(ctx.loop.startTurn(batchOf(1, 1), "normal_batch")).toBe(true);
+    expect(ctx.loop.isIdle()).toBe(false);
+    expect(ctx.loop.activeTurnId).not.toBeNull();
+    expect(ctx.loop.startTurn(batchOf(2, 2), "interrupt")).toBe(false);
+    await ctx.loop.close("immediate_close");
+    expect(ctx.provider.requests).toHaveLength(0);
+    expect(ctx.adoption.adoptions).toHaveLength(0);
+  });
+});

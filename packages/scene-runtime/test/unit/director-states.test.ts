@@ -463,3 +463,40 @@ describe("SceneDirector 输入校验与有界性", () => {
     ).toThrow(/active_limit_reached/);
   });
 });
+
+describe("terminal ownership regressions", () => {
+  it("never dispatches after disconnect settles a pending durable commit", async () => {
+    const h = createHarness();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.repository.commit = async () => {
+      await gate;
+      return { sceneId: hardPlan().scene.sceneId, committedAtMs: 1, duplicate: false };
+    };
+    const handle = submit(h);
+    h.stage.settlePrepare(handle.sceneId, readyFor(hardPlan()));
+    await flush(20);
+    h.director.notifyStageDisconnected("test_disconnect");
+    expect((await handle.done).state).toBe("uncertain");
+    release();
+    await flush(20);
+    expect(h.stage.calls.filter((call) => call.op === "commit")).toHaveLength(0);
+    expect(h.director.getExecutionState(handle.sceneId)).toBe("uncertain");
+    expect(h.repository.lifecycle.some((record) => record.from === "uncertain")).toBe(false);
+  });
+
+  it("cancels when a committed scene never reports its terminal result", async () => {
+    const h = createHarness({ executionTimeoutMs: 100 });
+    h.stage.prepareImmediate(hardPlan());
+    const handle = submit(h);
+    await flush(30);
+    h.clock.advanceBy(100_000n);
+    await flush(30);
+    expect((await handle.done).state).toBe("cancelled");
+    expect(h.stage.calls).toContainEqual(
+      expect.objectContaining({ op: "cancel", reason: "execution_deadline_exceeded" }),
+    );
+  });
+});

@@ -1,3 +1,4 @@
+import { fakeSpeechProvider } from "../application/phase-2/fake-tts.js";
 import { randomUUID } from "node:crypto";
 import type { MonotonicClock, SessionRecord } from "@bellis/contracts";
 import type {
@@ -19,6 +20,7 @@ import { SystemMonotonicClock } from "@bellis/transport";
 import { FakeSceneCommitService } from "../application/commit-fake-scene.js";
 import { PHASE_2_PCM_CONTENT_TYPE } from "@bellis/contracts";
 import { Phase2RuntimeHost } from "../application/phase-2/host.js";
+import { createDemoToolState, registerDemoTools } from "../application/phase-3/demo-tools.js";
 import { Phase3DecisionHost } from "../application/phase-3/host.js";
 import { DemoScriptedProvider } from "../providers/model/demo-scripted.js";
 import { OpenAICompatibleAdapter } from "../providers/model/openai-compatible.js";
@@ -331,6 +333,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       newRecordId: () => crypto.randomUUID(),
     });
     phase2Host = new Phase2RuntimeHost({
+      speechProvider: fakeSpeechProvider,
       sessionId: config.phase2.sessionId ?? "00000000-0000-4000-8000-000000000000",
       capabilities: {
         schemaVersion: 1,
@@ -447,6 +450,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
       }
     }
     phase3Host = new Phase3DecisionHost({
+      ...(modelConfig.provider === "demo-scripted"
+        ? {
+            registerTools: (runtime) =>
+              registerDemoTools(runtime, { clock, state: createDemoToolState() }),
+            grantedCapabilities: ["gift.send"],
+            evidenceCapacity: 1024,
+          }
+        : {}),
       sessionId: config.phase3.sessionId ?? phase2SessionId,
       clock,
       wallClockMs: () => Date.now(),

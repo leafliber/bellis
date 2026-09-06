@@ -41,6 +41,8 @@ export const ScenePlanSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
   scene: SceneSchema,
   cues: z.array(CueSchema).min(1).max(64),
+  /** soft Lane 准备预算；缺省由 Stage 按 500ms 处理。 */
+  softTimeoutMs: z.number().int().min(0).max(60_000).optional(),
 });
 
 export type SceneExecutionState = z.infer<typeof SceneExecutionStateSchema>;

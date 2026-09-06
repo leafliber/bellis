@@ -96,6 +96,8 @@ export interface DirectorPolicy {
   readonly maxActiveScenes: number;
   /** close() 排空全部活跃 Scene 的总预算（毫秒）。 */
   readonly closeTimeoutMs: number;
+  /** Maximum wait for execution completion; expiry cancels, never assumes success. */
+  readonly executionTimeoutMs: number;
 }
 
 export const DEFAULT_DIRECTOR_POLICY: DirectorPolicy = {
@@ -104,6 +106,7 @@ export const DEFAULT_DIRECTOR_POLICY: DirectorPolicy = {
   commitSendTimeoutMs: 1000,
   maxActiveScenes: 16,
   closeTimeoutMs: 5000,
+  executionTimeoutMs: 120_000,
 };
 
 export interface SceneDirectorOptions {
@@ -188,6 +191,7 @@ interface SceneExecution {
   cancelRequested: boolean;
   cancelReason: string | null;
   startedReported: boolean;
+  settled: boolean;
   /** #awaitTerminal 建立的终态解除回调（finished/disconnect 时调用）。 */
   resolveTerminalWait: (() => void) | null;
   resolveDone: (outcome: SceneOutcome) => void;
@@ -345,6 +349,7 @@ export class SceneDirector {
       cancelRequested: false,
       cancelReason: null,
       startedReported: false,
+      settled: false,
       resolveTerminalWait: null,
       resolveDone,
     };
@@ -521,6 +526,8 @@ export class SceneDirector {
       const deadlineUs = prepareStartUs + BigInt(exec.plan.scene.deadlineMs) * 1000n;
 
       const stageReady = await this.#prepareWithDeadline(exec, deadlineUs);
+      if (exec.settled) return;
+      exec.controller.signal.throwIfAborted();
       const preparedUs = this.#clock.nowUs();
       this.#metrics
         .histogram("bellis_scene_prepare_duration_ms", { result: "ready" })
@@ -528,13 +535,12 @@ export class SceneDirector {
 
       const barrier = new PrepareBarrier({
         groups: exec.plan.scene.groups,
-        softTimeoutUs: BigInt(500) * 1000n,
       });
       const barrierStartUs = preparedUs;
       for (const lane of stageReady.lanes) {
         barrier.reportLane(lane);
       }
-      const verdict = barrier.judge(this.#clock.nowUs(), barrierStartUs, { force: true });
+      const verdict = barrier.judge();
       if (verdict.verdict === "hard_unavailable") {
         const detail = [
           ...verdict.lanes.map((lane) => `${lane.lane}:${lane.reason ?? "unavailable"}`),
@@ -579,13 +585,16 @@ export class SceneDirector {
           exec.controller.signal,
         );
       } catch (error) {
+        if (exec.settled) return;
         // 数据库失败：Stage 只收到取消/释放，绝不收到 Commit。
         const code = error instanceof DurableCommitError ? error.code : "durable_commit_failed";
         await this.#releaseStageQuietly(exec, `durable_commit_failed:${code}`);
+        if (exec.settled) return;
         this.#transition(exec, "failed", `durable_commit_failed:${code}`);
         this.#finish(exec, "failed", `durable_commit_failed:${code}`);
         return;
       }
+      if (exec.settled) return;
       this.#logger.log("info", "scene_durable_committed", {
         sceneId,
         cycleId: exec.plan.scene.cycleId,
@@ -593,6 +602,7 @@ export class SceneDirector {
         duplicate: durable.duplicate,
       });
       this.#fireFaultHook("after_durable_commit");
+      if (exec.settled) return;
       if (exec.cancelRequested) {
         await this.#cancelViaStage(exec, exec.cancelReason ?? "cancelled_after_durable");
         return;
@@ -601,14 +611,21 @@ export class SceneDirector {
       try {
         await this.#commitToStage(exec, commitAtRuntimeUs);
       } catch (error) {
+        if (exec.settled) return;
         if (error instanceof StageCommitAmbiguousError) {
           this.#transition(exec, "uncertain", "stage_commit_ambiguous");
           this.#finish(exec, "uncertain", "stage_commit_ambiguous");
         } else {
           await this.#releaseStageQuietly(exec, "stage_commit_failed");
+          if (exec.settled) return;
           this.#transition(exec, "failed", "stage_commit_failed");
           this.#finish(exec, "failed", "stage_commit_failed");
         }
+        return;
+      }
+      if (exec.settled) return;
+      if (exec.cancelRequested) {
+        await this.#cancelViaStage(exec, exec.cancelReason ?? "cancelled_during_send");
         return;
       }
       this.#transition(exec, "scheduled", "stage_commit_sent");
@@ -686,6 +703,7 @@ export class SceneDirector {
     } finally {
       timeout.dispose();
     }
+    if (exec.settled) return;
     if (outcome.status === "stopped") {
       this.#transition(exec, "cancelled", reason);
       this.#finish(exec, "cancelled", reason);
@@ -712,6 +730,23 @@ export class SceneDirector {
 
   /** 等待 started/finished 通知（notifyFinished/#finish 解除）或取消。 */
   #awaitTerminal(exec: SceneExecution): Promise<void> {
+    if (exec.settled) return Promise.resolve();
+    const timer = new AbortController();
+    void this.#clock
+      .sleepUntil(
+        this.#clock.nowUs() + BigInt(this.#policy.executionTimeoutMs) * 1000n,
+        timer.signal,
+      )
+      .then(
+        () => {
+          if (!exec.settled) {
+            exec.cancelRequested = true;
+            exec.cancelReason = "execution_deadline_exceeded";
+            exec.controller.abort(new SceneAbortedError(exec.cancelReason));
+          }
+        },
+        () => undefined,
+      );
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const onAbort = () => {
@@ -736,7 +771,7 @@ export class SceneDirector {
         resolve();
       };
       exec.controller.signal.addEventListener("abort", onAbort, { once: true });
-    });
+    }).finally(() => timer.abort());
   }
 
   async #handleAbortOrFailure(exec: SceneExecution, error: unknown): Promise<void> {
@@ -769,6 +804,9 @@ export class SceneDirector {
     note?: string,
   ): void {
     const from = exec.state;
+    if (exec.settled || TERMINAL_STATES.has(from)) {
+      throw new Error(`terminal_scene_transition:${from}:${to}`);
+    }
     exec.state = to;
     const record: SceneLifecycleRecord = {
       sceneId: exec.plan.scene.sceneId,
@@ -797,8 +835,11 @@ export class SceneDirector {
   }
 
   #finish(exec: SceneExecution, state: SceneExecutionState, reason?: string): void {
+    if (exec.settled) return;
+    exec.settled = true;
     this.#metrics.counter("bellis_scene_execution_total", { result: state }).inc();
     exec.resolveTerminalWait?.();
+    exec.controller.abort(new SceneAbortedError("scene_settled"));
     exec.resolveDone({
       sceneId: exec.plan.scene.sceneId,
       state,

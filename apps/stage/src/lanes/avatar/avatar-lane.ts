@@ -93,7 +93,12 @@ export class RecordingAvatarAdapter implements AvatarLaneAdapter {
     return { ready: true };
   }
 
-  async start(sceneId: string, atStageUs: bigint, cues: readonly Cue[]): Promise<void> {
+  async start(
+    sceneId: string,
+    atStageUs: bigint,
+    cues: readonly Cue[],
+    onStarted?: (atStageUs?: bigint) => void,
+  ): Promise<void> {
     const first = cues[0];
     const intent = (first?.intent ?? {}) as { motion?: string; expression?: string };
     this.commands.push({
@@ -104,6 +109,7 @@ export class RecordingAvatarAdapter implements AvatarLaneAdapter {
       ...(intent.expression === undefined ? {} : { expression: intent.expression }),
     });
     this.#prepared.delete(sceneId);
+    onStarted?.();
   }
 
   async stop(sceneId: string, reason: string): Promise<void> {

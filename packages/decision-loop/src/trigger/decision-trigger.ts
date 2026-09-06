@@ -27,7 +27,7 @@ export interface TurnOwnerPort {
    */
   cancelActiveTurn(): readonly AudienceBatch[];
   /**
-   * 启动 Turn；返回 false 表示无法接受（已关闭）。trigger=interrupt 的
+   * 启动 Turn；返回 false 表示无法接受（忙碌或已关闭）。trigger=interrupt 的
    * Batch 覆盖全部未消费区间（本 Trigger 合并保证）。
    */
   startTurn(batch: AudienceBatch, trigger: "normal_batch" | "interrupt" | "next_turn"): boolean;
@@ -114,6 +114,7 @@ export class DecisionTrigger {
   readonly #mailboxCapacity: number;
   #mailbox: AudienceBatch[] = [];
   #closed = false;
+  #interruptPending = false;
 
   constructor(options: DecisionTriggerOptions) {
     this.#options = options;
@@ -149,9 +150,13 @@ export class DecisionTrigger {
     }
     while (this.#mailbox.length > 0 && this.#options.owner.isIdle()) {
       const next = this.#mailbox.shift();
-      if (next === undefined || !this.#options.owner.startTurn(next, "next_turn")) {
+      if (next === undefined) return;
+      const trigger = this.#interruptPending ? "interrupt" : "next_turn";
+      if (!this.#options.owner.startTurn(next, trigger)) {
+        this.#mailbox.unshift(next);
         return;
       }
+      this.#interruptPending = false;
     }
   }
 
@@ -204,7 +209,9 @@ export class DecisionTrigger {
       }
     }
     this.#options.metrics?.counter("bellis_decision_interrupt_total").inc();
-    this.#options.owner.startTurn(merged, "interrupt");
+    this.#mailbox = [merged];
+    this.#interruptPending = true;
+    this.notifyOwnerIdle();
   }
 
   #enqueueNextTurn(batch: AudienceBatch): void {

@@ -1,5 +1,7 @@
 # Control WebSocket 协议（/ws/v1/control）
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](../adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 状态：Phase 1 冻结 v1 + Phase 2 兼容扩展（实现：`@bellis/transport`）
 > 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
 > 姊妹文档：[Binary Media WebSocket](./binary-media-websocket.md) · [Scene Execution](./scene-execution.md)
@@ -200,14 +202,14 @@ Phase 2 演出消息的语义、时间字段与 reason 码见
 
 - 每个**逻辑 Session** 的服务端消息 `seq` 严格递增（从 1 开始），不因连接重建归零。
   同进程重连通过内存导出的 `nextSeq / confirmedAck / replay / pending` 恢复。
-  当前 Runtime 跨重启只持久化最新分配 Seq，不持久化 Replay/pending 内容；
+  当前 Runtime 跨重启持久化 Seq 预留上界（默认一次 1024 个），不持久化 Replay/pending 内容；
   重启时以空 Replay 窗口恢复，客户端有历史缺口或未带 lastAck 时走 Snapshot 对账。
   若 lastAck 已覆盖持久化水位，则可以继续新消息，无须补播历史。
 
 - **Seq 在消息实际发送时分配**（而不是入队时）：发送优先级只作用于 Seq
   分配之前的准入、淘汰、合并与调度。被淘汰/合并/过期的消息从未消耗 Seq、
-  从未进入 Replay Window，因此线上 Seq 严格递增且无缺口，累计 ACK 语义
-  始终成立。
+  从未进入 Replay Window，因此同一进程的正常发送连续递增。跨重启跳过未使用的预留区间；
+  客户端先接受 Snapshot 对账并建立新基线，再累计 ACK，不能把预留缺口解释成已执行业务。
 - `ack` 表示客户端**已处理**（不只是收到）的最大连续服务端 Seq。任意客户端
   消息都可携带 `ack` 累计确认。
 - ACK 语义：
@@ -220,10 +222,12 @@ Phase 2 演出消息的语义、时间字段与 reason 码见
 - `lastAck + 1` 早于窗口最旧条目（缺口超出窗口）→ 服务端产生
   `snapshot_required` 内部 Effect，由 P4 读取 Persistence 后发送完整
   `session.snapshot`，不补发不完整历史。
-- 心跳 Pong 与 Clock Pong 也消耗 Seq 并占用内存窗口；所有消息的最新分配水位都必须持久化，避免重启复用 Seq。
+- 心跳 Pong 与 Clock Pong 也消耗 Seq 并占用内存窗口。每个发送序号必须被已持久预留区间覆盖；区间不足时先等待扩展成功，再发送。预留失败以 1011 关闭。
 - `persistable` 是 Transport 导出状态供可选持久化适配器使用的元数据，当前 Runtime 没有装配 Replay 内容持久化。
   Transport 支持导入过滤后的窗口，并在 `(lastAck, latest]` 碰到内部或尾部缺口时要求 Snapshot；
   这是包级可选能力，不能推导当前 Runtime 已有磁盘 Replay 日志。
+
+配置 `limits.seqReservationSize` 的范围为 1–65536，缺省 1024；1 用于逐次分配故障注入。同进程恢复以导出的实际 nextSeq 为准，跨进程从持久上界加一开始。`session.snapshot.latestServerSeq` 是恢复/预留水位，可能大于实际发送值，不能用作业务完成证明。
 
 ## 6. 客户端幂等（client → server）
 
@@ -354,7 +358,7 @@ onWsOpenFlush / 定时:
 
 onDisconnect:
   state = session.exportLogicalState()   # nextSeq / confirmedAck / replay / pending
-  # 同进程保存内存导出状态供 resume 使用；磁盘只保存最新分配 Seq。
+  # 同进程保存内存导出状态供 resume 使用；磁盘保存 Seq 预留上界。
   # 跨重启导入空 replay，通过 lastAck 与水位决定继续或 Snapshot 对账。
   # 恢复会话在 client.hello（含 lastAck）之前不会发送新消息——重放先行。
 

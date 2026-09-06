@@ -10,7 +10,6 @@ import {
   type ModelProvider,
   type PerformancePort,
   type TurnOwnerPort,
-  type TurnResult,
 } from "@bellis/decision-loop";
 import { StandardToolRuntime } from "@bellis/tool-runtime";
 import type { ToolCacheStore } from "@bellis/tool-runtime";
@@ -24,7 +23,6 @@ import {
   DurableToolCacheStore,
   Phase3AuditRecorder,
 } from "./adapters.js";
-import { createDemoToolState, registerDemoTools } from "./demo-tools.js";
 import type { LoggerPort, MetricsPort } from "@bellis/observability";
 
 /**
@@ -55,7 +53,9 @@ export interface Phase3HostOptions {
   readonly loopConfig?: Partial<DecisionLoopConfig>;
   /** Session/Profile 授予的 Capability（Tool 权限门）。 */
   readonly grantedCapabilities?: readonly string[];
-  readonly toolDurationUs?: bigint;
+  readonly registerTools?: (runtime: StandardToolRuntime) => void;
+  /** 0 disables detailed evidence. Positive values retain only the most recent entries. */
+  readonly evidenceCapacity?: number;
   /**
    * 演出服务：生命周期装配传入共享的 Phase2RuntimeHost.service
    *（Stage/Media 绑定由 Phase 2 宿主继续持有）；缺省时自建独立实例
@@ -148,7 +148,7 @@ export class Phase3DecisionHost {
     notifyOwnerIdle(): void;
     requeueFront(batches: readonly AudienceBatch[]): void;
   };
-  readonly demoState = createDemoToolState();
+  readonly #evidenceCapacity: number;
   readonly #evidence = {
     requested: 0,
     adopted: 0,
@@ -174,6 +174,13 @@ export class Phase3DecisionHost {
 
   constructor(options: Phase3HostOptions) {
     this.#options = options;
+    this.#evidenceCapacity = options.evidenceCapacity ?? 0;
+    if (
+      !Number.isInteger(this.#evidenceCapacity) ||
+      this.#evidenceCapacity < 0 ||
+      this.#evidenceCapacity > 4096
+    )
+      throw new RangeError("evidenceCapacity must be in [0, 4096]");
     this.#sessionId = options.sessionId;
     const adapterOptions = {
       persistence: options.persistence,
@@ -197,6 +204,20 @@ export class Phase3DecisionHost {
       cacheStore,
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
+      persistRunEvent: async (event) => {
+        await options.persistence.phase3ToolRunEvent({
+          sessionId: this.#sessionId,
+          toolRunId: event.toolRunId,
+          cycleId: event.cycleId,
+          toolName: event.toolName,
+          transition: event.transition,
+          state: event.state ?? "running",
+          ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
+          ...(event.errorCode === undefined ? {} : { errorCode: event.errorCode }),
+          ...(event.cacheSource === undefined ? {} : { cacheSource: event.cacheSource }),
+          trace: { traceId: event.cycleId.replaceAll("-", "") },
+        });
+      },
       onRunEvent: (event) => {
         const tracked = this.#evidence.toolRuns.get(event.toolRunId) ?? {
           toolName: event.toolName,
@@ -213,7 +234,12 @@ export class Phase3DecisionHost {
           tracked.outcome = event.state ?? "succeeded";
           tracked.cacheSource = event.cacheSource ?? null;
         }
-        this.#evidence.toolRuns.set(event.toolRunId, tracked);
+        if (this.#evidenceCapacity > 0) {
+          this.#evidence.toolRuns.set(event.toolRunId, tracked);
+          while (this.#evidence.toolRuns.size > this.#evidenceCapacity) {
+            this.#evidence.toolRuns.delete(this.#evidence.toolRuns.keys().next().value!);
+          }
+        }
         this.#audit.toolRun({
           toolRunId: event.toolRunId,
           cycleId: event.cycleId,
@@ -228,11 +254,7 @@ export class Phase3DecisionHost {
         });
       },
     });
-    registerDemoTools(this.#tools, {
-      state: this.demoState,
-      clock: options.clock,
-      ...(options.toolDurationUs === undefined ? {} : { durationUs: options.toolDurationUs }),
-    });
+    options.registerTools?.(this.#tools);
     this.#performance =
       options.performanceService ??
       new Phase2PerformanceService({
@@ -248,7 +270,6 @@ export class Phase3DecisionHost {
         ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
       });
     this.#owner = lateBoundOwner();
-    const settledTurns: { turnId: string; result: TurnResult }[] = [];
     this.#loop = new DecisionLoop({
       sessionId: this.#sessionId,
       provider: {
@@ -280,15 +301,14 @@ export class Phase3DecisionHost {
       instructions: options.instructions,
       model: options.model,
       ...(options.loopConfig === undefined ? {} : { config: options.loopConfig }),
-      capabilities: new Set(options.grantedCapabilities ?? ["gift.send"]),
+      capabilities: new Set(options.grantedCapabilities ?? []),
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
       audit: this.#audit,
       onWatermarkConsumed: (watermarkTo) => {
         this.#pipeline.markConsumed(watermarkTo);
       },
-      onTurnSettled: (turnId, result) => {
-        settledTurns.push({ turnId, result });
+      onTurnSettled: () => {
         this.#triggerSink.notifyOwnerIdle();
       },
       onUnadoptedReturn: (batches) => this.#triggerSink.requeueFront(batches),
@@ -353,15 +373,19 @@ export class Phase3DecisionHost {
 
   ingest(input: unknown): Promise<IngestResult> {
     const result = this.#pipeline.ingest(input);
-    void result.then((value) => {
-      this.#evidence.ingest.push({
-        result: value.result,
-        sequence:
-          value.result === "accepted" || value.result === "deduplicated"
-            ? value.sequence.toString(10)
-            : null,
-      });
-    });
+    void result
+      .then((value) => {
+        if (this.#evidenceCapacity === 0) return;
+        this.#evidence.ingest.push({
+          result: value.result,
+          sequence:
+            value.result === "accepted" || value.result === "deduplicated"
+              ? value.sequence.toString(10)
+              : null,
+        });
+        if (this.#evidence.ingest.length > this.#evidenceCapacity) this.#evidence.ingest.shift();
+      })
+      .catch(() => undefined);
     return result;
   }
 
@@ -385,16 +409,20 @@ export class Phase3DecisionHost {
     return {
       submitDecision: (packet, context) => {
         const result = adapter.submitDecision(packet, context);
-        if (result.kind === "scene_submitted") {
+        if (result.kind === "scene_submitted" && this.#evidenceCapacity > 0) {
           const span = {
             sceneId: result.sceneId,
             submittedAtUs: this.#options.clock.nowUs(),
             settledAtUs: null as bigint | null,
           };
           this.#evidence.sceneSpans.push(span);
-          void result.done.finally(() => {
-            span.settledAtUs = this.#options.clock.nowUs();
-          });
+          if (this.#evidence.sceneSpans.length > this.#evidenceCapacity)
+            this.#evidence.sceneSpans.shift();
+          void result.done
+            .finally(() => {
+              span.settledAtUs = this.#options.clock.nowUs();
+            })
+            .catch(() => undefined);
         }
         return result;
       },

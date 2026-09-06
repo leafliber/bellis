@@ -1,5 +1,7 @@
 # Scene Execution 协议（Phase 2：Runtime ↔ Stage 演出链路）
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](../adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 状态：Phase 2 完成态 v1（冻结于 P0；已由实现与验收覆盖：协议级 Demo
 > `pnpm demo:phase2`、四个 Crash Window `pnpm demo:phase2:crash`、
 > 真实 Chromium E2E `pnpm test:browser`。Contracts：`@bellis/contracts`；
@@ -223,17 +225,19 @@ Runtime 决定；Stage 只如实报告。
 - Wire 上一切微秒时刻为非负十进制字符串；核心/Stage 调度层转为
   `bigint`（ADR 0001）。
 - `scene.prepare.prepareDeadlineUs`：Prepare 截止（Runtime 单调域）。
-  当前由 Runtime Director 计时并在到期时取消未完成 Prepare，释放 Stage 资源。
-  Stage 不自行消费该绝对截止字段，也不保证到期生成 unavailable 回执；
-  Lane 内部错误仍可报告 unavailable。不能等待 Stage 超时回执才执行 Runtime Deadline。
+  Runtime Director 按此绝对时刻取消整场准备；Stage 在收到 Prepare 时按 `scene.deadlineMs` 限制 hard Lane、按 `min(scene.deadlineMs, plan.softTimeoutMs ?? 500)` 限制 soft Lane，并在本地超时中止准备、报告 unavailable。Runtime 的截止独立执行，不依赖 Stage 回执到达。
 - `scene.commit.commitAtRuntimeUs`：Runtime 当前进程单调时钟域的**未来**
   生效时刻。Stage 通过当前连接的 Offset Estimate（≥3 个合格
   `clock.ping` 样本）映射为本地目标时刻；映射是 Stage 本地行为，
   不回写协议字段。
 - `scene.started` 每个 Lane 回传两个域的时刻：`startedAtStageUs`
   （Stage 本地单调）与 `startedAtRuntimeUs`（用同一 Offset Estimate
-  反算），供 Runtime 计算 hardLaneSkewMs 指标。
+  反算）。回执来自实际 Lane 开始确认：Worklet 首个非空渲染块、DOM 应用后确认。Runtime 按 scene+lane 聚合各条消息，在 finished 时对有至少两个确认的 Scene 计算偏差；单 Lane 不能产生同步成功证据。音频确认不包含设备输出延迟，不能据此宣称物理声画 P99。
 - `commitAtRuntimeUs` 不得持久化为重启后可执行时间；重连后旧值失效。
+
+`ScenePlan.softTimeoutMs` 是兼容可选字段，整数 0–60000ms，缺省 500ms；当前 Compiler 显式写出该值。Stage 返回一份有界的整包 ready；Runtime Barrier 只检查结果，不启动第二套 soft 等待。Unavailable Lane 不得在 Commit 后被迟到 prepare 结果复活；soft 调度丢弃也必须进入 finished 聚合。
+
+Scene Director 在所有异步提交/发送边界检查终态，uncertain 不被迟到完成改写。执行等待缺省 120s，超时请求取消并按确认结果结算 cancelled/uncertain；时间经过本身不等于演出完成。
 
 ## 6. late_commit 与降级决策
 
@@ -253,6 +257,8 @@ unsupported_content_type contentType 不在本 Stage 能力列表
 motion_not_found         语义动作名未在 capabilities 声明
 expression_not_found     语义表情名未在 capabilities 声明
 prepare_failed           Lane 内部准备失败（细节进日志/Trace，不进 Wire）
+prepare_timeout          Lane 准备超时并已发出中止
+late_dropped             soft Lane 的调度项迟到，已丢弃并结算
 stage_busy               当前 Stage 已占用
 lane_not_available       未装配请求的 Lane
 prebuffer_timeout        音频预缓冲未完成
@@ -266,7 +272,7 @@ cancelled                因取消而终止（配合 cancel.ack 使用）
 
 ## 7. Runtime → Stage 媒体流
 
-Phase 2 的音频主要是 Runtime → Stage 方向（Fake TTS PCM）：
+音频为 Runtime → Stage 方向的固定格式 PCM；来源通过 `SpeechProvider.stream` 注入，开发启动入口显式选择逐帧生成的 Fake Provider：
 
 1. `media.stream.announce`（Control）声明 `streamId/mediaKind/contentType`
    及可选 `sceneId/cueId`；`mediaKind` 限定 `audio|viseme`
@@ -284,6 +290,7 @@ Phase 2 的音频主要是 Runtime → Stage 方向（Fake TTS PCM）：
 6. Control 取消优先于 Media 发送：`scene.cancel` 进入 P1 发送优先级；
    取消后不再为该 Scene 产生新帧，Stage 在预算内清空目标 Scene 样本。
 7. Media Stream 不重放：重连后必须重新 announce；旧 Stream 关闭不可复活。
+8. Media Sender 按消费节奏逐帧拉取并传播 Abort，不为整句话分配连续 PCM。帧目标固定于 Stream 启动时选择的首帧目标；Provider 迟到不能自行重置时间线，过期帧按统一规则丢弃。当前未实现真实商业 TTS、模型 final 前 Prepare 或首块预缓冲 Gate，这些属于后续性能交付。
 
 ### 7.1 PCM 格式基线（P0 冻结）
 

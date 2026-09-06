@@ -58,6 +58,25 @@ export {
   type PendingDelivery,
 } from "./state-store.js";
 
+export type IrisContextContribution = ContextContribution &
+  Required<
+    Pick<
+      ContextContribution,
+      | "mappingVersion"
+      | "priorityDerivationVersion"
+      | "returnedBlockIds"
+      | "sourceWatermark"
+      | "completedRoutes"
+      | "degradedRoutes"
+      | "partial"
+      | "cacheUntil"
+      | "nextWakeAt"
+      | "personaRevision"
+      | "personaContentHash"
+      | "audit"
+    >
+  >;
+
 export const IRIS_PROVIDER_VERSION = "0.1.0";
 
 const REQUIRED_CAPABILITIES = [
@@ -378,7 +397,7 @@ export class IrisMemoryProvider implements MemoryProvider, PersonaSource {
     query: MemoryQuery,
     options: { readonly tokenBudget: number; readonly deadlineMs: number },
     signal: AbortSignal,
-  ): Promise<ContextContribution> {
+  ): Promise<IrisContextContribution> {
     if (this.#config.activeSurfaceMode === "required" && this.#lease === undefined) {
       throw new Error("required active-surface lease is unavailable");
     }

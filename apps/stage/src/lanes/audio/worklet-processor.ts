@@ -27,6 +27,8 @@ import { PcmSceneBuffer } from "./pcm-scene-buffer.js";
 /* oxlint-disable unicorn/require-post-message-target-origin */
 /* oxlint-disable unicorn/prefer-add-event-listener */
 
+declare const currentTime: number;
+
 declare function registerProcessor(name: string, ctor: new () => object): void;
 
 interface WorkletPort {
@@ -58,6 +60,7 @@ const state: WorkletState = {
 
 class PcmSceneProcessor extends ProcessorBase {
   #underrunsReported = 0;
+  #startedScene: string | null = null;
 
   constructor() {
     super();
@@ -114,7 +117,18 @@ class PcmSceneProcessor extends ProcessorBase {
     }
     const frames = output.length;
     const pcm = new Int16Array(frames);
+    const renderingScene = state.buffer.activeScene;
+    const hasSamples = renderingScene !== null && state.buffer.bufferedUs(renderingScene) > 0n;
     state.buffer.pull(pcm, frames);
+    if (hasSamples && renderingScene !== this.#startedScene) {
+      this.#startedScene = renderingScene;
+      this.port.postMessage({
+        v: PROTOCOL_VERSION,
+        op: "started",
+        sceneId: renderingScene,
+        renderedAtAudioSeconds: currentTime,
+      });
+    }
     for (let i = 0; i < frames; i += 1) {
       output[i] = (pcm[i] ?? 0) / 32768;
     }

@@ -201,3 +201,31 @@ describe("mergeBatches", () => {
     expect(merged.highlights[0]?.text).toBe("msg-3");
   });
 });
+
+it("keeps repeated interrupts in the mailbox until the cancelling owner releases", () => {
+  const state: OwnerState = {
+    idle: false,
+    canMerge: false,
+    started: [],
+    cancelled: [batch(1, 2)],
+    startAccepts: true,
+  };
+  const trigger = new DecisionTrigger({
+    owner: {
+      ...makeOwner(state),
+      cancelActiveTurn: () => state.cancelled.splice(0),
+    },
+  });
+  trigger.submit(batch(3, 4));
+  trigger.submit(batch(5, 5, true));
+  trigger.submit(batch(6, 6, true));
+  expect(state.started).toHaveLength(0);
+  expect(trigger.mailboxSize).toBe(1);
+  state.idle = true;
+  trigger.notifyOwnerIdle();
+  expect(state.started).toHaveLength(1);
+  expect(state.started[0]?.trigger).toBe("interrupt");
+  expect(state.started[0]?.batch.watermarkFrom).toBe("1");
+  expect(state.started[0]?.batch.watermarkTo).toBe("6");
+  expect(trigger.mailboxSize).toBe(0);
+});

@@ -68,7 +68,13 @@ class FakeLane implements StageLaneAdapter {
     return this.prepareResult;
   }
 
-  async start(sceneId: string, atStageUs: bigint) {
+  async start(
+    sceneId: string,
+    atStageUs: bigint,
+    _cues: readonly Cue[],
+    onStarted?: (atStageUs?: bigint) => void,
+  ) {
+    if (!this.startError) onStarted?.();
     this.commands.push(`start:${this.lane}@${atStageUs}`);
     if (this.startHangs) {
       return new Promise<void>(() => {});
@@ -323,4 +329,105 @@ describe("SceneClient", () => {
       ),
     ).toBe(true);
   });
+});
+
+describe("soft lane lifecycle regressions", () => {
+  function softPlan(): ScenePlan {
+    return {
+      ...PLAN,
+      softTimeoutMs: 10,
+      scene: {
+        ...PLAN.scene,
+        groups: [
+          {
+            schemaVersion: 1,
+            groupId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            lanes: ["audio"],
+            level: "hard",
+          },
+          {
+            schemaVersion: 1,
+            groupId: "dddddddd-dddd-4ddd-8ddd-ddddddddddde",
+            lanes: ["subtitle"],
+            level: "soft",
+          },
+        ],
+      },
+    };
+  }
+
+  it("times out soft preparation without waiting for the entire scene deadline", async () => {
+    const h = createSceneHarness();
+    let aborted = false;
+    h.subtitle.prepare = async (_scene, _cues, signal) => {
+      signal.addEventListener("abort", () => {
+        aborted = true;
+      });
+      return new Promise(() => {});
+    };
+    const prepared = h.client.handlePrepare({ plan: softPlan(), prepareDeadlineUs: "500000" });
+    await flush(20);
+    h.clock.advanceBy(10_000n);
+    await prepared;
+    expect(aborted).toBe(true);
+    expect(h.sent).toContainEqual(expect.objectContaining({ type: "scene.ready" }));
+    h.client.close();
+  });
+
+  it("a late dropped soft lane still settles the scene", async () => {
+    const h = createSceneHarness();
+    await h.client.handlePrepare({ plan: softPlan(), prepareDeadlineUs: "500000" });
+    h.client.handleCommit(PLAN.scene.sceneId, 350_000n);
+    h.clock.advanceBy(200_000n);
+    await flush(30);
+    expect(h.sent).toContainEqual(expect.objectContaining({ type: "scene.finished" }));
+    expect(h.client.activeCount).toBe(0);
+  });
+});
+
+it("reports a lane start only after its delayed effect confirmation", async () => {
+  const h = createSceneHarness();
+  let confirm: ((atStageUs?: bigint) => void) | undefined;
+  let finish!: () => void;
+  h.audio.start = async (_scene, _at, _cues, onStarted) => {
+    confirm = onStarted;
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+  };
+  await h.client.handlePrepare({ plan: PLAN });
+  h.client.handleCommit(PLAN.scene.sceneId, 350_000n);
+  h.clock.advanceBy(100_000n);
+  await flush(20);
+  const startedLanes = () =>
+    h.sent
+      .filter((m) => m.type === "scene.started")
+      .flatMap((m) => (m.payload as { lanes: { lane: string; startedAtStageUs: string }[] }).lanes);
+  expect(startedLanes().map((lane) => lane.lane)).toEqual(["subtitle"]);
+  h.clock.advanceBy(40_000n);
+  confirm?.(140_000n);
+  expect(startedLanes().find((lane) => lane.lane === "audio")?.startedAtStageUs).toBe("140000");
+  finish();
+  await flush(20);
+  expect(h.client.activeCount).toBe(0);
+});
+
+it("zero soft budget accepts an immediately ready lane and leaves no timer", async () => {
+  const h = createSceneHarness();
+  await h.client.handlePrepare({
+    plan: {
+      ...PLAN,
+      softTimeoutMs: 0,
+      scene: { ...PLAN.scene, groups: [{ ...PLAN.scene.groups[0], level: "soft" }] },
+    },
+  });
+  const ready = h.sent.find((m) => m.type === "scene.ready");
+  expect(
+    (expectFound(ready).payload as { lanes: { status: string }[] }).lanes.every(
+      (lane) => lane.status === "ready",
+    ),
+  ).toBe(true);
+  h.client.close();
+  await flush(20);
+  expect(h.clock.pendingCount()).toBe(0);
 });

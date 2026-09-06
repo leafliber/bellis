@@ -1,3 +1,5 @@
+import { fakeSpeechProvider } from "../../src/application/phase-2/fake-tts.js";
+import { createNoopMetrics, type MetricsPort } from "@bellis/observability";
 import { describe, expect, it } from "vitest";
 import { VirtualClock, createDeterministicIdSource } from "@bellis/testkit";
 import type { JsonValue, StageCapabilities } from "@bellis/contracts";
@@ -105,6 +107,7 @@ class FakePersistence {
 }
 
 function createService(options?: {
+  readonly metrics?: MetricsPort;
   readonly media?: {
     sendFrame: (frame: { header: Record<string, string | number>; payload: Uint8Array }) => boolean;
   };
@@ -144,6 +147,8 @@ function createService(options?: {
     },
   };
   const service = new Phase2PerformanceService({
+    ...(options?.metrics === undefined ? {} : { metrics: options.metrics }),
+    speechProvider: fakeSpeechProvider,
     sessionId: "11111111-1111-4111-8111-111111111111",
     capabilities: CAPABILITIES,
     clock,
@@ -280,6 +285,8 @@ describe("Phase2PerformanceService", () => {
       h.clock.nowUs(),
     );
     await h.service.interruptAll("urgent_interrupt");
+    await flush();
+    expect(h.channel.sent.some((message) => message.type === "scene.cancel")).toBe(true);
     // 回放 cancel.ack（全部 Lane 已停止）。
     h.service.handleStageMessage(
       "scene.cancel.ack",
@@ -500,12 +507,14 @@ describe("Phase2PerformanceService 媒体编排", () => {
     const streamId = (announce!.payload as { streamId: string }).streamId;
     // 流发完（携带关闭边界）；closed 入队失败（连接断开/队列满）→ 保留。
     h.service.handleStageMessage("media.stream.ready", { streamId }, h.clock.nowUs());
-    h.clock.advanceBy(2_600_000n);
-    await flush(30);
-    expect(frames.length).toBeGreaterThan(0);
     h.channel.closedDelivery = false;
-    h.clock.advanceBy(200_000n);
-    await flush(30);
+    await flush();
+    // 流式 Provider 每次只拉取一帧，按真实发送节奏推进虚拟时钟至 EOS。
+    for (let index = 0; index < 150; index += 1) {
+      h.clock.advanceBy(20_000n);
+      await flush(10);
+    }
+    expect(frames.length).toBeGreaterThan(0);
     expect(h.channel.sent.filter((m) => m.type === "media.stream.closed")).toHaveLength(0);
     // 连接恢复（markStageConnected）：待发 closed 冲刷，携带 finalSequence。
     h.channel.closedDelivery = true;
@@ -660,6 +669,7 @@ describe("Phase2PerformanceService 媒体编排", () => {
       appendLifecycle: async () => {},
     };
     const service = new Phase2PerformanceService({
+      speechProvider: fakeSpeechProvider,
       sessionId: "11111111-1111-4111-8111-111111111111",
       capabilities: CAPABILITIES,
       clock,
@@ -929,3 +939,55 @@ describe("Phase2RuntimeHost 跨进程快照对账（decorateSnapshot，活动 Sc
 function activeOf(decorated: { schemaVersion: number }): { executionState?: string } | null {
   return (decorated as { activeScene?: { executionState?: string } }).activeScene ?? null;
 }
+
+it("aggregates separate lane start confirmations before calculating scene skew", async () => {
+  const skews: { lane: string | undefined; value: number }[] = [];
+  const h = createService({
+    metrics: {
+      ...createNoopMetrics(),
+      histogram: (name, labels) => ({
+        observe: (value) => {
+          if (name === "bellis_scene_start_skew_ms") skews.push({ lane: labels?.lane, value });
+        },
+      }),
+    },
+  });
+  const submission = h.service.submit({ signal: SIGNAL, fixture: FIXTURE });
+  if (submission.kind !== "submitted") throw new Error("expected submitted");
+  await flush();
+  h.channel.reply(h.service, h.clock);
+  await flush(30);
+  const starts = [
+    ["subtitle", "100000"],
+    ["audio", "140000"],
+    ["avatar", "120000"],
+  ] as const;
+  for (const [lane, time] of starts) {
+    h.service.handleStageMessage(
+      "scene.started",
+      {
+        sceneId: submission.sceneId,
+        cycleId: FIXTURE.cycleId,
+        lanes: [{ lane, startedAtStageUs: time, startedAtRuntimeUs: time }],
+      },
+      h.clock.nowUs(),
+    );
+    expect(skews).toHaveLength(0);
+  }
+  h.service.handleStageMessage(
+    "scene.finished",
+    {
+      sceneId: submission.sceneId,
+      cycleId: FIXTURE.cycleId,
+      lanes: starts.map(([lane]) => ({ lane, outcome: "completed", finishedAtStageUs: "1000000" })),
+    },
+    h.clock.nowUs(),
+  );
+  await submission.handle.done;
+  expect(skews).toEqual([
+    { lane: "subtitle", value: 0 },
+    { lane: "audio", value: 40 },
+    { lane: "avatar", value: 20 },
+  ]);
+  await h.service.close();
+});

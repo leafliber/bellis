@@ -128,3 +128,26 @@ describe("memory plugin contract", () => {
     ).toBe(true);
   });
 });
+
+it("a retrieval-only provider can contribute without persona, routes or lease metadata", () => {
+  const value = ContextContributionSchema.parse({
+    schemaVersion: 1,
+    providerId: "local",
+    requestId: "query-1",
+    blocks: [block],
+  });
+  expect(value.personaRevision).toBeUndefined();
+  expect(value.audit).toBeUndefined();
+  expect(
+    MemoryProviderCapabilitiesSchema.safeParse({
+      schemaVersion: 1,
+      providerVersion: "1.0",
+      healthy: true,
+      categories: ["fact"],
+      placements: ["memory"],
+      observe: false,
+      usageReport: false,
+      persona: false,
+    }).success,
+  ).toBe(true);
+});

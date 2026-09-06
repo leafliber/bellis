@@ -1,5 +1,7 @@
 # ADR 0001：Canonical Core and Wire Contracts
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./0007-task-ownership-and-runtime-scope.md) 为准。 本文保留历史决策/实施过程；与新决策冲突的描述不再作为当前实现要求。
+
 > 状态：Accepted
 >
 > 日期：2026-08-19

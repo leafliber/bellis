@@ -8,7 +8,7 @@ import {
   createMigratedBaseClient,
   createTempDataDirectory,
   originFor,
-  startTestRuntime,
+  startTestRuntime as startRuntimeWithDefaults,
   wrapPersistenceClient,
 } from "../helpers.js";
 import { clientEnvelope, ControlWsClient } from "../ws-client.js";
@@ -172,12 +172,11 @@ describe("断线与 Seq 落库并发（二轮评审修复 2）", () => {
 
       const first = await connectedClient(handle, cookie, sessionId);
       await first.waitForType("server.ready");
-      first.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "1" } }));
-      await first.waitForType("clock.pong");
-      first.terminate();
-      await new Promise((resolve) => setTimeout(resolve, 150));
-
+      // Seq 3 已分配但扩展落库失败，导出 nextSeq 超出持久上界 2。
       failReconcile = true;
+      first.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "1" } }));
+      expect(await first.closed()).toBe(1011);
+      expect(first.received.every((message) => BigInt(message.seq) <= 2n)).toBe(true);
       const second = await connectedClient(handle, cookie, sessionId, { lastAck: 0n });
       const closeCode = await second.closed();
       expect(closeCode).toBe(1011);
@@ -688,3 +687,13 @@ describe("Abort 监听器与 WS 载荷边界（二轮评审修复 6/7）", () =>
     }
   });
 });
+
+/** These historical tests inject failures at individual allocations.
+ * Default batching and restart behavior are covered separately with 1024-ID ranges.
+ */
+function startTestRuntime(options: Parameters<typeof startRuntimeWithDefaults>[0]) {
+  return startRuntimeWithDefaults({
+    ...options,
+    limits: { seqReservationSize: 1, ...options.limits },
+  });
+}

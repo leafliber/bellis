@@ -1,5 +1,7 @@
 # Bellis Phase 1 完成态参考
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 状态：已完成并关闭  
 > 阶段：基础协议  
 > 关闭日期：2026-08-23  
@@ -202,3 +204,7 @@ Phase 2 直接复用 Phase 1 的 Contracts、Clock、Control/Media、Persistence
 - 同步偏差、取消、断线和恢复的端到端验证。
 
 具体范围、接口缺口、工作包和 Gate 见 [Phase 2 开发指南](./phase-2-development-guide.md)。
+
+## 2026-09-06 兼容性修订
+
+Control 预先持久化分段预留序号，缺省 1024 个。区间内发送和心跳无需逐条写库；latest_server_seq 是预留上界，不是实际发送数或业务完成水位。同进程保留实际 nextSeq/Replay，跨重启跳过未使用区间并通过 Snapshot 对账。详情见 [Control 协议](./protocols/control-websocket.md)。

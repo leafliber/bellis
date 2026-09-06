@@ -9,7 +9,7 @@ import {
   createTempDataDirectory,
   mustExchange,
   originFor,
-  startTestRuntime,
+  startTestRuntime as startRuntimeWithDefaults,
   WORKER_FIXTURE,
   wrapPersistenceClient,
 } from "../helpers.js";
@@ -345,4 +345,82 @@ describe("关闭鲁棒性（P4 修复 4）", () => {
       cleanupTempDataDirectory(directory);
     }
   });
+});
+
+/** These historical tests inject failures at individual allocations.
+ * Default batching and restart behavior are covered separately with 1024-ID ranges.
+ */
+function startTestRuntime(options: Parameters<typeof startRuntimeWithDefaults>[0]) {
+  return startRuntimeWithDefaults({
+    ...options,
+    limits: { seqReservationSize: 1, ...options.limits },
+  });
+}
+
+it("default Seq reservations allow many heartbeats without per-frame writes", async () => {
+  const directory = tempDirectory("bellis-seq-reservation-");
+  const base = await createMigratedBaseClient(directory);
+  baseClients.push(base);
+  const writes: bigint[] = [];
+  const handle = await startRuntimeWithDefaults({
+    dataDirectory: directory,
+    persistenceClient: wrapPersistenceClient(base, {
+      advanceServerSeq: (input) => {
+        writes.push(input.latestServerSeq);
+        return base.advanceServerSeq(input);
+      },
+    }),
+  });
+  try {
+    const { sessionId, cookie } = await mustExchange(handle, handle.issueStartupToken().token);
+    const client = await connectedClient(handle, cookie, sessionId);
+    await client.waitForType("server.ready");
+    for (let i = 0; i < 20; i += 1) {
+      const previous = BigInt(client.received.at(-1)?.seq ?? "0");
+      client.send(clientEnvelope({ sessionId, type: "heartbeat.ping", payload: {} }));
+      await client.waitFor(
+        (message) => message.type === "heartbeat.pong" && BigInt(message.seq) > previous,
+      );
+    }
+    expect(writes).toEqual([1024n]);
+    expect((await base.readRecoveryState(sessionId)).latestServerSeq).toBe(1024n);
+    client.close();
+  } finally {
+    await handle.close();
+  }
+});
+
+it("a failed reservation extension cannot send a sequence beyond the durable range", async () => {
+  const directory = tempDirectory("bellis-seq-extension-");
+  const base = await createMigratedBaseClient(directory);
+  baseClients.push(base);
+  const writes: bigint[] = [];
+  const handle = await startRuntimeWithDefaults({
+    dataDirectory: directory,
+    limits: { seqReservationSize: 4 },
+    persistenceClient: wrapPersistenceClient(base, {
+      advanceServerSeq: (input) => {
+        writes.push(input.latestServerSeq);
+        if (input.latestServerSeq > 4n)
+          return Promise.reject(new PersistenceError("unavailable", "reservation failed"));
+        return base.advanceServerSeq(input);
+      },
+    }),
+  });
+  try {
+    const { sessionId, cookie } = await mustExchange(handle, handle.issueStartupToken().token);
+    const client = await connectedClient(handle, cookie, sessionId);
+    await client.waitForType("server.ready");
+    for (let seq = 3n; seq <= 4n; seq += 1n) {
+      client.send(clientEnvelope({ sessionId, type: "heartbeat.ping", payload: {} }));
+      await client.waitFor((message) => BigInt(message.seq) === seq);
+    }
+    client.send(clientEnvelope({ sessionId, type: "heartbeat.ping", payload: {} }));
+    expect(await client.closed()).toBe(1011);
+    expect(writes).toEqual([4n, 8n]);
+    expect(client.received.every((message) => BigInt(message.seq) <= 4n)).toBe(true);
+    expect((await base.readRecoveryState(sessionId)).latestServerSeq).toBe(4n);
+  } finally {
+    await handle.close();
+  }
 });

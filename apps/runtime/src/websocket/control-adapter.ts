@@ -34,8 +34,9 @@ import type { ExportedControlClaim, LogicalSession } from "./session-store.js";
  *   ControlSession 构造全部成功才 commit；读取失败、对账失败、初始化
  *   期间连接关闭或意外异常一律 rollback 原样归还——一次瞬态失败绝不
  *   把同进程导出状态不可逆消费掉（否则 Session 在本进程内无法恢复）。
- * - `seq_advanced` → **先等待 P2 advanceServerSeq 成功落库**，才执行同一
- *   消息的 `send`（P4 修复 2）。落库失败不得发送，连接降级关闭（1011）。
+ * - `seq_advanced` 必须落在已持久预留区间内；超过上界时先等待
+ *   advanceServerSeq 扩展成功，再 send。区间内发送无需写库；扩展失败
+ *   不得发送，连接降级关闭（1011）。
  * - `send` → socket.send 的**成功回调**后才确认写出（P4 修复 11）；
  *   广播等待者据此得到真实写出结果与连接代际（二轮评审修复 4）。
  * - `snapshot_required` → Replay Gap 快照用**预加载**的恢复状态同步入队，
@@ -52,6 +53,7 @@ const SEQ_PERSIST_FAILED_CLOSE = 1011;
 const SNAPSHOT_UNAVAILABLE_CLOSE = 1011;
 
 export interface ControlLimits {
+  readonly seqReservationSize?: number;
   readonly heartbeatIntervalMs: number;
   readonly helloTimeoutMs: number;
   readonly replayWindowCapacity: number;
@@ -247,10 +249,12 @@ export class ControlConnection {
       this.#recoveryState = plan.recoveryState;
       this.#phase2ActiveScenes = plan.phase2ActiveScenes ?? null;
       this.#resumedSession = plan.resume !== undefined;
-      // 恢复水位对账（二轮评审修复 2）：任何 Replay/新消息上线前，先把
-      // 上条连接已分配的最大 Seq 补落库。advanceServerSeq 幂等接受相等。
-      if (plan.resume !== undefined && plan.resume.nextSeq > 1n) {
-        const watermark = plan.resume.nextSeq - 1n;
+      this.#lastPersistedSeq = plan.recoveryState?.latestServerSeq ?? 0n;
+      // Replay/新消息上线前确保持久区间覆盖上条连接的全部分配；
+      // 已被预留覆盖时无需重复写库（ADR 0007）。
+      if (plan.resume !== undefined && plan.resume.nextSeq - 1n > this.#lastPersistedSeq) {
+        const watermark =
+          plan.resume.nextSeq - 1n + BigInt(this.#limits.seqReservationSize ?? 1024) - 1n;
         const reconciled = await this.#persistServerSeqAwait(watermark);
         if (this.#finished) {
           plan.claim?.rollback();
@@ -684,7 +688,7 @@ export class ControlConnection {
   }
 
   /**
-   * Effect 串行执行（P4 修复 2/11）：seq_advanced 落库成功后才执行对应
+   * Effect 串行执行（P4 修复 2/11）：seq_advanced 超过预留区间时先扩展持久上界，再执行对应
    * send；send 以回调确认为准。任一 Seq 落库失败即停止发送并降级关闭。
    */
   async #pump(): Promise<void> {
@@ -709,7 +713,9 @@ export class ControlConnection {
           }
           if (effect.kind === "seq_advanced") {
             if (effect.seq > this.#lastPersistedSeq) {
-              const persisted = await this.#persistServerSeqAwait(effect.seq);
+              const reservedThrough =
+                effect.seq + BigInt(this.#limits.seqReservationSize ?? 1024) - 1n;
+              const persisted = await this.#persistServerSeqAwait(reservedThrough);
               if (this.#finished) {
                 return;
               }
@@ -722,7 +728,7 @@ export class ControlConnection {
                 this.#finish(SEQ_PERSIST_FAILED_CLOSE, "seq persistence failed");
                 return;
               }
-              this.#lastPersistedSeq = effect.seq;
+              this.#lastPersistedSeq = reservedThrough;
             }
             continue;
           }

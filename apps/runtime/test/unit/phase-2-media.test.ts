@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { VirtualClock } from "@bellis/testkit";
 import { PHASE_2_PCM_FRAME_BYTES } from "@bellis/contracts";
-import { frameAt, synthesizeSpeech } from "../../src/application/phase-2/fake-tts.js";
+import {
+  fakeSpeechProvider,
+  frameAt,
+  synthesizeSpeech,
+} from "../../src/application/phase-2/fake-tts.js";
 import { RuntimeMediaSender } from "../../src/application/phase-2/media-sender.js";
 import type { ScenePlan } from "@bellis/contracts";
 
@@ -397,4 +401,61 @@ describe("RuntimeMediaSender", () => {
     expect(sent.length).toBeGreaterThan(0);
     sender.close();
   });
+});
+
+it("lazy fake PCM matches the buffered fixture and observes cancellation", async () => {
+  const expected = synthesizeSpeech(SPEECH);
+  const controller = new AbortController();
+  const iterator = fakeSpeechProvider.stream(SPEECH, controller.signal)[Symbol.asyncIterator]();
+  for (let index = 0; index < 3; index += 1) {
+    expect((await iterator.next()).value).toEqual(frameAt(expected, index));
+  }
+  controller.abort();
+  await expect(iterator.next()).rejects.toThrow();
+});
+
+it("pulls streaming frames on demand and closes the provider after cancellation", async () => {
+  const clock = new VirtualClock();
+  let pulled = 0;
+  let released = false;
+  let aborted = false;
+  const sender = new RuntimeMediaSender({ clock, sendFrame: () => true });
+  sender.startSpeechStream({
+    plan: PLAN,
+    tts: {
+      async *frames(signal) {
+        signal.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+          },
+          { once: true },
+        );
+        try {
+          while (!signal.aborted) {
+            pulled += 1;
+            yield new Uint8Array(PHASE_2_PCM_FRAME_BYTES);
+          }
+        } finally {
+          released = true;
+        }
+      },
+    },
+    audioCueId: "c",
+    streamId: "s",
+    sessionId: "session",
+    traceId: "0123456789abcdef0123456789abcdef",
+    firstFrameTargetUs: 1_000_000n,
+  });
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  expect(pulled).toBe(1);
+  sender.cancelStream(PLAN.scene.sceneId, "interrupt");
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  expect(aborted).toBe(true);
+  expect(released).toBe(true);
+  expect(pulled).toBe(1);
+  expect(sender.sentTotal).toBe(0);
+  expect(sender.activeJobs).toBe(0);
+  expect(clock.pendingCount()).toBe(0);
+  sender.close();
 });

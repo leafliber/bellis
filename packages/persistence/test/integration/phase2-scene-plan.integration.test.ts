@@ -120,6 +120,7 @@ describe("Phase 2 ScenePlan 持久化", () => {
     const c = await freshClient();
     const mismatched: ScenePlan = {
       ...PLAN,
+      softTimeoutMs: PLAN.softTimeoutMs ?? 500,
       scene: { ...SCENE, sceneId: "44444444-4444-4444-8444-4444444444ff" },
     };
     await expect(c.commitScene(commitInput({ plan: mismatched }))).rejects.toThrow(

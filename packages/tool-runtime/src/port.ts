@@ -38,6 +38,7 @@ export type ToolHandler = (input: {
 }) => Promise<{ readonly value: unknown }>;
 
 export type DagIssueCode =
+  | "dependencies_unsupported"
   | "unknown_tool"
   | "duplicate_tool_run_id"
   | "dependency_unknown"
@@ -65,12 +66,12 @@ export interface DagNodePlan {
 export interface DagCompileResult {
   readonly ok: boolean;
   readonly issues: readonly DagCompileIssue[];
-  /** 拓扑层（确定性排序）：同层节点可并行。 */
+  /** 兼容旧调用方的单层视图；当前计划无显式依赖。 */
   readonly layers: readonly (readonly DagNodePlan[])[];
   readonly nodes: readonly DagNodePlan[];
 }
 
-/** 一次 DAG 执行的结果：每个 toolRunId 至多一条 ToolResult。 */
+/** 一次独立调用列表执行的结果：每个 toolRunId 至多一条 ToolResult。 */
 export interface ToolDagExecution {
   readonly results: readonly ToolResult[];
   /** background 任务的 done（不阻塞下一 Cycle；Session 关闭时等待）。 */

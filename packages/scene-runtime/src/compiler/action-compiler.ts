@@ -366,6 +366,7 @@ export function compileActionFrame(input: CompileInput): CompileResult {
   };
   const plan: ScenePlan & { speech?: unknown } = {
     schemaVersion: 1,
+    softTimeoutMs: frame.sync.softTimeoutMs ?? 500,
     scene,
     cues,
     ...(speech === undefined ? {} : { [SPEECH_PLAN_KEY]: speech }),

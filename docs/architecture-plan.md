@@ -1,5 +1,7 @@
 # Bellis Autonomous Live：自主游戏直播系统设计
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 文档状态：独立项目设计基线 v1
 >
 > 项目属性：从零建设的产品，不以现有代码结构为实现边界
@@ -342,7 +344,7 @@ decisionLoop:
 模型流被增量解析为四类片段：文本、结构化工具调用、Avatar 意图和其他 Action 意图。
 
 - 一句话达到稳定边界并通过内容策略后，可提前启动 TTS Prepare。
-- 工具参数在 JSON 完整并验证后可编译内存 DAG；当前所有 Tool 均在完整包校验和 durable Cycle adoption 成功后启动，不允许流式阶段执行可变工具。
+- 工具参数在 JSON 完整并验证后可编译无依赖调用计划；当前所有 Tool 均在完整包校验和 durable Cycle adoption 成功后启动，不允许流式阶段执行可变工具。
 - 所有准备均可提前开始，但只有完整 DecisionPacket 通过校验后才能 Commit。
 - 模型在 final/adoption 前断流时，未提交准备全部取消，此时不会已有本 Cycle 的播放。已提交 Scene 的后续媒体中断另按播放确认处理，不能把计划文本当作已生效输出。
 
@@ -369,7 +371,7 @@ Cycle 开始时先固定 `signalWatermark` 和 `worldVersion`。Audience、Game�
 固定快照后立即 fan-out：
 
 1. 读取热 World State。
-2. 查询多个 Memory Context Provider。
+2. 查询 Memory Context Provider；首条纵向链路只接一个，多 Provider fan-out 后续按需启用。
 3. 准备 Persona、规则和工具目录。
 4. 读取当前 Turn 历史及 Token Budget。
 
@@ -405,7 +407,7 @@ interface ToolExecutionPolicy {
 - `keyed` 工具只在相同实体键上串行。
 - `background` 工具不在当前 Cycle 的关键路径，例如普通记忆归档。
 
-模型可以声明工具依赖，Scheduler 将调用编译为 DAG。默认等待真正被下一 Cycle 使用的结果，不为无关的日志、缓存刷新和异步写入停顿。
+当前模型只能输出无显式依赖的调用列表；Scheduler 保留并发、资源锁和取消，非空或非法 dependsOn 明确拒绝。需要前一步结果时进入下一 Cycle。前台结束后，后台调度仍由 Tool Runtime 持有直至全部结算。通用 DAG 待真实场景验证后另行设计。
 
 ## 9. Scene Director：动作对齐中心
 
@@ -457,7 +459,7 @@ interface SceneParticipant<TIntent> {
 ```
 
 1. **Prepare**：TTS 生成首块音频、字幕完成首句断句、Live2D 检查动作资源、游戏技能完成安全校验。所有项目并行。
-2. **Barrier**：只等待当前 SyncGroup 的硬同步项目。软同步项目超时后可以缺席或稍后追上。
+2. **Barrier**：只等待当前 SyncGroup 的硬同步项目。Stage 按 softTimeoutMs 中止超时的软同步准备并报告缺席，不允许迟到结果重建本场景。Runtime 只验证整包准备结果。
 3. **Commit**：Scene Director 分配统一 `T0`，各 Lane 根据同一时钟开始。
 4. **Cancel/Compensate**：中断时执行音频淡出、字幕清理、Avatar 回中、游戏松键和 Overlay 撤回。
 
@@ -466,10 +468,10 @@ interface SceneParticipant<TIntent> {
 | 等级 | 适用内容 | 失败处理 |
 | --- | --- | --- |
 | `hard` | 语音首块、首句字幕、口型、必须同时开始的游戏技能 | 整组等待或整体降级 |
-| `soft` | 表情、手势、Overlay 动画 | 超时可缺席或晚到 |
-| `detached` | 遥测、记忆写入、预加载 | 不影响 Scene |
+| `soft` | 表情、手势、Overlay 动画 | 有界准备，超时缺席；丢弃也结算 |
+| `detached`（规划保留） | 遥测、记忆写入、预加载 | 当前由宿主后台任务承担，不扩展 Scene 执行协议 |
 
-系统只等待首个可播放音频块和首屏字幕，不等待整段 TTS 生成完成。后续音频、字幕和口型流式进入已提交的 Timeline，从而兼顾低首延迟和同步。
+目标是等待首个可播放音频块和首屏字幕即可提交，后续内容流式进入 Timeline。当前演出链已通过 TTS Port 逐帧拉取，但仍在模型 final 后、Stage media ready 后开始生成；首块预缓冲 Gate 和 final 前推测准备尚未实现。不得据此宣称达到首音频性能目标。
 
 ### 9.4 主时钟
 
@@ -483,7 +485,7 @@ interface SceneParticipant<TIntent> {
 
 ### 10.1 TTS Pipeline
 
-TTS Provider 面向流式输出：
+当前实现的最小 Port 是 `apps/runtime/src/application/performance/speech-provider.ts` 中的 `SpeechProvider.stream(SpeechIntent, AbortSignal)`，每次产出一个固定格式的 PCM 帧。以下 TtsProvider 能力协商、词级时间和 viseme 是后续目标，不是另一套已实现接口：
 
 ```ts
 interface TtsProvider {
@@ -656,7 +658,7 @@ Provider 不能直接插入或修改模型消息，只返回声明式内容：
 interface ContextBlock {
   id: string;
   revision: string;                 // 十进制字符串，只做相等与单调判定
-  contentHash: string;              // 来源存证，对 Provider 原始字节校验
+  contentHash: string;              // Provider 来源摘要，验证方案见 ADR 0008
   text: string;
   category: "viewer" | "relationship" | "fact" | "episode" | "task";
   providerCategory?: string;        // Provider 原始分类，保留来源语义
@@ -675,7 +677,8 @@ interface ContextBlock {
 Memory Gateway 负责并行查询、身份隔离、Token 预算、去重、冲突检测和排序。最终被采用的 Context Block 必须写入本次 Cycle 记录，确保能够回答“模型当时究竟看到了什么”。
 
 字段裁决见 [ADR 0005](./adr/0005-memory-provider-seam-and-persona-ownership.md) 决策 2：
-`contentHash` 是来源存证而非规范化摘要，去重另存 `normalizedHash`；`category`
+`contentHash` 是来源存证而非规范化摘要；[ADR 0008](./adr/0008-iris-phase4-integration.md)
+进一步区分结构化来源 hash、原文 `textHash` 和去重 `normalizedHash`，按 Provider 声明方案记录验证状态，不能一律以 SHA-256(text) 复核。`category`
 保持闭枚举且未知值 fail closed；`privacyScope` 始终由宿主拥有，Provider 标签
 只能进入 `privacyLabels`。
 
@@ -956,7 +959,7 @@ Turn、Cycle、Tool Batch、Scene 和 Game Skill 形成父子取消域。高层�
 - 状态使用 SQLite；不预设分布式部署或 PostgreSQL 迁移。
 - 游戏真实输入必须通过 Rust Sidecar、租约、心跳和 Arm，不能以“性能尚可”为由绕过安全边界。
 - Rust/Python 边界采用 Protobuf/gRPC，Python 仅承担可选视觉能力。
-- 包名采用 contracts、decision-loop、tool-runtime、scene-runtime、persistence；Phase 4 的 context-builder、memory-runtime、persona-runtime、avatar-runtime 仍是规划包。
+- 包名采用 contracts、decision-loop、tool-runtime、scene-runtime、persistence；Phase 4 先在宿主内实现记忆纵向模块，context-builder、memory-runtime、persona-runtime、avatar-runtime 只作为后续职责拆分候选，不预先建四个包。
 - 仓内独立 Memory Provider 置于 providers/；第三方插件产品化另有阶段，不与核心 workspace 包混淆。
 
 ## 20. 交付计划
@@ -982,14 +985,14 @@ Pipeline、单 Provider Decision Loop 与 Tool Runtime；完成事实见
 
 - 结构化 DecisionPacket。
 - 工具前可选短句。
-- Tool DAG、并行只读工具、资源锁和超时。
+- 无依赖工具调用列表、并行只读工具、资源锁和超时。
 - 工具结果驱动下一 Cycle。
 
 验收：短句、TTS/字幕/Avatar 和工具同时开始；多个安全工具并行；失败工具不终止直播。
 
 ### Milestone 3：主动角色与直播平台
 
-当前 Phase 4 实现本 Milestone 的 Presence Engine、Avatar Mixer 与资源仲裁核心；
+Phase 4 后续工作包含本 Milestone 的 Presence Engine、Avatar Mixer 与资源仲裁核心；
 阶段范围和工作包见 [Phase 4 构建指南](./phase-4-development-guide.md)。
 
 - Presence Engine、受约束随机行为和 Avatar Mixer。
@@ -1000,8 +1003,7 @@ Pipeline、单 Provider Decision Loop 与 Tool Runtime；完成事实见
 
 ### Milestone 4：外部记忆
 
-当前 Phase 4 同时实现本 Milestone 的 Context、Memory Provider、MCP Adapter
-与 Observe Outbox。
+Phase 4A 先经公共 SDK/HTTP 接入独立 Iris Core，连接 PersonaSource、MemoryProvider、Usage 与实际输出确认后的 Observe Outbox，再完成工具、更新失效和真实服务恢复验收。以下多 Provider、MCP 与主动表现由 Phase 4B 继续交付；缓存必须先证明删除/隐私失效可靠。接入不依赖 Iris Phase 11 恢复或 Core 内部存储访问，见 [ADR 0008](./adr/0008-iris-phase4-integration.md)。
 
 - Context、Tool、Observe 三个 Memory 接口。
 - 一个本地 Provider、一个 HTTP/gRPC Provider、一个 MCP Adapter。
@@ -1050,7 +1052,7 @@ sessionId / turnId / cycleId / toolCallId / sceneId / cueId / skillId
 
 - Cycle 上下文 fan-out 各 Provider 的耗时与超时。
 - LLM TTFT、总耗时、输入/输出 Token 和 Prefix Cache 命中。
-- Tool DAG 的并行度、关键路径和资源锁等待。
+- 工具调用列表的并行度、资源锁等待、后台结算与关键状态写入失败。
 - TTS 首块、未来句队列和取消浪费音频时长。
 - Scene Prepare 时间、Commit 偏差和各 Lane drift。
 - Audience Batch 大小、积压、聚类压缩率和 interrupt 次数。
@@ -1123,3 +1125,7 @@ sessionId / turnId / cycleId / toolCallId / sceneId / cueId / skillId
 8. 只让决策关键路径等待；记忆写入、遥测、预计算和非关键媒体全部后台化。
 9. 缓存不能跨身份或隐私域复用，也不能让已删除记忆重新出现。
 10. 插件故障必须局部化，不能成为整场直播的隐式单点。
+
+## 24. 当前执行与交付约束
+
+Trigger Mailbox 是唯一等待队列，Loop 接受任务时同步取得所有权；所有后台工作在 close 前取消并结算。工具开始/结束使用可等待的恢复事实 Port。Scene 终态禁止出边，durable 与发送完成后的迟到继续执行必须被拒绝。Control 的磁盘 Seq 是分段预留上界，不是业务完成水位。Demo 工具、TTS 与有界验收记录器由入口显式装配。真实 Provider 延迟与物理播放指标需独立验收。

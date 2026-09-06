@@ -179,7 +179,8 @@ describe("跨重启 Control Seq 恢复（P4 修复 1）", () => {
     const recovery1 = await first.next();
     expect(recovery1.type).toBe("recovery");
     const persistedWatermark = parseDecimalString(recovery1.latestServerSeq as string);
-    expect(persistedWatermark).toBe(oldWatermark);
+    expect(persistedWatermark).toBe(1024n);
+    expect(persistedWatermark).toBeGreaterThan(oldWatermark);
     await first.kill();
     client1.close();
 
@@ -221,7 +222,7 @@ describe("跨重启 Control Seq 恢复（P4 修复 1）", () => {
     }
   });
 
-  it("resumeSessionId + lastAck=旧水位：无缺口时不发快照，直接 up-to-date 继续", async () => {
+  it("lastAck 覆盖全部实际发送但未覆盖预留区间：跨重启仍先快照", async () => {
     const directory = createTempDataDirectory("bellis-p4-restart2-");
     directories.push(directory);
 
@@ -243,9 +244,9 @@ describe("跨重启 Control Seq 恢复（P4 修复 1）", () => {
       const exchanged2 = await exchange(second.port, token2, sessionId);
       expect(exchanged2.status).toBe(200);
       const resumed = controlClient(second.port, exchanged2.cookie as string, sessionId, lastSeq);
-      // lastAck=旧水位：无缺口，不应出现 session.snapshot。
+      // 实际发送全部确认仍存在未使用的预留区间，先 Snapshot 建立新基线。
       await resumed.waitForType("server.ready");
-      expect(resumed.received.some((envelope) => envelope.type === "session.snapshot")).toBe(false);
+      expect(resumed.received.some((envelope) => envelope.type === "session.snapshot")).toBe(true);
       resumed.send(clientEnvelope({ sessionId, type: "clock.ping", payload: { c0: "2" } }));
       const pong = await resumed.waitForType("clock.pong");
       // resume 后 hello/ready 消耗 Seq：首条业务消息只需严格大于旧水位。

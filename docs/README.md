@@ -1,5 +1,7 @@
 # Bellis 文档索引
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 本文档目录按“长期设计、阶段实施、稳定协议、架构决策”四类维护。已交付能力以完成态参考和稳定协议为当前入口；Phase 2/3 开发指南保留为历史实施计划，不作为已通过全部 Gate 的证明。当前实现与待验收项集中见 [构建与验收状态](./build-and-validation.md)。
 
 ## 当前入口
@@ -11,7 +13,8 @@
 - [Phase 2 完成态参考](./phase-2-reference.md)：Phase 2 交付形态、验收证据与已知边界。
 - [Phase 3 开发指南](./phase-3-development-guide.md)：阶段“Decision Loop”的范围、工作包、Gate 和原定验收方式（历史计划）。
 - [Phase 3 完成态参考](./phase-3-reference.md)：Phase 3 交付形态、验收证据与已知边界。
-- [Phase 4 构建指南](./phase-4-development-guide.md)：阶段“记忆与主动表现”的范围、工作包、Gate 和验收方式（待实施）。
+- [Phase 4 构建指南](./phase-4-development-guide.md)：先完成 Phase 4A Iris 真实接入，再推进 Phase 4B 主动表现与扩展；含 A0–A4 工作包、接口映射与验收（待实施）。
+- [Phase 4 Iris 接入调研](./phase-4-iris-integration-research.md)：两仓库当前能力、契约差异、职责归属及本轮针对性验证。
 
 ## 稳定协议
 
@@ -30,6 +33,8 @@
 - [ADR 0004：Phase 3 决策边界](./adr/0004-phase-3-decision-boundaries.md)
 - [ADR 0005：Memory Provider 插件缝与 Persona 归属](./adr/0005-memory-provider-seam-and-persona-ownership.md)
 - [ADR 0006：文档权威性、来源去重与 Phase 4 交付边界](./adr/0006-documentation-and-delivery-boundaries.md)
+- [ADR 0007：任务所有权、恢复事实与能力收敛](./adr/0007-task-ownership-and-runtime-scope.md)
+- [ADR 0008：Phase 4 Iris 接入与来源校验](./adr/0008-iris-phase4-integration.md)
 
 新增或改变冻结边界时创建新 ADR，不回写历史 ADR 的原始决策来掩盖变化。
 

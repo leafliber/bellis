@@ -27,6 +27,7 @@
       "maximum": 9007199254740991
     },
     "blocks": {
+      "maxItems": 256,
       "type": "array",
       "items": {
         "type": "object",
@@ -46,7 +47,8 @@
             "maxLength": 256
           },
           "text": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "category": {
             "type": "string",
@@ -258,19 +260,7 @@
     "schemaVersion",
     "providerId",
     "requestId",
-    "mappingVersion",
-    "priorityDerivationVersion",
-    "blocks",
-    "returnedBlockIds",
-    "sourceWatermark",
-    "completedRoutes",
-    "degradedRoutes",
-    "partial",
-    "cacheUntil",
-    "nextWakeAt",
-    "personaRevision",
-    "personaContentHash",
-    "audit"
+    "blocks"
   ],
   "additionalProperties": {
     "$ref": "#/definitions/__schema0"

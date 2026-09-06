@@ -1,5 +1,7 @@
 # Persistence & Recovery 协议（P2）
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](../adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 适用范围：`packages/persistence`（DB Worker、Migration、Session Records、
 > 原子 commitScene、Outbox、恢复）。
 > 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) ·
@@ -222,11 +224,11 @@ idempotency_keys(scope TEXT NOT NULL, key TEXT NOT NULL,
 
 ## 6. Server Seq
 
-`sessions.latest_server_seq`：`advanceServerSeq` 单调推进，返回落库后
-当前值；倒退 → `seq_regression`，相等幂等。存储为无损十进制 TEXT。
-P4 在 Control Session 断线重连导出/恢复 `nextSeq` 时必须调用它持久化
-最新分配水位（含 persistable=false 的瞬时消息，见 control-websocket.md
-§5），防止重启后复用 Seq。
+`sessions.latest_server_seq` 是已持久预留的序号上界；`advanceServerSeq` 单调推进，返回落库后当前值；倒退 → `seq_regression`，相等幂等。存储为无损十进制 TEXT。
+
+Control 适配器缺省一次预留 1024 个序号，等待落库后才使用；区间内的业务消息、心跳和时钟消息不重复写库。预留扩展失败必须停止发送。同进程恢复仍使用实际 nextSeq/Replay，但上线前必须确保持久上界覆盖全部已分配序号。跨重启从预留上界之后继续，未使用区间通过 Snapshot 对账跳过。此字段不代表实际发送数、业务消费水位或效果完成。旧数据库的精确水位可直接作为初始预留上界，不修改历史 Migration。
+
+工具执行开始/结束通过可等待的 `phase3ToolRunEvent` 写入，不能从尽力审计回调投影恢复状态。开始写入失败不得执行；结束写入失败向调用者报错，保留 running 供重启标记 uncertain。普通观测日志与此恢复事实分离。
 
 ## 7. 原子 commitScene
 

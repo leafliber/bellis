@@ -1,5 +1,7 @@
 # Bellis Phase 2 开发指南：演出纵向链路
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。 本文保留历史决策/实施过程；与新决策冲突的描述不再作为当前实现要求。
+
 > 文档状态：历史实施计划（实现事实见 [Phase 2 完成态参考](./phase-2-reference.md)，现行命令见 [构建与验收状态](./build-and-validation.md)）
 > 阶段状态：完成  
 > 上游基线：[Phase 1 完成态参考](./phase-1-reference.md)  
@@ -326,14 +328,15 @@ created
 要求：
 
 - 每个 Scene 一个根 AbortController，Lane 派生子 Signal；
-- Prepare 并行启动，但 Barrier 按 Sync Group 判定；
+- Stage 并行启动 Lane 准备并拥有超时/中止，返回有界整包 ready；Runtime Barrier 按 Sync Group 验证结果；
 - Hard：全 Ready 才能提交，失败时整组降级或取消；
-- Soft：等待到 `softTimeoutMs`，之后可缺席/晚到，但结果必须记录；
-- Detached：不阻塞 Commit，但仍有资源上限和关闭责任；
+- Soft：Stage 按 `min(scene.deadlineMs, plan.softTimeoutMs ?? 500)` 限时准备；超时报告 unavailable，不允许迟到准备复活；
+- Detached：当前 Compiler 不产出 detached Cue；遥测和记忆写入交给宿主后台任务；
 - Commit 前先选择足够未来的 `commitAtRuntimeUs`，再完成数据库原子提交，最后发送 `scene.commit`；
 - 如果数据库提交失败，Stage 只收到取消/释放，不得收到 Commit；
 - 如果数据库成功但 Commit 消息结果不确定，状态记为 `uncertain`，不得自动重复外部效果；
-- 同一 Scene 的状态转换串行化，迟到 Ready/Finished 不得复活终态；
+- 同一 Scene 的状态转换串行化，迟到 Ready/Finished、数据库完成和发送完成均不得复活终态；
+- 执行等待缺省 120s 后走取消；无确认时标记 uncertain，不以超时推导效果完成；
 - Shutdown 先停止接收新 Scene，再取消/排空，最后关闭 Adapter。
 
 ### 6.3 Port 边界
@@ -411,7 +414,8 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 
 ### 8.1 Fake TTS 与 Media Sender
 
-- 输入只接受 `SpeechIntent`；输出固定 PCM 格式和可选词/句时间标记；
+- 服务依赖 `SpeechProvider.stream(SpeechIntent, AbortSignal)`；开发入口显式注入 Fake Provider，发送器按消费节奏拉取，避免整句连续 PCM 分配；
+- 缓冲版 synthesizeSpeech 为已有调用方兼容保留；真实商业 TTS 与 final 前准备是后续能力；
 - 波形、分块、时长和 Timing 对相同输入确定；
 - 按 Frame Sequence 发送，使用 `targetTimeUs/durationUs`；Sequence 只
   计数到达传输层的帧（限制丢弃/传输拒绝不消耗序号——缺号会被
@@ -429,6 +433,8 @@ booting → auth_ready → control_ready → clock_ready → performance_ready
 - 不把 PCM、全文或敏感输入写入日志。
 
 ### 8.2 AudioWorklet
+
+soft Cue 被 Timeline 迟到丢弃时必须进入 Lane 的结束聚合。scene.started 来自 Worklet 首个有样本的渲染块确认，DOM Lane 在应用后确认；Runtime 汇总各条 Lane 回执后计算偏差。设备物理发声延迟未计入此指标。
 
 - Worklet 内维护有界 PCM 帧块队列；**容量按当前未播占用执行**
   （= maxBufferedUs）——已消费的帧块立即释放，长音频（> maxBufferedUs）

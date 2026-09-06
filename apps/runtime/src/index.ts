@@ -79,3 +79,5 @@ export type {
   StartupTokenReservation,
 } from "./auth/startup-token.js";
 export type { ExportedControlClaim } from "./websocket/session-store.js";
+
+export type { SpeechProvider, PcmSpeechSource } from "./application/performance/speech-provider.js";

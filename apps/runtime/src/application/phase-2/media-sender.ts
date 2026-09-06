@@ -5,7 +5,7 @@ import {
   type MonotonicClock,
   type ScenePlan,
 } from "@bellis/contracts";
-import type { FakeTtsResult } from "./fake-tts.js";
+import type { BufferedPcmSpeech, PcmSpeechSource } from "../performance/speech-provider.js";
 
 /**
  * Runtime → Stage 媒体发送器（docs/phase-2-development-guide.md §8.1）。
@@ -72,7 +72,7 @@ interface SendJob {
   readonly sessionId: string;
   readonly cueId: string;
   readonly traceId: string;
-  readonly pcm: FakeTtsResult;
+  readonly pcm: BufferedPcmSpeech | PcmSpeechSource;
   readonly firstFrameTargetUs: bigint;
   controller: AbortController;
   stopped: boolean;
@@ -149,7 +149,7 @@ export class RuntimeMediaSender {
    */
   startSpeechStream(input: {
     readonly plan: ScenePlan;
-    readonly tts: FakeTtsResult;
+    readonly tts: BufferedPcmSpeech | PcmSpeechSource;
     readonly audioCueId: string;
     readonly streamId: string;
     readonly sessionId: string;
@@ -175,7 +175,9 @@ export class RuntimeMediaSender {
       sentSequence: 0n,
     };
     this.#jobs.set(sceneId, job);
-    void this.#run(job);
+    void this.#run(job).catch(() => {
+      if (!job.stopped) this.cancelStream(sceneId, "speech_provider_failed");
+    });
   }
 
   /** 取消发送：立即停止该 Scene 的新帧（取消优先于媒体）。 */
@@ -215,87 +217,109 @@ export class RuntimeMediaSender {
   async #run(job: SendJob): Promise<void> {
     const perFrameUs = PHASE_2_PCM_FRAME_DURATION_US;
     let frameIndex = 0;
-    const totalFrames = job.pcm.frameCount;
-    while (!job.stopped && !this.#closed && frameIndex < totalFrames) {
-      const targetUs = job.firstFrameTargetUs + BigInt(frameIndex) * perFrameUs;
-      // 限制 1/3（未来时长）：超预算提前量时等待时钟追赶。
-      const lead = targetUs - this.#clock.nowUs();
-      if (lead > this.#limits.maxFutureUs) {
-        const waitOk = await this.#sleep(
-          targetUs - this.#limits.maxFutureUs,
-          job.controller.signal,
-        );
-        if (!waitOk) {
-          return;
+    const source = job.pcm;
+    const iterator =
+      "frames" in source ? source.frames(job.controller.signal)[Symbol.asyncIterator]() : null;
+    try {
+      while (!job.stopped && !this.#closed) {
+        let payload: Uint8Array;
+        if ("pcm" in source) {
+          if (frameIndex >= source.frameCount) break;
+          payload = source.pcm.subarray(
+            frameIndex * PHASE_2_PCM_FRAME_BYTES,
+            (frameIndex + 1) * PHASE_2_PCM_FRAME_BYTES,
+          );
+        } else {
+          const next = await iterator!.next();
+          if (next.done) break;
+          payload = next.value;
         }
-        continue;
-      }
-      if (lead > 0n) {
-        const waitOk = await this.#sleep(targetUs, job.controller.signal);
-        if (!waitOk) {
-          return;
-        }
-      }
-      if (job.stopped || this.#closed) {
-        return;
-      }
-      // 播放时刻已过：出账（追赶突发不占队列）。
-      this.#pruneQueue();
-      const frameBytes = PHASE_2_PCM_FRAME_BYTES;
-      const queueFull =
-        this.#queue.length >= this.#limits.maxQueuedFrames ||
-        this.#queuedBytes + frameBytes > this.#limits.maxQueuedBytes;
-      const overdueBy = this.#clock.nowUs() - targetUs;
-      if (queueFull && overdueBy <= LATE_DROP_US) {
-        // 限制 2/3（帧数/字节）：队列满但帧仍在有效窗口内——等待队头
-        // 播放出账后重估（不丢有效音频）。
-        const head = this.#queue[0];
-        if (head !== undefined) {
-          const waitOk = await this.#sleep(head.targetUs + perFrameUs, job.controller.signal);
-          if (!waitOk) {
+        if (job.stopped || this.#closed) return;
+        if (payload.byteLength !== PHASE_2_PCM_FRAME_BYTES)
+          throw new Error("invalid_pcm_frame_size");
+        while (!job.stopped && !this.#closed) {
+          const targetUs = job.firstFrameTargetUs + BigInt(frameIndex) * perFrameUs;
+          // 限制 1/3（未来时长）：超预算提前量时等待时钟追赶。
+          const lead = targetUs - this.#clock.nowUs();
+          if (lead > this.#limits.maxFutureUs) {
+            const waitOk = await this.#sleep(
+              targetUs - this.#limits.maxFutureUs,
+              job.controller.signal,
+            );
+            if (!waitOk) {
+              return;
+            }
+            continue;
+          }
+          if (lead > 0n) {
+            const waitOk = await this.#sleep(targetUs, job.controller.signal);
+            if (!waitOk) {
+              return;
+            }
+          }
+          if (job.stopped || this.#closed) {
             return;
           }
-          continue;
+          // 播放时刻已过：出账（追赶突发不占队列）。
+          this.#pruneQueue();
+          const frameBytes = PHASE_2_PCM_FRAME_BYTES;
+          const queueFull =
+            this.#queue.length >= this.#limits.maxQueuedFrames ||
+            this.#queuedBytes + frameBytes > this.#limits.maxQueuedBytes;
+          const overdueBy = this.#clock.nowUs() - targetUs;
+          if (queueFull && overdueBy <= LATE_DROP_US) {
+            // 限制 2/3（帧数/字节）：队列满但帧仍在有效窗口内——等待队头
+            // 播放出账后重估（不丢有效音频）。
+            const head = this.#queue[0];
+            if (head !== undefined) {
+              const waitOk = await this.#sleep(head.targetUs + perFrameUs, job.controller.signal);
+              if (!waitOk) {
+                return;
+              }
+              continue;
+            }
+          }
+          // 等号对齐 Stage Deadline（now−target ≥ 宽限即拒）：恰好到达阈值
+          // 的帧 Stage 必拒，发送侧直接丢弃（只产生会被接受的帧）。
+          if (queueFull || overdueBy >= LATE_DROP_US) {
+            // 队列满的过期帧 / 超过追赶预算的迟到帧：丢弃重同步（迟到音频
+            // 无播放价值，不洪泛 socket）；sequence 仍严格连续。
+            this.#droppedByLimit += 1;
+            frameIndex += 1;
+            break;
+          }
+          const header: Record<string, string | number> = {
+            schemaVersion: 1,
+            streamId: job.streamId,
+            frameId: this.#frameId(job.sceneId, frameIndex),
+            sessionId: job.sessionId,
+            sceneId: job.sceneId,
+            cueId: job.cueId,
+            // Sequence 只统计到达传输层的帧：丢弃帧不消耗序号（缺号会被
+            // Registry 判 sequence_violation 并关闭整个 Stream）。
+            sequence: job.sentSequence.toString(),
+            targetTimeUs: targetUs.toString(),
+            durationUs: perFrameUs.toString(),
+            contentType: PHASE_2_PCM_CONTENT_TYPE,
+            traceId: job.traceId,
+          };
+          const delivered = this.#sendFrame({ header, payload });
+          if (!delivered) {
+            this.#droppedByTransport += 1;
+          } else {
+            job.sentSequence += 1n;
+            this.#queue.push({ targetUs, bytes: frameBytes });
+            this.#queuedBytes += frameBytes;
+            // sentTotal 只计到达传输层的帧（与 droppedByTransport 不重叠；
+            // mediaStats.sent = 真实送达数）。
+            this.#sentTotal += 1;
+          }
+          frameIndex += 1;
+          break;
         }
       }
-      // 等号对齐 Stage Deadline（now−target ≥ 宽限即拒）：恰好到达阈值
-      // 的帧 Stage 必拒，发送侧直接丢弃（只产生会被接受的帧）。
-      if (queueFull || overdueBy >= LATE_DROP_US) {
-        // 队列满的过期帧 / 超过追赶预算的迟到帧：丢弃重同步（迟到音频
-        // 无播放价值，不洪泛 socket）；sequence 仍严格连续。
-        this.#droppedByLimit += 1;
-        frameIndex += 1;
-        continue;
-      }
-      const start = frameIndex * PHASE_2_PCM_FRAME_BYTES;
-      const payload = job.pcm.pcm.subarray(start, start + PHASE_2_PCM_FRAME_BYTES);
-      const header: Record<string, string | number> = {
-        schemaVersion: 1,
-        streamId: job.streamId,
-        frameId: this.#frameId(job.sceneId, frameIndex),
-        sessionId: job.sessionId,
-        sceneId: job.sceneId,
-        cueId: job.cueId,
-        // Sequence 只统计到达传输层的帧：丢弃帧不消耗序号（缺号会被
-        // Registry 判 sequence_violation 并关闭整个 Stream）。
-        sequence: job.sentSequence.toString(),
-        targetTimeUs: targetUs.toString(),
-        durationUs: perFrameUs.toString(),
-        contentType: PHASE_2_PCM_CONTENT_TYPE,
-        traceId: job.traceId,
-      };
-      const delivered = this.#sendFrame({ header, payload });
-      if (!delivered) {
-        this.#droppedByTransport += 1;
-      } else {
-        job.sentSequence += 1n;
-        this.#queue.push({ targetUs, bytes: frameBytes });
-        this.#queuedBytes += frameBytes;
-        // sentTotal 只计到达传输层的帧（与 droppedByTransport 不重叠；
-        // mediaStats.sent = 真实送达数）。
-        this.#sentTotal += 1;
-      }
-      frameIndex += 1;
+    } finally {
+      await iterator?.return?.();
     }
     if (!job.stopped) {
       this.#jobs.delete(job.sceneId);

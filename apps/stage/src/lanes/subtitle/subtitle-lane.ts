@@ -106,7 +106,12 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
     return { ready: true };
   }
 
-  async start(sceneId: string, atStageUs: bigint, _cues: readonly Cue[]): Promise<void> {
+  async start(
+    sceneId: string,
+    atStageUs: bigint,
+    _cues: readonly Cue[],
+    onStarted?: (atStageUs?: bigint) => void,
+  ): Promise<void> {
     const record = this.#lines.get(sceneId);
     if (record === undefined) {
       return;
@@ -115,6 +120,7 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
     record.startTargetUs = atStageUs;
     record.shownAtUs = this.#clock.nowUs();
     record.line.setVisible(true);
+    onStarted?.(this.#clock.nowUs());
     // 可见性上限兜底：endOfSpeech 永不到达时也必须有界撤下。
     this.#sleep(record, this.#clock.nowUs() + this.#maxVisibleUs, () => {
       this.#hide(sceneId, record);

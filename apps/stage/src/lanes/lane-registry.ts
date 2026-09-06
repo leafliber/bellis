@@ -21,7 +21,12 @@ export interface StageLaneAdapter {
   /** Prepare：只允许验证与缓冲资源；signal 触发即放弃并释放。 */
   prepare(sceneId: string, cues: readonly Cue[], signal: AbortSignal): Promise<LanePrepareResult>;
   /** 生效：atStageUs 为映射后的本地目标时刻（到达或已过）。 */
-  start(sceneId: string, atStageUs: bigint, cues: readonly Cue[]): Promise<void>;
+  start(
+    sceneId: string,
+    atStageUs: bigint,
+    cues: readonly Cue[],
+    onStarted?: (atStageUs?: bigint) => void,
+  ): Promise<void>;
   /** 停止并释放（取消/关闭路径）；reason 为稳定机器码。 */
   stop(sceneId: string, reason: string): Promise<void>;
   /** Lane 全部完成后的资源回收。 */

@@ -1,5 +1,7 @@
 # Bellis Phase 2 完成态参考：演出纵向链路
 
+> 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。
+
 > 文档状态：完成态 v1（Gate 2 通过）  
 > 实施指南：[Phase 2 开发指南](./phase-2-development-guide.md)（含工作包分解与验收标准）  
 > 上游基线：[Phase 1 完成态参考](./phase-1-reference.md)  
@@ -28,11 +30,13 @@ Fake Signal → Fake Model（固定 DecisionPacket）→ ActionFrame 校验
 | --- | --- |
 | `packages/contracts` | ScenePlan/SceneExecutionState/StageCapabilities/PCM 基线常量/Phase2 Snapshot/10 个 Phase 2 消息类型（双 JSON Schema + 三方 fixture 等价） |
 | `packages/transport` | `./browser` 浏览器安全入口（静态扫描强制）；BaseMonotonicClock 共享等待算法 |
-| `packages/scene-runtime` | 纯函数 Action Compiler（确定性拒绝/锚点闭合/能力策略）、PrepareBarrier（hard 全 ready、soft 超时缺席记录）、SceneDirector 状态机（commitAtRuntimeUs 先于 durable 提交选定；DB 失败只发取消；结果不确定即 uncertain 终不自动重试；终态保留窗 128） |
+| `packages/scene-runtime` | 纯函数 Action Compiler（确定性拒绝/锚点闭合/能力策略）、PrepareBarrier（整包 ready 的纯校验；Stage 对 soft 准备限时并报告缺席）、SceneDirector 状态机（commitAtRuntimeUs 先于 durable 提交选定；DB 失败只发取消；结果不确定即 uncertain 终不自动重试；迟到异步结果不改写终态；执行等待 120s 后取消；终态保留窗 128） |
 | `apps/runtime` | Phase2PerformanceService（Signal→Model→Compiler→媒体编排→Director；Scene 级稳定 traceId；版本化审计 Record）、MediaConnection 出站 BELL v1（背压上限）、clientType=stage 连接归属、Snapshot v2 装饰、`phase2.stageDistDir` 静态托管 `/stage/*` |
 | `apps/stage` | StageApp 引导状态机、三 Lane（真实 AudioWorklet/DOM 字幕文本节点/Recording+DOM Avatar）、StageMediaClient（入站 Registry 校验 + 断线有界重连）、CueTimeline（Runtime 时刻映射 + 迟到容忍）、Vite 构建（base=/stage/、Worklet 独立 lib 产物） |
 | `packages/persistence` | Migration 0002 `scenes.plan_json`；commitScene 携带完整 plan |
 | `packages/observability` | Phase 2 Runtime 侧指标目录（§13） |
+
+演出服务依赖可注入的流式 SpeechProvider，发送器逐帧拉取并传播取消，开发入口选择确定性 Fake Provider。started 由 Worklet/DOM 生效确认产生，Runtime 汇总多条 Lane 回执后计算偏差。当前仍无真实 TTS 或首块预缓冲验收，不以调度时间代替实际输出时间。
 
 ## 3. 验收命令与证据（全部通过）
 

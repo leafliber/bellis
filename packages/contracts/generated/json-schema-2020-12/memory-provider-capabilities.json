@@ -78,14 +78,12 @@
   "required": [
     "schemaVersion",
     "providerVersion",
-    "mappingVersion",
     "healthy",
     "categories",
     "placements",
     "observe",
     "usageReport",
-    "persona",
-    "activeSurfaceMode"
+    "persona"
   ],
   "additionalProperties": {
     "$ref": "#/$defs/__schema0"

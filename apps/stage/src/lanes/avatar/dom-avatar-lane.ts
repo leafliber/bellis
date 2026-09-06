@@ -70,10 +70,17 @@ export class DomAvatarLane implements StageLaneAdapter {
     return this.#recorder.prepare(sceneId, cues, signal);
   }
 
-  async start(sceneId: string, atStageUs: bigint, cues: readonly Cue[]): Promise<void> {
+  async start(
+    sceneId: string,
+    atStageUs: bigint,
+    cues: readonly Cue[],
+    onStarted?: (atStageUs?: bigint) => void,
+  ): Promise<void> {
     await this.#recorder.start(sceneId, atStageUs, cues);
     const intent = (cues[0]?.intent ?? {}) as { motion?: string; expression?: string };
+    if (this.#closed) return;
     this.present(intent.motion, intent.expression);
+    onStarted?.(this.#clock.nowUs());
     const endAtUs = atStageUs + BigInt(this.motionDurationMs(cues)) * 1000n;
     const timer = new AbortController();
     this.#running.set(sceneId, timer);

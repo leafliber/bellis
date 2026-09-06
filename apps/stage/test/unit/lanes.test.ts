@@ -55,6 +55,10 @@ class FakeAudioEnvironment implements AudioEnvironment {
     this.#handler?.({ v: 1, op: "ended", sceneId });
   }
 
+  reportStarted(sceneId: string, startedAtStageUs: bigint): void {
+    this.#handler?.({ v: 1, op: "started", sceneId, startedAtStageUs });
+  }
+
   async close(): Promise<void> {
     this.nodeReady = false;
   }
@@ -315,4 +319,26 @@ describe("RecordingAvatarAdapter", () => {
     await adapter.close();
     expect(adapter.commands.at(-1)?.kind).toBe("close");
   });
+});
+
+it("audio start confirmation comes from Worklet rendering and is reported once", async () => {
+  const env = new FakeAudioEnvironment();
+  const lane = new AudioLaneAdapter({
+    environment: env,
+    clock: new VirtualClock(),
+    minPreparedFrames: 1,
+  });
+  await lane.arm();
+  lane.appendFrame("s1", new Int16Array(960));
+  await lane.prepare("s1", AUDIO_CUES, new AbortController().signal);
+  const starts: (bigint | undefined)[] = [];
+  const done = lane.start("s1", 0n, AUDIO_CUES, (at) => starts.push(at));
+  expect(starts).toHaveLength(0);
+  env.reportStarted("other", 10_000n);
+  env.reportStarted("s1", 40_000n);
+  env.reportStarted("s1", 45_000n);
+  expect(starts).toEqual([40_000n]);
+  env.reportEnded("s1");
+  await done;
+  await lane.close();
 });

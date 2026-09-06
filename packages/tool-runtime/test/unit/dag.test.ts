@@ -65,76 +65,27 @@ describe("compileDag", () => {
     }
   });
 
-  it("orders dependencies into deterministic layers", () => {
+  it("rejects explicit and malformed dependencies until the model contract supports them", () => {
     const registry = registryWith(declaration());
-    const result = compileDag(registry, [
-      call(RUN(1)),
-      call(RUN(2), "lookup_quest", {}, [RUN(1)]),
-      call(RUN(3), "lookup_quest", {}, [RUN(2)]),
-    ]);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.layers.map((layer) => layer.map((node) => node.call.toolRunId))).toEqual([
-        [RUN(1)],
-        [RUN(2)],
-        [RUN(3)],
-      ]);
+    for (const dependsOn of [[RUN(2)], "bad", null]) {
+      const input = { ...call(RUN(1)), dependsOn } as ToolCall;
+      expect(compileDag(registry, [input]).issues).toContainEqual(
+        expect.objectContaining({ code: "dependencies_unsupported" }),
+      );
     }
+    expect(compileDag(registry, [call(RUN(1), "lookup_quest", {}, [])]).ok).toBe(true);
   });
 
-  it("rejects cycles", () => {
+  it("rejects unknown tools, duplicate ids and oversized lists", () => {
     const registry = registryWith(declaration());
-    const result = compileDag(registry, [
-      call(RUN(1), "lookup_quest", {}, [RUN(2)]),
-      call(RUN(2), "lookup_quest", {}, [RUN(1)]),
-    ]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.issues.some((issue) => issue.code === "dependency_cycle")).toBe(true);
-    }
-  });
-
-  it("rejects unknown tools, duplicate ids and missing dependencies", () => {
-    const registry = registryWith(declaration());
-    const unknown = compileDag(registry, [call(RUN(1), "nope")]);
-    expect(unknown.issues.some((issue) => issue.code === "unknown_tool")).toBe(true);
-    const duplicate = compileDag(registry, [call(RUN(1)), call(RUN(1))]);
-    expect(duplicate.issues.some((issue) => issue.code === "duplicate_tool_run_id")).toBe(true);
-    const missing = compileDag(registry, [call(RUN(1), "lookup_quest", {}, [RUN(9)])]);
-    expect(missing.issues.some((issue) => issue.code === "dependency_unknown")).toBe(true);
-  });
-
-  it("rejects dependencies on background tools", () => {
-    const registry = registryWith(
-      declaration(),
-      declaration({
-        name: "log_audit",
-        executionMode: "background",
-        semantic: "idempotent",
-        cache: null,
-      }),
-    );
-    const result = compileDag(registry, [
-      call(RUN(1), "log_audit"),
-      call(RUN(2), "lookup_quest", {}, [RUN(1)]),
-    ]);
-    expect(result.issues.some((issue) => issue.code === "dependency_on_background")).toBe(true);
-  });
-
-  it("rejects more than 8 nodes and excessive depth", () => {
-    const registry = registryWith(declaration());
-    const tooMany = compileDag(
-      registry,
-      Array.from({ length: 9 }, (_, index) => call(RUN(index + 1))),
-    );
-    expect(tooMany.issues.some((issue) => issue.code === "too_many_nodes")).toBe(true);
-    const tooDeep = compileDag(
-      registry,
-      Array.from({ length: 5 }, (_, index) =>
-        call(RUN(index + 1), "lookup_quest", {}, index === 0 ? undefined : [RUN(index)]),
-      ),
-    );
-    expect(tooDeep.issues.some((issue) => issue.code === "depth_exceeded")).toBe(true);
+    expect(compileDag(registry, [call(RUN(1), "nope")]).ok).toBe(false);
+    expect(compileDag(registry, [call(RUN(1)), call(RUN(1))]).ok).toBe(false);
+    expect(
+      compileDag(
+        registry,
+        Array.from({ length: 9 }, (_, i) => call(RUN(i + 1))),
+      ).issues,
+    ).toContainEqual(expect.objectContaining({ code: "too_many_nodes" }));
   });
 
   it("builds keyed lock keys from normalized argument values", () => {

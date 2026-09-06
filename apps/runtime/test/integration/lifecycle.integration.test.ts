@@ -11,7 +11,7 @@ import {
   createTempDataDirectory,
   mustExchange,
   originFor,
-  startTestRuntime,
+  startTestRuntime as startRuntimeWithDefaults,
   wrapPersistenceClient,
 } from "../helpers.js";
 import { clientEnvelope, ControlWsClient } from "../ws-client.js";
@@ -369,3 +369,13 @@ describe("关闭顺序：应用任务与 Outbox 先停、再等待连接排空�
     }
   });
 });
+
+/** These historical tests inject failures at individual allocations.
+ * Default batching and restart behavior are covered separately with 1024-ID ranges.
+ */
+function startTestRuntime(options: Parameters<typeof startRuntimeWithDefaults>[0]) {
+  return startRuntimeWithDefaults({
+    ...options,
+    limits: { seqReservationSize: 1, ...options.limits },
+  });
+}

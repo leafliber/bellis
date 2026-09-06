@@ -17,7 +17,8 @@
       "maxLength": 256
     },
     "text": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 65536
     },
     "category": {
       "type": "string",

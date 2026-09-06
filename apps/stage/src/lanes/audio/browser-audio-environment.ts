@@ -109,7 +109,16 @@ export class BrowserAudioEnvironment implements AudioEnvironment {
       throw error;
     }
     node.port.onmessage = (event: MessageEvent) => {
-      this.#workletHandler?.(event.data as WorkletMessage);
+      const message = event.data as WorkletMessage;
+      if (message.op === "started" && message.renderedAtAudioSeconds !== undefined) {
+        // Map the render clock into performance.now's domain; excludes device output latency.
+        const atMs =
+          performance.now() + (message.renderedAtAudioSeconds - context.currentTime) * 1000;
+        this.#workletHandler?.({
+          ...message,
+          startedAtStageUs: BigInt(Math.max(0, Math.round(atMs * 1000))),
+        });
+      } else this.#workletHandler?.(message);
     };
     // 出声链路串接 AnalyserNode（直通音频）：Commit 后的输出能量是
     // 「PCM 真实出声」的浏览器侧证据。

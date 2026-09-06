@@ -1,3 +1,4 @@
+import type { SpeechProvider } from "../performance/speech-provider.js";
 import {
   PHASE_2_PCM_BYTES_PER_SAMPLE,
   PHASE_2_PCM_CHANNELS,
@@ -117,3 +118,50 @@ export function frameAt(result: FakeTtsResult, frameIndex: number): Uint8Array |
 }
 
 export const FAKE_TTS_FRAME_BYTES = PHASE_2_PCM_FRAME_BYTES;
+
+/** Lazy demo generator: one frame allocated at a time, identical to buffered fixtures. */
+export const fakeSpeechProvider: SpeechProvider = {
+  async *stream(speech, signal) {
+    const segments: { start: number; length: number; frequency: number }[] = [];
+    let cursorMs = 0;
+    for (const char of speech.text) {
+      const code = char.codePointAt(0) ?? 0;
+      if (/\s/.test(char)) {
+        cursorMs += 40;
+        continue;
+      }
+      const durationMs = charDurationMs(code);
+      segments.push({
+        start: Math.floor(cursorMs * 48),
+        length: Math.floor(durationMs * 48),
+        frequency: 180 + (code % 12) * 20,
+      });
+      cursorMs += durationMs;
+    }
+    const frameCount = Math.ceil(Math.max(MIN_TOTAL_MS, cursorMs + TAIL_SILENCE_MS) / 20);
+    const phase = (fnv1a32(speech.text) % 1000) / 1000;
+    let segmentIndex = 0;
+    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+      signal.throwIfAborted();
+      const bytes = new Uint8Array(PHASE_2_PCM_FRAME_BYTES);
+      const view = new DataView(bytes.buffer);
+      const firstSample = frameIndex * PHASE_2_PCM_SAMPLES_PER_FRAME;
+      for (let offset = 0; offset < PHASE_2_PCM_SAMPLES_PER_FRAME; offset += 1) {
+        const sample = firstSample + offset;
+        while (
+          segments[segmentIndex] !== undefined &&
+          sample >= segments[segmentIndex]!.start + segments[segmentIndex]!.length
+        )
+          segmentIndex += 1;
+        const segment = segments[segmentIndex];
+        if (segment === undefined || sample < segment.start) continue;
+        const i = sample - segment.start;
+        const t = i / segment.length;
+        const envelope = Math.min(1, t / 0.15, (1 - t) / 0.15) * 0.25;
+        const angle = 2 * Math.PI * segment.frequency * (i / PHASE_2_PCM_SAMPLE_RATE_HZ) + phase;
+        view.setInt16(offset * 2, Math.round(Math.sin(angle) * envelope * 32767), true);
+      }
+      yield bytes;
+    }
+  },
+};
