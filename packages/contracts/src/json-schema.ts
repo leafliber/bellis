@@ -58,6 +58,16 @@ import { ControlPayloadSchema } from "./transport/control-payload.js";
 import { MediaFrameHeaderSchema } from "./transport/media-frame-header.js";
 import { TraceContextSchema } from "./common/trace-context.js";
 import { JsonValueSchema } from "./common/json-value.js";
+import {
+  ContextBlockSchema,
+  ContextContributionSchema,
+  MemoryObserveEventSchema,
+  MemoryProviderCapabilitiesSchema,
+  MemoryQuerySchema,
+  MemoryUsageReportSchema,
+  PersonaInvalidationSchema,
+  PersonaSnapshotSchema,
+} from "./memory/index.js";
 
 /**
  * JSON Schema 双目标生成（ADR 0001 §4）：
@@ -134,6 +144,14 @@ export const CONTRACT_SCHEMA_ENTRIES = {
   "control-envelope": ControlEnvelopeSchema,
   "control-payload": ControlPayloadSchema,
   "media-frame-header": MediaFrameHeaderSchema,
+  "context-block": ContextBlockSchema,
+  "context-contribution": ContextContributionSchema,
+  "memory-query": MemoryQuerySchema,
+  "memory-provider-capabilities": MemoryProviderCapabilitiesSchema,
+  "memory-observe-event": MemoryObserveEventSchema,
+  "memory-usage-report": MemoryUsageReportSchema,
+  "persona-snapshot": PersonaSnapshotSchema,
+  "persona-invalidation": PersonaInvalidationSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type ContractSchemaKey = keyof typeof CONTRACT_SCHEMA_ENTRIES;

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "incremental": false,
+    "rootDir": ".",
+    "outDir": "dist",
+    "paths": {
+      "@bellis/contracts/memory": ["../../packages/contracts/dist/memory/index.d.ts"],
+      "@bellis/testkit": ["../../packages/testkit/dist/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}

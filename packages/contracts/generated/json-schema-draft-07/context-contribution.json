@@ -1,0 +1,311 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "mappingVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "priorityDerivationVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+          },
+          "contentHash": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "text": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "viewer",
+              "relationship",
+              "fact",
+              "episode",
+              "task"
+            ]
+          },
+          "providerCategory": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "placement": {
+            "type": "string",
+            "enum": [
+              "working",
+              "memory"
+            ]
+          },
+          "priority": {
+            "type": "number"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "tokenEstimate": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "expiresAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "privacyScope": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "privacyLabels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "conflictHint": {
+            "type": "string",
+            "enum": [
+              "conflicts",
+              "redundant"
+            ]
+          },
+          "sourceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "contentHash",
+          "text",
+          "category",
+          "placement",
+          "priority",
+          "tokenEstimate",
+          "privacyScope",
+          "sourceRefs"
+        ],
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
+      }
+    },
+    "returnedBlockIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "sourceWatermark": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "completedRoutes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "degradedRoutes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "fallback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "route",
+          "reasonCode",
+          "retryable",
+          "fallback"
+        ],
+        "additionalProperties": {
+          "$ref": "#/definitions/__schema0"
+        }
+      }
+    },
+    "partial": {
+      "type": "boolean"
+    },
+    "cacheUntil": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nextWakeAt": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "personaRevision": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "personaContentHash": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "audit": {
+      "type": "object",
+      "properties": {
+        "droppedCandidateIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "providerTrace": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/__schema0"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "droppedCandidateIds"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/__schema0"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "providerId",
+    "requestId",
+    "mappingVersion",
+    "priorityDerivationVersion",
+    "blocks",
+    "returnedBlockIds",
+    "sourceWatermark",
+    "completedRoutes",
+    "degradedRoutes",
+    "partial",
+    "cacheUntil",
+    "nextWakeAt",
+    "personaRevision",
+    "personaContentHash",
+    "audit"
+  ],
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "adapterVersion": "0.1.0",
+  "mappingVersion": 1,
+  "priorityDerivationVersion": 1,
+  "core": {
+    "packageVersion": {
+      "minimum": "0.11.0",
+      "current": "0.11.0",
+      "maximum": "0.11.x"
+    },
+    "apiVersion": {
+      "minimum": "v1",
+      "current": "v1",
+      "maximum": "v1"
+    },
+    "schemaVersion": {
+      "minimum": 11,
+      "current": 11,
+      "maximum": 11
+    },
+    "contractVersion": {
+      "minimum": "1.9.0",
+      "current": "1.9.0",
+      "maximum": "1.9.x"
+    },
+    "typescriptSdk": {
+      "minimum": "0.11.1",
+      "current": "0.11.1",
+      "maximum": "0.11.x"
+    }
+  },
+  "requiredCapabilities": [
+    "contract.negotiation",
+    "observe.batch.v1",
+    "persona.read.v1",
+    "recall.usage.v1",
+    "recall.v1",
+    "source-cursor.v1"
+  ],
+  "optionalCapabilities": [
+    "active-surface.v1",
+    "events.sse.v1"
+  ],
+  "forwardCompatibility": {
+    "unknownOptionalFields": "accept-and-preserve-at-audit-boundary",
+    "unknownCoreCategories": "drop-and-diagnose",
+    "unknownRequiredSchema": "fail-closed"
+  }
+}

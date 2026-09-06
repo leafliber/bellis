@@ -1,0 +1,7 @@
+# ADR-0020 §11.2 stage one: `providers/*` is not in the host workspace yet, so
+# this package installs standalone (`pnpm install --ignore-workspace`) and needs
+# its own policy file. The Core SDK is published to the local Verdaccio moments
+# before it is consumed, so it can never satisfy minimumReleaseAge; the exclusion
+# goes away with the move to public npm, when this whole file does.
+minimumReleaseAgeExclude:
+  - '@iris-memory/sdk@0.11.1'

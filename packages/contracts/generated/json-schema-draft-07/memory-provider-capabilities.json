@@ -1,0 +1,126 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "providerVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "mappingVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "healthy": {
+      "type": "boolean"
+    },
+    "degradedReason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "viewer",
+          "relationship",
+          "fact",
+          "episode",
+          "task"
+        ]
+      }
+    },
+    "placements": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "working",
+          "memory"
+        ]
+      }
+    },
+    "observe": {
+      "type": "boolean"
+    },
+    "usageReport": {
+      "type": "boolean"
+    },
+    "persona": {
+      "type": "boolean"
+    },
+    "activeSurfaceMode": {
+      "type": "string",
+      "enum": [
+        "off",
+        "advisory",
+        "required"
+      ]
+    },
+    "coreApiVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "coreSchemaVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "providerVersion",
+    "mappingVersion",
+    "healthy",
+    "categories",
+    "placements",
+    "observe",
+    "usageReport",
+    "persona",
+    "activeSurfaceMode"
+  ],
+  "additionalProperties": {
+    "$ref": "#/definitions/__schema0"
+  },
+  "definitions": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

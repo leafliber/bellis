@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "queryId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "spaceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "spaceGroupId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sessionId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "actors": {
+      "minItems": 1,
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "externalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "realm": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "provider",
+          "externalId"
+        ],
+        "additionalProperties": {
+          "$ref": "#/$defs/__schema0"
+        }
+      }
+    },
+    "topic": {
+      "type": "string",
+      "minLength": 1
+    },
+    "purpose": {
+      "type": "string",
+      "enum": [
+        "reply",
+        "planning",
+        "reflection",
+        "tool"
+      ]
+    },
+    "privacyScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "requestedPrivacyLabels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      }
+    },
+    "categories": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "viewer",
+          "relationship",
+          "fact",
+          "episode",
+          "task"
+        ]
+      }
+    },
+    "minimumWatermark": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "allowPartial": {
+      "type": "boolean"
+    },
+    "includeTrace": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "queryId",
+    "agentId",
+    "spaceId",
+    "actors",
+    "topic",
+    "purpose",
+    "privacyScope"
+  ],
+  "additionalProperties": {
+    "$ref": "#/$defs/__schema0"
+  },
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}

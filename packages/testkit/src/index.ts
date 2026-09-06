@@ -11,6 +11,8 @@ export { createDeterministicRandom } from "./deterministic-random.js";
 export type { DeterministicRandom } from "./deterministic-random.js";
 export { createTempDataDirectory, isSafeCleanupTarget } from "./temp-data-directory.js";
 export type { TempDataDirectory } from "./temp-data-directory.js";
+export { assertMemoryProviderConformance } from "./memory-provider-conformance.js";
+export type { MemoryProviderConformanceCase } from "./memory-provider-conformance.js";
 export {
   FIXTURE_CUE_ID,
   FIXTURE_CYCLE_ID,
