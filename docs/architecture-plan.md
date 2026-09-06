@@ -342,9 +342,9 @@ decisionLoop:
 模型流被增量解析为四类片段：文本、结构化工具调用、Avatar 意图和其他 Action 意图。
 
 - 一句话达到稳定边界并通过内容策略后，可提前启动 TTS Prepare。
-- 工具参数在 JSON 完整并验证后立即进入 Tool Scheduler。
+- 工具参数在 JSON 完整并验证后可编译内存 DAG；当前所有 Tool 均在完整包校验和 durable Cycle adoption 成功后启动，不允许流式阶段执行可变工具。
 - 所有准备均可提前开始，但只有完整 DecisionPacket 通过校验后才能 Commit。
-- 模型断流时，未提交内容全部取消；已经播放的内容记录为 partial，并由下一 Cycle 自然衔接。
+- 模型在 final/adoption 前断流时，未提交准备全部取消，此时不会已有本 Cycle 的播放。已提交 Scene 的后续媒体中断另按播放确认处理，不能把计划文本当作已生效输出。
 
 ## 8. 面向低等待的并行执行
 
@@ -628,33 +628,25 @@ Scene Director 只负责高层开始、抢占和结束；技能内部的帧级�
 
 外部记忆 Provider 可以提供以下一个或多个接口：
 
-```ts
-interface ExternalMemoryProvider {
-  id: string;
-
-  provideContext?(
-    request: MemoryContextRequest,
-    signal: AbortSignal
-  ): Promise<MemoryContextResult>;
-
-  listTools?(): Promise<ToolDescriptor[]>;
-  executeTool?(
-    call: ToolCall,
-    signal: AbortSignal
-  ): Promise<ToolResult>;
-
-  observe?(
-    records: SessionRecord[],
-    signal: AbortSignal
-  ): Promise<void>;
-}
-```
+具体 Port 以 [`@bellis/contracts/memory`](../packages/contracts/src/memory/index.ts) 为准；本节只说明能力边界，不定义另一份可实现接口。当前契约与 Iris Provider 为原型；宿主 Memory Gateway 和 Memory Tools 仍属 Phase 4 交付目标，见 [Phase 4 指南](./phase-4-development-guide.md)。
 
 1. **Context 接口**：在模型请求前自动贡献相关用户关系、历史事实和未完成事项。
 2. **Tool 接口**：允许模型主动搜索、记住、纠正或忘记信息。
 3. **Observe 接口**：异步接收会话记录，用于外部系统抽取和更新记忆。
 
 前两个接口是用户要求的核心能力；Observe 用于避免每次记忆写入阻塞当前直播响应。
+`start`/`stop` 让 Provider 持有连接、后台刷新与有界本地队列；`reportUsage`
+回传本 Cycle 的 returned / hostSelected / modelVisible 三个集合，走 Observe
+Outbox 异步投递，不进入回复关键路径。
+
+Provider 只允许依赖 `@bellis/contracts` 的 `memory` 子路径，
+不得依赖 runtime、persistence、transport 或 scene-runtime。注册由配置驱动
+（`MemoryProviderRegistry`），这是一条窄插件缝而非完整 Plugin SDK——
+热更新、沙箱隔离、Marketplace 与第三方 UI 仍不在范围内。
+
+第一方 Provider 住在仓内的 `providers/` 下（如 `providers/memory-iris/`），
+与仓库外实现受完全相同的依赖与 Conformance 约束；它们是插件，不是核心包，
+因此不放在 `packages/`。
 
 ### 13.2 Context Block
 
@@ -663,20 +655,29 @@ Provider 不能直接插入或修改模型消息，只返回声明式内容：
 ```ts
 interface ContextBlock {
   id: string;
-  revision: string;
-  contentHash: string;
+  revision: string;                 // 十进制字符串，只做相等与单调判定
+  contentHash: string;              // 来源存证，对 Provider 原始字节校验
   text: string;
   category: "viewer" | "relationship" | "fact" | "episode" | "task";
+  providerCategory?: string;        // Provider 原始分类，保留来源语义
+  placement: "working" | "memory";  // 预算池归属
   priority: number;
-  confidence: number;
+  confidence?: number;              // Provider 只有相关性排序时不得伪造
   tokenEstimate: number;
   expiresAt?: number;
-  privacyScope: string;
-  sourceRefs: string[];
+  privacyScope: string;             // 宿主可信 identity/privacy domain
+  privacyLabels?: readonly string[];         // Provider 声明的隐私标签
+  conflictHint?: "conflicts" | "redundant";  // 冲突分组的输入，不是结论
+  sourceRefs: readonly string[];    // 可逆 URN：<provider>:<type>:<id>@<rev>
 }
 ```
 
 Memory Gateway 负责并行查询、身份隔离、Token 预算、去重、冲突检测和排序。最终被采用的 Context Block 必须写入本次 Cycle 记录，确保能够回答“模型当时究竟看到了什么”。
+
+字段裁决见 [ADR 0005](./adr/0005-memory-provider-seam-and-persona-ownership.md) 决策 2：
+`contentHash` 是来源存证而非规范化摘要，去重另存 `normalizedHash`；`category`
+保持闭枚举且未知值 fail closed；`privacyScope` 始终由宿主拥有，Provider 标签
+只能进入 `privacyLabels`。
 
 ### 13.3 多 Provider 策略
 
@@ -704,6 +705,63 @@ MCP 只作为外部知识和工具边界，不承担音频流、Live2D 参数流
 - 外部写入采用幂等键；重试不能产生重复记忆。
 - 遗忘产生 tombstone 与 revision，防止旧缓存或其他 Provider 重新注入已删除内容。
 
+### 13.6 人格记忆归属
+
+人格（Persona）的**事实源在外部记忆系统**，Bellis 拥有人格的表达与安全边界。
+完整裁决见 [ADR 0005](./adr/0005-memory-provider-seam-and-persona-ownership.md) 决策 3。
+
+| 层 | 归属 |
+| --- | --- |
+| 安全与直播规则、输出协议、稳定 Tool Schema | Bellis Runtime，不可被外部覆盖 |
+| 人格身份、性格、叙事 | 外部记忆系统 |
+| 人格瞬时状态（随时间衰减回 baseline） | 外部记忆系统 |
+| 演化策略、提案、评审、发布、回滚与历史 | 外部记忆系统 |
+| 人格渲染为 Stable Prefix 文本 | Bellis |
+| 取不到人格时能否开播 | Bellis |
+
+人格通过独立于 Memory Gateway 的 `PersonaSource` Port 进入，返回**结构化数据
+而非 Prompt 文本**：
+
+```ts
+interface PersonaSource {
+  readonly id: string;
+  start?(ctx: PersonaSourceContext): Promise<void>;
+  stop?(): Promise<void>;
+  current(agentId: string, signal: AbortSignal): Promise<PersonaSnapshot>;
+  subscribe?(onInvalidated: (e: PersonaInvalidation) => void): Disposable;
+}
+
+interface PersonaSnapshot {
+  agentId: string;
+  revision: string;
+  contentHash: string;
+  policyMode: "locked" | "manual" | "bounded_auto";
+  core: PersonaFields;
+  traits: PersonaFields;
+  narrative: PersonaFields;
+  state: { fields: PersonaFields; baseline: PersonaFields; expiresAt: number } | null;
+  effectiveFrom: number;
+  fetchedAt: number;
+  origin: "live" | "verified-cache" | "static-fallback";
+}
+```
+
+四条约束：
+
+- **结构化而非文本**：Bellis 用自己的确定性模板渲染，外部系统无法注入指令，
+  Prompt 单一所有权不外包。
+- **两条时间轴**：发布版本进 Stable Prefix 并触发新 `promptEpoch`；瞬时状态进
+  Dynamic Tail 的可信块，**不影响 `promptEpoch`**，以免情绪变化击穿前缀缓存。
+- **预取而非前台等待**：按 §8.3，人格在 `start()` 与失效通知时编译，Cycle 内
+  零网络等待；换入发生在 Cycle 边界之外，进行中的 Cycle 保持其快照人格。
+- **Persona 不得提权**：渲染器丢弃任何试图声明工具权限、改写输出协议或放宽
+  安全规则的字段并告警。
+
+Runtime 配置中的 `staticPersona` 是离线兜底，不是事实源。启动时取不到人格、
+无已验证缓存且无静态兜底，宿主进入 not ready 而非使用未知人格；发布版本被
+撤销（`revoked`）时立即 fail closed。
+
+
 ## 14. 上下文与缓存
 
 ### 14.1 Context Builder
@@ -712,8 +770,8 @@ MCP 只作为外部知识和工具边界，不承担音频流、Live2D 参数流
 
 ```text
 Stable Prefix
-  - 角色设定
-  - 安全与直播规则
+  - 安全与直播规则      ← Runtime 拥有，Persona 永不覆盖
+  - Persona Slot        ← 由 PersonaSource 渲染（§13.6）
   - 稳定工具 Schema
   - 输出协议
 
@@ -723,15 +781,23 @@ Append-only Conversation
 Dynamic Tail
   - 当前 Audience Batch
   - World Snapshot 摘要
+  - Persona 瞬时状态（trusted，不影响 promptEpoch）
   - 本 Cycle Memory Context Blocks
   - 中断或优先指令
 ```
 
 动态记忆放在尾部，不每次改写 System Prompt 或旧历史，以保留模型 Provider 的精确前缀缓存命中。
+人格的**瞬时状态**同样属于动态部分，进入 Dynamic Tail 的可信块；只有人格的
+**发布版本**进入 Stable Prefix。
+
+安全与直播规则排在 Persona 之前：人格成为外部可变数据后，不能再排在宿主
+安全边界之上，否则等价于允许外部记忆隐式提权。
 
 ### 14.2 Prompt Epoch
 
-角色、规则、输出协议或工具 Schema 发生变化时生成新的 `promptEpoch`。同一 Epoch 内保证：
+角色、规则、输出协议或工具 Schema 发生变化时生成新的 `promptEpoch`。人格侧参与
+计算的输入是 `(agentId, personaRevision, personaContentHash, rendererVersion)`
+四元组；人格瞬时状态**不参与**。同一 Epoch 内保证：
 
 - 字节级稳定的 System 内容。
 - 固定的工具顺序与规范化 JSON Schema。
@@ -882,52 +948,16 @@ Turn、Cycle、Tool Batch、Scene 和 Game Skill 形成父子取消域。高层�
 
 ## 19. 技术选型与工程布局
 
-### 19.1 建议技术栈
+### 19.1 工程决策入口
 
-- 主 Runtime：TypeScript/Node.js，负责 Loop、插件、调度、场景和 Web 协议。
-- Studio 与 Overlay：React，包含 Live2D 渲染、配置、监控和直播页面。
-- 本地记录：开发期 SQLite；多实例部署再评估 PostgreSQL。
-- Python Worker：按需承载 CV、OCR、特定游戏生态和已有 AI 库。
-- 跨进程协议：JSON Schema 起步，稳定后对高频链路使用 Protobuf/gRPC。
-- Rust Sidecar：仅在性能数据证明音频时钟或输入抖动不达标时引入。
+具体技术栈与目标目录统一维护在 [技术选型基线](./technology-selection.md)，当前能力与命令见 [构建与验收状态](./build-and-validation.md)。
 
-选择 TypeScript 是为了让 Runtime、插件协议、Live2D Web 客户端和 Overlay 共享类型，而不是为了追随某个参考项目。
-
-### 19.2 目录建议
-
-```text
-apps/
-  runtime/                 # 主进程与 API
-  studio/                  # 配置、调试、Live2D 与 Overlay
-packages/
-  domain/                  # Signal、Cycle、Action、Scene 类型
-  decision-loop/           # Turn/Cycle、收件箱、模型流解析
-  context/                 # Context Builder、预算、Prompt Epoch
-  scheduler/               # Tool DAG、资源锁、Deadline、取消
-  scene-director/          # Scene、Cue、Timeline、时钟
-  session-records/         # 记录、投影、恢复
-  plugin-sdk/              # Manifest、能力接口、测试套件
-  observability/           # Trace、Metrics、成本
-plugins/
-  platform-bilibili/
-  model-openai-compatible/
-  memory-local/
-  memory-mcp/
-  tts-*/
-  avatar-live2d/
-  game-*/
-  output-obs/
-workers/
-  python/
-docs/
-  README.md
-  architecture-plan.md
-  technology-selection.md
-  phase-1-reference.md
-  phase-2-development-guide.md
-  protocols/
-  adr/
-```
+- Runtime 使用 Node.js/TypeScript；Studio/Stage 使用浏览器，演出端与操作台分离。
+- 状态使用 SQLite；不预设分布式部署或 PostgreSQL 迁移。
+- 游戏真实输入必须通过 Rust Sidecar、租约、心跳和 Arm，不能以“性能尚可”为由绕过安全边界。
+- Rust/Python 边界采用 Protobuf/gRPC，Python 仅承担可选视觉能力。
+- 包名采用 contracts、decision-loop、tool-runtime、scene-runtime、persistence；Phase 4 的 context-builder、memory-runtime、persona-runtime、avatar-runtime 仍是规划包。
+- 仓内独立 Memory Provider 置于 providers/；第三方插件产品化另有阶段，不与核心 workspace 包混淆。
 
 ## 20. 交付计划
 
@@ -936,10 +966,10 @@ docs/
 ### Milestone 1：可说、可看、可打断
 
 Phase 2 已完成本 Milestone 的确定性演出骨架；完成事实见
-[Phase 2 完成态参考](./phase-2-reference.md)。当前 Phase 3 接入模拟 Signal
-Pipeline、单 Provider Decision Loop 与 Tool Runtime，范围边界和工作包见
-[Phase 3 开发指南](./phase-3-development-guide.md)。真实流式 TTS Provider
-仍留在后续能力切片。
+[Phase 2 完成态参考](./phase-2-reference.md)。Phase 3 已接入模拟 Signal
+Pipeline、单 Provider Decision Loop 与 Tool Runtime；完成事实见
+[Phase 3 完成态参考](./phase-3-reference.md)。真实流式 TTS Provider 仍留在
+后续能力切片。
 
 - Signal Hub 与一个模拟弹幕输入。
 - 单 Provider LLM Decision Loop。
@@ -959,6 +989,9 @@ Pipeline、单 Provider Decision Loop 与 Tool Runtime，范围边界和工作�
 
 ### Milestone 3：主动角色与直播平台
 
+当前 Phase 4 实现本 Milestone 的 Presence Engine、Avatar Mixer 与资源仲裁核心；
+阶段范围和工作包见 [Phase 4 构建指南](./phase-4-development-guide.md)。
+
 - Presence Engine、受约束随机行为和 Avatar Mixer。
 - 正式 Bilibili 插件与 Audience Batcher。
 - 礼物、关注、弹幕主题和工具等待状态的主动反应。
@@ -966,6 +999,9 @@ Pipeline、单 Provider Decision Loop 与 Tool Runtime，范围边界和工作�
 验收：没有模型请求时角色仍自然；Agent 动作能抢占主动动作并在结束后自然恢复。
 
 ### Milestone 4：外部记忆
+
+当前 Phase 4 同时实现本 Milestone 的 Context、Memory Provider、MCP Adapter
+与 Observe Outbox。
 
 - Context、Tool、Observe 三个 Memory 接口。
 - 一个本地 Provider、一个 HTTP/gRPC Provider、一个 MCP Adapter。

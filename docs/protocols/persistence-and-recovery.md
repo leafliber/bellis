@@ -369,3 +369,8 @@ W4 Lease 期间（in_flight 时被杀）
    `outboxId` 幂等。关闭顺序：先 stop Dispatcher（Grace），再
    `client.close()`。
 5. 生产装配不注入 `checkpointObserver`、不注入测试 Migration 注册表。
+
+## Phase 3 来源与序号补充（ADR 0006）
+
+Signal 去重使用 `(sessionId, source, signalId)`。Migration 0005 从旧 signal_json 的 source 建表达式唯一索引，不更改历史 ID/序号及 Migration checksum。
+序号按规范十进制 TEXT 存取，查询按 `length(sequence), sequence` 数值排序，递增使用 bigint；禁止用 SQLite INTEGER 或 JS number 处理中间值。容量统计、最大值和恢复采用相同无损规则，测试覆盖 9→10、2^53 和 2^63。

@@ -198,10 +198,12 @@ Phase 2 演出消息的语义、时间字段与 reason 码见
 
 ## 5. Seq / ACK / Replay（服务端 → 客户端）
 
-- 每个**逻辑 Session** 的服务端消息 `seq` 严格递增（从 1 开始），不因连接
-  重建归零。逻辑会话状态（`nextSeq` / `confirmedAck` / Replay Window / 未发送
-  暂存消息）由 P4 在重连时通过 `ControlSession` 的 resume 导入；跨重启恢复由
-  P2/P4 持久化。
+- 每个**逻辑 Session** 的服务端消息 `seq` 严格递增（从 1 开始），不因连接重建归零。
+  同进程重连通过内存导出的 `nextSeq / confirmedAck / replay / pending` 恢复。
+  当前 Runtime 跨重启只持久化最新分配 Seq，不持久化 Replay/pending 内容；
+  重启时以空 Replay 窗口恢复，客户端有历史缺口或未带 lastAck 时走 Snapshot 对账。
+  若 lastAck 已覆盖持久化水位，则可以继续新消息，无须补播历史。
+
 - **Seq 在消息实际发送时分配**（而不是入队时）：发送优先级只作用于 Seq
   分配之前的准入、淘汰、合并与调度。被淘汰/合并/过期的消息从未消耗 Seq、
   从未进入 Replay Window，因此线上 Seq 严格递增且无缺口，累计 ACK 语义
@@ -218,18 +220,10 @@ Phase 2 演出消息的语义、时间字段与 reason 码见
 - `lastAck + 1` 早于窗口最旧条目（缺口超出窗口）→ 服务端产生
   `snapshot_required` 内部 Effect，由 P4 读取 Persistence 后发送完整
   `session.snapshot`，不补发不完整历史。
-- 心跳 Pong 与 Clock Pong 也消耗 Seq 并占用窗口（排除会造成虚假缺口），
-  标记为 `persistable=false`。持久化语义拆分为两层：
-  - **最新分配水位（nextSeq）必须为包括瞬时消息在内的一切 Seq 推进持久化**，
-    否则进程重启后会复用 Seq（客户端去重误判、ACK 超前甚至 4003 关闭）；
-  - `persistable=false` 仅表示不持久化该消息的 **Replay 内容**（瞬时消息
-    重放无意义）。
-- **持久化过滤造成的缺口**：跨重启只恢复 `persistable=true` 条目时，被过滤
-  的瞬时 Seq 会在恢复后的窗口中留下内部或尾部缺口。恢复时由（条目集合，
-  水位）推导缺口区间；`replayAfter` 的请求区间 `(lastAck, latest]` 只要碰到
-  缺口即返回 `snapshot_required`——累计 ACK 语义下客户端无法越过缺口推进
-  确认，只能走完整快照。客户端 ACK 覆盖缺口（重启前已完整收到瞬时消息）
-  后，缺口不再阻塞后续重放。
+- 心跳 Pong 与 Clock Pong 也消耗 Seq 并占用内存窗口；所有消息的最新分配水位都必须持久化，避免重启复用 Seq。
+- `persistable` 是 Transport 导出状态供可选持久化适配器使用的元数据，当前 Runtime 没有装配 Replay 内容持久化。
+  Transport 支持导入过滤后的窗口，并在 `(lastAck, latest]` 碰到内部或尾部缺口时要求 Snapshot；
+  这是包级可选能力，不能推导当前 Runtime 已有磁盘 Replay 日志。
 
 ## 6. 客户端幂等（client → server）
 
@@ -353,15 +347,15 @@ onTextMessage(text):
 onWsOpenFlush / 定时:
   pump(): for effect of session.tick(clock.nowUs()):
     send  → socket.write(effect.text)
-    seq_advanced → 持久化最新分配水位（所有消息，含瞬时消息；
-                   persistable=false 仅跳过该消息的 Replay 内容持久化）
+    seq_advanced → 持久化最新分配水位（所有消息，含瞬时消息；当前不存 Replay 内容）
     snapshot_required → 读 Persistence 后 enqueueServerMessage("session.snapshot")
     dropped → 记账指标（类别+数量）
     close   → socket.close(effect.code, effect.reason)；释放 registry.closeAll()
 
 onDisconnect:
   state = session.exportLogicalState()   # nextSeq / confirmedAck / replay / pending
-  # 持久化 nextSeq 与 persistable=true 的 replay/pending 内容；重连用 resume 恢复。
+  # 同进程保存内存导出状态供 resume 使用；磁盘只保存最新分配 Seq。
+  # 跨重启导入空 replay，通过 lastAck 与水位决定继续或 Snapshot 对账。
   # 恢复会话在 client.hello（含 lastAck）之前不会发送新消息——重放先行。
 
 onClose:

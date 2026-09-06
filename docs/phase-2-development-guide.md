@@ -1,6 +1,6 @@
 # Bellis Phase 2 开发指南：演出纵向链路
 
-> 文档状态：完成态 v1（Gate 2 通过；实现事实见 [Phase 2 完成态参考](./phase-2-reference.md)）  
+> 文档状态：历史实施计划（实现事实见 [Phase 2 完成态参考](./phase-2-reference.md)，现行命令见 [构建与验收状态](./build-and-validation.md)）
 > 阶段状态：完成  
 > 上游基线：[Phase 1 完成态参考](./phase-1-reference.md)  
 > 后续实施：[Phase 3 开发指南](./phase-3-development-guide.md)
@@ -9,7 +9,7 @@
 
 ## 0. 如何使用本文
 
-本文把技术路线中的“阶段二：演出纵向链路”拆成可开发、可并行、可验收的工作包。实施时遵循以下顺序：
+本文保留阶段二的原始工作包和设计依据。以下是历史实施顺序，不是当前待执行任务；现行行为以完成态参考和稳定协议为准：
 
 1. 先完成 Gate 0 基线检查和 P0 Contracts/协议冻结，解决跨 Runtime/Stage 的契约缺口；
 2. P1 Scene Runtime 与 P2 Stage Core 从同一 Gate Commit 并行；
@@ -618,10 +618,11 @@ streamMarathon=ok(scenes=9+, opened>=11, rejected=0)
 
 ### 10.3 阶段完成命令
 
-以下根脚本是 Phase 2 交付并接入 CI 的验收命令（均已存在并通过）：
+以下是 Phase 2 的复验命令。CI 通过 `pnpm check` 与 `pnpm test:acceptance` 执行构建、基础检查及 Phase 1–3 阶段回归；一次本地通过不代替双平台 CI 结果：
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm --filter @bellis/stage exec playwright install chromium  # 首次运行/浏览器版本更新时
 pnpm check          # typecheck + lint + format + 全部单测/集成/性质测试
 pnpm build
 pnpm contracts:check
@@ -673,7 +674,8 @@ flowchart LR
 ### 12.1 Gate 0：Phase 1 基线
 
 - 工作树状态已确认，未覆盖用户未提交修改；
-- `pnpm install --frozen-lockfile`、`pnpm check`、`pnpm build`、`pnpm demo:phase1` 通过；
+- `pnpm install --frozen-lockfile
+pnpm --filter @bellis/stage exec playwright install chromium  # 首次运行/浏览器版本更新时`、`pnpm check`、`pnpm build`、`pnpm demo:phase1` 通过；
 - Node/Package Manager 与 ADR 0002 一致；
 - Phase 1 稳定协议和公开入口已阅读。
 

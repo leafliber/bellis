@@ -6,7 +6,7 @@
 >
 > 首发平台：Windows 11 x64
 >
-> 更新日期：2026-08-19
+> 更新日期：2026-09-06
 >
 > 关联文档：[系统架构设计](./architecture-plan.md)
 
@@ -33,7 +33,7 @@ Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.j
 | 主语言 | TypeScript 7.x、ESM | Runtime、协议、Studio 和插件 SDK |
 | 包管理 | pnpm Workspace | Monorepo、依赖锁定和任务编排 |
 | Lint / Format | Oxlint + Oxfmt | 与 TypeScript 7 原生工具链对齐；`tsc -b` 仍是类型检查真相源 |
-| Runtime API | Fastify 5.10.x | REST、WebSocket、OpenAPI 和静态资源 |
+| Runtime API | Fastify 5.x（精确版本见 apps/runtime/package.json） | REST、WebSocket、OpenAPI 和静态资源 |
 | Studio | React 19.2 + Vite 8.x | 操作台、配置、调试、监控和回放 |
 | UI | Tailwind CSS 4 + Radix UI | 设计系统和基础无障碍组件 |
 | 前端状态 | TanStack Query + Zustand | REST 服务端状态和高频实时状态分离 |
@@ -127,10 +127,11 @@ packages/
 plugins/
   platform-*/              # 弹幕与直播平台插件
   model-*/                 # LLM Provider 插件
-  memory-*/                # 记忆系统插件
   tts-*/                   # TTS Provider 插件
   avatar-*/                # Avatar Provider 插件
   game-*/                  # 游戏观察和技能插件
+providers/
+  memory-*/                # 独立 Provider 过渡目录（ADR 0005/0006）
 crates/
   game-sidecar/            # Rust 游戏输入和安全控制
 workers/
@@ -402,22 +403,17 @@ PRAGMA busy_timeout = 3000;
 
 ### 10.2 提交与恢复
 
-Scene Commit 和 Signal Watermark 在同一事务写入：
+Phase 3 的消费边界是独立 `Cycle adoption` 事务（[ADR 0004](./adr/0004-phase-3-decision-boundaries.md)）：
 
 ```text
-验证 Scene
-  → 事务写入 scene_committed + signal_watermark + outbox
-  → Commit
-  → 分发 Cue
-  → 标记 Outbox 完成
+最终 DecisionPacket 校验
+  → adoption：Cycle/Packet 摘要 + 消费水位 + Tool planned + 审计
+  → Scene 准备/提交 与 Tool 执行并行
+  → 各自持久化真实结果
 ```
 
-重启时：
-
-- 已提交 Scene 可以按 Cue 幂等状态恢复或确认完成。
-- 未提交 Scene 直接废弃，不产生外部副作用。
-- Tool 使用 `toolRunId` 防止非幂等调用自动重放。
-- 游戏输入由 Sidecar Watchdog 在 Runtime 断开时立即释放。
+`noOp`、仅 Tool 或 Scene 编译拒绝同样可以消费 Cycle；不得依赖 Scene Commit 推进所有决策水位。
+Phase 1/2 兼容入口仍使用其 Scene 提交事务。重启后未采用决策不推进水位；已采用决策不重新问模型，Scene 不自动补播，非幂等 Tool 不自动重试。Scene 调度提交并不是输出已经播放的证明；Phase 4 的输出确认/Observe 方案见 ADR 0006。
 
 ## 11. 缓存设计
 
@@ -455,51 +451,11 @@ hash(
 
 ## 12. 外部记忆接入
 
-内部定义稳定的 `MemoryProvider`：
+Memory 插件和 Persona 的当前代码入口为 [`@bellis/contracts/memory`](../packages/contracts/src/memory/index.ts)。这里不复制第二份 Port 或 ContextContribution 定义。
 
-```ts
-interface MemoryProvider {
-  provideContext(
-    input: MemoryQuery,
-    options: {
-      tokenBudget: number;
-      deadlineMs: number;
-    },
-    signal: AbortSignal
-  ): Promise<ContextContribution>;
+当前仓库有契约与独立 Iris Provider 原型，Memory Gateway、Context Builder、Persona Runtime 和宿主 Observe Outbox 尚待 Phase 4 实施；没有已交付的宿主纵向链路。当前 Port 含 capabilities/provideContext 与可选 observe/reportUsage/start/stop；Memory Tool 接口需要 P0 单独冻结，不能把规划示例当成已导出类型。
 
-  listTools(signal: AbortSignal): Promise<ToolDefinition[]>;
-
-  executeTool(
-    call: ToolCall,
-    signal: AbortSignal
-  ): Promise<ToolResult>;
-
-  observe?(event: CommittedEvent): Promise<void>;
-}
-```
-
-外部系统通过以下方式连接：
-
-- 原生 HTTP/gRPC MemoryProvider。
-- MCP v2 Adapter，支持本地 stdio 和 Streamable HTTP。
-
-记忆系统不能任意改写 Prompt，而是返回带元数据的 Context Contribution：
-
-```ts
-interface ContextContribution {
-  providerId: string;
-  blocks: ContextBlock[];
-  revision?: string;
-  cacheUntil?: number;
-  confidence?: number;
-  privacyDomain?: string;
-}
-```
-
-Base Context、World Snapshot、Audience Batch 和各 Memory Provider 并行构建。Context Builder 最终统一执行排序、Token 裁剪、去重、隐私过滤和来源标记。
-
-默认外部记忆 Deadline 为 150–250ms。超时后使用可接受的短期缓存或无记忆降级，不阻塞整个 DecisionCycle。`observe` 在 Scene Commit 后通过 Outbox 异步执行。
+Phase 4 通过本地 Provider、HTTP/gRPC 或 MCP Adapter 贡献声明式记忆，再适配到宿主的通用 Context 贡献。Builder 拥有排序、预算、来源和隐私过滤。多个 Provider 共用 150–250ms 前台 Deadline；Observe/Usage 由后台宿主 Outbox 调用，成功仅代表对端持久接收，失败由宿主重试。完整规划及兼容规则见 [Phase 4 指南](./phase-4-development-guide.md) 和 [ADR 0006](./adr/0006-documentation-and-delivery-boundaries.md)。
 
 ## 13. 插件模型与隔离
 
@@ -511,7 +467,7 @@ Base Context、World Snapshot、Audience Batch 和各 Memory Provider 并行构�
 | CPU-heavy trusted | Worker Thread | 编码、分析和较重计算 |
 | External/untrusted | Child Process | 第三方工具、外部程序和记忆服务 |
 
-Worker Thread 不是安全边界，只用于 CPU 和故障隔离。涉及文件、网络、系统输入或第三方原生依赖的插件必须进入 Child Process。
+Worker Thread 不是安全边界，只用于 CPU 和故障隔离。第三方或不可信插件涉及文件、网络、系统输入或原生依赖时必须进入 Child Process；第一方可信 Provider 可通过受控 Credential/网络/文件 Port 在进程内执行。Phase 4 只建立可信 Provider 接缝，完整第三方沙箱属于后续插件产品化阶段。
 
 插件 Manifest 至少包含：
 
@@ -696,6 +652,8 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 - 实现每次请求对应一个 ActionFrame 的不变量。
 
 ### 阶段四：记忆和主动表现
+
+当前实施拆分、契约 Gate 与验收标准见 [Phase 4 构建指南](./phase-4-development-guide.md)。
 
 - 实现 Context Contribution Pipeline。
 - 实现 MemoryProvider 和 MCP v2 Adapter。

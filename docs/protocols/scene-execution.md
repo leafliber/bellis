@@ -9,7 +9,7 @@
 >
 > 本文档中的全部 `json control-envelope` 代码块由
 > `packages/transport/test/unit/protocol-docs.test.ts` 自动验证，
-> 与实现保持一致，不是未经测试的副本。
+> 验证示例的 Schema/编解码一致性；消息顺序、Deadline 和恢复语义另由行为测试保护，不能由 JSON 解码通过推导。
 
 ## 1. 范围与定位
 
@@ -18,9 +18,10 @@ Phase 2 在 Control WebSocket v1 之上新增 Runtime（服务端）与 Stage（
 
 ```text
 stage.capabilities（握手后上报能力）
-  → scene.prepare（Runtime 传递 ScenePlan + Prepare Deadline）
+  → [media.stream.announce → media.stream.ready]（先建立媒体缓冲，确认后才能送帧）
+  → scene.prepare（Runtime 传递 ScenePlan + Prepare Deadline，与 PCM 传输并行）
+  → 硬同步 Lane 完成准备（audio 预缓冲至少 6 帧；无 audio 场景跳过媒体握手）
   → scene.ready（Stage 逐 Lane 报告就绪/不可用）
-  → [media.stream.announce → media.stream.ready]（Runtime → Stage 音频流）
   → scene.commit（Runtime 传递未来生效时刻）
   → scene.started → scene.finished（Stage 报告实际起始与结果）
   任意 preparing/scheduled/running 阶段：
@@ -222,8 +223,9 @@ Runtime 决定；Stage 只如实报告。
 - Wire 上一切微秒时刻为非负十进制字符串；核心/Stage 调度层转为
   `bigint`（ADR 0001）。
 - `scene.prepare.prepareDeadlineUs`：Prepare 截止（Runtime 单调域）。
-  到期未 Ready 的 Lane 由 Stage 标记 `unavailable` 并回报，
-  Runtime 决定降级或取消。
+  当前由 Runtime Director 计时并在到期时取消未完成 Prepare，释放 Stage 资源。
+  Stage 不自行消费该绝对截止字段，也不保证到期生成 unavailable 回执；
+  Lane 内部错误仍可报告 unavailable。不能等待 Stage 超时回执才执行 Runtime Deadline。
 - `scene.commit.commitAtRuntimeUs`：Runtime 当前进程单调时钟域的**未来**
   生效时刻。Stage 通过当前连接的 Offset Estimate（≥3 个合格
   `clock.ping` 样本）映射为本地目标时刻；映射是 Stage 本地行为，
@@ -242,7 +244,7 @@ Commit 到达时映射后的目标时刻已过（或落入不容忍窗口）：
    `reason: "late_commit"`）回报，不伪造 completed；
 3. Runtime 决定取消整组、降级或重新调度；Stage 不自行猜测。
 
-Lane reason 码为闭合小写机器码，Phase 2 冻结集合：
+Lane reason 是有界开放字符串（1–64 字符）。以下是原因码目录，不是闭合枚举；消费者遇到未知码按通用失败处理，不得拒绝整个兼容消息：
 
 ```text
 audio_not_armed          浏览器自动播放限制，AudioContext 未 resume
@@ -251,13 +253,16 @@ unsupported_content_type contentType 不在本 Stage 能力列表
 motion_not_found         语义动作名未在 capabilities 声明
 expression_not_found     语义表情名未在 capabilities 声明
 prepare_failed           Lane 内部准备失败（细节进日志/Trace，不进 Wire）
+stage_busy               当前 Stage 已占用
+lane_not_available       未装配请求的 Lane
+prebuffer_timeout        音频预缓冲未完成
 late_commit              Commit 时刻已过或落入不容忍窗口
 buffer_underrun          播放中缓冲下越限（failed 时上报）
 lane_error               Lane 执行期错误（通用兜底）
 cancelled                因取消而终止（配合 cancel.ack 使用）
 ```
 
-新增 reason 码属于兼容变更，但必须先更新本文档。
+新增原因码保持兼容，生产者应同步本目录；只有另行冻结枚举并修改 Schema 后，才能把它当作闭合集合。
 
 ## 7. Runtime → Stage 媒体流
 

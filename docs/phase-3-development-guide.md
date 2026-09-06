@@ -1,7 +1,7 @@
 # Bellis Phase 3 开发指南：Decision Loop
 
-> 文档状态：完成态（实现事实见 Phase 3 完成态参考）
-> 阶段状态：已完成（Gate 2 通过）
+> 文档状态：历史实施计划（当前事实见 [Phase 3 完成态参考](./phase-3-reference.md)）
+> 阶段状态：核心已交付；原定 Gate 2 的子任务 P99 性能验收尚未完成，见 [构建与验收状态](./build-and-validation.md)
 > 起始基线：`f77d6e0`（`main`，Phase 2 已合并）
 > 上游基线：[Phase 2 完成态参考](./phase-2-reference.md)
 > 完成态参考：[Phase 3 完成态参考](./phase-3-reference.md)
@@ -10,7 +10,7 @@
 
 ## 0. 如何使用本文
 
-本文把技术路线中的“阶段三：Decision Loop”拆成可开发、可验收的纵向工作包。实施顺序为：
+本文保留阶段三的原始工作包与验收目标，不表示所有目标均已证明。以下为历史实施顺序；当前事实及剩余验收以完成态参考为准：
 
 1. Gate 0 复验 Phase 2，并在 P0 冻结 Cycle、模型流、Tool DAG 和持久化语义；
 2. P1 Signal Pipeline、P2 Model/Decision Loop、P3 Tool Runtime 从同一 Gate Commit 开始；
@@ -193,6 +193,7 @@ performance port → scene-runtime / transport / stage
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm --filter @bellis/stage exec playwright install chromium  # 首次运行/浏览器版本更新时
 pnpm runtime:check
 pnpm contracts:check
 pnpm check
@@ -499,7 +500,7 @@ batchLatencyMs=<number <= 500>
 cyclePackets=requested=2 adopted=2 duplicateFinal=0
 toolDag=ok(parallel=2,cacheHit>=1,permissionDenied>=1)
 actionToolOverlapMs=<number > 0>
-interruptLatencyMs=<number <= 100 + harness tolerance>
+turnSettleLatencyMs=<number <= 2100>  # 当前 Demo 的端到端收尾；不是子任务 P99
 watermark=ok(deduplicated=1,monotonic=true)
 recovery=ok(nonIdempotentReplay=0)
 ```
@@ -512,6 +513,7 @@ recovery=ok(nonIdempotentReplay=0)
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm --filter @bellis/stage exec playwright install chromium  # 首次运行/浏览器版本更新时
 pnpm check
 pnpm build
 pnpm contracts:check
@@ -543,8 +545,8 @@ flowchart TD
 | 工作包 | 主要修改范围 | 禁止越界 |
 | --- | --- | --- |
 | P0 | `packages/contracts/**`、必要 ADR、Migration/Port 设计 | 不实现 Route 或业务循环 |
-| P1 | `packages/decision-loop/src/signals|batcher|trigger/**` | 不调用模型或 Scene Director |
-| P2 | `packages/decision-loop/src/model|loop/**`、Runtime Model Adapter | 不实现 Tool 锁和 DB SQL |
+| P1 | `packages/decision-loop/src/{signals,batcher,trigger}/**` | 不调用模型或 Scene Director |
+| P2 | `packages/decision-loop/src/{model,loop}/**`、Runtime Model Adapter | 不实现 Tool 锁和 DB SQL |
 | P3 | `packages/tool-runtime/**` | 不拥有 Turn/Cycle，不提交 Scene |
 | P4 | `apps/runtime/**`、`packages/persistence/**`、必要 Observability | 不把领域逻辑写入 Route/WS Handler |
 | P5 | `scripts/phase-3-*`、E2E/恢复 Harness、CI/根脚本 | 只通过包根和公开 Runtime 入口集成 |
