@@ -227,6 +227,12 @@ export class DecisionLoop implements TurnOwnerPort {
 
   async #runTurn(turn: TurnState): Promise<void> {
     this.#turn = turn;
+    // A finished Turn can still have a playing Scene. Urgent input must also
+    // cancel that performance when the model loop is already idle. Serialize
+    // this before the new decision so it cannot cancel the new Turn's output.
+    if (turn.trigger === "interrupt") {
+      await this.#options.performance.interruptActiveScenes("urgent_interrupt");
+    }
     this.#options.audit?.turnStarted({
       turnId: turn.turnId,
       trigger: turn.trigger,

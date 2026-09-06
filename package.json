@@ -17,12 +17,13 @@
     "test:integration": "pnpm -r --if-present test:integration",
     "contracts:check": "node scripts/check-generated-contracts.mjs",
     "runtime:check": "node scripts/verify-runtime-baseline.mjs",
-    "check": "pnpm runtime:check && pnpm typecheck && pnpm lint && pnpm format:check && pnpm contracts:check && pnpm test && pnpm test:integration",
+    "check": "pnpm runtime:check && pnpm build && pnpm typecheck && pnpm lint && pnpm format:check && pnpm contracts:check && pnpm test && pnpm test:integration",
     "demo:phase1": "node scripts/phase-1-demo.mjs",
     "demo:phase2": "node scripts/phase-2-demo.mjs",
     "demo:phase2:crash": "node scripts/phase-2-crash-windows.mjs",
     "test:browser": "pnpm --filter @bellis/stage test:browser",
-    "demo:phase3": "node scripts/phase-3-demo.mjs"
+    "demo:phase3": "node scripts/phase-3-demo.mjs",
+    "test:acceptance": "pnpm demo:phase1 && pnpm demo:phase2 && pnpm demo:phase2:crash && pnpm demo:phase3 && pnpm test:browser"
   },
   "devDependencies": {
     "@types/node": "26.2.0",

@@ -86,6 +86,43 @@ const cycleTwoScript: ModelStreamEvent[] = [
 ];
 
 describe("DecisionLoop", () => {
+  it("interrupts a still-playing scene after its Turn is idle, before requesting the urgent decision", async () => {
+    let releaseCancel!: () => void;
+    let finishScene!: (outcome: "cancelled") => void;
+    const cancellation = new Promise<void>((resolve) => {
+      releaseCancel = resolve;
+    });
+    class PlayingPerformance extends FakePerformance {
+      override async interruptActiveScenes(reason: string): Promise<void> {
+        await super.interruptActiveScenes(reason);
+        await cancellation;
+        finishScene("cancelled");
+      }
+    }
+    const performance = new PlayingPerformance();
+    performance.nextResult = {
+      kind: "scene_submitted",
+      sceneId: "44444444-4444-4444-8444-444444444444",
+      done: new Promise((resolve) => {
+        finishScene = resolve;
+      }),
+    };
+    const ctx = makeLoop({
+      performance,
+      scripts: [cycleTwoScript, [{ type: "next", next: "finish" }, { type: "final" }]],
+    });
+    ctx.loop.startTurn(batchOf(1, 1), "normal_batch");
+    await waitFor(() => ctx.settled.length === 1);
+    expect(ctx.loop.isIdle()).toBe(true);
+    ctx.loop.startTurn(batchOf(2, 2), "interrupt");
+    await waitFor(() => performance.interrupts.length > 0);
+    expect(ctx.provider.requests).toHaveLength(1);
+    expect(performance.interrupts).toEqual(["urgent_interrupt"]);
+    releaseCancel();
+    await waitFor(() => ctx.settled.length === 2);
+    await ctx.loop.close("test");
+  });
+
   it("runs a two-cycle turn: tools in cycle 1 feed cycle 2, then finish", async () => {
     const ctx = makeLoop({ scripts: [cycleOneScript, cycleTwoScript] });
     expect(ctx.loop.startTurn(batchOf(1, 3), "normal_batch")).toBe(true);

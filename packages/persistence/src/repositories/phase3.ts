@@ -9,7 +9,7 @@ import type { SqliteDatabase } from "./sqlite-port.js";
  * Phase 3 决策域仓库（ADR 0004 / phase-3-development-guide.md §9.3）。
  *
  * - 序号在 append 事务内分配（max+1，1 起、无缺口；单写 Worker 串行）；
- * - 去重以 (session_id, signal_id) 唯一索引承载：重复回显原序号；
+ * - 去重以 (session_id, source, signal_id) 唯一索引承载：重复回显原序号；
  * - adoptCycle 是原子操作：cycle 行 + 消费水位 + Tool Run planned +
  *   session record 同事务，任一失败整体回滚；
  * - 非幂等 Tool 的 running 行恢复为 uncertain，绝不自动重试。
@@ -59,23 +59,43 @@ function advanceConsumedWatermark(
   ).run(sessionId, watermark.toString(10), nowMs);
 }
 
+/** Canonical decimal TEXT sorts numerically by length, then bytes; never cast through INTEGER/number. */
+function lastAssignedSequence(db: SqliteDatabase, sessionId: string): bigint {
+  const row = db
+    .prepare(
+      "SELECT sequence FROM phase3_signals WHERE session_id = ? ORDER BY length(sequence) DESC, sequence DESC LIMIT 1",
+    )
+    .get(sessionId);
+  return row === undefined ? 0n : parseDecimalString(readText(row, "sequence"));
+}
+
 export function appendPhase3Signal(
   db: SqliteDatabase,
   input: Phase3AppendSignalInput,
 ): Phase3AppendSignalOutcome {
   const existing = db
-    .prepare("SELECT sequence FROM phase3_signals WHERE session_id = ? AND signal_id = ?")
-    .get(input.sessionId, input.signal.id);
+    .prepare(
+      "SELECT sequence FROM phase3_signals WHERE session_id = ? AND json_extract(signal_json, '$.source') = ? AND signal_id = ?",
+    )
+    .get(input.sessionId, input.signal.source, input.signal.id);
   if (existing !== undefined) {
     return { result: "deduplicated", sequence: parseDecimalString(readText(existing, "sequence")) };
   }
   const consumed = readConsumedWatermark(db, input.sessionId);
   const pendingRow = db
     .prepare(
-      `SELECT priority_class, COUNT(*) AS n FROM phase3_signals
-       WHERE session_id = ? AND sequence > ? AND priority_class = ?`,
+      `SELECT COUNT(*) AS n FROM phase3_signals
+       WHERE session_id = ?
+         AND (length(sequence) > length(?) OR (length(sequence) = length(?) AND sequence > ?))
+         AND priority_class = ?`,
     )
-    .get(input.sessionId, consumed.toString(10), input.priorityClass) as { n: number } | undefined;
+    .get(
+      input.sessionId,
+      consumed.toString(10),
+      consumed.toString(10),
+      consumed.toString(10),
+      input.priorityClass,
+    ) as { n: number } | undefined;
   const pendingCount = pendingRow?.n ?? 0;
   const capacity = input.priorityClass === "urgent" ? input.urgentCapacity : input.normalCapacity;
   if (pendingCount >= capacity) {
@@ -84,10 +104,7 @@ export function appendPhase3Signal(
       reason: input.priorityClass === "urgent" ? "urgent_capacity" : "normal_capacity",
     };
   }
-  const maxRow = db
-    .prepare("SELECT MAX(CAST(sequence AS INTEGER)) AS m FROM phase3_signals WHERE session_id = ?")
-    .get(input.sessionId) as { m: number | null } | undefined;
-  const next = BigInt((maxRow?.m ?? 0) + 1);
+  const next = lastAssignedSequence(db, input.sessionId) + 1n;
   db.prepare(
     `INSERT INTO phase3_signals (session_id, sequence, signal_id, priority_class, received_at_ms, signal_json)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -113,10 +130,11 @@ export function restorePhase3Signals(db: SqliteDatabase, sessionId: string): Pha
   const rows = db
     .prepare(
       `SELECT sequence, signal_id, priority_class, received_at_ms, signal_json
-       FROM phase3_signals WHERE session_id = ? AND CAST(sequence AS INTEGER) > ?
-       ORDER BY CAST(sequence AS INTEGER) ASC LIMIT 4096`,
+       FROM phase3_signals WHERE session_id = ?
+         AND (length(sequence) > length(?) OR (length(sequence) = length(?) AND sequence > ?))
+       ORDER BY length(sequence) ASC, sequence ASC LIMIT 4096`,
     )
-    .all(sessionId, consumed.toString(10));
+    .all(sessionId, consumed.toString(10), consumed.toString(10), consumed.toString(10));
   const pending: IngestedSignal[] = rows.map((row) => ({
     schemaVersion: 1,
     signalId: readText(row, "signal_id"),
@@ -125,10 +143,7 @@ export function restorePhase3Signals(db: SqliteDatabase, sessionId: string): Pha
     receivedAtMs: Number(row.received_at_ms),
     signal: JSON.parse(readText(row, "signal_json")) as Signal,
   }));
-  const maxRow = db
-    .prepare("SELECT MAX(CAST(sequence AS INTEGER)) AS m FROM phase3_signals WHERE session_id = ?")
-    .get(sessionId) as { m: number | null } | undefined;
-  return { pending, lastAssigned: BigInt(maxRow?.m ?? 0), consumed };
+  return { pending, lastAssigned: lastAssignedSequence(db, sessionId), consumed };
 }
 
 export function markPhase3Consumed(

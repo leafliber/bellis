@@ -53,6 +53,16 @@ describe("SignalIngress", () => {
     expect(delivered.length).toBe(1);
   });
 
+  it("keeps identical IDs from different sources and deduplicates source retries", async () => {
+    const { ingress, delivered } = makeIngest();
+    const first = signal("11111111-1111-4111-8111-111111111111");
+    await ingress.ingest(first);
+    const second = { ...first, source: "another-platform" };
+    expect(await ingress.ingest(second)).toMatchObject({ result: "accepted", sequence: 2n });
+    expect(await ingress.ingest(second)).toMatchObject({ result: "deduplicated", sequence: 2n });
+    expect(delivered).toHaveLength(2);
+  });
+
   it("classifies urgent by threshold and kind directory", async () => {
     const { ingress, delivered } = makeIngest();
     await ingress.ingest(signal("11111111-1111-4111-8111-111111111111", 900));

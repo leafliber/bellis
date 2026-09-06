@@ -2,6 +2,7 @@ import { stateInitial } from "./state/0001-initial.js";
 import { statePhase2ScenePlan } from "./state/0002-phase2-scene-plan.js";
 import { statePhase2ActiveScenes } from "./state/0003-phase2-active-scenes.js";
 import { statePhase3Decision } from "./state/0004-phase3-decision.js";
+import { statePhase3SignalOrder } from "./state/0005-phase3-signal-order.js";
 import { telemetryInitial } from "./telemetry/0001-initial.js";
 import { validateMigrationRegistry } from "./definition.js";
 import type { MigrationDefinition } from "./definition.js";
@@ -18,6 +19,7 @@ export const STATE_MIGRATIONS: readonly MigrationDefinition[] = [
   statePhase2ScenePlan,
   statePhase2ActiveScenes,
   statePhase3Decision,
+  statePhase3SignalOrder,
 ];
 export const TELEMETRY_MIGRATIONS: readonly MigrationDefinition[] = [telemetryInitial];
 

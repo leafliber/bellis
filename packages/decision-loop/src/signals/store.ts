@@ -4,7 +4,7 @@ import type { IngestedSignal, Signal, SignalPriorityClass } from "@bellis/contra
  * Signal 持久化 Port（P0 冻结语义 1/2；ADR 0004 §1）。
  *
  * 生产实现（P4）在入库事务内分配单调序号并持久化 IngestedSignal；
- * 本包只依赖接口。序号 1 起、Session 内单调无缺口；重复 signalId
+ * 本包只依赖接口。序号 1 起、Session 内单调无缺口；同一来源内重复 signalId
  * 返回 deduplicated 并回显原序号；容量满在分配序号前拒绝
  * （被拒信号不占用序号空间，审计事实由宿主记录）。
  */
@@ -58,7 +58,8 @@ export class InMemorySignalStore implements SignalStorePort {
   }
 
   async append(signal: Signal, priorityClass: SignalPriorityClass): Promise<SignalAppendOutcome> {
-    const existing = this.#seen.get(signal.id);
+    const key = JSON.stringify([signal.source, signal.id]);
+    const existing = this.#seen.get(key);
     if (existing !== undefined) {
       return { result: "deduplicated", sequence: existing };
     }
@@ -73,7 +74,7 @@ export class InMemorySignalStore implements SignalStorePort {
       };
     }
     this.#lastAssigned += 1n;
-    this.#seen.set(signal.id, this.#lastAssigned);
+    this.#seen.set(key, this.#lastAssigned);
     if (this.#seen.size > this.#capacity.dedupeCapacity) {
       const oldest = this.#seen.keys().next().value;
       if (oldest !== undefined) {

@@ -24,11 +24,15 @@
     "types": ["node"],
     "paths": {
       "@bellis/contracts": ["./packages/contracts/src/index.ts"],
+      "@bellis/contracts/memory": ["./packages/contracts/src/memory/index.ts"],
       "@bellis/observability": ["./packages/observability/src/index.ts"],
       "@bellis/testkit": ["./packages/testkit/src/index.ts"],
       "@bellis/transport": ["./packages/transport/src/index.ts"],
       "@bellis/transport/browser": ["./packages/transport/src/browser/index.ts"],
-      "@bellis/persistence": ["./packages/persistence/src/index.ts"]
+      "@bellis/persistence": ["./packages/persistence/src/index.ts"],
+      "@bellis/decision-loop": ["./packages/decision-loop/src/index.ts"],
+      "@bellis/tool-runtime": ["./packages/tool-runtime/src/index.ts"],
+      "@bellis/scene-runtime": ["./packages/scene-runtime/src/index.ts"]
     }
   }
 }

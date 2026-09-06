@@ -396,19 +396,12 @@ async function main() {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert(interruptSettled, "interrupt", "interrupt turn did not settle");
-    const interruptLatencyMs = Date.now() - interruptStart;
-    assert(interruptLatencyMs <= 100 + 2_000, "interrupt", `interruptLatencyMs=${interruptLatencyMs}`);
-    report("interrupt", `urgent settled in ${interruptLatencyMs}ms (budget 100ms + harness tolerance)`);
+    const turnSettleLatencyMs = Date.now() - interruptStart;
+    assert(turnSettleLatencyMs <= 2_100, "interrupt", `turnSettleLatencyMs=${turnSettleLatencyMs}`);
+    report("interrupt", `urgent settled in ${turnSettleLatencyMs}ms (end-to-end Turn settlement limit 2100ms; not a child-task P99)`);
 
-    // Stage 侧可中断 Scene 收到 cancel（不绕过 Director）。
-    const cancelled = await stage.waitFor("scene.cancel", 10_000).catch(() => null);
-    if (cancelled !== null) {
-      stage.send("scene.cancel.ack", {
-        schemaVersion: 1,
-        sceneId: cancelled.payload.sceneId,
-        lanes: (cancelled.payload.lanes ?? []).map((lane) => lane.lane),
-      });
-    }
+    // 此场景中断的是尚未 final/adoption 的模型流，没有本 Cycle 的已提交 Scene。
+    // 不用一个可选的 scene.cancel 回执冒充 Scene 取消证据；真实 Stage 取消由浏览器测试验证。
 
     // ── 7. 非法模型流 → 唯一安全包 ──
     ipc.send({
@@ -466,7 +459,7 @@ async function main() {
       `toolDag=ok(parallel=2,cacheHit=${cached.cacheSource},permissionDenied=${denied ? 1 : 0})`,
     );
     console.log(`actionToolOverlapMs=${actionToolOverlapMs}`);
-    console.log(`interruptLatencyMs=${interruptLatencyMs}`);
+    console.log(`turnSettleLatencyMs=${turnSettleLatencyMs}`);
     console.log(`watermark=ok(deduplicated=1,monotonic=true)`);
     console.log(`recovery=ok(nonIdempotentReplay=0)`);
     console.log("");

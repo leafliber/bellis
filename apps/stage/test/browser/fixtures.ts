@@ -14,7 +14,6 @@ import { test as base } from "@playwright/test";
 
 const STAGE_DIR = fileURLToPath(new URL("../..", import.meta.url));
 const REPO_ROOT = resolve(STAGE_DIR, "../..");
-const DEMO_CHILD = join(REPO_ROOT, "scripts", "phase-2-demo-child.mjs");
 
 /** 挑选一个空闲 TCP 端口（listen 后立即释放，交给子进程/服务使用）。 */
 function freePort(): Promise<number> {
@@ -46,23 +45,27 @@ export interface StageEnvironment {
   issueToken(): Promise<string>;
 }
 
-export const test = base.extend<{ stageEnv: StageEnvironment }>({
-  /* oxlint-disable-next-line no-empty-pattern -- Playwright fixture 签名要求解构 */
-  stageEnv: async ({}, run) => {
+export const test = base.extend<{ stageEnv: StageEnvironment; phase: 2 | 3 }>({
+  phase: [2, { option: true }],
+  stageEnv: async ({ phase }, run) => {
     const runtimePort = await freePort();
     const vitePort = await freePort();
     const viteOrigin = `http://127.0.0.1:${vitePort}`;
     const dataDirectory = mkdtempSync(join(tmpdir(), "bellis-stage-e2e-"));
 
-    const child = fork(DEMO_CHILD, [dataDirectory], {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
-      env: {
-        ...process.env,
-        BELLIS_E2E_PORT: String(runtimePort),
-        BELLIS_E2E_ORIGINS: viteOrigin,
+    const child = fork(
+      join(REPO_ROOT, "scripts", `phase-${phase}-demo-child.mjs`),
+      [dataDirectory],
+      {
+        cwd: REPO_ROOT,
+        stdio: ["ignore", "pipe", "pipe", "ipc"],
+        env: {
+          ...process.env,
+          BELLIS_E2E_PORT: String(runtimePort),
+          BELLIS_E2E_ORIGINS: viteOrigin,
+        },
       },
-    });
+    );
     const childLogs: string[] = [];
     for (const stream of [child.stdout, child.stderr]) {
       if (stream !== null) {
@@ -80,7 +83,7 @@ export const test = base.extend<{ stageEnv: StageEnvironment }>({
     });
 
     const vite = spawn(
-      "node",
+      process.execPath,
       [
         join(STAGE_DIR, "node_modules", "vite", "bin", "vite.js"),
         "--port",

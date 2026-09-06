@@ -19,11 +19,18 @@ if (dataDirectory === undefined) {
   process.exit(2);
 }
 
+const fixedPort = Number(process.env.BELLIS_E2E_PORT ?? 0);
+const extraOrigins = (process.env.BELLIS_E2E_ORIGINS ?? "").split(",").filter(Boolean);
+const allowedOrigins = fixedPort > 0 && extraOrigins.length > 0
+  ? [`http://127.0.0.1:${fixedPort}`, `http://localhost:${fixedPort}`, ...extraOrigins]
+  : undefined;
+
 const runtime = await startRuntime({
   config: {
     dataDirectory,
     runtimeVersion: "0.1.0-phase3-demo",
-    port: 0,
+    port: fixedPort,
+    ...(allowedOrigins === undefined ? {} : { allowedOrigins }),
     phase2: { enabled: true },
     phase3: { enabled: true, model: { provider: "demo-scripted", paceMs: 30 } },
   },
@@ -79,6 +86,7 @@ process.on("message", (event) => {
       provider: {
         callCount: host.modelProvider.callCount,
         requests: host.modelProvider.requests?.length ?? 0,
+        prompts: host.modelProvider.requests?.map((request) => request.prompt) ?? [],
       },
       batches: host.pipeline.sealedBatches.map((entry) => ({
         from: entry.batch.watermarkFrom,
