@@ -8,22 +8,24 @@
 >
 > 首发平台：Windows 11 x64
 >
-> 更新日期：2026-09-06
+> 更新日期：2026-09-07
 >
 > 关联文档：[系统架构设计](./architecture-plan.md)
 
+> 2026-09-07 游戏规划修订：[ADR 0048](./adr/0048-external-game-runtime-and-session-activity.md) 采用独立游戏平台、Session Activity、HTTP/SSE 和桌面级输入权威；[Phase 5–8 路线图](./phase-5-and-beyond-roadmap.md) 替代旧后续排期。新边界均待实现与验收。
+
 ## 1. 选型结论
 
-Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.js/TypeScript Runtime 负责核心决策、插件编排和场景调度；浏览器提供 Studio、Stage 和 Overlay；React 负责操作界面，Web Audio 与 Live2D Web SDK 负责实时表现；SQLite 保存本地状态；Rust 只承担游戏输入、进程守护、密钥访问等系统级能力。
+Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.js/TypeScript Runtime 负责核心决策、插件编排和场景调度；浏览器提供 Studio、Stage 和 Overlay；React 负责操作界面，Web Audio 与 Live2D Web SDK 负责实时表现；SQLite 保存宿主本地状态。独立游戏平台使用 Python Runtime 管理游戏任务、控制器和恢复，原生 Input Broker/看门狗靠近 Windows 交互桌面；Rust 继续适用于 Broker、Launcher、密钥访问等系统能力。
 
 该方案优先满足以下目标：
 
 - 让 Context、Memory、Tool、TTS 和动作资源尽可能并行准备。
-- 由 Scene Director 统一提交语音、字幕、Live2D 和游戏行为。
+- Scene Director 统一直播表现和约定的游戏时间锚点；游戏任务由独立 Runtime 核验与提交，真实输入由桌面级 Broker 仲裁。
 - 保证每次 LLM 请求对应一个 ActionFrame，同时允许静默行动。
 - 让 Live2D Presence Engine 在没有 LLM 请求时仍能主动表现。
 - 通过稳定插件协议替换模型、记忆、TTS、平台、Avatar 和游戏能力。
-- 以单机安装包交付，不要求用户安装 Node.js、Python 或开发工具链。
+- Bellis 与游戏平台分别形成应用安装包，组合发行固定兼容版本，不要求普通用户手工安装 Node.js、Python 或编译 Broker。
 
 ## 2. 技术栈总表
 
@@ -31,7 +33,8 @@ Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.j
 | --- | --- | --- |
 | 首发平台 | Windows 11 x64 | 游戏、OBS 和虚拟主播生态的正式支持平台 |
 | 次级平台 | macOS arm64 | 开发、调试和非游戏使用场景 |
-| Runtime | Node.js 26，最低 26.5（ADR 0002） | 核心调度、网络、模型、插件和媒体协调 |
+| Bellis Runtime | Node.js 26，最低 26.5（ADR 0002） | 直播决策、插件、Session Activity 和媒体协调 |
+| 游戏 Runtime | Python，具体版本/锁文件在游戏仓库冻结 | 独立 Host/Core、任务图、控制器、Game Pack 与恢复 |
 | 主语言 | TypeScript 7.x、ESM | Runtime、协议、Studio 和插件 SDK |
 | 包管理 | pnpm Workspace | Monorepo、依赖锁定和任务编排 |
 | Lint / Format | Oxlint + Oxfmt | 与 TypeScript 7 原生工具链对齐；`tsc -b` 仍是类型检查真相源 |
@@ -45,13 +48,14 @@ Bellis Autonomous Live 采用 Windows-first 的本地实时产品形态：Node.j
 | Live2D | 官方 Cubism SDK for Web | 模型加载、动作、参数和口型 |
 | 浏览器媒体 | Web Audio + AudioWorklet | TTS 播放、媒体时钟和口型同步 |
 | 本地通信 | REST + WebSocket | 配置查询、状态订阅和实时媒体 |
-| 跨语言通信 | Protobuf + gRPC over loopback | Rust 游戏侧车和可选 Python 视觉侧车 |
+| 游戏服务通信 | HTTP JSON/OpenAPI + 带游标 SSE | 同机 attach 与后续配对跨机共用语义；不流式派发逐帧按键 |
+| 游戏本机 IPC | 受认证、有 deadline 的 Broker/Worker 协议 | 编码在契约 Gate 冻结；捕获与重计算使用有界本机缓冲 |
 | 本地存储 | SQLite WAL + `node:sqlite` | 状态、事件、缓存、配置和 Outbox |
 | 外部记忆 | `MemoryProvider` + MCP v2 Adapter | Context、Tool 和 Observe 接入 |
 | 可观测性 | OpenTelemetry + Pino | Trace、Metrics 和结构化日志 |
 | 测试 | Vitest + Playwright + fast-check | 单元、浏览器、回放和性质测试 |
-| 系统能力 | Rust Launcher/Sidecar | 输入安全、进程守护、密钥和更新 |
-| 交付 | Rust Launcher + 内嵌 Node Runtime | 独立安装和浏览器启动 |
+| 系统能力 | Bellis Launcher；游戏平台原生 Broker | 分别负责宿主启动/密钥/更新与主机级输入安全 |
+| 交付 | Bellis 应用 + 游戏平台应用 + 独立 Game Pack | 组合清单锁定 SDK、插件、Runtime、Broker、游戏包和模型哈希 |
 
 核心依赖使用 lockfile 精确锁定。Node.js 固定在 26（开发与 CI 基线 26.5.0，见 [ADR 0002](./adr/0002-node-26-baseline.md)），开发、CI 和发布清单记录完整补丁版本；基线不得低于 26.5.0，补丁升级通过双平台 CI 后再更新。核心协议、Runtime 和媒体依赖不使用无界版本范围。
 
@@ -79,8 +83,7 @@ flowchart LR
     subgraph Workers["隔离执行单元"]
         DB["SQLite DB Worker"]
         PluginWorker["插件 Worker / Child Process"]
-        Game["Rust Game Sidecar"]
-        Vision["可选 Python Vision Sidecar"]
+
     end
 
     Studio <-->|"REST + Control WS"| Edge
@@ -95,8 +98,20 @@ flowchart LR
     Plugins --> Loop
     Store --> DB
     Tools --> PluginWorker
-    Director --> Game
-    Signals --> Vision
+    Activity["Session Activity（待实现）"]
+    GamePlugin["通用薄插件 / Game Client"]
+    subgraph GamePlatform["独立游戏平台 / Windows 游戏机器"]
+        GameHost["Python Runtime Host / Core"]
+        GamePack["选定 Game Pack / 本机 Workers"]
+        Broker["桌面级 Input Broker / Watchdog"]
+    end
+    Loop --> Activity
+    Activity --> GamePlugin
+    Director -->|"高层时间锚点"| GamePlugin
+    GamePlugin <-->|"HTTP / SSE"| GameHost
+    GameHost --> GamePack
+    GameHost --> Broker
+    GamePlugin -->|"事件 / 状态"| Signals
 ```
 
 浏览器暴露三个入口：
@@ -107,7 +122,7 @@ flowchart LR
 
 Runtime 为每场直播授予一个 `render-leader lease`。只有 Stage Leader 播放正式音频；Studio 预览默认静音，避免多个页面同时播放 TTS。
 
-## 4. Monorepo 结构
+## 4. Bellis 工作区与外部游戏仓库
 
 ```text
 apps/
@@ -131,16 +146,13 @@ plugins/
   model-*/                 # LLM Provider 插件
   tts-*/                   # TTS Provider 插件
   avatar-*/                # Avatar Provider 插件
-  game-*/                  # 游戏观察和技能插件
 providers/
   memory-*/                # 独立 Provider 过渡目录（ADR 0005/0006）
-crates/
-  game-sidecar/            # Rust 游戏输入和安全控制
-workers/
-  vision/                  # 可选 Python OCR/CV/ONNX 服务
 ```
 
-包之间只通过 `contracts` 中的版本化对象通信。插件可以扩展 payload，但不能修改基础身份、时序、权限、幂等和取消字段。
+上图是 Bellis 目标职责目录，不表示所有包已存在。游戏平台位于独立仓库：`runtime-sdk`、`runtime-core`、`runtime-host`、`games/fake`、`games/genshin`、TS `game-client` 与 `bellis-plugin-game`、Windows 平台实现和 `input-broker`。薄插件在游戏仓库开发/发布，Bellis 安装其产物；新增游戏不新增 Bellis 核心路由或复制插件。详细目录见 [v0.4 §3](./design/game-runtime-multigame-v0.4.md)。
+
+Bellis 包通过自己的公共 contracts/SDK 通信；游戏包只依赖 Adapter SDK，游戏 Core 不 import 原神。游戏公共 Python 模型生成 OpenAPI/JSON Schema/TS 类型，薄插件映射到 Bellis 宿主契约。各仓独立 workspace/锁文件，发布验收不允许依赖相邻源码路径。
 
 ## 5. Runtime 后端选型
 
@@ -210,13 +222,13 @@ type ControlEnvelope<T> =
 
 ### 5.3 Schema 策略
 
-Zod 4 是 TypeScript 侧唯一 Schema 源，限制为可无损转换到两种目标 dialect 的 JSON-safe 子集：
+Zod 4 是 Bellis 宿主契约的唯一 Schema 源，限制为可无损转换到两种目标 dialect 的 JSON-safe 子集；独立游戏服务的 Python 公共模型是另一协议面的源，其生成的 TS 类型不在 Bellis 手写复制：
 
 - 生成 JSON Schema 2020-12，供 OpenAPI 3.1 文档和对外契约使用。
 - 另行生成 JSON Schema Draft 7，供 Fastify/Ajv 运行期验证和 LLM Tool 使用。
 - 两套生成物来自同一个 Zod Schema，使用相同成功/失败 Fixture 做语义等价测试和独立漂移检查。
 - WebSocket 消息进入系统边界时执行 Zod 校验。
-- Rust/Python 跨语言协议独立使用 Protobuf，避免以 JSON 承载高频二进制数据。
+- 游戏服务 OpenAPI/JSON Schema/TS 类型从 runtime-sdk/contracts 生成；Broker/Worker 的本机 IPC 编码在对应契约 Gate 冻结，高频帧使用有界本机缓冲而非普通 JSON 总线。
 
 ## 6. Decision Loop 与模型接入
 
@@ -365,14 +377,14 @@ Stage 使用 AudioWorklet 环形缓冲区播放音频：
 
 ### 9.3 时钟同步与 Scene Commit
 
-Runtime、Stage 和 Game Sidecar 使用单调时钟，通过周期性 Ping 校准偏移。Scene 执行流程为：
+Bellis Runtime、Stage 使用单调时钟校准；独立 Game Runtime 的时间锚点、状态核验和可接受偏差在 Phase 5 契约 Gate 冻结。只有声明并通过能力协商的游戏操作才参与跨服务同步。目标 Scene 执行流程为：
 
 1. Scene Director 发出 `prepare(sceneId)`。
-2. TTS、字幕、Live2D Motion、Overlay 和游戏技能并行准备。
+2. TTS、字幕、Live2D Motion、Overlay 并行准备；相关游戏候选经薄插件请求 Runtime 核验，不能由宿主伪造 ready。
 3. Stage 达到至少 120–200ms 音频预缓冲后返回 Ready。
 4. Scene Director 确定 `commitAtRuntimeUs`。
 5. 每个执行端将 Runtime 时间映射为本地单调时钟。
-6. 所有 Cue 按同一时间线执行。
+6. Bellis Cue 按该时间线执行；外部游戏操作由游戏 Runtime 在约定锚点及有效授权下应用，完成结果须单独确认。
 
 准备失败时由 Scene Policy 决定等待、降级或取消，插件不能自行决定开始时间。
 
@@ -503,20 +515,19 @@ installed
 
 生产环境不允许运行中任意安装 npm 包。插件安装必须经过签名检查、权限确认和冷启动健康检查；热重载只用于开发模式。
 
-## 14. 游戏控制
+## 14. 独立游戏平台与游戏控制
 
-游戏规划保留在 TypeScript Runtime，真实输入执行交给 Rust Game Sidecar：
+Bellis 负责直播人格、Session Activity 和高层意图；Python 游戏 Runtime 负责候选计划、任务图、尝试、控制器快循环、执行合法性和检查点恢复。战斗不等待普通 LLM 回复，游戏知识放在 Game Pack；控制器不能直接争抢键鼠。详细边界见 [ADR 0048](./adr/0048-external-game-runtime-and-session-activity.md)。
 
-- Runtime 与 Sidecar 使用 Protobuf + gRPC，通过 `127.0.0.1` 临时端口通信。
-- LLM 只能选择 `move_to_safe_area`、`attack_target` 等语义技能。
-- 游戏插件将语义动作编译为确定性输入序列。
-- Sidecar 维护输入租约、按键状态、最大持续时间和紧急停止。
-- Runtime 心跳丢失超过 100ms 时立即释放所有输入。
-- 未经用户显式 Arm，不允许产生真实游戏输入。
-- 优先使用游戏官方 API、Mod API 或无障碍接口。
-- 原始键鼠注入按游戏合规性单独启用，不提供反作弊绕过能力。
+- Bellis Plugin SDK、Game Client SDK、Game Adapter SDK 分别由对应仓库维护；一个通用薄插件连接不同已配对 Host/Session。
+- 薄插件↔Runtime 为 HTTP JSON/OpenAPI + 游标 SSE；命令与阅读回执经 HTTP，事件经 SSE。超时查询原 operation_id，accepted/applied/completed 分别记录。
+- Runtime↔原生 Input Broker 使用本地认证 IPC；协议编码待冻结。帧捕获、视觉和路径 Worker 靠近游戏，重模型可独立环境，不把按键或全量帧送到远端 Bellis 控制。
+- Broker 对 host/desktop/foreground-input 提供父级独占，下面才分配 Session/控制器资源。首版一个桌面最多一个可控游戏会话，多进程不能各自绕开该权威。
+- 本地 Arm、输入租约、最大持续时间、撤权和独立急停为必需；网络失联的有限继续策略与本地 Broker 心跳分开定义。释放输入 ≤100ms 的目标须区分检测阈值和释放耗时并真机验证。
+- 首个真实游戏为独立 Genshin Game Pack，采用已验证的 Windows 画面/键鼠路径，不假定存在可用官方 API。未来其他平台/API/手柄通过公共端口扩展，不绕过授权、归属和结果确认。
+- 同游戏任务图仅在检查点局部更新；切换游戏新建 Session、重新选窗/profile/授权；代码和模型在受控停用后升级。
 
-Python 只作为可选 Vision Sidecar，承担 OCR、OpenCV 和 ONNX 推理，不参与 Decision Loop、Scene Director 或输入安全控制。
+首版 attach 到操作员已启动并配对的服务。managed 由后续 ProcessManager 仅启动已安装、清单固定、哈希/签名验证的程序，不执行模型生成的 Shell。Iris 保持独立；集成模式统一由 Bellis 播报与写入，独立 CLI 使用相同服务与单 owner 规则。
 
 ## 15. 安全基线
 
@@ -573,42 +584,41 @@ Studio 提供本地 Trace Timeline，用同一时间轴展示 LLM、Memory、Too
 
 - 每个 DecisionCycle 最多只有一个最终 DecisionPacket。
 - 每个有效 DecisionPacket 恰好对应一个 ActionFrame。
-- 未经 Scene Director Commit，不产生对观众或游戏的副作用。
+- Bellis 表现未经 Scene Director Commit 不生效；游戏副作用须由 Runtime 通过授权/合法性检查与提交，再经受控动作后端执行。
 - 同一资源在同一时刻只有一个高优先级租约持有者。
 - Cue 重放不会产生重复不可逆动作。
-- Runtime 或 Game Sidecar 失联时，所有游戏输入都能在 100ms 内释放。
+- 本地游戏执行器/输入链失联或被撤权时，Broker 独立释放输入；≤100ms 目标按冻结的检测/释放口径实测。Bellis 网络失联另执行预先授权、有界的继续/停止策略，不借此绕开 Broker 租约。
 - Memory、TTS 或单个插件失败不会终止整场直播。
 
 Windows 正式发布必须增加 OBS Browser Source 实机测试，验证透明背景、音频捕获、WebGL、AudioWorklet 和长时间运行稳定性。
 
 ## 18. 打包与发布
 
-发布包结构：
+目标是两个独立应用加受管 Game Pack；不是让普通用户手工组装多个语言环境。以下目录属于 Phase 8 目标，尚未建立：
 
 ```text
 Bellis/
   launcher.exe
-  runtime/
-    node.exe
-    app/
-    builtin-plugins/
-  game-sidecar.exe
+  runtime/node.exe
+  runtime/app/
+  installed-plugins/          # 已校验的通用游戏薄插件等
   studio/
   stage/
   live2d-runtime/
+GameRuntime/
+  runtime-host/              # 已锁定 Python 环境与 Host/Core
+  input-broker.exe
+  game-packs/                # 仅安装选定且兼容的包
+  resource-manifests/        # 模型/资产哈希与许可索引
 ```
 
-Rust Launcher 负责：
+Bellis Launcher 拥有单实例锁、Node 生命周期、浏览器打开、系统密钥存储、安全模式及自身签名更新/回滚。游戏平台应用拥有 Host、Broker、Game Pack 和 Worker 生命周期。attach 是首版默认；后续 managed 只通过受控 ProcessManager 启动固定清单程序，进程归 Activity/宿主策略而非每个聊天 Turn。
 
-- 单实例锁。
-- 启动和监控 Node.js Runtime。
-- 打开默认浏览器进入 Studio。
-- 访问操作系统密钥存储。
-- 崩溃重启和安全模式启动。
-- 签名版本清单检查。
-- 原子版本目录切换和失败回滚。
+发行组合锁定 Runtime、Broker、Adapter SDK、Game Pack、模型、Client、Bellis SDK 与插件的版本/哈希。只改游戏识别资源且线协议不变时可独立更新 Game Pack；协议变化显式升级兼容面。大型模型和长录屏不进 Git，受管资源须有来源、许可、哈希和适用范围。
 
-Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Live2D 资源和外部 Worker 保持独立文件，便于升级、授权检查和故障隔离。
+开发可临时 link/editable，正式 consumer 测试只用包产物，不依赖相邻源码或未发布私有路径。公共仓库发布不是初期 Gate，CI tarball/wheel 可完成联调。运行 Session 固定代码与模型组合，停用后才升级；原子目录回滚仍需满足数据库兼容。Windows 安装、签名、升级失败恢复与 OBS 完整直播负载在 Phase 8 验收。
+
+各自应用携带通过 CI 的语言运行时；Bellis 继续分发官方 Node 二进制，不使用 Node SEA。更细的交付矩阵见 [路线图](./phase-5-and-beyond-roadmap.md)。
 
 ## 19. 明确不采用的方案
 
@@ -621,10 +631,10 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 - Redis、Kafka、NATS 或 PostgreSQL：单机产品没有必要。
 - WebRTC 或 WebTransport：本地控制和媒体流阶段收益不足。
 - Module Federation：第三方 UI 使用 iframe 隔离。
-- Python 主 Runtime：不利于前后端共享类型、插件开发和交付。
+- 用 Python 替换 Bellis 主 Runtime：宿主仍为 Node/TypeScript；独立游戏平台的 Python 执行引擎属于另一职责边界。
 - Rust 全量核心：会降低模型、平台和插件迭代速度。
 - 让 LLM 进入帧级游戏或 Live2D 控制循环。
-- 让插件绕过 Scene Director 直接启动语音、动作或游戏输入。
+- 让插件绕过 Scene Director 播放直播语音/动作，或绕过游戏 Runtime 授权、检查点与 Broker 直接生成游戏输入。
 
 ## 20. 实现顺序
 
@@ -662,12 +672,23 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 - Phase 4B 扩展多 Provider 和 MCP Adapter。
 - 实现 Avatar Mixer、Presence Engine 和资源仲裁。
 
-### 阶段五：游戏和产品交付
+### 阶段五：公共游戏 SDK 与 FakeGame 联调
 
-- 实现 Rust Game Sidecar、心跳和输入租约。
-- 接入首个语义游戏技能插件。
-- 完成 Studio 的插件、Trace 和回放界面。
-- 完成 Launcher、签名更新、回滚和 Windows 安装包。
+以 [Phase 5 构建指南](./phase-5-development-guide.md) 为唯一实施入口。交付 Bellis Plugin SDK、GameProvider/Session Activity、可信连接；独立游戏仓库的 Adapter SDK、最小 Runtime/FakeGame、HTTP/SSE Client 和单一薄插件。先冻结 v0.3 未展开的继承语义，再以干净 consumer 中的实际 tarball/wheel 验证活动、单 owner、桌面父资源、操作和事件对账。无需先运行原神。
+
+### 阶段六：Windows 原神闭环
+
+单 Host、单前台会话；真实平台捕获与原生 Broker，原神独立 Game Pack。先无 LLM 战斗，再剧情/导航/GUI、固定完整任务链及检查点局部更新。Windows 真机验证输入释放、实际效果、集成模式单一播报/记忆写入。
+
+### 阶段七：多游戏与跨机
+
+加入第二款真实游戏的短流程，验证无需修改 Bellis 核心路由或复制 Runtime/插件。验证会话切换、包不兼容隔离、桌面父独占和旧结果隔离；配对跨机仍走同一 HTTP/SSE 语义，快循环保持本机，不先建设集群。
+
+### 阶段八：产品化与受控部署
+
+完善 Studio 插件/连接/Activity/权限/Trace/回放，交付独立 Bellis 与游戏平台应用、受控 managed、签名更新、回滚和 Windows 安装包。以无源码安装、组合兼容矩阵及 Windows/OBS 直播负载验收。游戏包迁往独立 Git 仓库仅按团队/权限/许可需求决定，不强制新增阶段。
+
+完整进入条件、Gate、跨仓职责与用户支持见 [Phase 5–8 路线图](./phase-5-and-beyond-roadmap.md)。Phase 4A 冻结不变，Phase 4B 的实际依赖按对应 Gate 补齐，不能扩大旧恢复矩阵或将未验收能力标记通过。
 
 ## 21. 立项冻结项
 
@@ -677,10 +698,10 @@ Node.js 官方二进制随应用分发，不使用 Node SEA。动态插件、Liv
 2. Studio 和 Stage 使用浏览器，不引入 Electron/Tauri。
 3. Decision Loop、Tool Runtime 和 Scene Director 的所有权保留在项目核心。
 4. 一次 LLM 请求只产生一个最终 DecisionPacket 和 ActionFrame。
-5. 所有外部副作用必须经过 Scene Director 或安全执行器 Commit。
+5. Bellis 直播表现须经过 Scene Director Commit；独立游戏任务须经过 Runtime 合法性、授权和检查点提交，再由 Broker 管理真实输入。
 6. 外部记忆只能贡献 Context、Tool 和 Observe，不能任意修改 Prompt 或共享状态。
 7. Live2D Presence Engine 独立于 LLM Loop，但接受资源仲裁。
-8. 游戏输入必须通过 Rust Sidecar、租约、心跳和用户 Arm。
+8. 游戏输入必须通过独立游戏平台的主机/桌面级 Broker、租约、本地心跳与用户 Arm；Bellis 不拥有物理输入出口。
 9. 本地状态使用 SQLite，首版不引入分布式基础设施。
 10. 第三方插件 UI 使用 sandboxed iframe，第三方系统插件使用独立进程。
 

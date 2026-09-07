@@ -4,3 +4,6 @@
 
 # Preserve byte-identical upstream SQLite ABI headers, including upstream whitespace.
 packages/persistence/native/sqlite/* linguist-vendored -whitespace
+
+# Preserve authored Markdown hard breaks in the immutable supplied design snapshot.
+docs/design/game-runtime-multigame-v0.4.md whitespace=-blank-at-eol

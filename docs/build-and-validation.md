@@ -4,6 +4,21 @@
 
 此页维护当前可执行入口，历史 Phase 2/3 指南保留原始实施目标。未通过的指标不因脚本存在而视为完成。
 
+## Phase 5 及以后：计划与已有验收分开
+
+当前已交付基线见 [Phase 4 实施状态](./phase-4-implementation-status.md)；公共游戏 SDK、Session Activity、独立游戏 Runtime 与原神支持仍待实现。新工作以 [Phase 5 指南](./phase-5-development-guide.md) 和 [Phase 5–8 路线图](./phase-5-and-beyond-roadmap.md) 为准，不把现有 GameIntent 类型、Fake Stage 或 Phase 4A 的 480 例当作游戏执行证据。
+
+| 新阶段 | 计划增加的验证 | 外部条件 |
+| --- | --- | --- |
+| Phase 5 | G0–G5：公共包/独立构建、FakeGame、正式插件注册、Activity/owner/操作/SSE/阅读回执、干净 consumer | 不需要原神或真实输入；公共规格与跨仓访问须明确 |
+| Phase 6 | 单桌面真实 Broker、原神能力链、真实效果与输入清理、单一表现/记忆写入 | Windows 11 交互桌面、游戏测试账号/场景，实际表现所需资源 |
+| Phase 7 | 第二款真实游戏、跨会话污染防护、包兼容隔离、配对跨机与同协议恢复 | 第二游戏短流程、跨机环境 |
+| Phase 8 | 无源码应用安装、签名组合/回滚、managed、Windows/OBS 负载 | 正式签名/发布条件与 OBS 实机 |
+
+以上均为待新增检查，当前没有 `test:game` 或 `demo:phase5` 命令。新增后才更新本页命令列表。Phase 5 开工需让 CI 实际覆盖目标分支或 PR：现有 push 过滤器只包含 main、master 和 codex/**，另有 pull_request 触发；不能仅凭已推送 phase4/dev 分支宣称远程 CI 通过。
+
+Bellis CI 不检出游戏源码来完成宿主构建；游戏 Core CI 不安装 Bellis 或真实游戏来完成 Fake/契约测试。联合发布 Gate 在无相邻源码、editable/link 的 consumer 中安装实际 tarball/wheel，并验证对应版本矩阵。日志/录屏/逐次报告归 artifact，仓库只留摘要与组合清单。
+
 ## 首次运行
 
 从仓库根目录执行。Node 的固定复验版本见 `.node-version`，pnpm 版本见 `package.json#packageManager`；安装时强制检查 engines。
@@ -15,7 +30,7 @@ pnpm check
 pnpm test:acceptance
 ```
 
-`check` 依次执行 runtime baseline、全量 build、typecheck、lint、format、双 dialect 契约漂移、单元/性质/集成测试，能在无 dist 的检出上运行。`pnpm typecheck` 也通过完整的 workspace 源码映射解析内部包。
+`check` 先运行 evidence:check、test:scripts，再依次执行 runtime baseline、全量 build、typecheck、lint、format、双 dialect 契约漂移、单元/性质/集成测试，能在无 dist 的检出上运行。`pnpm typecheck` 也通过完整的 workspace 源码映射解析内部包。
 `test:acceptance` 依赖 check/build 生成的产物，依次执行 Phase 1 Demo、Phase 2 Demo、Phase 2 Crash、Phase 3 Demo 和 Chromium E2E。依赖及浏览器安装需要提前完成；安装完成后的确定性验收不依赖真实模型、外部记忆或商业资源。
 `apps/stage/dist-web/` 是本地构建产物，由 `pnpm build` 生成并被 Git 忽略，不纳入源码提交。
 

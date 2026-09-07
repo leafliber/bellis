@@ -2,6 +2,8 @@
 
 > 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](./adr/0007-task-ownership-and-runtime-scope.md) 为准。
 
+> Phase 5 及以后游戏架构以 [ADR 0048](./adr/0048-external-game-runtime-and-session-activity.md) 和新路线图为准；Phase 4A 冻结与现有稳定协议保持原状态。
+
 本文档目录按“长期设计、阶段实施、稳定协议、架构决策”四类维护。已交付能力以完成态参考和稳定协议为当前入口；Phase 2/3 开发指南保留为历史实施计划，不作为已通过全部 Gate 的证明。当前实现与待验收项集中见 [构建与验收状态](./build-and-validation.md)。
 
 ## 当前入口
@@ -15,6 +17,9 @@
 - [Phase 3 完成态参考](./phase-3-reference.md)：Phase 3 交付形态、验收证据与已知边界。
 - [Phase 4 构建指南](./phase-4-development-guide.md)：先完成 Phase 4A Iris 真实接入，再推进 Phase 4B 主动表现与扩展；按主题分册维护 A0–A4 工作包、接口映射与验收（实施中，见 [实施记录](./phase-4-implementation-status.md)）。
 - [Phase 4 Iris 接入调研](./phase-4-iris-integration-research.md)：两仓库当前能力、契约差异、职责归属及本轮针对性验证。
+- [Phase 5 构建指南](./phase-5-development-guide.md)：公共 Plugin SDK、Session Activity、独立游戏服务与 FakeGame 跨仓包产物联调（待实施）。
+- [Phase 5–8 路线图](./phase-5-and-beyond-roadmap.md)：原神闭环、多游戏/跨机和产品交付的顺序、Gate 与外部条件。
+- [游戏多仓与部署设计 v0.4](./design/game-runtime-multigame-v0.4.md)：用户输入的设计快照；采纳边界见 [ADR 0048](./adr/0048-external-game-runtime-and-session-activity.md)。
 
 ## 稳定协议
 

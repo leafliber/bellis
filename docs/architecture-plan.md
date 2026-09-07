@@ -8,6 +8,8 @@
 >
 > 核心目标：让 AI 主播能够听懂直播间、记住长期关系、自然表达、主动表现并操作游戏，同时在低等待下保持语音、字幕、Live2D 与游戏行为一致。
 
+> 2026-09-07 游戏规划修订：[ADR 0048](./adr/0048-external-game-runtime-and-session-activity.md) 采用独立游戏平台、Session Activity、HTTP/SSE 和桌面级输入权威；[Phase 5–8 路线图](./phase-5-and-beyond-roadmap.md) 替代旧后续排期。新边界均待实现与验收。
+
 ## 1. 项目定义
 
 Bellis Autonomous Live 是一个完整的自主游戏直播系统。它既不是聊天机器人加一个 Live2D 页面，也不是把若干 AI 接口串起来的工作流，而是同时包含以下能力的实时产品：
@@ -58,7 +60,7 @@ Bellis Autonomous Live 是一个完整的自主游戏直播系统。它既不是
 
 ### 3.1 并行准备，统一生效
 
-上下文、外部记忆、工具、TTS、字幕、动作资源和游戏技能尽可能并行准备；真正对观众或游戏产生效果时，由场景导演统一确定开始时间。
+上下文、外部记忆、工具、TTS、字幕和动作资源尽可能并行准备；直播表现由场景导演统一提交。游戏候选经独立 Runtime 核验，可接受约定的高层时间锚点；游戏任务、检查点与真实输入的执行权不归 Bellis Scene。
 
 系统优化的是关键路径，而不是追求所有模块表面上的并发。存在数据依赖的工作仍需等待，不影响本次决策的工作必须退出关键路径。
 
@@ -75,7 +77,7 @@ Bellis Autonomous Live 是一个完整的自主游戏直播系统。它既不是
 
 ### 3.3 单一决策权，多路能力供应
 
-一个 Cycle 只有一个最终决策包，避免两个并行 LLM 同时争夺角色和游戏控制权。记忆、检索、视觉分析、内容过滤、工具和媒体生成可以多路并行，它们作为供应者服务于同一个决策。
+Bellis 一个 Cycle 只有一个最终决策包，避免并行模型争夺同一次直播行动；游戏侧异步规划只能提交候选，不能获得独立于 Runtime 的执行权。记忆、检索、视觉分析、内容过滤、工具和媒体生成可以多路并行，它们作为供应者服务于同一个决策。
 
 ### 3.4 LLM 不进入帧级实时环
 
@@ -122,10 +124,16 @@ flowchart TB
         VoiceRuntime["TTS / Subtitle"]
         Avatar["Avatar Mixer"]
         Presence["Presence Engine"]
-        GameRuntime["Game Skill Runtime"]
+        GamePlugin["通用游戏薄插件 / Client"]
         Overlay["Overlay / OBS"]
     end
 
+    subgraph ExternalGame["独立游戏平台（待实现）"]
+        GameRuntime["Python Host / Session Task Engine"]
+        GamePack["选定 Game Pack / 本机控制器"]
+        Broker["Host/Desktop Input Broker"]
+    end
+    Activity["Bellis Session Activity（待实现）"]
     subgraph Foundation["项目基础设施"]
         Plugins["Plugin Host"]
         Records["Session Records"]
@@ -151,7 +159,13 @@ flowchart TB
     Policy --> Director
     Director --> VoiceRuntime
     Director --> Avatar
-    Director --> GameRuntime
+    Loop --> Activity
+    Activity --> GamePlugin
+    Director -->|"高层时间锚点"| GamePlugin
+    GamePlugin <-->|"HTTP / SSE"| GameRuntime
+    GameRuntime --> GamePack
+    GameRuntime --> Broker
+    GamePlugin -->|"状态 / 事件"| SignalHub
     Director --> Overlay
     Presence --> Avatar
     Performance --> World
@@ -161,7 +175,7 @@ flowchart TB
     Foundation --- Performance
 ```
 
-架构中心不是 LLM，而是 `Scene Director`。LLM 产出高层意图，Scene Director 将它编译成可准备、可同步、可取消的直播场景。Live2D 主动表现和游戏快循环能够独立运行，但它们的高优先级行为仍接受场景与资源仲裁。
+Bellis 的直播表达由 `Scene Director` 组织为可准备、可同步、可取消的场景；长期游戏由 Session Activity 绑定独立 Runtime。游戏 Runtime 负责任务图与执行合法性，主机/桌面 Broker 负责物理输入，不能让两个项目重复维护同一任务图。Live2D 帧循环与游戏快循环都不等待普通 LLM 回复。
 
 ## 5. 核心领域对象
 
@@ -215,6 +229,7 @@ interface ActionFrame {
 - `ActionFrame`：该请求对应的一次行动机会。
 - `Scene`：ActionFrame 经校验和编译后的可执行计划。
 - `Cue`：Scene 中具有时间锚点的最小输出单位。
+- `Session Activity`（Phase 5 待定义）：Bellis Session 拥有的长期外部活动绑定，独立于单次 Turn/Scene；游戏任务与尝试保留在游戏 Runtime，不复制进宿主调用列表。
 
 领域对象采用版本化 Schema。插件可以扩展 payload，但不能改变基础的身份、时序、权限和取消字段。
 
@@ -269,7 +284,7 @@ Batcher 只整理事实，不代替 LLM 做角色决策。它可以使用廉价�
 | `next_cycle` | 工具返回后的下一次模型请求一并读取 | 新的高价值弹幕 |
 | `next_turn` | 当前 Turn 正常结束后启动新 Turn | 普通弹幕批次 |
 
-已开始播放的语音或游戏技能不会被粗暴终止，而由 Scene Director 执行淡出、回中、松键等补偿动作。
+已开始播放的直播场景由 Scene Director 执行淡出、回中等补偿。游戏停止由 Activity 策略向 Runtime 发出受授权操作，再由本地 Broker 清理输入；普通聊天 Turn 取消不自动终止长期游戏活动，紧急撤权/停止的传播在活动契约中冻结。
 
 ## 7. Decision Loop
 
@@ -448,7 +463,7 @@ interface Cue {
 
 ### 9.2 Prepare、Barrier、Commit
 
-所有产生外部效果的 Provider 实现三段协议：
+参与 Bellis Scene 的表现 Provider 遵守准备、提交和取消边界；以下为场景端口示意，不是外部游戏 Runtime 的全部任务协议：
 
 ```ts
 interface SceneParticipant<TIntent> {
@@ -458,10 +473,10 @@ interface SceneParticipant<TIntent> {
 }
 ```
 
-1. **Prepare**：TTS 生成首块音频、字幕完成首句断句、Live2D 检查动作资源、游戏技能完成安全校验。所有项目并行。
+1. **Prepare**：TTS、字幕、Live2D 等表现资源并行准备；涉及游戏时间锚点时，由薄插件请求独立 Runtime 核验候选与授权，不提前执行。
 2. **Barrier**：只等待当前 SyncGroup 的硬同步项目。Stage 按 softTimeoutMs 中止超时的软同步准备并报告缺席，不允许迟到结果重建本场景。Runtime 只验证整包准备结果。
-3. **Commit**：Scene Director 分配统一 `T0`，各 Lane 根据同一时钟开始。
-4. **Cancel/Compensate**：中断时执行音频淡出、字幕清理、Avatar 回中、游戏松键和 Overlay 撤回。
+3. **Commit**：Scene Director 分配直播表现的 `T0`，各 Lane 按校准时钟执行；外部游戏 Runtime 自行核验并应用约定的操作/锚点，不由 Scene 代写任务状态。
+4. **Cancel/Compensate**：场景中断执行音频淡出、字幕清理、Avatar 回中和 Overlay 撤回；相关游戏操作按 Activity/操作取消范围提交给 Runtime，Broker 负责输入清理，普通场景终止不误杀长期游戏任务。
 
 ### 9.3 同步等级
 
@@ -581,48 +596,46 @@ Mixer 负责参数混合、动作抢占和自然恢复。Agent Scene 结束后�
 
 不同模型缺少某个动作时，插件按语义标签寻找替代或安全忽略。上层不依赖具体 motion group、文件名和 Cubism 参数编号。
 
-## 12. 游戏系统
+## 12. 独立游戏 Runtime 与多游戏接入
 
-### 12.1 四层结构
+### 12.1 所有权与仓库
+
+Bellis 保留人格、直播 Decision Loop/Scene、Plugin SDK、GameProvider/Session Activity、可信连接和统一记忆写入。独立游戏平台仓库拥有 Python Runtime/Core/Host、领域任务图、候选计划、控制器、恢复、Adapter SDK、Game Pack、Windows 平台和原生 Input Broker；Iris 保持既有独立服务。仓库、发布包、进程和机器分别按维护、兼容、隔离与资源需求决策。
+
+游戏平台内提供一个 TS Game Client 和一个 Bellis 薄插件。新增游戏是新增 Game Pack、资源索引和测试，不复制 Runtime 或宿主插件。只有薄插件依赖 Bellis SDK；游戏 Core 不 import 原神，游戏包不读 Core 私有队列、Broker 令牌或其他游戏的状态。
+
+### 12.2 快慢闭环与公共接口
 
 ```text
-Game Sensor
-  -> Game World Model
-  -> Skill Planner
-  -> Skill Executor / Safety Controller
-  -> Game Adapter
+Bellis Session Activity / 独立 CLI（一个控制 owner）
+  → Game Client：HTTP 命令/查询 + 游标 SSE
+    → Runtime Host：身份、Session 与桌面资源
+      → Session Task Engine：任务图、尝试与检查点
+        → Game Pack Controller：感知、技能和结果确认
+          → 本机 Broker：输入租约与独立看门狗
 ```
 
-- Sensor 读取原生 API、Mod、RCON、机器人库或 CV 结果。
-- World Model 把高频观测投影为结构化状态。
-- LLM 选择技能与目标，不生成逐帧输入。
-- Skill Executor 以状态机或行为树在 20–60 Hz 快循环中执行。
-- Safety Controller 处理失焦、卡键、超时、死亡和急停。
+Agent 异步规划，Runtime 在版本、授权和检查点上验证候选；有依赖的任务顺序执行，兼容的观察/计算可并行，战斗不等待普通 LLM。能力通过当前绑定 Session 发现，分别表达 installed、compatible、enabled、currently_available；不支持的能力拒绝而不是空实现。
 
-### 12.2 Game Capability
+Bellis 宿主契约、Game Client 线协议、Game Adapter 接口分别维护。游戏公共 Python 模型生成 OpenAPI/JSON Schema/TS 类型，薄插件显式映射到 Bellis；稳定 operation_id、accepted/applied/completed、事件快照水位、去重与 cursor_expired 在 Phase 5 冻结。此处不新增手写 GameProvider 方法签名或宣称现有 `GameIntent` 已支持这些协议。
 
-```ts
-interface GameProvider {
-  observe(query: ObservationQuery): Promise<GameSnapshot>;
-  listSkills(): Promise<GameSkillDescriptor[]>;
-  prepare(intent: GameIntent, signal: AbortSignal): Promise<PreparedSkill>;
-  start(skill: PreparedSkill, at: MonotonicTime): Promise<SkillHandle>;
-  cancel(handle: SkillHandle, reason: string): Promise<void>;
-}
-```
+### 12.3 输入、时间锚点与会话切换
 
-优先使用结构化接口：游戏 Mod/官方 API > RCON/专用机器人库 > CV + 键鼠回退。通用键鼠插件必须提供窗口焦点校验、输入租约、最大按键时长和独立急停。
+原神首版采用 Windows 画面与键鼠路径；不假定存在适用官方 API。其他游戏以后通过平台/动作端口扩展。物理输入必须经过 host/desktop/foreground-input 父级独占，以下才是 Session 和根控制器资源。多个 Runtime 必须共享同一 Broker 权威或已验证的平台独占机制；首版同桌面仅一个可控会话。
 
-### 12.3 与表达并行
+本地 Arm、租约、最大持续时间、焦点检查、撤权、看门狗与急停属于真实输入前置。Bellis 网络失联的有限运行策略与 Broker 本地心跳分别定义；不能将网络继续执行许可等同于永久输入授权。
 
-游戏技能可以与 TTS 并行执行，但必须声明时间关系：
+现有 GameIntent 的 `at_scene_start`、`at_speech_word`、`after_speech`、`independent` 是高层时间关系。外部 Runtime 是否支持及怎样核验这些关系需经过契约 Gate；Scene 不逐帧控制设备，也不能将 accepted/输入提交当成游戏效果完成。普通 Turn 结束不结束 Activity，操作员停止/撤权有独立明确语义。
 
-- `at_scene_start`：说话与游戏同时开始。
-- `at_speech_word`：在某个词出现时启动。
-- `after_speech`：说完再操作。
-- `independent`：持续技能不等待表达。
+换游戏必须暂停/结束旧活动，确认输入释放并撤销旧绑定，再选择新窗口/profile、建立新 Session、获取能力和重新 Arm。清理失败拒绝交接；旧事件、路线和候选不污染新会话。任务图局部更新在检查点进行，代码/模型升级在受控停用后进行。
 
-Scene Director 只负责高层开始、抢占和结束；技能内部的帧级状态转换由 Game Runtime 自己完成。
+### 12.4 部署与宿主接入
+
+首版 Windows 同机、独立进程 attach；插件经 HTTP/OpenAPI 与 SSE 连接操作员已启动的 Runtime。跨机以后使用配对加密的同一协议，只传有限语义数据，捕获、快循环和 Broker 靠近游戏。managed 是后续启动方式，不改变服务协议，也不允许模型生成任意 Shell/SSH 命令。
+
+集成模式由 Bellis 统一语音、确认阅读和 Iris 写入；独立 CLI 可使用同一个 Runtime，但一会话仅一个上层控制 owner，不发生双重播报或双写。运行数据和记忆来源带 game/profile/session/entity 命名空间，不共享数据库文件。
+
+实现顺序、版本组合与真机 Gate 见 [Phase 5–8 路线图](./phase-5-and-beyond-roadmap.md) 和 [ADR 0048](./adr/0048-external-game-runtime-and-session-activity.md)。
 
 ## 13. 外部记忆系统
 
@@ -831,7 +844,7 @@ Dynamic Tail
 - Tool：搜索、知识、直播控制和业务能力。
 - Voice：TTS、音色、音频处理。
 - Avatar：Live2D、其他 2D/3D 角色渲染器。
-- Game：具体游戏的观测与技能。
+- Game：通用外部游戏连接与 Activity 映射；具体游戏能力由游戏平台 Game Pack 提供。
 - Output：字幕、Overlay、OBS、录制。
 - Policy：权限、内容安全、资源仲裁。
 
@@ -870,7 +883,7 @@ configSchema: ./config.schema.json
 - 请求/响应能力使用类型化 Service Call。
 - 高频状态使用可合并的 State Stream。
 - 需要留痕的决策使用 Session Records。
-- 对外行动使用 Timeline Cue。
+- 直播表现使用 Timeline Cue；长期游戏通过 Activity 与受授权的语义操作协调。
 - 取消、健康和生命周期使用 Control Channel。
 
 明确通信语义可以避免把实时状态写爆日志，也避免关键取消信号和普通弹幕竞争。
@@ -882,7 +895,7 @@ configSchema: ./config.schema.json
 - 中文与日文使用不同 TTS。
 - 低延迟模型处理普通弹幕，高能力模型处理复杂规划。
 - 主记忆服务失败时回退到 Session 内短期记忆。
-- 结构化游戏接口不可用时切换为只解说模式，而不是自动启用高风险键鼠回退。
+- 绑定游戏的已验收捕获/动作后端不可用时转只读/解说，不自动切换为未授权或未验收的输入后端。
 
 ## 16. Session Records 与状态恢复
 
@@ -895,7 +908,7 @@ configSchema: ./config.schema.json
 - 模型请求元数据与 DecisionPacket。
 - Tool 调用、结果、错误与幂等键。
 - Scene Prepare/Commit/Cancel 与高层 Cue。
-- 游戏技能开始、结束和安全中断。
+- 外部 Activity 绑定、操作回执和安全中断；完整任务图/尝试由游戏 Runtime 保存。
 - 外部记忆明确写入、纠正和遗忘。
 
 不逐条记录：
@@ -925,7 +938,7 @@ Turn、Cycle、Tool Batch、Scene 和 Game Skill 形成父子取消域。高层�
 2. 释放已 Prepare 但未 Commit 的资源。
 3. 淡出已播放语音并撤回对应字幕。
 4. 中断可抢占 Avatar 动作并自然回到 Presence 状态。
-5. 取消游戏技能并强制释放输入。
+5. 按取消范围停止对应外部游戏操作/Activity；普通 Turn 取消不误停长期活动，安全撤权经 Runtime/Broker 清理输入。
 6. 记录真实取消原因，不伪装成正常完成。
 
 ### 17.3 降级方案
@@ -955,10 +968,10 @@ Turn、Cycle、Tool Batch、Scene 和 Game Skill 形成父子取消域。高层�
 
 具体技术栈与目标目录统一维护在 [技术选型基线](./technology-selection.md)，当前能力与命令见 [构建与验收状态](./build-and-validation.md)。
 
-- Runtime 使用 Node.js/TypeScript；Studio/Stage 使用浏览器，演出端与操作台分离。
+- Bellis Runtime 使用 Node.js/TypeScript；Studio/Stage 使用浏览器，演出端与操作台分离；独立游戏 Runtime 使用 Python。
 - 状态使用 SQLite；不预设分布式部署或 PostgreSQL 迁移。
-- 游戏真实输入必须通过 Rust Sidecar、租约、心跳和 Arm，不能以“性能尚可”为由绕过安全边界。
-- Rust/Python 边界采用 Protobuf/gRPC，Python 仅承担可选视觉能力。
+- 游戏真实输入由独立游戏平台的桌面级 Broker、租约、本地心跳和 Arm 管理；Bellis 仅通过公开 SDK/服务连接，不能新增未管理的输入出口。
+- Bellis 与游戏平台经 HTTP/OpenAPI + 游标 SSE 连接；游戏平台内 Broker/Worker 走受认证的本机 IPC，具体编码由契约 Gate 冻结。
 - 包名采用 contracts、decision-loop、tool-runtime、scene-runtime、persistence；Phase 4 先在宿主内实现记忆纵向模块，context-builder、memory-runtime、persona-runtime、avatar-runtime 只作为后续职责拆分候选，不预先建四个包。
 - 仓内独立 Memory Provider 置于 providers/；第三方插件产品化另有阶段，不与核心 workspace 包混淆。
 
@@ -1012,21 +1025,22 @@ Phase 4A 先经公共 SDK/HTTP 接入独立 Iris Core，连接 PersonaSource、M
 
 验收：外部 Provider 超时不拖住回答；工具搜索和自动注入均可用；模型可见记忆可追溯。
 
-### Milestone 5：游戏纵向切片
+### Milestone 5：游戏纵向能力（工程 Phase 5–7）
 
-- 选择一个具有结构化接口的游戏。
-- World Model、技能状态机、Scene 时间锚点、安全租约和急停。
-- 游戏行动与语音、字幕、Live2D 同步。
+- Phase 5 先交付 Bellis 公共 SDK、GameProvider/Session Activity 与独立游戏平台的 FakeGame/Client/薄插件，使用实际包产物联调。
+- Phase 6 在 Windows 单 Host/单前台会话交付原神 Game Pack：先无 LLM 战斗，再剧情、导航、GUI、固定任务链与检查点局部更新。
+- Phase 7 用第二款真实游戏及跨机连接验证通用能力、包隔离、会话切换和主机级资源边界。
 
-验收：LLM 只选择技能；快循环独立执行；取消后无残留按键；动作结果真实反馈到下一 Cycle。
+验收：Agent 提候选，Runtime 决定执行合法性；快循环独立；同桌面至多一个输入 owner；取消/失联按已授权策略安全处理，真实结果进入后续活动/决策，集成模式不双重播报或写记忆。
 
-### Milestone 6：插件产品化
+### Milestone 6：插件与应用产品化（最小 SDK 前移 Phase 5，完整交付 Phase 8）
 
-- Plugin SDK、Profile、权限、隔离、热重载和健康检查。
-- Studio 中的配置、时间线检查器、缓存与成本面板。
-- 回放测试、故障注入和长时稳定性验证。
+- Phase 5 提前建立可发布的最小公共 Plugin SDK 与 Activity 生命周期，作为跨仓集成前置。
+- Phase 8 完善 Studio 配置、连接/权限/Activity、Trace、回放与成本观察，以及独立 Bellis/游戏平台应用安装。
+- attach 先交付，managed、签名组合、升级回滚、包/模型更新与 Windows/OBS 长时负载在产品化阶段完成。
+- Game Pack 可在同仓独立发布，是否迁往独立 Git 仓库按维护、权限与许可需求决定，不强制拆库。
 
-验收：替换 TTS/Memory/Game Provider 不修改核心；单插件崩溃可自动隔离和恢复。
+验收：无相邻源码/开发工具仍可安装；替换合规 Game Pack 不修改 Bellis 核心；故障隔离与受控恢复、升级失败回滚有真实证据。阶段编号和 Gate 以 [Phase 5–8 路线图](./phase-5-and-beyond-roadmap.md) 为准，不从 Milestone 名称推定功能已交付。
 
 ## 21. 测试与观测
 
@@ -1117,7 +1131,7 @@ sessionId / turnId / cycleId / toolCallId / sceneId / cueId / skillId
 
 1. 每次 LLM 请求恰好产生一个 ActionFrame，发言可选。
 2. 工具与行动可以并行准备，但冲突副作用必须经过资源仲裁。
-3. 对观众可感知的同步行为由 Scene Director 统一 Commit。
+3. Bellis 直播表现由 Scene Director 统一 Commit；外部游戏任务由 Runtime 核验/提交，高层时间锚点不能绕过授权。
 4. Live2D 主动行为不依赖 LLM，且永远不能覆盖更高优先级的口型、安全和明确动作。
 5. 游戏快循环不等待 LLM；任何控制路径都能独立松键和急停。
 6. 外部记忆通过 Context、Tool 和可选 Observe 接口接入，不能直接篡改模型消息。
@@ -1128,4 +1142,4 @@ sessionId / turnId / cycleId / toolCallId / sceneId / cueId / skillId
 
 ## 24. 当前执行与交付约束
 
-Trigger Mailbox 是唯一等待队列，Loop 接受任务时同步取得所有权；所有后台工作在 close 前取消并结算。工具开始/结束使用可等待的恢复事实 Port。Scene 终态禁止出边，durable 与发送完成后的迟到继续执行必须被拒绝。Control 的磁盘 Seq 是分段预留上界，不是业务完成水位。Demo 工具、TTS 与有界验收记录器由入口显式装配。真实 Provider 延迟与物理播放指标需独立验收。
+Bellis Turn 的 Trigger Mailbox 是唯一等待队列，Loop 接受任务时同步取得所有权；所有后台工作在 close 前取消并结算。工具开始/结束使用可等待的恢复事实 Port。Scene 终态禁止出边，durable 与发送完成后的迟到继续执行必须被拒绝。Control 的磁盘 Seq 是分段预留上界，不是业务完成水位。Demo 工具、TTS 与有界验收记录器由入口显式装配。真实 Provider 延迟与物理播放指标需独立验收。
