@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runtime 基线验证（docs/phase-1-reference.md；runtime:check）：
+ * Runtime 基线验证（docs/reference/phase-1.md；runtime:check）：
  * - 所有 node:sqlite 操作都在短生命周期 Worker 内执行，主线程不绕过
  *   DB Worker 原则；不设置 NODE_NO_WARNINGS，不抑制 ExperimentalWarning。
  * - 捕获每个 Worker 的 stderr：出现任何 SQLite 实验警告或平台差异即失败。

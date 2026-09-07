@@ -14,7 +14,7 @@ import {
 import type { StageSocket } from "./stage-socket.js";
 
 /**
- * Stage Control 客户端（docs/phase-2-development-guide.md §7）。
+ * Stage Control 客户端（docs/archive/phase-2/development-guide.md §7）。
  *
  * 职责：Control WebSocket 连接生命周期——hello 握手（含 resume lastAck）、
  * ACK 累计确认（搭载心跳）、心跳、时钟采样与偏移估计（≥3 个合格样本进入

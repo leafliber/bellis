@@ -1,7 +1,7 @@
 import type { MonotonicClock } from "@bellis/contracts";
 
 /**
- * 单调时钟的共享等待/关闭实现（docs/phase-1-reference.md）。
+ * 单调时钟的共享等待/关闭实现（docs/reference/phase-1.md）。
  *
  * 只依赖抽象 nowUs() 与 setTimeout（两者在 Node 与浏览器都可用）：
  * - 等待只依赖单调时间：setTimeout 仅作唤醒 hints，到期后以 nowUs() 复核，

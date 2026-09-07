@@ -13,7 +13,7 @@ import {
 import type { MediaFrame, MediaFrameLimits } from "./frame-codec.js";
 
 /**
- * 增量 Media 帧解析器（docs/phase-1-reference.md）。
+ * 增量 Media 帧解析器（docs/reference/phase-1.md）。
  *
  * - 帧边界 = WebSocket 消息边界：适配器把一条 WS 二进制消息的任意分片
  *   依次 push，消息结束时调用 endMessage() 取得完整帧并复位累积器。

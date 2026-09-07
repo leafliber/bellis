@@ -38,7 +38,7 @@ import { RuntimeMediaSender, type OutboundMediaFrame } from "./media-sender.js";
 import { ControlStagePortAdapter, type ControlChannel } from "./stage-port-adapter.js";
 
 /**
- * Phase 2 演出应用服务（docs/phase-2-development-guide.md §9.2）。
+ * Phase 2 演出应用服务（docs/archive/phase-2/development-guide.md §9.2）。
  *
  * 编排链（新增命名服务，不扩展 Phase 1 的 FakeSceneCommitService）：
  *

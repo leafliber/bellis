@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 2 四个关键 Crash Window 定向覆盖（docs/phase-2-development-guide.md §10.2）。
+ * Phase 2 四个关键 Crash Window 定向覆盖（docs/archive/phase-2/development-guide.md §10.2）。
  *
  * 每个窗口：子进程 Runtime 在 Director 指定窗口 SIGKILL 自身（无清理路径
  * 的硬崩溃）→ 同目录重启 → resumeSessionId 重新挂载逻辑 Session → Stage

@@ -11,7 +11,7 @@ import {
 } from "./schemas.js";
 
 /**
- * OpenAPI 3.1 路由（docs/phase-1-reference.md）。
+ * OpenAPI 3.1 路由（docs/reference/phase-1.md）。
  *
  * - 请求/响应 Schema 与 Route Handler 共用 schemas.ts / @bellis/contracts
  *   生成物（ErrorEnvelope），不在文档中维护重复定义。

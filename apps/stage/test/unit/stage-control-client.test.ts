@@ -13,7 +13,7 @@ import { FakeSocketPair } from "../fake-socket.js";
 /**
  * Stage Control 客户端协议测试：真实 encodeControlMessage 编码的服务端
  * 消息 + FakeSocket——不 Mock 协议，验证握手、能力上报、ACK、时钟校准
- * 与重连代际语义（docs/phase-2-development-guide.md §7）。
+ * 与重连代际语义（docs/archive/phase-2/development-guide.md §7）。
  */
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";

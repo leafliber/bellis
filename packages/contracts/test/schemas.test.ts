@@ -20,7 +20,7 @@ import {
 } from "./fixtures.js";
 
 /**
- * 契约测试：每个公开 Schema 至少具备成功样例与失败样例（docs/phase-1-reference.md），
+ * 契约测试：每个公开 Schema 至少具备成功样例与失败样例（docs/reference/phase-1.md），
  * 并验证关键的协议不变量。
  */
 describe("schema fixtures", () => {

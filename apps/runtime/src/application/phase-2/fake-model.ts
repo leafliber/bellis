@@ -1,7 +1,7 @@
 import { DecisionPacketSchema, type DecisionPacket } from "@bellis/contracts";
 
 /**
- * Fake Model（docs/phase-2-development-guide.md §9.1）。
+ * Fake Model（docs/archive/phase-2/development-guide.md §9.1）。
  *
  * - 返回经 DecisionPacketSchema 运行期校验的**固定** DecisionPacket
  *  （Fixture 携带 sessionId/turnId/cycleId/sceneId/traceId，确定性重放）；

@@ -10,7 +10,7 @@ import {
 } from "@bellis/contracts";
 
 /**
- * 确定性 Fake TTS（docs/phase-2-development-guide.md §8.1）。
+ * 确定性 Fake TTS（docs/archive/phase-2/development-guide.md §8.1）。
  *
  * - 输入只接受 SpeechIntent（单一发言来源）；输出固定 PCM 基线格式
  *   （48kHz/mono/S16LE）与词边界时间标记；

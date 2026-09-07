@@ -11,7 +11,7 @@ import { SceneClient } from "../../src/scenes/scene-client.js";
 /**
  * Stage Scene 客户端状态机测试：Fake Lane Adapter + VirtualClock。
  * 验证 prepare→ready、commit 调度与 started/finished 上报、late_commit、
- * cancel ack 与连接代际丢弃（docs/phase-2-development-guide.md §7）。
+ * cancel ack 与连接代际丢弃（docs/archive/phase-2/development-guide.md §7）。
  */
 
 const PLAN: ScenePlan = {

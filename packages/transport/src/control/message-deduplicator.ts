@@ -1,5 +1,5 @@
 /**
- * 单连接内的 messageId 去重集合（docs/phase-1-reference.md）。
+ * 单连接内的 messageId 去重集合（docs/reference/phase-1.md）。
  *
  * - 只做连接内短期去重；跨连接/跨重启幂等由 idempotencyKey + P2 持久化负责。
  * - 集合有界：容量满时按 FIFO 淘汰最旧 messageId。

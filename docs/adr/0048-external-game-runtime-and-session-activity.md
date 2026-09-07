@@ -39,7 +39,7 @@ Broker 在 `host/desktop/foreground-input` 上提供父级独占，下面才是 
 
 ## 兼容与交付
 
-Phase 5 先交付公共包、FakeGame 服务和真实插件注册路径；Phase 6 完成 Windows 单 Host 原神闭环；Phase 7 以第二款真实游戏和跨机连接验证抽象；Phase 8 再完成 managed 启动及正式产品化。详见 [路线图](../phase-5-and-beyond-roadmap.md)。这些 Phase 是本次工程排期，不与原长期 Milestone 编号强行一一对应。
+Phase 5 先交付公共包、FakeGame 服务和真实插件注册路径；Phase 6 完成 Windows 单 Host 原神闭环；Phase 7 以第二款真实游戏和跨机连接验证抽象；Phase 8 再完成 managed 启动及正式产品化。以上描述游戏线 G5–G8；直播线另在 L5 补真实 TTS/Cubism/平台/最小 Studio，L6 做稳定性，L7 做扩展，L8 做产品交付。整阶段需 L/G 与联合 J Gate 同时通过，详见 [双线路线图](../plans/README.md)。这些 Phase 是本次工程排期，不与原长期 Milestone 编号强行一一对应。
 
 当前 GameIntent、Scene Wire 和工具调用列表继续按既有协议解释。新增 Activity、状态机、operation/事件和兼容版本须先过 Phase 5 契约 Gate；不直接把设计示例复制到稳定协议。v0.4 引用的 v0.3 正文未在本次读取中取得，继承但未展开的精确状态机、阅读回执、双层心跳和候选提交规则列为明确待冻结项。
 

@@ -1,7 +1,7 @@
 import { BaseMonotonicClock } from "./base-monotonic-clock.js";
 
 /**
- * 生产单调时钟（docs/phase-1-reference.md，P1 交付；仅服务端/Node）。
+ * 生产单调时钟（docs/reference/phase-1.md，P1 交付；仅服务端/Node）。
  *
  * - nowUs 基于 process.hrtime.bigint() 从纳秒整除到微秒（bigint 域，无浮点）。
  * - 等待/关闭语义见 BaseMonotonicClock（与浏览器时钟共享同一实现）。

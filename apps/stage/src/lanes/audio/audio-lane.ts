@@ -2,7 +2,7 @@ import type { Cue, CueLane, MonotonicClock } from "@bellis/contracts";
 import type { LanePrepareResult, StageLaneAdapter } from "../lane-registry.js";
 
 /**
- * 音频 Lane 主线程适配器（docs/phase-2-development-guide.md §8.2）。
+ * 音频 Lane 主线程适配器（docs/archive/phase-2/development-guide.md §8.2）。
  *
  * - 浏览器自动播放限制：AudioContext 未成功 resume（未 Arm）时 prepare
  *   返回 audio_not_armed——绝不虚报 Ready；

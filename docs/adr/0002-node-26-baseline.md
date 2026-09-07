@@ -10,7 +10,7 @@
 >
 > 决策范围：`engines.node`、CI Node 版本、`node:sqlite` 稳定性核验基线
 >
-> 关联文档：[Phase 1 完成态参考](../phase-1-reference.md) · [技术选型基线](../technology-selection.md)
+> 关联文档：[Phase 1 完成态参考](../reference/phase-1.md) · [技术选型基线](../architecture/technology.md)
 
 ## 背景
 

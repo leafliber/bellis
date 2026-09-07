@@ -12,7 +12,7 @@ import type { ControlEnvelope } from "@bellis/contracts";
 import { SESSION_ID, TRACE_ID, VALID_PAYLOADS, serverText } from "../helpers.js";
 
 /**
- * 性质测试（docs/phase-1-reference.md）：
+ * 性质测试（docs/reference/phase-1.md）：
  * - 任意合法 Envelope 编码再解码保持等价。
  * - 任意大序号/时间十进制字符串 JSON 往返无精度损失。
  * - 任意 ACK 序列不会让已确认 Seq 倒退或超过已分配最大 Seq。

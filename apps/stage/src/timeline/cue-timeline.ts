@@ -2,7 +2,7 @@ import type { MonotonicClock } from "@bellis/contracts";
 import type { ClockEstimate } from "@bellis/transport/browser";
 
 /**
- * Stage Cue Timeline（docs/phase-2-development-guide.md §7.2）。
+ * Stage Cue Timeline（docs/archive/phase-2/development-guide.md §7.2）。
  *
  * - Runtime Commit 时间经当前连接的 Offset Estimate 映射为 Stage 本地时刻：
  *   `localUs = runtimeUs - runtimeOffsetUs`（offset 为 Runtime 相对本地的偏移）。

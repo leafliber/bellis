@@ -3,7 +3,7 @@ import { AuthExchangeRequestSchema, AuthExchangeResponseSchema } from "./schemas
 import type { AuthRouteContext } from "./context.js";
 
 /**
- * Auth Exchange 路由（docs/phase-1-reference.md）。
+ * Auth Exchange 路由（docs/reference/phase-1.md）。
  *
  * - Startup Token 从请求 Body 或 `Authorization` 头接收，绝不放 URL Query。
  * - Ready 前的业务请求返回稳定 `not_ready`（此时尚未消耗 Token）。

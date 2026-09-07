@@ -1,7 +1,7 @@
 import type { CueLane } from "@bellis/contracts";
 
 /**
- * 编译期稳定问题码（docs/phase-2-development-guide.md §6.1）。
+ * 编译期稳定问题码（docs/archive/phase-2/development-guide.md §6.1）。
  * 闭合集合：新增码属于兼容变更，但必须先更新协议/开发指南文档。
  */
 export const COMPILE_ISSUE_CODES = [

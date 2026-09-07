@@ -7,7 +7,7 @@ import {
 import type { LanePrepareResult, StageLaneAdapter } from "../lane-registry.js";
 
 /**
- * 浏览器 Avatar Lane（docs/phase-2-development-guide.md §8.4）。
+ * 浏览器 Avatar Lane（docs/archive/phase-2/development-guide.md §8.4）。
  *
  * Phase 2 浏览器路径 = Recording Adapter（命令/顺序/释放与 CI 同源验证）
  * + 最小 DOM 呈现（语义 motion/expression 文本徽标，无帧级参数、无未授权

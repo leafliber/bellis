@@ -16,7 +16,7 @@ import {
 } from "@bellis/scene-runtime";
 
 /**
- * Director Port 的 Control 通道适配器（docs/phase-2-development-guide.md §9.2）。
+ * Director Port 的 Control 通道适配器（docs/archive/phase-2/development-guide.md §9.2）。
  *
  * - 发送：经注入的 ControlChannel（Runtime ControlConnection 的封装）以
  *   协议优先级入队 scene.prepare/commit/cancel；

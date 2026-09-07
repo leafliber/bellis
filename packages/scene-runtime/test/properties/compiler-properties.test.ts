@@ -4,7 +4,7 @@ import type { ActionFrame, StageCapabilities } from "@bellis/contracts";
 import { PHASE_2_PCM_CONTENT_TYPE } from "@bellis/contracts";
 import { compileActionFrame, validateScenePlan } from "../../src/index.js";
 
-/** 性质测试（docs/phase-2-development-guide.md §6.4）：
+/** 性质测试（docs/archive/phase-2/development-guide.md §6.4）：
  * - 相同输入重放结果一致（确定性编译）；
  * - 编译产物恒通过 ScenePlanSchema；
  * - noop 帧恒为 noop，不伪造 Scene。

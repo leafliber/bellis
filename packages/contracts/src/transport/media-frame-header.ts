@@ -4,7 +4,7 @@ import { TraceIdSchema, UuidSchema } from "../common/ids.js";
 import { extensibleJsonObject } from "../common/json-value.js";
 
 /**
- * Binary Media WebSocket 的 JSON Header（docs/phase-1-reference.md）。
+ * Binary Media WebSocket 的 JSON Header（docs/reference/phase-1.md）。
  * 二进制帧布局：magic "BELL" + version 1 + media kind + flags(LE16)
  * + header length(LE32) + UTF-8 JSON header + payload。
  * 解析与编码由 @bellis/transport（P1）实现；本 Schema 约束 Header 语义。

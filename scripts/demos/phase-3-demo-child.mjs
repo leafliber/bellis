@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 3 Demo 子进程 harness（docs/phase-3-development-guide.md §10.2；仅测试装配）。
+ * Phase 3 Demo 子进程 harness（docs/archive/phase-3/development-guide.md §10.2；仅测试装配）。
  *
  * - 使用已构建的 `@bellis/runtime` dist；phase2+phase3 显式启用；
  * - IPC：ready/port、issue-token、ingest（Signal → Pipeline）、set-script

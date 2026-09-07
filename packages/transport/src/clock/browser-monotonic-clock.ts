@@ -1,7 +1,7 @@
 import { BaseMonotonicClock } from "./base-monotonic-clock.js";
 
 /**
- * 浏览器单调时钟（Phase 2 Stage，docs/phase-2-development-guide.md §5.6）。
+ * 浏览器单调时钟（Phase 2 Stage，docs/archive/phase-2/development-guide.md §5.6）。
  *
  * - nowUs 基于 performance.now()（毫秒 double）转微秒 bigint：
  *   `Math.round(now * 1000)`。performance.now 是单调时钟（不受系统墙钟

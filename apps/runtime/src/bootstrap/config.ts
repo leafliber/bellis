@@ -4,7 +4,7 @@ import { UuidSchema } from "@bellis/contracts";
 import type { LogLevel } from "@bellis/observability";
 
 /**
- * Runtime 配置 Schema 与校验（docs/phase-1-reference.md）。
+ * Runtime 配置 Schema 与校验（docs/reference/phase-1.md）。
  *
  * 配置输入类型固定为 `unknown`：生产启动（环境变量/CLI）与测试注入都
  * 先经过这里的单一校验入口，未校验配置不得进入装配。
@@ -17,7 +17,7 @@ import type { LogLevel } from "@bellis/observability";
 
 const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "::1"] as const;
 
-/** 只允许 loopback 监听地址（docs/phase-1-reference.md）。 */
+/** 只允许 loopback 监听地址（docs/reference/phase-1.md）。 */
 const BindHostSchema = z.enum(["127.0.0.1", "localhost", "::1"]);
 
 /** 允许的 Host 头（主机名，不带端口；端口在比较时剥离）。 */
@@ -53,7 +53,7 @@ const RuntimeConfigSchema = z
      * （http://<host>:<port>）。显式条目必须是 loopback http(s) URL。
      */
     allowedOrigins: z.array(OriginSchema).min(1).optional(),
-    /** 允许缺失 Origin 的非浏览器客户端；默认拒绝（docs/phase-1-reference.md）。 */
+    /** 允许缺失 Origin 的非浏览器客户端；默认拒绝（docs/reference/phase-1.md）。 */
     allowMissingOrigin: z.boolean().default(false),
     /** 数据目录绝对路径；必填，无默认值。 */
     dataDirectory: z
@@ -150,7 +150,7 @@ const RuntimeConfigSchema = z
     /**
      * Phase 2 演出链路（开发/测试/Demo 装配，默认关闭）：启用后
      * startRuntime 创建 Phase2RuntimeHost 并挂接 Stage 连接；生产默认
-     * 路径不装配任何 Phase 2 输入入口（docs/phase-2-development-guide.md §9.1）。
+     * 路径不装配任何 Phase 2 输入入口（docs/archive/phase-2/development-guide.md §9.1）。
      */
     phase2: z
       .object({
@@ -162,8 +162,8 @@ const RuntimeConfigSchema = z
          */
         stageDistDir: z.string().min(1).optional(),
         /**
-         * 崩溃窗口故障注入（仅开发/Demo 崩溃测试装配，docs/phase-2-
-         * development-guide.md §10.2）：Director 到达指定窗口时 SIGKILL
+         * 崩溃窗口故障注入（仅开发/Demo 崩溃测试装配，
+         * docs/archive/phase-2/development-guide.md §10.2）：Director 到达指定窗口时 SIGKILL
          * 自身。生产配置禁止出现该字段。
          */
         faultPoint: z

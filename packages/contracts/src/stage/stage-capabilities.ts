@@ -3,7 +3,7 @@ import { DecimalStringSchema } from "../common/decimal-string.js";
 import { extensibleJsonObject } from "../common/json-value.js";
 
 /**
- * Stage 能力声明（Phase 2，docs/phase-2-development-guide.md §5.2）。
+ * Stage 能力声明（Phase 2，docs/archive/phase-2/development-guide.md §5.2）。
  *
  * Stage 在握手后通过 `stage.capabilities` 上报本连接可执行的 Lane 与限制；
  * Runtime 的 Action Compiler 用该快照做编译期能力判定（不支持的能力返回

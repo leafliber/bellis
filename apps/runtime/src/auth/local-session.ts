@@ -8,7 +8,7 @@ import { newCookieToken, SessionStore } from "../websocket/session-store.js";
 import type { StartupTokenReservation, StartupTokenService } from "./startup-token.js";
 
 /**
- * 本地 Session 服务（docs/phase-1-reference.md）。
+ * 本地 Session 服务（docs/reference/phase-1.md）。
  *
  * 一次性 Startup Token 交换成功 → 创建逻辑 Session（P2 ensureSession
  * 落库）→ 签发 HttpOnly / SameSite=Strict / 限定 Path 的 Cookie。

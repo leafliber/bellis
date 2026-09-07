@@ -1,5 +1,5 @@
 /**
- * 受控检查点观察器（docs/phase-1-reference.md；docs/protocols/persistence-and-recovery.md）。
+ * 受控检查点观察器（docs/reference/phase-1.md；docs/protocols/persistence-and-recovery.md）。
  *
  * - 公开装配可选注入，生产默认 No-op；未启用时事务顺序与性能语义不变。
  * - 测试适配器只能由测试父进程通过继承的私有 IPC 创建（test/fixtures），

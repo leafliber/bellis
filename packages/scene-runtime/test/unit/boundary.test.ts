@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * 依赖边界扫描（docs/phase-2-development-guide.md §4 / §6.4）：
+ * 依赖边界扫描（docs/archive/phase-2/development-guide.md §4 / §6.4）：
  *
  * - scene-runtime 不依赖 Fastify、WebSocket、SQLite、React 或浏览器 API；
  *   src 导入只允许 @bellis/contracts、@bellis/observability 与相对路径。

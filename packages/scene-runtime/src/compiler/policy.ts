@@ -1,5 +1,5 @@
 /**
- * 编译策略（docs/phase-2-development-guide.md §6.1）。
+ * 编译策略（docs/archive/phase-2/development-guide.md §6.1）。
  *
  * - 不支持的能力在编译期返回稳定 Issue；非 hard lane 是否降级（omit
  *   该 Cue）由策略决定，hard lane 不可满足一律拒绝（指南 §6.1 冻结）。

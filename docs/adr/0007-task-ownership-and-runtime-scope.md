@@ -1,6 +1,6 @@
 # ADR 0007：任务所有权、恢复事实与当前能力收敛
 
-> 状态：Accepted；实现与验证状态见 `docs/build-and-validation.md`。
+> 状态：Accepted；实现与验证状态见 `docs/guides/build-and-validation.md`。
 >
 > 日期：2026-09-06
 >

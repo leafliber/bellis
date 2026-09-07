@@ -2,7 +2,7 @@ import type { Cue, CueLane, MonotonicClock } from "@bellis/contracts";
 import type { LanePrepareResult, StageLaneAdapter } from "../lane-registry.js";
 
 /**
- * 字幕 Lane（docs/phase-2-development-guide.md §8.3）。
+ * 字幕 Lane（docs/archive/phase-2/development-guide.md §8.3）。
  *
  * - 文本直接来自同一 SpeechIntent（Cue intent.speechRef → plan.speech，
  *   调用方传入文本；Lane 不做任何文本生成）；

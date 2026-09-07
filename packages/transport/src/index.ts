@@ -2,7 +2,7 @@
  * @bellis/transport — Clock、Control WebSocket 与 Binary Media WebSocket
  * 协议核心（Phase 1 / P1 交付）。
  *
- * 公开边界约定（docs/phase-1-reference.md）：
+ * 公开边界约定（docs/reference/phase-1.md）：
  * - 所有公共导出只从本包根暴露；P4 只能依赖 `@bellis/transport` 包根，
  *   不得读取包内模块路径。
  * - 协议类型一律来自 `@bellis/contracts`，本包不复制 Envelope/Payload/Header

@@ -6,7 +6,7 @@ import { SceneClient, type SpeechTextPublisher } from "../scenes/scene-client.js
 import { CueTimeline } from "../timeline/cue-timeline.js";
 
 /**
- * Stage 应用引导状态机（docs/phase-2-development-guide.md §7.1）。
+ * Stage 应用引导状态机（docs/archive/phase-2/development-guide.md §7.1）。
  *
  * ```text
  * booting → auth_ready → control_ready → clock_ready → performance_ready

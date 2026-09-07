@@ -12,7 +12,7 @@ import type {
 import type { RecoveryState } from "@bellis/persistence";
 
 /**
- * 恢复与快照构造（docs/phase-1-reference.md；docs/protocols/scene-execution.md §8）。
+ * 恢复与快照构造（docs/reference/phase-1.md；docs/protocols/scene-execution.md §8）。
  *
  * - 重连 Replay Gap：由 P2 `readRecoveryState` 构造快照。
  * - Phase 1 固定限制：`activeScene` 恒为 `null`，`openMediaStreams` 恒为空

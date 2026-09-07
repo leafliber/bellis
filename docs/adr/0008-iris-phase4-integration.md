@@ -2,7 +2,7 @@
 
 > 状态：Accepted（计划与设计边界）；Runtime、Provider 和契约实现待 Phase 4 A0–A4。
 > 日期：2026-09-06
-> 依据：本次项目负责人要求先调研 Iris，再完善 Phase 4 接入计划；[调研证据](../phase-4-iris-integration-research.md)。
+> 依据：本次项目负责人要求先调研 Iris，再完善 Phase 4 接入计划；[调研证据](../research/iris-integration.md)。
 > 关联：[ADR 0005](./0005-memory-provider-seam-and-persona-ownership.md)、[ADR 0006](./0006-documentation-and-delivery-boundaries.md)、[ADR 0007](./0007-task-ownership-and-runtime-scope.md)。
 
 ## 1. 交付归属与顺序

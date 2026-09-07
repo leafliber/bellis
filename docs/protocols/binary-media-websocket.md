@@ -3,7 +3,7 @@
 > 2026-09-06 架构审查修订：任务所有权、工具恢复事实、调用列表范围、场景终态、Seq 分段预留及 Provider 接缝以 [ADR 0007](../adr/0007-task-ownership-and-runtime-scope.md) 为准。
 
 > 状态：Phase 1 冻结 v1 + Phase 2 兼容扩展（实现：`@bellis/transport`）
-> 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
+> 上位规范：[Phase 1 完成态参考](../reference/phase-1.md) · [ADR 0001](../adr/0001-canonical-core-and-wire-contracts.md)
 > 姊妹文档：[Control WebSocket](./control-websocket.md) · [Scene Execution](./scene-execution.md)
 >
 > 本文档中的全部 `hex media-frame` 代码块由

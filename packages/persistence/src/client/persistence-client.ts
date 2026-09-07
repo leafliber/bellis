@@ -65,9 +65,9 @@ import type { PersistenceErrorCode, SafePersistenceError } from "../errors.js";
 import { PersistenceRpcChannel } from "./rpc-channel.js";
 
 /**
- * Persistence 公开装配接口（docs/phase-1-reference.md）。
+ * Persistence 公开装配接口（docs/reference/phase-1.md）。
  *
- * Gate 1.1 审查结论（docs/phase-1-reference.md）：
+ * Gate 1.1 审查结论（docs/reference/phase-1.md）：
  * - 新增 `ensureSession`：commitScene 依赖 Session 存在，此前无创建入口。
  * - `CommitSceneInput` 新增 `scene`：scenes.payload_json 必须写入经
  *   SceneSchema 验证的完整版本化 Payload，不再只有 ID。

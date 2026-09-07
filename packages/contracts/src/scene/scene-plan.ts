@@ -5,7 +5,7 @@ import { CueSchema } from "./cue.js";
 import { SceneSchema } from "./scene.js";
 
 /**
- * Scene 执行状态（Phase 2，docs/phase-2-development-guide.md §5.2）。
+ * Scene 执行状态（Phase 2，docs/archive/phase-2/development-guide.md §5.2）。
  *
  * 这是跨 Runtime/Stage 的公开执行状态，不是 Scene Director 内部状态机全集：
  * Director 内部的 created/committing/cancelling 等过渡态不进入 Wire，

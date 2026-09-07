@@ -10,7 +10,7 @@
 > Turn/Cycle 身份与收件箱语义、Cycle adoption 原子操作、
 > ModelProvider Port 事件边界、Tool Run 状态与恢复判定
 >
-> 关联文档：[Phase 3 开发指南](../phase-3-development-guide.md) ·
+> 关联文档：[Phase 3 开发指南](../archive/phase-3/development-guide.md) ·
 > [ADR 0001](./0001-canonical-core-and-wire-contracts.md) ·
 > [Persistence & Recovery 协议](../protocols/persistence-and-recovery.md)
 

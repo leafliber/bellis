@@ -1,8 +1,9 @@
 # Phase 4 历史归档
 
-此目录冻结保存实施过程，不再追加执行切片。原 ADR 编号不重用，原决策正文保留；移动位置不表示撤销兼容性约束。当前主题入口为 [存储容量](../../phase-4/storage-capacity.md)、[历史恢复](../../phase-4/history-recovery.md)，当前状态见 [实施状态](../../phase-4-implementation-status.md)。
+此目录冻结保存实施过程，不再追加执行切片。原 ADR 编号不重用，原决策正文保留；移动位置不表示撤销兼容性约束。当前主题入口为 [存储容量](../../reference/phase-4/storage-capacity.md)、[历史恢复](../../reference/phase-4/history-recovery.md)，当前状态见 [实施状态](../../reference/phase-4-status.md)。
 
 - [实施历史](./implementation-history.md)
+- [旧构建验收日志](./build-validation-history.md)
 
 ## 历史决策与切片记录
 

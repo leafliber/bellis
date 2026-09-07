@@ -20,7 +20,7 @@ import type { ActiveSceneRow } from "@bellis/persistence";
 import { buildSessionSnapshot } from "../../src/application/recovery.js";
 
 /**
- * Phase 2 应用服务全链路（docs/phase-2-development-guide.md §9.2）：
+ * Phase 2 应用服务全链路（docs/archive/phase-2/development-guide.md §9.2）：
  * Signal → Fake Model → Compiler → Director（真实状态机）→ Control 通道
  * （Fake，回放 Stage 协议消息）→ 持久化（Fake Client 记录调用）。
  * 验证：编译产物落库携带 plan、started/finished 聚合、紧急打断取消。

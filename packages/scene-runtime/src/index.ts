@@ -1,6 +1,6 @@
 /**
  * @bellis/scene-runtime — Action Compiler、Prepare Barrier 与 Scene Director
- *（Phase 2 / P1 交付，docs/phase-2-development-guide.md §6）。
+ *（Phase 2 / P1 交付，docs/archive/phase-2/development-guide.md §6）。
  *
  * 公开边界约定：
  * - 依赖只限 @bellis/contracts 与 @bellis/observability；不依赖 Fastify、

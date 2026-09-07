@@ -11,7 +11,7 @@ import type { ScenePlan } from "@bellis/contracts";
 
 /**
  * Fake TTS 确定性与 Media Sender 三重限制/取消优先测试
- * （docs/phase-2-development-guide.md §8.1）。
+ * （docs/archive/phase-2/development-guide.md §8.1）。
  */
 
 const SPEECH = {

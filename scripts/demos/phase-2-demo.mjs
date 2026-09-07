@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 2 Demo（docs/phase-2-development-guide.md §10.2）。
+ * Phase 2 Demo（docs/archive/phase-2/development-guide.md §10.2）。
  *
  * 协议级真实纵向链路（真实子进程 Runtime + 真实 WebSocket + 真实 DB Worker；
  * 浏览器 Stage 属于 test:browser，见交付报告）：

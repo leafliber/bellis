@@ -1,7 +1,7 @@
 import type { Cue, CueLane } from "@bellis/contracts";
 
 /**
- * Stage Lane Adapter Port 与注册表（docs/phase-2-development-guide.md §7/§8.4）。
+ * Stage Lane Adapter Port 与注册表（docs/archive/phase-2/development-guide.md §7/§8.4）。
  *
  * - 每条 Lane（audio/subtitle/avatar…）实现同一 Port：prepare 只验证/缓冲，
  *   start 在生效时刻之后才产生用户可见效果，stop 在预算内停止并释放。

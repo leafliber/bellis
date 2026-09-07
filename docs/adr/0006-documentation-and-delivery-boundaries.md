@@ -8,7 +8,7 @@
 >
 > 决策背景：构建文档审查及项目负责人要求修复已构建部分的文档/代码、修复未构建部分的文档。
 >
-> 关联：[ADR 0004](./0004-phase-3-decision-boundaries.md)、[ADR 0005](./0005-memory-provider-seam-and-persona-ownership.md)、[构建与验收状态](../build-and-validation.md)
+> 关联：[ADR 0004](./0004-phase-3-decision-boundaries.md)、[ADR 0005](./0005-memory-provider-seam-and-persona-ownership.md)、[构建与验收状态](../guides/build-and-validation.md)
 
 ## 1. 文档权威性与实现状态
 

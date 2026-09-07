@@ -1,5 +1,5 @@
 /**
- * @bellis/contracts — 唯一协议源（docs/phase-1-reference.md）。
+ * @bellis/contracts — 唯一协议源（docs/reference/phase-1.md）。
  *
  * Zod Schema 是 TypeScript 领域类型、REST、WebSocket 和持久化 Payload 的
  * 唯一真相来源；TypeScript 类型一律用 z.infer 推导，禁止复制手写副本。

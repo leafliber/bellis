@@ -5,7 +5,7 @@ import { extensibleJsonObject } from "../common/json-value.js";
 import { SceneExecutionStateSchema } from "../scene/scene-plan.js";
 
 /**
- * Phase 1 的 session.snapshot 固定形态（docs/phase-1-reference.md）。
+ * Phase 1 的 session.snapshot 固定形态（docs/reference/phase-1.md）。
  *
  * - Phase 1 不执行真实 Scene，activeScene 恒为 null。
  * - Media Stream 是连接级资源，重连后必须重新打开，Snapshot 不声称恢复旧 Stream。
@@ -40,7 +40,7 @@ export const Phase1SessionSnapshotSchema = extensibleJsonObject({
 export type Phase1SessionSnapshot = z.infer<typeof Phase1SessionSnapshotSchema>;
 
 /**
- * Phase 2 快照中的活动 Scene 对账视图（docs/phase-2-development-guide.md §5.5）。
+ * Phase 2 快照中的活动 Scene 对账视图（docs/archive/phase-2/development-guide.md §5.5）。
  *
  * - executionState：跨 Runtime/Stage 的公开执行状态（SceneExecutionState）。
  * - outcomeCertain：false 表示执行结果无法证明（uncertain 语义），恢复
@@ -59,7 +59,7 @@ export const ActiveSceneStateSchema = extensibleJsonObject({
 export type ActiveSceneState = z.infer<typeof ActiveSceneStateSchema>;
 
 /**
- * Phase 2 的 session.snapshot 版本化形态（docs/phase-2-development-guide.md §5.5）。
+ * Phase 2 的 session.snapshot 版本化形态（docs/archive/phase-2/development-guide.md §5.5）。
  *
  * - schemaVersion 提升为 2：与 Phase 1 快照（schemaVersion 1）通过
  *   SessionSnapshotUnionSchema 判别区分；Phase 1 语义原样保留。

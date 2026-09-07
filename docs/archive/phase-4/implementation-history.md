@@ -1,13 +1,13 @@
 # Phase 4 实施历史（归档）
 
-> 归档于 2026-09-07。此处保存当时的切片进度、命令和判定，不再追加；“本次”“当前”“提交后停止”均为历史语境。现行事实见 [当前实施状态](../../phase-4-implementation-status.md)。
+> 归档于 2026-09-07。此处保存当时的切片进度、命令和判定，不再追加；“本次”“当前”“提交后停止”均为历史语境。现行事实见 [当前实施状态](../../reference/phase-4-status.md)。
 
 
 状态：用户指定的 Phase 4A 范围冻结收尾已完成验证；两项命令均退出 0，提交后停止，不自动开始新切片。
 
 ## 当前有效的恢复验收范围
 
-[ADR 0047](../../adr/0047-phase4a-recovery-scope-freeze.md) 显式冻结 Phase 4A 恢复 Gate 为 8 个窗口 × 3 个目标 × 20 次，冻结时已通过 480/480：Cycle/Usage 180、Observe HTTP 180、SSE 120。顶层 status 改为依据次数和实际/预期用例总数计算。原 remaining 与「仍需完成」条目整体移入 [Phase 4B 待办](../../phase-4b-backlog.md)；扩展的恢复、Stage、容量、cursor 场景不再列作 Phase 4A 恢复通过条件。
+[ADR 0047](../../adr/0047-phase4a-recovery-scope-freeze.md) 显式冻结 Phase 4A 恢复 Gate 为 8 个窗口 × 3 个目标 × 20 次，冻结时已通过 480/480：Cycle/Usage 180、Observe HTTP 180、SSE 120。顶层 status 改为依据次数和实际/预期用例总数计算。原 remaining 与「仍需完成」条目整体移入 [Phase 4B 待办](../../plans/phase-4/backlog.md)；扩展的恢复、Stage、容量、cursor 场景不再列作 Phase 4A 恢复通过条件。
 
 本次先以 `08bb567` 保存全部工作树 WIP，再修改判定与文档。收尾已运行一次完整根检查和冻结的 480 例恢复命令：`pnpm check` 退出 0（1054 项单元/性质、275 项集成、168 个生成契约），`pnpm test:memory:iris:recovery` 退出 0（24 组合各 20 次，480/480，`covered-windows-passed`）。见 [本次结果](../../evidence/phase4a-recovery-scope-freeze.json) 和 [原始恢复报告摘要](../../evidence/phase4a-frozen-recovery-summary.json)。全部收尾改动提交后停止。
 
@@ -40,13 +40,13 @@
 - Core 0.13 兼容：新旧 wheel 的应用契约差异只有包版本/Schema；0.13 安装逐项核对 156 个文件，SDK 保持 0.11.1。新版本真实 Chromium/Core 回归通过三个 Cycle、四条输出、三次 Usage 和隐私 generation 1。搜索初始化切片当时的 Core 源码 11,032 项测试通过、覆盖率 84.49%，初始化专项 9 项及类型/公共契约检查通过。未原地升级用户数据。
 - 修复既有 Audio Arm 过早公开就绪的问题：Worklet 加载完成后再允许准备，避免初始媒体帧丢失及并发创建节点。全部 Chromium 三用例此前通过，欠载 0，既有同步样本最大偏差 3.13ms、打断 3.20ms；不代表物理扬声器或 P99 验收。本切片另复验真实 Core 联合浏览器路径。
 
-- A4 连续纵向：新增 `test:memory:iris:continuous`，同一真实 Runtime/DB Worker、Core API/Worker 和 Chromium 会话运行 100 个 Cycle。逐轮读取持久 Manifest，对照实际模型请求、Recall 来源/Persona 版本与 Core Usage ACK 三集合；100/100 均通过。101 条实际输出的 Core 源游标为 101，最大输入估算 6,857／16,000，末轮隐私中断通过。双进程崩溃、总磁盘配额和长时资源增长仍未通过。见 [运行说明](../../phase-4-continuous-validation.md) 与 [证据](../../evidence/phase4-continuous-probe.json)。
+- A4 连续纵向：新增 `test:memory:iris:continuous`，同一真实 Runtime/DB Worker、Core API/Worker 和 Chromium 会话运行 100 个 Cycle。逐轮读取持久 Manifest，对照实际模型请求、Recall 来源/Persona 版本与 Core Usage ACK 三集合；100/100 均通过。101 条实际输出的 Core 源游标为 101，最大输入估算 6,857／16,000，末轮隐私中断通过。双进程崩溃、总磁盘配额和长时资源增长仍未通过。见 [运行说明](../../validation/iris-continuous.md) 与 [证据](../../evidence/phase4-continuous-probe.json)。
 
-- A4 SSE 崩溃窗口：新增 `test:memory:iris:recovery`，已通过 pending 失效落盘/宿主 ACK 前及策略提交/游标推进前两个窗口，分别 SIGKILL 真实 Runtime、Core API、Core Worker，每组合 20 次，共 120 次。重启继续原事件，永久 tombstone、游标与原删除回执一致，已提交策略不重复推进 generation。完整恢复 Gate 仍报告 incomplete/退出 2；新增采用/Observe/ACK 窗口见后续条目；旧快照、容量及 Stage 窗口仍待完成。见 [恢复说明](../../phase-4-recovery-validation.md) 与 [证据](../../evidence/phase4-recovery-probe.json)。
+- A4 SSE 崩溃窗口：新增 `test:memory:iris:recovery`，已通过 pending 失效落盘/宿主 ACK 前及策略提交/游标推进前两个窗口，分别 SIGKILL 真实 Runtime、Core API、Core Worker，每组合 20 次，共 120 次。重启继续原事件，永久 tombstone、游标与原删除回执一致，已提交策略不重复推进 generation。完整恢复 Gate 仍报告 incomplete/退出 2；新增采用/Observe/ACK 窗口见后续条目；旧快照、容量及 Stage 窗口仍待完成。见 [恢复说明](../../validation/iris-recovery.md) 与 [证据](../../evidence/phase4-recovery-probe.json)。
 
-- A4 采用/Usage 崩溃窗口：真实 Signal Pipeline/Loop 在 Manifest 形成/adoption 前、adoption 提交/Usage ACK 前、Usage ACK/宿主 delivered 前停留；分别终止 Runtime、Core API、Core Worker，各 20 次，新增 180 次通过，同轮 SSE 120 次回归通过。已采用 Runtime 重启保持原 Manifest 且模型请求为 0；采用前原候选缺席，未消费输入以新 Cycle 恢复。原键 Usage 重投与 Core 自然去重指向同一 report ID。完整恢复 Gate 仍为 incomplete/退出 2；见 [恢复说明](../../phase-4-recovery-validation.md) 和 [300 次证据](../../evidence/phase4-cycle-recovery-probe.json)。
+- A4 采用/Usage 崩溃窗口：真实 Signal Pipeline/Loop 在 Manifest 形成/adoption 前、adoption 提交/Usage ACK 前、Usage ACK/宿主 delivered 前停留；分别终止 Runtime、Core API、Core Worker，各 20 次，新增 180 次通过，同轮 SSE 120 次回归通过。已采用 Runtime 重启保持原 Manifest 且模型请求为 0；采用前原候选缺席，未消费输入以新 Cycle 恢复。原键 Usage 重投与 Core 自然去重指向同一 report ID。完整恢复 Gate 仍为 incomplete/退出 2；见 [恢复说明](../../validation/iris-recovery.md) 和 [300 次证据](../../evidence/phase4-cycle-recovery-probe.json)。
 
-- A4 Observation HTTP 窗口：真实输入/Outbox 经固定目的地址的 loopback 代理，在 Core 发布前、Core 已提交但 HTTP ACK 未转发、SDK 已确认但宿主未结算三个边界分别终止 Runtime/API/Worker，各 20 次。新增 180 次及原有 300 次回归均通过，共 480 次。原正文/批次键重投保持 180 个 Canonical ID，记录级重报新增事实与投影任务为 0，两端源游标及宿主 delivered 均为 1。完整恢复 Gate 仍为 incomplete；见 [恢复说明](../../phase-4-recovery-validation.md) 与 [本轮证据](../../evidence/phase4-observe-recovery-probe.json)。
+- A4 Observation HTTP 窗口：真实输入/Outbox 经固定目的地址的 loopback 代理，在 Core 发布前、Core 已提交但 HTTP ACK 未转发、SDK 已确认但宿主未结算三个边界分别终止 Runtime/API/Worker，各 20 次。新增 180 次及原有 300 次回归均通过，共 480 次。原正文/批次键重投保持 180 个 Canonical ID，记录级重报新增事实与投影任务为 0，两端源游标及宿主 delivered 均为 1。完整恢复 Gate 仍为 incomplete；见 [恢复说明](../../validation/iris-recovery.md) 与 [本轮证据](../../evidence/phase4-observe-recovery-probe.json)。
 
 - A3 显式作用域：宿主要求明确接受 space 跨 Session 语义，拒绝未核验的 Core Session/group；Provider 启动前事务性保存本地 Session 归属，重启改配置失败整体回滚。输出目标使用配置快照，旧 Outbox 不兼容目标拒绝发送且不重写。Core Session 映射仍未完成，见 [ADR 0023](../../adr/0023-phase4-explicit-memory-scope.md)。
 
@@ -174,7 +174,7 @@ A3 Runtime 恢复装配：可信 `historyRecovery` 为所有已注册 Provider �
 
 最终完整根检查退出 0，1049 项单元/性质测试、274 项集成测试通过，168 个生成契约无漂移；十四项历史恢复集成用例覆盖新装配。初次发现的 Node 原生 TypeScript 参数属性兼容错误已修复，最终复跑全部通过。真实 Core/Chromium 通过实际 Runtime 维护启动和重启复用，核验 HTTP 不重复，原 Usage 及其余三项未核验事实保留；工具和既有 24 组恢复冒烟通过，完整恢复入口保持退出 2。生产凭据配置加载器、全部事实核验、跨批次一致性、安全解除和后续 Phase 4B 仍未完成。默认 SDK 保持，候选发布仍等待此前明确授权，Phase 4 继续实施。
 
-A4 可信配置与运行入口：新增 `pnpm start:iris --config /absolute/config.json`，严格配置只接受凭据引用，Iris token 不进入 RuntimeConfig。文件读取有界，POSIX 凭据文件检查私有权限；禁用不解析凭据或导入 Provider，错误不回显配置正文。固定安装入口装配单个 Provider/Persona 所有者及可选恢复通道，支持 SIGINT/SIGTERM 关闭。见 [ADR 0041](../../adr/0041-phase4-iris-launch-configuration.md)、[运行说明](../../iris-runtime-operations.md)、[样例](../../examples/iris-runtime.json) 和 [证据](../../evidence/phase4-iris-launch-probe.json)。
+A4 可信配置与运行入口：新增 `pnpm start:iris --config /absolute/config.json`，严格配置只接受凭据引用，Iris token 不进入 RuntimeConfig。文件读取有界，POSIX 凭据文件检查私有权限；禁用不解析凭据或导入 Provider，错误不回显配置正文。固定安装入口装配单个 Provider/Persona 所有者及可选恢复通道，支持 SIGINT/SIGTERM 关闭。见 [ADR 0041](../../adr/0041-phase4-iris-launch-configuration.md)、[运行说明](../../guides/iris-runtime.md)、[样例](../../examples/iris-runtime.json) 和 [证据](../../evidence/phase4-iris-launch-probe.json)。
 
 最终根检查退出 0，1054 项单元/性质测试、274 项集成测试通过，168 个生成契约无漂移。五项配置专项及真实 CLI 四场景（启用、重启、禁用、缺失凭据）通过；修复了原默认 paceMs 0 在重复校验时被拒绝的问题。真实 Core/Chromium 联合回归和工具通过，既有 24 组恢复冒烟通过，完整恢复入口保持退出 2。默认 SDK 与 Schema 范围不变；生产输入/工具身份授权、凭据轮换撤销、完整事实核验、安全解除及 Phase 4B 仍待完成。候选 SDK 发布继续等待此前明确授权，Phase 4 保持进行中。
 

@@ -1,5 +1,5 @@
 /**
- * Cue Anchor 闭合语法（docs/phase-2-development-guide.md §6.1）。
+ * Cue Anchor 闭合语法（docs/archive/phase-2/development-guide.md §6.1）。
  *
  * Anchor 是语义时间引用，不是绝对时刻：Runtime/Stage 在 Commit 得到 T0
  * （及可选的 speech 起点映射）后解析为本地目标时刻。允许的语法：

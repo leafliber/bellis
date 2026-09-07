@@ -1,5 +1,5 @@
 /**
- * Phase 2 媒体格式基线（docs/phase-2-development-guide.md §5.4，ADR 0003）。
+ * Phase 2 媒体格式基线（docs/archive/phase-2/development-guide.md §5.4，ADR 0003）。
  *
  * Phase 2 只要求一种可测试音频格式：48 kHz、mono、signed 16-bit
  * little-endian PCM，20 ms 一帧。该 contentType 字符串在 P0 冻结；

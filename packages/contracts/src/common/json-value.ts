@@ -111,7 +111,7 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 );
 
 /**
- * 可前向扩展的协议对象（docs/phase-1-reference.md，原规范对“未识别的可选 Payload
+ * 可前向扩展的协议对象（docs/reference/phase-1.md，原规范对“未识别的可选 Payload
  * 字段由 Schema 策略明确处理」的统一答案）。
  *
  * 未知扩展键以 JsonValueSchema 作为 catch-all 校验：扩展值必须是 JSON 值，

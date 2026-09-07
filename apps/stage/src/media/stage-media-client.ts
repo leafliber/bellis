@@ -12,7 +12,7 @@ import { MediaStreamAnnouncePayloadSchema } from "@bellis/contracts";
 import type { StageSocket } from "../control/stage-socket.js";
 
 /**
- * Stage 媒体客户端（docs/phase-2-development-guide.md §8；binary-media-websocket.md §10）。
+ * Stage 媒体客户端（docs/archive/phase-2/development-guide.md §8；binary-media-websocket.md §10）。
  *
  * Runtime → Stage 方向的 BELL v1 帧接收端：
  * - `media.stream.announce`（Control）到达时校验能力（contentType ∈ 本端

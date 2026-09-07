@@ -7,7 +7,7 @@
 - [Phase 4A 冻结结论](./phase4a-recovery-scope-freeze.json)：根检查及 480/480 恢复结果。
 - [冻结恢复摘要](./phase4a-frozen-recovery-summary.json)：各窗口/目标的记录数与重复次数。
 - [连续 100 Cycle 摘要](./phase4-continuous-core-probe.json)。
-- [当前能力与证据导航](../phase-4-implementation-status.md)。
+- [当前能力与证据导航](../reference/phase-4-status.md)。
 
 ## 生成与维护
 

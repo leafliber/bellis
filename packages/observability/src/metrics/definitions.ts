@@ -1,5 +1,5 @@
 /**
- * Phase 1 指标定义（docs/phase-1-reference.md）。
+ * Phase 1 指标定义（docs/reference/phase-1.md）。
  *
  * - 每个指标声明类型、说明与 Label Allowlist；未列入 Allowlist 的 Label
  *   会被 Registry 拒绝，从源头阻断高基数。
@@ -124,7 +124,7 @@ const RAW_PHASE_1_METRIC_DEFINITIONS: readonly MetricDefinition[] = [
 ];
 
 /**
- * Phase 2 指标定义（docs/phase-2-development-guide.md §13 Runtime 侧名单）。
+ * Phase 2 指标定义（docs/archive/phase-2/development-guide.md §13 Runtime 侧名单）。
  * bellis_stage_*（Stage 侧时钟/音频缓冲/重连）由 Stage 上报路径承载，
  * 不在 Runtime Registry 注册。
  */

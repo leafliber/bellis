@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 /**
- * 一次性启动 Token（docs/phase-1-reference.md）。
+ * 一次性启动 Token（docs/reference/phase-1.md）。
  *
  * - Token 至少 256-bit 随机（32 字节 → base64url 43 字符），短期、单次使用。
  * - 内存中**只保存 SHA-256 摘要**（索引与记录均为 digest），

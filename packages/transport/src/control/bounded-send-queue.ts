@@ -1,5 +1,5 @@
 /**
- * 有界、分优先级的发送暂存队列（docs/phase-1-reference.md）。
+ * 有界、分优先级的发送暂存队列（docs/reference/phase-1.md）。
  *
  * 队列持有的是**尚未分配 Seq** 的暂存消息：优先级只在此阶段起作用——
  * 调度（drain 按优先级升序）、准入淘汰、mergeKey 合并与 Deadline 剪枝

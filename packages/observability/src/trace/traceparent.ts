@@ -1,9 +1,9 @@
 /**
- * W3C Trace Context `traceparent` 的严格解析与格式化（docs/phase-1-reference.md）。
+ * W3C Trace Context `traceparent` 的严格解析与格式化（docs/reference/phase-1.md）。
  *
  * 只支持 version `00` 的标准字段宽度；解析失败的唯一结果是 `null`——
  * HTTP 边界收到非法 `traceparent` 时必须丢弃并由调用方创建新 Trace，
- * 绝不能原样透传（docs/phase-1-reference.md）。
+ * 绝不能原样透传（docs/reference/phase-1.md）。
  */
 
 export interface ParsedTraceparent {

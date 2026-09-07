@@ -6,7 +6,7 @@
 > `pnpm demo:phase2`、四个 Crash Window `pnpm demo:phase2:crash`、
 > 真实 Chromium E2E `pnpm test:browser`。Contracts：`@bellis/contracts`；
 > 编解码：`@bellis/transport`）
-> 上位规范：[Phase 2 开发指南](../phase-2-development-guide.md) · [ADR 0003](../adr/0003-phase-2-scene-wire-and-browser-boundary.md)
+> 上位规范：[Phase 2 开发指南](../archive/phase-2/development-guide.md) · [ADR 0003](../adr/0003-phase-2-scene-wire-and-browser-boundary.md)
 > 姊妹文档：[Control WebSocket](./control-websocket.md) · [Binary Media WebSocket](./binary-media-websocket.md)
 >
 > 本文档中的全部 `json control-envelope` 代码块由

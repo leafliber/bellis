@@ -88,7 +88,7 @@ export function createOutboxDispatcher(options: OutboxDispatcherOptions): Outbox
   const pendingGauge = metrics.gauge("bellis_outbox_pending");
   // Phase 1 规范指标：统一 bellis_outbox_delivery_total{result=delivered|retry|dead}，
   // 与 @bellis/observability 的 PHASE_1_METRIC_DEFINITIONS 对齐
-  // （docs/phase-1-reference.md）；独立三指标名会被 Registry 拒绝成 No-op。
+  // （docs/reference/phase-1.md）；独立三指标名会被 Registry 拒绝成 No-op。
   const deliveredCounter = metrics.counter("bellis_outbox_delivery_total", {
     result: "delivered",
   });

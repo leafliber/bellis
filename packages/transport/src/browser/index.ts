@@ -1,6 +1,6 @@
 /**
  * @bellis/transport/browser — 浏览器安全入口（Phase 2 Browser Bundle
- * Spike，docs/phase-2-development-guide.md §5.6，ADR 0003）。
+ * Spike，docs/archive/phase-2/development-guide.md §5.6，ADR 0003）。
  *
  * 边界约定：
  * - 本入口只重新导出可在浏览器运行的核心：Control 编解码/方向白名单、

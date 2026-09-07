@@ -14,7 +14,7 @@ import { resolveCompilePolicy, type CompilePolicy } from "./policy.js";
 import { validateScenePlan } from "./plan-validator.js";
 
 /**
- * 纯函数 Action Compiler（docs/phase-2-development-guide.md §6.1）。
+ * 纯函数 Action Compiler（docs/archive/phase-2/development-guide.md §6.1）。
  *
  * 输入：经 ActionFrameSchema 校验的 ActionFrame、cycleId、Stage 能力快照、
  * 确定性 ID 源与编译策略。输出：noop / ScenePlan / 拒绝 Issue 列表。

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 2 Demo 子进程 harness（docs/phase-2-development-guide.md §10.2；仅测试装配）。
+ * Phase 2 Demo 子进程 harness（docs/archive/phase-2/development-guide.md §10.2；仅测试装配）。
  *
  * - 使用已构建的 `@bellis/runtime` dist；phase2 显式启用（开发/Demo 装配，
  *   生产默认路径不创建该宿主）。

@@ -9,7 +9,7 @@ import {
 } from "../src/index.js";
 
 /**
- * Redaction 评审基线（docs/phase-1-reference.md）：
+ * Redaction 评审基线（docs/reference/phase-1.md）：
  * 敏感原值不得出现在序列化输出的任何位置，而不只是顶层字段。
  */
 

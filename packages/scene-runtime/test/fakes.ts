@@ -11,7 +11,7 @@ import type {
 
 /**
  * 可脚本化的 Stage/Repository 假件：只替换外部能力，不绕开被测的
- * Compiler/Director 逻辑（docs/phase-2-development-guide.md §3.10）。
+ * Compiler/Director 逻辑（docs/archive/phase-2/development-guide.md §3.10）。
  */
 
 export interface StageCall {

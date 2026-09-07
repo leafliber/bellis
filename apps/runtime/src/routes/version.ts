@@ -5,7 +5,7 @@ import { VersionResponseSchema } from "./schemas.js";
 import type { RouteContext } from "./context.js";
 
 /**
- * Version 路由（docs/phase-1-reference.md）：应用版本、Control/Media 协议版本、
+ * Version 路由（docs/reference/phase-1.md）：应用版本、Control/Media 协议版本、
  * 构建信息与 Runtime Instance ID。不返回 Token、路径或环境变量。
  * 响应结构经共享 Schema（schemas.ts）运行时校验，与 OpenAPI 同源。
  */

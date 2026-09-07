@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MediaFrameError, MediaFrameParser, decodeControlMessage } from "../../src/index.js";
 
 /**
- * 协议文档一致性测试（docs/phase-1-reference.md）：
+ * 协议文档一致性测试（docs/reference/phase-1.md）：
  * docs/protocols/*.md 中带 `control-envelope` / `media-frame` 标注的代码块
  * 会按其 valid/invalid 语义自动校验，防止文档成为未经测试的协议副本。
  */

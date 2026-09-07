@@ -15,7 +15,7 @@ import {
 } from "./ports.js";
 
 /**
- * Scene Director（docs/phase-2-development-guide.md §6.2）。
+ * Scene Director（docs/archive/phase-2/development-guide.md §6.2）。
  *
  * 状态机（内部）：
  *
@@ -125,7 +125,7 @@ export interface SceneDirectorOptions {
   readonly faultHook?: (point: DirectorFaultPoint) => void;
 }
 
-/** 崩溃窗口注入点（docs/phase-2-development-guide.md §10.2 四个关键窗口）。 */
+/** 崩溃窗口注入点（docs/archive/phase-2/development-guide.md §10.2 四个关键窗口）。 */
 export type DirectorFaultPoint =
   | "before_durable_commit"
   | "after_durable_commit"

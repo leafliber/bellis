@@ -4,7 +4,7 @@ import { SpanIdSchema, TraceIdSchema, UuidSchema } from "../common/ids.js";
 import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 
 /**
- * Control WebSocket 的 Wire Envelope 规范形态（ADR 0001 / docs/phase-1-reference.md）。
+ * Control WebSocket 的 Wire Envelope 规范形态（ADR 0001 / docs/reference/phase-1.md）。
  *
  * - 微秒时间、序号、ACK 与水位使用非负十进制字符串，进入 Runtime 后再无损转 bigint。
  * - direction 是判别字段：只有服务端 Envelope 包含 seq；只有客户端 Envelope

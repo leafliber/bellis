@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { TraceContext } from "@bellis/contracts";
 
 /**
- * 可选的异步 Trace 上下文管理（docs/phase-1-reference.md）。
+ * 可选的异步 Trace 上下文管理（docs/reference/phase-1.md）。
  *
  * - 以实例形式创建：每个 `createTraceContextManager()` 拥有独立的
  *   AsyncLocalStorage，不存在模块级共享可变单例，实例之间互不可见。

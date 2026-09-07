@@ -1,7 +1,7 @@
 import type { SubtitleDocument, SubtitleLine } from "./subtitle-lane.js";
 
 /**
- * 浏览器字幕 DOM 环境（docs/phase-2-development-guide.md §8.3）。
+ * 浏览器字幕 DOM 环境（docs/archive/phase-2/development-guide.md §8.3）。
  *
  * - 文本一律写入 textContent（文本节点），模型文本绝不进入 innerHTML；
  * - 可见性用 hidden 属性切换（支持 Reduced Motion：无动画，只有显隐）；

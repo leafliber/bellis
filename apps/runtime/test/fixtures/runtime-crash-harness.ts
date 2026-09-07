@@ -11,7 +11,7 @@ import { startRuntime } from "../../src/index.js";
 import type { RuntimeHandle } from "../../src/index.js";
 
 /**
- * Crash Window 测试/Demo 子进程 harness（docs/phase-1-reference.md）。
+ * Crash Window 测试/Demo 子进程 harness（docs/reference/phase-1.md）。
  *
  * 仅测试装配：通过 fork 继承的私有 IPC（process.send）与父进程协作。
  * `armed` 模式注入受控检查点观察器——到达目标检查点后通知父进程并

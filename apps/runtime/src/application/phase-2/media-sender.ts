@@ -8,7 +8,7 @@ import {
 import type { BufferedPcmSpeech, PcmSpeechSource } from "../performance/speech-provider.js";
 
 /**
- * Runtime → Stage 媒体发送器（docs/phase-2-development-guide.md §8.1）。
+ * Runtime → Stage 媒体发送器（docs/archive/phase-2/development-guide.md §8.1）。
  *
  * - 帧 Sequence 从 0 严格连续（只计数到达传输层的帧：丢弃帧不消耗
  *   序号）；targetTimeUs = 首帧目标 + PCM 帧序 × 20ms；发送节奏跟随时钟

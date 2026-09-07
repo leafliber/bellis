@@ -2,7 +2,7 @@ import type { Cue, CueLane } from "@bellis/contracts";
 import type { LanePrepareResult, StageLaneAdapter } from "../lane-registry.js";
 
 /**
- * Avatar Lane（docs/phase-2-development-guide.md §8.4）。
+ * Avatar Lane（docs/archive/phase-2/development-guide.md §8.4）。
  *
  * Phase 2 交付 Port 语义 + 录制适配器（CI 路径：验证命令、顺序、资源
  * 释放与 drift；不渲染真实模型）。浏览器 Cubism Adapter 边界：只接收

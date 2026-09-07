@@ -8,7 +8,7 @@ import {
 import { MAX_U64, MESSAGE_ID, SESSION_ID, TRACE_ID } from "./fixtures.js";
 
 /**
- * 性质测试（docs/phase-1-reference.md）：
+ * 性质测试（docs/reference/phase-1.md）：
  * - 任意合法 Envelope JSON 编码再解码保持等价。
  * - 任意大序号和水位在 JSON 往返后无精度损失（包括超过 2^53 的值）。
  */

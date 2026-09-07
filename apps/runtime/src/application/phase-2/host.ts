@@ -29,7 +29,7 @@ import {
 import type { FakeModelFixture } from "./fake-model.js";
 
 /**
- * Phase 2 Runtime Host（开发/Demo 装配，docs/phase-2-development-guide.md §9.1）。
+ * Phase 2 Runtime Host（开发/Demo 装配，docs/archive/phase-2/development-guide.md §9.1）。
  *
  * - 把 Phase2PerformanceService 绑定到当前 Stage 类型的 ControlConnection：
  *   出站走 sendPhase2Message（协议优先级入队），入站经 onStageMessage 钩子；

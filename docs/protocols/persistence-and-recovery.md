@@ -4,7 +4,7 @@
 
 > 适用范围：`packages/persistence`（DB Worker、Migration、Session Records、
 > 原子 commitScene、Outbox、恢复）。
-> 上位规范：[Phase 1 完成态参考](../phase-1-reference.md) ·
+> 上位规范：[Phase 1 完成态参考](../reference/phase-1.md) ·
 > [ADR 0002](../adr/0002-node-26-baseline.md)。
 
 ## 1. Worker 边界

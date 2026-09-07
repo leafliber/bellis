@@ -4,7 +4,7 @@ import { extname, join, normalize, resolve, sep } from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 /**
- * Stage 静态托管（Phase 2 开发/Demo 装配，docs/phase-2-development-guide.md §10）。
+ * Stage 静态托管（Phase 2 开发/Demo 装配，docs/archive/phase-2/development-guide.md §10）。
  *
  * - 挂载点 /stage/*：读取 apps/stage 构建产物（base=/stage/），SPA 回退
  *   到 index.html（/stage/:profile 由前端路由解析）；

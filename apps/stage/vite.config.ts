@@ -2,7 +2,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 /**
- * Stage 构建（docs/phase-2-development-guide.md §10）：
+ * Stage 构建（docs/archive/phase-2/development-guide.md §10）：
  * - base=/stage/：Runtime 静态托管（phase2.stageDistDir）以 /stage 挂载，
  *   资源与 Worklet 均落在同一前缀下；
  * - dev 代理：BELLIS_RUNTIME_PROXY=http://127.0.0.1:PORT 时把 /api 与

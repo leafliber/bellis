@@ -1,5 +1,5 @@
 /**
- * 生产时钟与测试时钟共同的最小接口（docs/phase-1-reference.md）。
+ * 生产时钟与测试时钟共同的最小接口（docs/reference/phase-1.md）。
  *
  * Contracts 只定义能力，不包含实现：
  * - 生产实现 SystemMonotonicClock 由 @bellis/transport 交付（P1）。

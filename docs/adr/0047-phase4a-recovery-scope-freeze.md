@@ -14,7 +14,7 @@ Phase 4A 的恢复 Gate 固定为以下八个窗口，目标为 Bellis Runtime�
 
 顶层聚合此前将 `status` 固定写成 `incomplete`，使所有用例通过后入口仍退出 2。现在计算 `expectedCases = coveredWindows.length × targets.length × repetitions`，并比较实际 `casesPassed`。达到 `requiredRepetitions=20` 且计数完全一致才返回 `covered-windows-passed`；完整执行但次数不足仅为 `smoke-passed`，不算正式 Gate 通过；计数不符仍为 `incomplete`。原有断言失败退出 1、缺少 Core 安装路径退出 2 并报告 NOT RUN 的语义保留。
 
-原聚合 `remaining` 数组与恢复说明「仍需完成」一节整体移入 [Phase 4B 待办](../phase-4b-backlog.md)。Stage 效果耦合、额外崩溃组合、旧快照/cursor 扩展、磁盘/WAL 与活动 Scene 配额等不再作为 Phase 4A 恢复 Gate 的前置条件，也不因此宣称它们已完成。
+原聚合 `remaining` 数组与恢复说明「仍需完成」一节整体移入 [Phase 4B 待办](../plans/phase-4/backlog.md)。Stage 效果耦合、额外崩溃组合、旧快照/cursor 扩展、磁盘/WAL 与活动 Scene 配额等不再作为 Phase 4A 恢复 Gate 的前置条件，也不因此宣称它们已完成。
 
 本次收尾顺序：先提交全部工作树 WIP；修正聚合和范围文档；运行完整 `pnpm check` 与 `pnpm test:memory:iris:recovery`；两者退出 0 后提交全部改动并停止。既有其他 Phase 4 文档保留历史事实，遇到恢复范围冲突以本决定为准。本次收尾完成不表示 Phase 4B 已完成，也不自动开始新的切片。
 

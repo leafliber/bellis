@@ -54,7 +54,7 @@ import type { RuntimeConfig } from "./config.js";
 import { buildServer } from "./server.js";
 
 /**
- * Runtime 生命周期（docs/phase-1-reference.md）。
+ * Runtime 生命周期（docs/reference/phase-1.md）。
  *
  * 启动：校验配置 → Logger/Metrics/InstanceID → Persistence Client →
  * migrate() → 装配 Service/Dispatcher → 注册 REST/WS → loopback Listen →
@@ -670,7 +670,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RuntimeHand
 
   /** 单步关闭：错误捕获并聚合，不阻断后续步骤（P4 修复 4）。
    *
-   * 顺序与 docs/phase-1-reference.md 一致（Gate 3 重开评审修复 3）：停止接入与
+   * 顺序与 docs/reference/phase-1.md 一致（Gate 3 重开评审修复 3）：停止接入与
    * draining 通知之后，**先** Abort 应用任务、停止 Outbox Claim，
    * **再**花时间等待/排空连接——连接排空最长可等满 shutdownGraceMs，
    * 期间既不得继续执行已有 Commit 任务，也不得继续领取/发布 Outbox。

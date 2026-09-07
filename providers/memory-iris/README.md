@@ -149,9 +149,9 @@ The host now filters pending Signals and Tool Results against durable admission/
 
 Public resource invalidations are persisted before the trusted host callback and the SSE cursor advances only after the host acknowledges its policy transaction and effect cancellation. Pending failures block Recall across restart; in-flight older Recall results are rejected. Legacy pending deliveries are retained for reconciliation and quarantined after invalidation. The Core CLI application credential must grant `events.sse.v1`; existing credentials are not changed automatically. See [ADR 0022](../../docs/adr/0022-phase4-resource-invalidations.md). This proves received deletion events, not history-gap recovery or ordinary correction notifications.
 
-`pnpm test:memory:iris:continuous` from the repository root runs 100 cycles through one real Runtime/DB Worker, installed Core API/Worker, and Chromium session. Each cycle audits the persisted Manifest against the actual model request, Recall provenance/Persona revision, budget and Core-acknowledged Usage sets. The recorded run passed 100 cycles and 101 actual output observations. See [continuous validation](../../docs/phase-4-continuous-validation.md); crash, capacity and resource-growth gates remain separate.
+`pnpm test:memory:iris:continuous` from the repository root runs 100 cycles through one real Runtime/DB Worker, installed Core API/Worker, and Chromium session. Each cycle audits the persisted Manifest against the actual model request, Recall provenance/Persona revision, budget and Core-acknowledged Usage sets. The recorded run passed 100 cycles and 101 actual output observations. See [continuous validation](../../docs/validation/iris-continuous.md); crash, capacity and resource-growth gates remain separate.
 
-`pnpm test:memory:iris:recovery` exercises durable SSE pending and policy-commit boundaries with real Runtime/Core API/Core Worker SIGKILL and restart. The remaining crash and capacity windows are explicit in the report; until the whole recovery matrix is implemented, the command reports `incomplete` and exits 2. See [recovery validation](../../docs/phase-4-recovery-validation.md).
+`pnpm test:memory:iris:recovery` exercises durable SSE pending and policy-commit boundaries with real Runtime/Core API/Core Worker SIGKILL and restart. The remaining crash and capacity windows are explicit in the report; until the whole recovery matrix is implemented, the command reports `incomplete` and exits 2. See [recovery validation](../../docs/validation/iris-recovery.md).
 
 The recovery command now also tests Manifest/adoption and Usage ACK/delivered boundaries: 180 new cases plus the 120 SSE cases pass across the real Runtime, Core API and Core Worker. Adopted-cycle restart preserves the original Manifest without another model request; pending unconsumed input after a pre-adoption crash uses a new cycle. Original-key Usage replay and a test-only second key resolve to the same Core report ID. Full recovery still reports `incomplete`; [evidence](../../docs/evidence/phase4-cycle-recovery-probe.json).
 
@@ -184,11 +184,11 @@ An event request returning public `history_unavailable` / HTTP 410 now creates a
 
 可信 Runtime 装配可将独立 `IrisRecallVerifier` 放入 `memory.historyRecovery.verifiers`（每个已注册 Provider 恰好一个），并配置 `intervalMs` / `timeoutMs`。宿主会在正常启动后自动维护；持久缺口重启则跳过普通 Provider、Persona 和决策宿主，保留 live 与维护任务，ready 和新会话交换返回 503。运行期缺口关闭决策管道并保持屏障；配置错误与无缺口的凭据失败继续清理并拒绝启动。见 [ADR 0040](../../docs/archive/phase-4/decisions/0040-phase4-runtime-history-recovery.md)。核验端口的身份、凭据和 Core 能力支持仍由可信装配确定，不能从 Stage 或模型参数构造。
 
-已提供 `pnpm start:iris --config /absolute/config.json` 固定安装入口：配置只含环境/文件凭据引用，单个 Iris 实例拥有 MemoryProvider/PersonaSource，禁用时不加载 Provider，SIGINT/SIGTERM 统一关闭。安装、可信身份、读取范围和历史恢复配置见 [运行说明](../../docs/iris-runtime-operations.md)；写工具授权与凭据轮换仍未由此入口完成。
+已提供 `pnpm start:iris --config /absolute/config.json` 固定安装入口：配置只含环境/文件凭据引用，单个 Iris 实例拥有 MemoryProvider/PersonaSource，禁用时不加载 Provider，SIGINT/SIGTERM 统一关闭。安装、可信身份、读取范围和历史恢复配置见 [运行说明](../../docs/guides/iris-runtime.md)；写工具授权与凭据轮换仍未由此入口完成。
 
 明确的 401/403 或 404/access_denied 会锁定当前实例：取消其他在途调用、停用后台重试、持久记录 Persona 屏障并通知 Host；缓存与静态人格不能恢复服务。修复后须显式停止并启动新生命周期。Runtime readiness 现与已观察到的人格/隐私屏障一致，真实公开凭据撤销证据见 [ADR 0042](../../docs/adr/0042-phase4-memory-readiness.md)。
 
-零重叠轮换已通过真实 Core 公开接口与配置加载路径验证：前任凭据拒绝后显式关闭，原子替换私有凭据文件，以原业务身份和数据目录启动；原请求/Manifest/Usage 保留，继任凭据接受原 Usage 重放。步骤见 [运维说明](../../docs/iris-runtime-operations.md) 与 [ADR 0043](../../docs/adr/0043-phase4-credential-rotation.md)。
+零重叠轮换已通过真实 Core 公开接口与配置加载路径验证：前任凭据拒绝后显式关闭，原子替换私有凭据文件，以原业务身份和数据目录启动；原请求/Manifest/Usage 保留，继任凭据接受原 Usage 重放。步骤见 [运维说明](../../docs/guides/iris-runtime.md) 与 [ADR 0043](../../docs/adr/0043-phase4-credential-rotation.md)。
 
 正式 Provider 现从已安装 SDK 0.11.2 发送协商后的游标/事件身份；保存失败和重启保留原配对值。公开探针核对四个安装文件且不再使用独立候选 SDK 路径或代写检查点。`pnpm --dir providers/memory-iris check` 运行完整独立检查，CI 已配置同一安装路径；详见 [ADR 0044](../../docs/adr/0044-phase4-installed-checkpoint-sdk.md)。
 

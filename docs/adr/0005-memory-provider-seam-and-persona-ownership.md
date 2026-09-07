@@ -10,8 +10,8 @@
 > Persona 事实源归属与渲染边界、Stable Prefix 顺序、`promptEpoch` 触发条件、
 > Observe 片段粒度、Provider 降级与就绪门禁
 >
-> 关联文档：[Phase 4 构建指南](../phase-4-development-guide.md) ·
-> [系统架构设计 §13/§14](../architecture-plan.md) ·
+> 关联文档：[Phase 4 构建指南](../plans/phase-4/README.md) ·
+> [系统架构设计 §13/§14](../architecture/overview.md) ·
 > [ADR 0001](./0001-canonical-core-and-wire-contracts.md) ·
 > [ADR 0004](./0004-phase-3-decision-boundaries.md)
 >

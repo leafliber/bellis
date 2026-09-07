@@ -3,7 +3,7 @@ import { TraceIdSchema } from "../common/ids.js";
 import { JsonValueSchema, extensibleJsonObject } from "../common/json-value.js";
 
 /**
- * 错误使用稳定机器码，客户端不得解析错误文案（docs/phase-1-reference.md）。
+ * 错误使用稳定机器码，客户端不得解析错误文案（docs/reference/phase-1.md）。
  * details 只能包含安全、结构化和可序列化的信息（JsonValue）；
  * 不返回堆栈、SQL、密钥或本地绝对路径。
  */

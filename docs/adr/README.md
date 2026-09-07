@@ -34,9 +34,8 @@ ADR 记录跨包职责、协议/持久化兼容性或需要长期解释的取舍
 - [ADR 0045：两端旧快照与事件分叉验收](./0045-phase4-core-snapshot-restore.md)
 - [ADR 0046：真实 Stage 效果事务崩溃恢复](./0046-phase4-stage-effect-crash-recovery.md)
 - [ADR 0047：Phase 4A 恢复验收范围冻结](./0047-phase4a-recovery-scope-freeze.md)
-
 - [ADR 0048：独立游戏平台、Session Activity 与桌面输入归属](./0048-external-game-runtime-and-session-activity.md)
 
 ## 合并查阅的历史记录
 
-原 0024–0028 的容量增量与 0029–0040 的历史恢复增量含有真实约束及大量切片验收记录，原文移至 [归档](../archive/phase-4/README.md)。按 [存储容量](../phase-4/storage-capacity.md) 和 [历史恢复](../phase-4/history-recovery.md) 查阅现行边界；归档不撤销原决定。其他 Phase 4 ADR 涉及独立边界或显式范围决定，继续保留。
+原 0024–0028 的容量增量与 0029–0040 的历史恢复增量含有真实约束及大量切片验收记录，原文移至 [归档](../archive/phase-4/README.md)。按 [存储容量](../reference/phase-4/storage-capacity.md) 和 [历史恢复](../reference/phase-4/history-recovery.md) 查阅现行边界；归档不撤销原决定。其他 Phase 4 ADR 涉及独立边界或显式范围决定，继续保留。

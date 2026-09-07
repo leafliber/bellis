@@ -1,7 +1,7 @@
 import type { ScenePlan } from "@bellis/contracts";
 
 /**
- * Scene Director 的抽象 Port 边界（docs/phase-2-development-guide.md §6.3）。
+ * Scene Director 的抽象 Port 边界（docs/archive/phase-2/development-guide.md §6.3）。
  *
  * 只允许注入抽象能力：Stage 传输、Scene 持久化、时钟、日志与指标。
  * 禁止注入 Fastify/WebSocket/SQLite 具体对象——适配器在应用层组装

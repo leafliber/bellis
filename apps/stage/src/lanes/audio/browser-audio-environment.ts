@@ -5,7 +5,7 @@
 import type { AudioEnvironment, WorkletMessage } from "./audio-lane.js";
 
 /**
- * 浏览器音频环境（AudioContext + AudioWorklet，docs/phase-2-development-guide.md §8.2）。
+ * 浏览器音频环境（AudioContext + AudioWorklet，docs/archive/phase-2/development-guide.md §8.2）。
  *
  * - Arm = 用户手势内创建 48kHz AudioContext 并 resume（自动播放限制是
  *   正式前置条件，失败如实返回 false）；

@@ -12,9 +12,9 @@ import { TransportProtocolViolationError } from "../errors.js";
 import type { TransportFailure, TransportResult } from "../errors.js";
 
 /**
- * Control 消息编解码（docs/phase-1-reference.md；ADR 0001 §2）。
+ * Control 消息编解码（docs/reference/phase-1.md；ADR 0001 §2）。
  *
- * 入站解码顺序（docs/phase-1-reference.md）：
+ * 入站解码顺序（docs/reference/phase-1.md）：
  *
  * ```text
  * 字节/文本大小限制 → JSON 解析 → ControlEnvelopeSchema
@@ -104,7 +104,7 @@ function validateEnvelope(envelope: ControlEnvelope): TransportFailure | null {
     };
   }
   // Hello 类消息的主版本不匹配优先分类为 unsupported_version
-  // （docs/phase-1-reference.md：主版本不兼容时拒绝连接）。
+  // （docs/reference/phase-1.md：主版本不兼容时拒绝连接）。
   if (envelope.type === "client.hello" || envelope.type === "server.hello") {
     const declared = (envelope.payload as { protocolVersion?: unknown }).protocolVersion;
     if (typeof declared === "number" && declared !== CONTROL_PROTOCOL_VERSION) {

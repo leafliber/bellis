@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows 11 为正式支持门槛，macOS 为当前开发门槛（docs/phase-1-reference.md）。
+        # Windows 11 为正式支持门槛，macOS 为当前开发门槛（docs/reference/phase-1.md）。
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30

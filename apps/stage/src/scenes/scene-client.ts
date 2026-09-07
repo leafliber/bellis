@@ -6,7 +6,7 @@ import type { CueTimeline } from "../timeline/cue-timeline.js";
 import type { LaneRegistry } from "../lanes/lane-registry.js";
 
 /**
- * Stage Scene 客户端状态机（docs/phase-2-development-guide.md §7）。
+ * Stage Scene 客户端状态机（docs/archive/phase-2/development-guide.md §7）。
  *
  * Runtime 拥有决策权：本状态机只执行 prepare（缓冲不生效）→ ready 上报 →
  * commit（映射目标时刻并调度 Lane）→ started/finished 上报，以及 cancel →

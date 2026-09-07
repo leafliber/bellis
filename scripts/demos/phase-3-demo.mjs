@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase 3 Demo（docs/phase-3-development-guide.md §10.2）。
+ * Phase 3 Demo（docs/archive/phase-3/development-guide.md §10.2）。
  *
  * 真实 Runtime 子进程（DB Worker + Control/Media WS）+ 协议 Stage 客户端：
  * 1. 多条相关弹幕聚合为一个 Batch；

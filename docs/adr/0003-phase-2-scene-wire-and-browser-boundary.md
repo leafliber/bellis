@@ -10,7 +10,7 @@
 > 媒体流方向、版本化 Snapshot 联合、`@bellis/transport` 浏览器入口与
 > PCM 格式基线
 >
-> 关联文档：[Phase 2 开发指南](../phase-2-development-guide.md) ·
+> 关联文档：[Phase 2 开发指南](../archive/phase-2/development-guide.md) ·
 > [ADR 0001](./0001-canonical-core-and-wire-contracts.md) ·
 > [Scene Execution 协议](../protocols/scene-execution.md)
 

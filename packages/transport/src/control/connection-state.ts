@@ -1,5 +1,5 @@
 /**
- * Control 连接状态机（docs/phase-1-reference.md）：
+ * Control 连接状态机（docs/reference/phase-1.md）：
  *
  * ```text
  * awaiting_client_hello → active → draining → closed
