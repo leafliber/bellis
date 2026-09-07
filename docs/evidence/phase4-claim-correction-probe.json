@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T00:11:55.759371+00:00",
+  "status": "claim-correct-and-retraction-cascade-events-verified-full-phase4-incomplete",
+  "validation": {
+    "coreFocusedRegressionTests": 202,
+    "newEventTests": 6,
+    "coreRegressionExitCode": 0,
+    "coreMypyExitCode": 0,
+    "coreRuffCheckAndFormatExitCode": 0,
+    "probeSyntaxExitCode": 0,
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "fullRecoveryGate": "incomplete",
+    "bellisRootCheck": "not-rerun-this-slice; prior 1040 unit/property and 254 integration tests; host production source unchanged",
+    "coreRegressionLogSha256": "ee2c0773056c98b2e54349d6fa6b108683ff2beaaefb73fb3d57e275e7ded0c8"
+  },
+  "verified": [
+    "Public Claim Correct supersede, dispute and retract commit revision.invalidated.v1 for the predecessor in the canonical transaction without a running Worker",
+    "Retraction also publishes every transitive evidence-loss Claim and Relation predecessor event with the affected resource scope; no Core deletion tombstone is created",
+    "Failure inserting a primary or cascade notification rolls back revisions and evidence changes; original-key retry succeeds and successful replay emits no duplicate",
+    "Three-level Claim chain plus Relation, cross-space filtering and finite revision cutoff pass source integration tests",
+    "Installed Core Worker is stopped before public supersede; Bellis receives and durably ACKs event, cancels old Context, blocks revision 1 but allows revision 2 before Worker restart",
+    "After Worker projection resumes a fresh real Context includes revision 2 and new black-tea text and excludes the old revision; DB Worker restart preserves policy and event identity",
+    "Final installed candidate passes permanent-deletion, 410 gap barrier/inventory, paired-checkpoint and real Chromium regression; public tools and existing 24-case recovery smoke pass"
+  ],
+  "limits": [
+    "The real HTTP correction case is supersede; dispute/retract and transitive cascades are verified by Core integration tests, not claimed as additional real Chromium cases",
+    "Other Claim mutation paths, generic resource updates, privacy/permission revalidation, consistent remote conclusions, original-request reconciliation and atomic history-gap release remain unfinished",
+    "No new correction SIGKILL window, full Core regression, full recovery matrix, actual old-backup restoration or expanded capacity proof is claimed",
+    "Default SDK remains 0.11.1 and default Core schema maximum remains 15; exact-hash Schema 19 candidate acceptance is probe-only",
+    "Production tool authority, Core Session mapping, external StateStore coverage, long-growth acceptance, remote CI, Phase4B and complete demo remain open"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 19,
+    "bellisStateMigration": 18,
+    "wheelSha256": "8b03aa2b65a98ddcaf3c5044d2ae2f9ad45a6094c2b5263171915c376e780646",
+    "installedFilesVerified": 170,
+    "defaultSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "applicationOpenapiVsSchema18": "byte-identical",
+    "applicationOpenapiSha256": "6b3946d9d7134c50311ec39ed6a10dd9ab16fe3efac61bd5fd262c19bb27ccfe"
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-claim-correction-core-probe.json",
+      "exitCode": 0,
+      "sha256": "3ee7566d2d068de88d88432b17acee5b5d9d4dacd271209c345ff9ba539e6aa9"
+    },
+    {
+      "file": "phase4-claim-correction-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "148cdf92911d7e48fbce9985ea4f18a36aa3ba8c58d821668ee1553d2b007ed4"
+    }
+  ],
+  "sourceSha256": {
+    "scripts/iris-public-probe.mjs": "33e346fd6d128961a38804a5695d47216d700d65d3dd7c1a7b73573e0979af55",
+    "scripts/iris-resource-invalidation-probe.mjs": "f6f60c6b612ae1eb496be774b175815f406a1433fbe0c94f971e9172ee2bfb0b",
+    "../iris_memory_core/src/iris_memory_core/application/memory.py": "5fa742e23a8182491eea68362dac147c613dbeb578a1929588a9e48db7c15e74",
+    "../iris_memory_core/tests/integration/test_claim_revision_events.py": "0cc6c54d3bce10c79f84e174a22e7f38a90a284025fa74cff3711cafdd030bbf"
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T02:05:49.624079+00:00",
+  "status": "controlled-background-history-recovery-implemented-full-recovery-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": null,
+    "bellisRootCheckEvidence": "Complete log ends with successful final integration stage; original terminal result was consumed before context compaction and is not retained here",
+    "unitAndPropertyTests": 1049,
+    "integrationTests": 269,
+    "persistenceIntegrationTests": 138,
+    "runtimeIntegrationTests": 120,
+    "transportIntegrationTests": 11,
+    "generatedContracts": 168,
+    "focusedRuntimeTests": 9,
+    "providerTests": "not-rerun; production Provider source unchanged, prior final 96-test baseline",
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newBackgroundRecoverySigkillWindow": "not-claimed",
+    "fullCoreRegression": "not-rerun"
+  },
+  "verified": [
+    "Explicit MemoryHost.startHistoryRecovery creates one background worker per registered provider; repeated identical configuration reuses it, conflicting configuration is refused",
+    "Worker discovers later durable gaps, retries transient failures and stale-inventory conflicts, and skips persisted verdicts after database restart",
+    "Each attempt uses a fresh host-owned cancellation epoch; actual uncooperative work retains its capacity after timeout or stop, and pending stopped workers cannot be replaced",
+    "Non-retryable or response-identity errors stop automatic attempts with safe attention status; shutdown clears timers",
+    "Installed Core and Chromium probe performs automatic background polling with one public verification request, reuses coverage on another polling cycle and after DB Worker restart, and retains original Usage and the history barrier",
+    "Tools and the existing 24-case recovery smoke pass; full recovery remains explicitly incomplete"
+  ],
+  "limits": [
+    "Background recovery requires explicit trusted maintenance assembly; automatic startup/runtime recovery mode is not implemented",
+    "Transient/stale/attention failure scenarios use the actual DB integration fixture and controlled verifiers, not injected failures in real Core",
+    "Same-host cancellation is enforced; no cross-process privacy lock or forcible termination of uncooperative transport is claimed",
+    "Old preparation policy generations, independent Observation/Usage and other facts, external StateStore/legacy scope coverage, common cross-batch snapshot and safe release remain open",
+    "Actual backup/fork restore, full Stage/Core crash matrix, ENOSPC, total directory quota, long-growth, Phase4B and full demo remain incomplete",
+    "Default SDK and schema support window remain unchanged"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-background-history-recovery-core-probe.json",
+      "exitCode": 0,
+      "sha256": "212d853f9db7a327d661ba664ac36027ce339afd6f002fece41850f5fbfda14e"
+    },
+    {
+      "file": "phase4-background-history-recovery-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "3a35aeb92b7191d531066904bd0abcec79938d8d1fcd381e2d19225be9735556"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-background-check.log",
+      "sha256": "5b5cf33b339e70c279745f03fb513b8cac9a1102e1aa37590fe0f0cf0d7a31ea"
+    },
+    {
+      "file": "/tmp/bellis-background-tests.log",
+      "sha256": "9fc2f65904cdd522d665077270205467133d9f24f9b722eb136688b289d048da"
+    },
+    {
+      "file": "/tmp/bellis-background-types.log",
+      "sha256": "12dd54ee951bfcc068f5be1aa825f793e9b2f51d583b7e61634d157f003978ef"
+    },
+    {
+      "file": "/tmp/bellis-background-lint.log",
+      "sha256": "70d749813373d92d42472600f3fb9578ec01b307f011c91c2f08aed48f2ef838"
+    },
+    {
+      "file": "/tmp/bellis-background-core.log",
+      "sha256": "9146fcf1bc233f1b8038491a6fedf790b2916b30fbd904fe8c8450804e2378b1"
+    },
+    {
+      "file": "/tmp/bellis-background-recovery.log",
+      "sha256": "aeccf33ae90474579a265001214c0784b42f00a5b31e4a413b8ef6ed8d530504"
+    }
+  ],
+  "sourceSha256": {
+    "apps/runtime/src/application/phase-4/history-recovery-worker.ts": "e5be84714806465acaadb83b38ccba75c1322a6867f2f16b5227966d75ffa23b",
+    "apps/runtime/src/application/phase-4/history-revalidator.ts": "6dee77e5bcb47d319d5844131cea13c65955ab2261febb8b3136838982268930",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "e3b43c19563fe106742ea366e9395ef03a232d472ce01d5ffd7c9922d59a74e6",
+    "apps/runtime/src/index.ts": "5d96dc361fdc25b6886e82861d9e01c00238212243440dc0546cdb209307e30e",
+    "apps/runtime/test/integration/phase4-history-revalidation.integration.test.ts": "6d85f842410272c80a4ab4e7aaba13b23aa64b92bea21968666ec138b2ee6793",
+    "scripts/iris-history-gap-probe.mjs": "1218d51cfcceb629618e0aff70e5ea018c9f490eee5be14e24127c40b50d49ff"
+  }
+}

@@ -1,7 +1,7 @@
 import type { ContextBlock, ContextCategory, MemoryQuery } from "@bellis/contracts/memory";
 import type { RecallCandidate, RecallResponse } from "@iris-memory/sdk";
 
-export const MAPPING_VERSION = 1;
+export const MAPPING_VERSION = 2;
 export const PRIORITY_DERIVATION_VERSION = 1;
 
 /**
@@ -78,7 +78,10 @@ export function deriveContextCategory(
   category: string,
   overrides: Readonly<Record<string, ContextCategory>> = {},
 ): ContextCategory | undefined {
-  const override = overrides[category];
+  if (!Object.hasOwn(RESOURCE_TYPE_CATEGORY, resourceType)) return undefined;
+  const override = Object.hasOwn(overrides, category) ? overrides[category] : undefined;
+  // Viewer classification requires the host's trusted identity mapping.
+  if (override === "viewer") return undefined;
   if (override !== undefined) return override;
   if (resourceType === "claim" && category === "relationship") return "relationship";
   return RESOURCE_TYPE_CATEGORY[resourceType];
@@ -103,7 +106,7 @@ function sourceRefUrn(ref: Readonly<Record<string, unknown>>): string | undefine
     return undefined;
   }
   return `iris:${encodeURIComponent(type)}:${encodeURIComponent(id)}${
-    Number.isInteger(revision) && Number(revision) >= 1 ? `@${String(revision)}` : ""
+    Number.isSafeInteger(revision) && Number(revision) >= 1 ? `@${String(revision)}` : ""
   }`;
 }
 
@@ -129,15 +132,20 @@ export function mapRecallCandidate(
   // known resource type still maps, and is surfaced to audit instead of dropped —
   // Core adds categories additively, and dropping them would silently lose recall.
   if (category === undefined) return { dropped: true };
+  if (
+    !Number.isSafeInteger(candidate.resource_ref.revision) ||
+    candidate.resource_ref.revision < 1 ||
+    !/^(?:[a-f0-9]{16}|[a-f0-9]{64})$/.test(candidate.content_hash)
+  )
+    return { dropped: true };
   const known = CORE_CATEGORY_VOCABULARY[resourceType]?.includes(candidate.category) ?? false;
-  const sourceRefs = candidate.source_refs
-    .map(sourceRefUrn)
-    .filter((item): item is string => item !== undefined);
-  if (sourceRefs.length === 0) {
-    sourceRefs.push(
-      `iris:${encodeURIComponent(resourceType)}:${encodeURIComponent(candidate.resource_ref.resource_id)}@${candidate.resource_ref.revision}`,
-    );
-  }
+  const resourceRef = `iris:${encodeURIComponent(resourceType)}:${encodeURIComponent(candidate.resource_ref.resource_id)}@${candidate.resource_ref.revision}`;
+  const sourceRefs = [
+    resourceRef,
+    ...candidate.source_refs
+      .map(sourceRefUrn)
+      .filter((item): item is string => item !== undefined && item !== resourceRef),
+  ];
   const expiresAt = earliestTimestampMs(candidate.expires_at, response.cache_until);
   const block: ContextBlock = {
     id: candidate.candidate_id,
@@ -145,7 +153,7 @@ export function mapRecallCandidate(
     contentHash: candidate.content_hash,
     text: candidate.text,
     category,
-    providerCategory: candidate.category,
+    ...(candidate.category.length === 0 ? {} : { providerCategory: candidate.category }),
     placement: candidate.placement,
     priority: candidateCount - index,
     tokenEstimate: candidate.token_estimate,

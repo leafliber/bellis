@@ -1,3 +1,4 @@
+import { ScenePlanSchema } from "@bellis/contracts";
 import { describe, expect, it } from "vitest";
 import { VirtualClock } from "@bellis/testkit";
 import type { Cue, CueLane, ScenePlan } from "@bellis/contracts";
@@ -333,7 +334,7 @@ describe("SceneClient", () => {
 
 describe("soft lane lifecycle regressions", () => {
   function softPlan(): ScenePlan {
-    return {
+    return ScenePlanSchema.parse({
       ...PLAN,
       softTimeoutMs: 10,
       scene: {
@@ -353,7 +354,7 @@ describe("soft lane lifecycle regressions", () => {
           },
         ],
       },
-    };
+    });
   }
 
   it("times out soft preparation without waiting for the entire scene deadline", async () => {

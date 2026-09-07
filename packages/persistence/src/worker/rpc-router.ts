@@ -1,3 +1,4 @@
+import type { PersistenceCheckpoint } from "../checkpoints/observer.js";
 import { parentPort } from "node:worker_threads";
 import type { MessagePort } from "node:worker_threads";
 import { parseDecimalString } from "@bellis/contracts";
@@ -149,7 +150,7 @@ export class PersistenceRpcRouter {
 
   #notifyCheckpoint(
     requestId: string,
-    checkpoint: "before_scene_transaction_commit",
+    checkpoint: PersistenceCheckpoint,
     context: { traceId: string; sceneId?: string; outboxId?: string },
   ): Promise<void> {
     const notice = PersistenceCheckpointNoticeSchema.parse({

@@ -34,6 +34,11 @@ export type { DecisionAuditPort } from "./loop/audit.js";
 export { buildSafetyPacket, DEFAULT_DEGRADATION_POLICY } from "./loop/degradation.js";
 export type { DegradationPolicy, DegradationReason } from "./loop/degradation.js";
 export { buildModelRequest, packetDigest, MAX_PROMPT_CHARS } from "./loop/request-assembly.js";
+export type {
+  RequestAssemblyInput,
+  PreparedModelContext,
+  ModelContextPort,
+} from "./loop/request-assembly.js";
 
 export type { LoopLogger, LoopMetrics } from "./observability.js";
 

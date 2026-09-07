@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-09-06",
+  "status": "passed-persona-state-slice",
+  "scope": "A3 Persona state persistence and bounded requests; not complete A3, A4 or Phase 4B.",
+  "validation": {
+    "rootCheck": {
+      "command": "pnpm check",
+      "unitAndPropertyTests": 963,
+      "integrationTests": 203
+    },
+    "provider": {
+      "tests": 40,
+      "typecheck": "passed",
+      "lint": "passed",
+      "format": "passed",
+      "build": "passed"
+    },
+    "persistenceIntegrationTests": 90,
+    "realCoreStageReport": "phase4-stage-core-probe.json",
+    "realHostProviderState": "host-db-worker-durable",
+    "realStageCycles": 3,
+    "realStageObserveAcknowledgments": 4,
+    "realStageUsageAcknowledgments": 3,
+    "faultCases": [
+      "event refresh failure and file-backed restart",
+      "revoked and superseded revisions stay fenced",
+      "negotiation authorization failure blocks subsequent offline fallback",
+      "newer invalidation discards late refresh",
+      "failed cache installation restores read barrier",
+      "uncooperative read timeout retains permit and late response is discarded after shutdown",
+      "state refresh without event capability preserves publication identity",
+      "DB restart and scope isolation",
+      "lost write acknowledgment and stale writer conflicts",
+      "state row, individual and aggregate byte quotas without eviction"
+    ]
+  },
+  "limits": {
+    "stateRows": 128,
+    "stateBytesPerRow": 262144,
+    "stateTotalBodyBytes": 8388608,
+    "defaultNetworkTimeoutMs": 4000,
+    "wholeDatabaseDiskQuotaClaim": false
+  },
+  "remaining": [
+    "resource tombstones and durable privacy generation at adoption",
+    "historical Observe/Usage and confirmed-history suppression",
+    "trusted Session recovery isolation",
+    "controlled Iris search/remember/correct/forget",
+    "real Persona publication/revocation and privacy recovery matrix",
+    "100 cycles and at least 20 runs per crash window",
+    "Phase 4B Presence/Avatar, MCP and full demo:phase4"
+  ],
+  "sourceSha256": {
+    "apps/runtime/src/application/phase-4/memory-host.ts": "9190315b5c2b3f091b19a14e530802e94d2872aca45265f3cf6ef39d8f61dd6c",
+    "apps/runtime/src/application/phase-4/provider-state-store.ts": "871dc371ab96e85ebe5051546df3af6f4cad4abd554c594045ea16c8afaba2cc",
+    "packages/contracts/src/memory/index.ts": "fee1c0b04182cdb37719a386fc2eab0607edc9f65c8febc15b8b51186a77a0f3",
+    "packages/persistence/src/migrations/state/0009-phase4-provider-state.ts": "218fec99fbc3669ce071be23ac0b0871d75cd2728e7c17f2ea121dd2f70ea261",
+    "packages/persistence/src/repositories/phase4-provider-state.ts": "05976f80973326f7ef271664cb0d69033a336691887bb380bd3d49e5c7a8c7a3",
+    "packages/persistence/src/rpc/operations.ts": "a2dbcc7557069c03668e2808f27a4f15094eb5af1d9067de744fa261cfe215fa",
+    "packages/persistence/src/client/persistence-client.ts": "6f3f719ce92881934141110c1da810df595626445a61a63fdb7b8811db5441c5",
+    "packages/persistence/src/worker/operations.ts": "7581b7f45095d7f919c699a132a6641398723bc07ae1da473bbef6d0d5869371",
+    "packages/persistence/test/integration/phase4-provider-state.integration.test.ts": "b88fb12b7c2953e1401c0e699d5665cb84116365ea5c6fc23df7055259527a08",
+    "providers/memory-iris/src/index.ts": "5b496cf61459b042e3f2c9170df8acb2f97e7612f37ec19dd856db6cfccbf3ca",
+    "providers/memory-iris/src/state-store.ts": "8b9b27a5338aa1327e0b7c40ab4fdde75146d49663f8f439c7afd0f4d730ae31",
+    "providers/memory-iris/src/bounded-calls.ts": "dbfb2fa8f2d162b6d7f7d83aba2a8b0f4c51c6db6770ee7c22e6df59ef95ca00",
+    "providers/memory-iris/test/provider.test.ts": "3d22d2160f994629d44df9b61de6e62032d1b1637c96ad459dfa93392ab5f1b7",
+    "scripts/iris-host-context-probe.mjs": "e761ea4c984ae3a4b9d326e059105d0bd48122deef5f2fd661ea1393179a5b90"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T22:47:26.684Z",
+  "status": "core-and-sdk-event-checkpoint-contract-verified-bellis-gap-revalidation-incomplete",
+  "validation": {
+    "coreFocusedTests": 114,
+    "coreFocusedExitCode": 0,
+    "sdkTests": 19,
+    "sdkExitCode": 0,
+    "coreApiTypecheckExitCode": 0,
+    "changedPythonLintExitCode": 0,
+    "generatedContractCheckExitCode": 0,
+    "compatibilityCheckExitCode": 0,
+    "publicApiCheckExitCode": 0,
+    "coreFocusedLogSha256": "7fc90bab8b28e3b49096bfd9785c38dacb38e4a40c6f254728ba7e9a41575460",
+    "sdkLogSha256": "58cf4fa2593a07ca36c4f0cccd3af8605f8c50b64ddc3b8028757e71c11d7097",
+    "checkLogSha256": {
+      "types": "5d4b6d285b77932e3d08212c3b4974d0a803f98ec60408ac6ccf6a063fa6c19e",
+      "lint": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "compatibility": "ccfc32d5157c0c47260fa648cd99bdef6cfa410a4178b40db1545c1c8adcc64c",
+      "generatedContracts": "f899df84623b53811265efc7d120da7fde4895769e69011e683b995e391a8237",
+      "publicApi": "64b008f5d3ac24dd40faa6239ed3cd60301d19344d59807f8bf49ef1ae1c4e91"
+    }
+  },
+  "verified": [
+    "A negotiated events.checkpoint.v1 stream can validate Last-Event-ID together with X-Iris-After-Event-ID in the same read snapshot used for its successors",
+    "A visible anchor survives numeric gaps caused by tenant filtering; a verified head returns an empty finite SSE stream",
+    "Missing, changed or inaccessible saved anchors return JSON HTTP 410 history_unavailable with retryable=false before SSE headers, without revealing actual event identities",
+    "Out-of-range cursors and an identity without a positive cursor fail before streaming; SDK rejects invalid new checkpoint inputs before fetch",
+    "Disabled SSE removes both capabilities; fresh trusted initialization credentials include the new checkpoint capability",
+    "Legacy cursor-only requests retain their response behavior; the SDK forwards the optional identity and rejects both 410 and 503 as errors rather than empty polls",
+    "Reviewed public API changes are limited to streamEvents contract digest and the optional afterEventId TypeScript parameter"
+  ],
+  "limits": [
+    "This is source-level Core ASGI/packaging/local HTTP and SDK transport coverage. The installed Bellis SDK 0.11.1 and prior Core wheel have not been replaced or claimed to support the new capability",
+    "The anchor proves only that the last accepted visible event can still be located; it does not cryptographically prove the full log or detect arbitrary removal of other events",
+    "Bellis still needs durable cursor/event identity, a history-unavailable read and delivery barrier, public full revalidation and old-snapshot recovery tests",
+    "No full Core regression, new installed-wheel integration, A3 gap recovery, A4 matrix or Phase4B completion claim is made"
+  ],
+  "coreSourceSha256": {
+    "src/iris_memory_core/api/app.py": "5974448db3f2a0509057a7dabe9463dd027a2514d2ed19d4799c3d0460f56be5",
+    "src/iris_memory_core/bootstrap.py": "78dd83590233c2967b7245101e08b48e8d72d57063058f2a9797a537b8d469cf",
+    "src/iris_memory_core/application/console/credentials.py": "0d70c6c6de5a2250ef15d299c99c54c8c7388285f0611b63205376e050bfbe29",
+    "contracts/source/contracts.json": "8c81dafaadb6719f12e53d5494507d49eb3536381a787477ef608ee224161d9a",
+    "contracts/public-api.json": "da2c1bfef00f3626c2d95641b8c82b786aa3dd1bd289054f4dbefc5b21256c0f",
+    "schemas/openapi/openapi.json": "6b3946d9d7134c50311ec39ed6a10dd9ab16fe3efac61bd5fd262c19bb27ccfe",
+    "schemas/version-manifest.json": "6ce4aff7382e54b1de21bd52ddea23fca2156253a658c8b952c21e1d35c99e59",
+    "tools/generate_contracts.py": "705dad5a942675efb72a71d65f9ab04d964d0de65b96a4d7b082d332ca384b1f",
+    "tests/contract/test_phase10_asgi.py": "b9bfe7e5a8142902a300faae467a4a2f28e860e4fc686a2397456a4e61f7a438",
+    "tests/integration/test_phase14_packaging.py": "77e270fa1dbe5a6aaebcfce8f9b94babdfa97305dd7b64094f4ea71ab2615fbc",
+    "sdk/typescript/src/index.ts": "c0e56deeaa5db467ab982d3f7491a6412e1f74992ff8e8c343a03cf1d9df45b0",
+    "sdk/typescript/test/adapter-surface.test.ts": "136dd641a428f8d200c00c3df5d0225390ec219a6d9fa14ebcdf5aa130e5438a",
+    "sdk/typescript/package.json": "e78797172aa73ebb124dba083c7bd2248f51ec55efe51d6ff9a4f33e2679c451"
+  }
+}

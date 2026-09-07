@@ -1,4 +1,83 @@
 import {
+  HistoryRecoveryInputSchema,
+  HistoryRecoveryStateSchema,
+  type HistoryRecoveryInput,
+  type HistoryRecoveryState,
+} from "../repositories/phase4-history-inventory.js";
+import { MemoryRecallRequestSchema, type MemoryRecallRequest } from "@bellis/contracts";
+import {
+  HistoryVerificationBatchSchema,
+  HistoryVerificationPageSchema,
+  type HistoryVerificationBatch,
+  type HistoryVerificationPage,
+} from "../repositories/phase4-history-verification.js";
+import {
+  RecallRequestWriteSchema,
+  type RecallRequestWrite,
+} from "../repositories/phase4-recall-requests.js";
+import {
+  HistoryInventoryBeginSchema,
+  HistoryInventorySchema,
+  HistoryInventoryPageInputSchema,
+  HistoryInventoryPageSchema,
+  HistoryInventoryItemInputSchema,
+  HistoryInventoryItemSchema,
+  type HistoryInventoryBegin,
+  type HistoryInventory,
+  type HistoryInventoryPageInput,
+  type HistoryInventoryPage,
+  type HistoryInventoryItemInput,
+  type HistoryInventoryItem,
+} from "../repositories/phase4-history-inventory.js";
+import { MemoryHistoryGapSchema, type MemoryHistoryGap } from "@bellis/contracts";
+import { PersistenceDiskStatusSchema, type PersistenceDiskStatus } from "../disk-admission.js";
+import {
+  MemoryResourceInvalidationSchema,
+  type MemoryResourceInvalidation,
+} from "@bellis/contracts";
+import {
+  LocalInputVisibilityRequestSchema,
+  LocalInputVisibilitySchema,
+  type LocalInputVisibilityRequest,
+  type LocalInputVisibility,
+} from "@bellis/contracts";
+import {
+  MemoryForgetReceiptSchema,
+  MemoryForgetOperationSchema,
+  type MemoryForgetReceipt,
+  type MemoryForgetOperation,
+  type MemoryForgetTransition,
+} from "@bellis/contracts";
+import { PreparedToolCallSchema, type PreparedToolCall } from "@bellis/contracts";
+import {
+  EffectPreparationSchema,
+  MemoryPolicyStampSchema,
+  MemoryPolicyChangeSchema,
+  MemoryPolicySnapshotSchema,
+  type MemoryPolicyStamp,
+  type MemoryPolicyChange,
+  type MemoryPolicySnapshot,
+  AudioSegmentBindingSchema,
+  StageEffectReceiptSchema,
+  StageEffectAckSchema,
+  type EffectPreparation,
+  type AudioSegmentBinding,
+  type StageEffectAck,
+} from "@bellis/contracts";
+import type { ConfirmEffectInput, ConfirmedSpeech } from "../repositories/phase4-effects.js";
+import type {
+  ProviderStateScope,
+  ProviderStateWrite,
+  ProviderStateSnapshot,
+} from "../repositories/phase4-provider-state.js";
+import {
+  MemoryInputObservationSchema,
+  JsonValueSchema,
+  type MemoryInputObservation,
+  ContextAdoptionSchema,
+  ContextManifestSchema,
+  type ContextManifest,
+  type ContextAdoption,
   DecimalStringSchema,
   IngestedSignalSchema,
   OutboxMessageSchema,
@@ -8,6 +87,7 @@ import {
   SignalSchema,
   SignalPriorityClassSchema,
   ToolRunStateSchema,
+  ToolCallSchema,
   TraceIdSchema,
   UuidSchema,
   formatDecimalString,
@@ -36,6 +116,36 @@ import { z } from "zod";
  */
 
 export const PERSISTENCE_OPERATIONS = [
+  "read_disk_status",
+  "phase4_ensure_memory_policy",
+  "phase4_read_memory_policy",
+  "phase4_change_memory_policy",
+  "phase4_read_provider_state",
+  "phase4_read_tool_call",
+  "phase4_read_prepared_tool",
+  "phase4_read_local_visibility",
+  "phase4_apply_resource_invalidation",
+  "phase4_record_recall_request",
+  "phase4_read_history_recovery_state",
+  "phase4_read_revalidation_request",
+  "phase4_record_history_verification",
+  "phase4_read_history_verification_page",
+  "phase4_begin_history_inventory",
+  "phase4_read_history_inventory_page",
+  "phase4_read_history_inventory_item",
+  "phase4_begin_history_gap",
+  "phase4_begin_memory_forget",
+  "phase4_complete_memory_forget",
+  "phase4_read_memory_forget",
+  "phase4_save_prepared_tool",
+  "phase4_write_provider_state",
+  "phase4_prepare_effects",
+  "phase4_bind_audio_segment",
+  "phase4_confirm_effect",
+  "phase4_close_effects",
+  "phase4_read_confirmed_speech",
+
+  "phase4_read_context_manifest",
   "ping",
   "migrate",
   "ensure_session",
@@ -71,6 +181,50 @@ const WatermarkEntryJsonSchema = z.object({
 });
 
 export interface OperationInputs {
+  readonly phase4_record_recall_request: RecallRequestWrite;
+  readonly phase4_read_history_recovery_state: HistoryRecoveryInput;
+  readonly phase4_read_revalidation_request: HistoryInventoryItemInput;
+  readonly phase4_record_history_verification: HistoryVerificationBatch;
+  readonly phase4_read_history_verification_page: HistoryInventoryPageInput;
+  readonly phase4_begin_history_inventory: HistoryInventoryBegin;
+  readonly phase4_read_history_inventory_page: HistoryInventoryPageInput;
+  readonly phase4_read_history_inventory_item: HistoryInventoryItemInput;
+  readonly phase4_begin_history_gap: { readonly scopeKey: string; readonly gap: MemoryHistoryGap };
+  readonly phase4_apply_resource_invalidation: {
+    readonly scopeKey: string;
+    readonly event: MemoryResourceInvalidation;
+  };
+  readonly phase4_read_local_visibility: LocalInputVisibilityRequest;
+  readonly phase4_read_prepared_tool: { readonly sessionId: string; readonly toolRunId: string };
+  readonly phase4_begin_memory_forget: { readonly sessionId: string; readonly toolRunId: string };
+  readonly phase4_complete_memory_forget: {
+    readonly sessionId: string;
+    readonly toolRunId: string;
+    readonly receipt: MemoryForgetReceipt;
+  };
+  readonly phase4_read_memory_forget: { readonly sessionId: string; readonly toolRunId: string };
+  readonly phase4_save_prepared_tool: PreparedToolCall;
+  readonly phase4_read_tool_call: { readonly sessionId: string; readonly toolRunId: string };
+  readonly phase4_ensure_memory_policy: {
+    readonly scopeKey: string;
+    readonly privacyRevision: string;
+    readonly sessionId?: string | undefined;
+  };
+  readonly phase4_read_memory_policy: { readonly scopeKey: string };
+  readonly phase4_change_memory_policy: MemoryPolicyChange;
+  readonly phase4_read_provider_state: ProviderStateScope;
+  readonly phase4_write_provider_state: ProviderStateWrite;
+  readonly phase4_prepare_effects: EffectPreparation;
+  readonly phase4_bind_audio_segment: AudioSegmentBinding;
+  readonly phase4_confirm_effect: ConfirmEffectInput;
+  readonly phase4_close_effects: { readonly sessionId: string; readonly sceneId: string };
+  readonly phase4_read_confirmed_speech: {
+    readonly sessionId: string;
+    readonly limit: number;
+    readonly policy?: MemoryPolicyStamp | undefined;
+  };
+  readonly phase4_read_context_manifest: { readonly sessionId: string; readonly cycleId: string };
+  readonly read_disk_status: void;
   readonly ping: void;
   readonly migrate: void;
   readonly ensure_session: {
@@ -118,6 +272,8 @@ export interface OperationInputs {
   };
   readonly read_outbox_stats: void;
   readonly phase3_append_signal: {
+    readonly policy?: MemoryPolicyStamp;
+    readonly observations?: readonly MemoryInputObservation[];
     readonly sessionId: string;
     readonly signal: Signal;
     readonly priorityClass: "normal" | "urgent";
@@ -127,6 +283,7 @@ export interface OperationInputs {
   };
   readonly phase3_restore_signals: { readonly sessionId: string };
   readonly phase3_adopt_cycle: {
+    readonly context?: ContextAdoption;
     readonly sessionId: string;
     readonly turnId: string;
     readonly cycleId: string;
@@ -141,6 +298,7 @@ export interface OperationInputs {
       readonly toolRunId: string;
       readonly toolName: string;
       readonly idempotencyKeyHash: string | null;
+      readonly originalCall?: import("@bellis/contracts").ToolCall | undefined;
     }[];
   };
   readonly phase3_tool_run_event: {
@@ -169,6 +327,38 @@ export interface OperationInputs {
 }
 
 export interface OperationResults {
+  readonly phase4_record_recall_request: void;
+  readonly phase4_read_history_recovery_state: HistoryRecoveryState;
+  readonly phase4_read_revalidation_request: MemoryRecallRequest | null;
+  readonly phase4_record_history_verification: void;
+  readonly phase4_read_history_verification_page: HistoryVerificationPage;
+  readonly phase4_begin_history_inventory: HistoryInventory;
+  readonly phase4_read_history_inventory_page: HistoryInventoryPage;
+  readonly phase4_read_history_inventory_item: HistoryInventoryItem;
+  readonly phase4_begin_history_gap: MemoryPolicySnapshot;
+  readonly phase4_apply_resource_invalidation: MemoryPolicySnapshot;
+  readonly phase4_read_local_visibility: LocalInputVisibility;
+  readonly phase4_read_prepared_tool: PreparedToolCall | null;
+  readonly phase4_begin_memory_forget: MemoryForgetTransition;
+  readonly phase4_complete_memory_forget: MemoryForgetTransition;
+  readonly phase4_read_memory_forget: MemoryForgetOperation | null;
+  readonly phase4_save_prepared_tool: void;
+  readonly phase4_read_tool_call: import("@bellis/contracts").ToolCall | null;
+  readonly phase4_ensure_memory_policy: MemoryPolicySnapshot;
+  readonly phase4_read_memory_policy: MemoryPolicySnapshot;
+  readonly phase4_change_memory_policy: MemoryPolicySnapshot;
+  readonly phase4_read_provider_state: ProviderStateSnapshot | null;
+  readonly phase4_write_provider_state: number;
+  readonly phase4_prepare_effects: void;
+  readonly phase4_bind_audio_segment: void;
+  readonly phase4_confirm_effect: StageEffectAck;
+  readonly phase4_close_effects: void;
+  readonly phase4_read_confirmed_speech: { readonly items: readonly ConfirmedSpeech[] };
+  readonly phase4_read_context_manifest: {
+    readonly manifest: ContextManifest;
+    readonly manifestDigest: string;
+  } | null;
+  readonly read_disk_status: PersistenceDiskStatus;
   readonly ping: { readonly pongMs: number };
   readonly migrate: { readonly requeuedInFlight: number };
   readonly ensure_session: void;
@@ -313,6 +503,8 @@ const OutboxStatsResultSchema = z.object({
 const ListRecordsResultSchema = z.object({ records: z.array(SessionRecordSchema) });
 
 const Phase3AppendSignalPayloadSchema = z.object({
+  policy: MemoryPolicyStampSchema.optional(),
+  observations: z.array(MemoryInputObservationSchema).max(8).optional(),
   sessionId: UuidSchema,
   signal: SignalSchema,
   priorityClass: SignalPriorityClassSchema,
@@ -340,6 +532,7 @@ const Phase3RestoreSignalsResultSchema = z.object({
 
 /** adoption 传输形态（审计记录 payload 由 Worker 侧组装并经 Schema 校验）。 */
 const Phase3AdoptCyclePayloadSchema = z.object({
+  context: ContextAdoptionSchema.optional(),
   sessionId: UuidSchema,
   turnId: UuidSchema,
   cycleId: UuidSchema,
@@ -355,6 +548,7 @@ const Phase3AdoptCyclePayloadSchema = z.object({
       toolRunId: UuidSchema,
       toolName: z.string().min(1).max(128),
       idempotencyKeyHash: z.string().length(64).nullable(),
+      originalCall: ToolCallSchema.optional(),
     }),
   ),
 });
@@ -413,6 +607,11 @@ const ActiveSceneRowSchema = z.object({
 
 const ActiveScenesResultSchema = z.object({ scenes: z.array(ActiveSceneRowSchema) });
 const ClaimOutboxResultSchema = z.object({ messages: z.array(OutboxMessageSchema) });
+const ProviderStateScopeSchema = z.strictObject({
+  scopeKey: z.string().regex(/^[a-f0-9]{64}$/),
+  providerId: z.string().min(1).max(256),
+});
+const ProviderRevisionSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 function invalid(message: string): PersistenceError {
   return new PersistenceError("invalid_request", message);
@@ -437,6 +636,40 @@ function parseOr<S extends z.ZodType>(
 /** Client→Worker Payload 编码（typed 输入 → JsonValue）。 */
 export function encodeOperationPayload(message: OperationRequest): Record<string, unknown> {
   switch (message.operation) {
+    case "phase4_ensure_memory_policy":
+    case "phase4_read_memory_policy":
+    case "phase4_change_memory_policy":
+      return { ...message.input };
+    case "phase4_begin_memory_forget":
+    case "phase4_complete_memory_forget":
+    case "phase4_read_memory_forget":
+    case "phase4_record_recall_request":
+    case "phase4_read_history_recovery_state":
+    case "phase4_read_revalidation_request":
+    case "phase4_record_history_verification":
+    case "phase4_read_history_verification_page":
+    case "phase4_begin_history_inventory":
+    case "phase4_read_history_inventory_page":
+    case "phase4_read_history_inventory_item":
+    case "phase4_begin_history_gap":
+    case "phase4_apply_resource_invalidation":
+    case "phase4_read_local_visibility":
+    case "phase4_read_prepared_tool":
+    case "phase4_save_prepared_tool":
+    case "phase4_read_tool_call":
+      return { ...message.input };
+    case "phase4_read_provider_state":
+    case "phase4_write_provider_state":
+      return { ...message.input };
+    case "phase4_prepare_effects":
+    case "phase4_bind_audio_segment":
+    case "phase4_confirm_effect":
+    case "phase4_close_effects":
+    case "phase4_read_confirmed_speech":
+      return { ...message.input };
+    case "phase4_read_context_manifest":
+      return { ...message.input };
+    case "read_disk_status":
     case "ping":
     case "migrate":
     case "read_outbox_stats":
@@ -482,6 +715,10 @@ export function encodeOperationPayload(message: OperationRequest): Record<string
       return { ...message.input };
     case "phase3_append_signal":
       return {
+        ...(message.input.policy === undefined ? {} : { policy: message.input.policy }),
+        ...(message.input.observations === undefined
+          ? {}
+          : { observations: message.input.observations }),
         sessionId: message.input.sessionId,
         signal: message.input.signal,
         priorityClass: message.input.priorityClass,
@@ -493,6 +730,7 @@ export function encodeOperationPayload(message: OperationRequest): Record<string
       return { sessionId: message.input.sessionId };
     case "phase3_adopt_cycle":
       return {
+        ...(message.input.context === undefined ? {} : { context: message.input.context }),
         sessionId: message.input.sessionId,
         turnId: message.input.turnId,
         cycleId: message.input.cycleId,
@@ -538,6 +776,262 @@ export function decodeOperationPayload(
   payload: unknown,
 ): OperationRequest {
   switch (operation) {
+    case "phase4_ensure_memory_policy":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({
+            scopeKey: MemoryPolicyStampSchema.shape.scopeKey,
+            privacyRevision: z.string().min(1).max(256),
+            sessionId: UuidSchema.optional(),
+          }),
+          payload,
+          invalid("invalid memory policy initialization"),
+        ),
+      };
+    case "phase4_read_memory_policy":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({ scopeKey: MemoryPolicyStampSchema.shape.scopeKey }),
+          payload,
+          invalid("invalid memory policy scope"),
+        ),
+      };
+    case "phase4_change_memory_policy":
+      return {
+        operation,
+        input: parseOr(MemoryPolicyChangeSchema, payload, invalid("invalid memory policy change")),
+      };
+    case "phase4_begin_memory_forget":
+    case "phase4_read_memory_forget":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({ sessionId: UuidSchema, toolRunId: UuidSchema }),
+          payload,
+          invalid("invalid memory forget identity"),
+        ),
+      };
+    case "phase4_complete_memory_forget":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({
+            sessionId: UuidSchema,
+            toolRunId: UuidSchema,
+            receipt: MemoryForgetReceiptSchema,
+          }),
+          payload,
+          invalid("invalid memory forget receipt"),
+        ),
+      };
+    case "phase4_save_prepared_tool":
+      return {
+        operation,
+        input: parseOr(PreparedToolCallSchema, payload, invalid("prepared tool invalid")),
+      };
+    case "phase4_record_recall_request":
+      return {
+        operation,
+        input: parseOr(RecallRequestWriteSchema, payload, invalid("Recall request record invalid")),
+      };
+    case "phase4_read_history_recovery_state":
+      return {
+        operation,
+        input: parseOr(
+          HistoryRecoveryInputSchema,
+          payload,
+          invalid("history recovery input invalid"),
+        ),
+      };
+    case "phase4_read_revalidation_request":
+      return {
+        operation,
+        input: parseOr(
+          HistoryInventoryItemInputSchema,
+          payload,
+          invalid("revalidation request input invalid"),
+        ),
+      };
+    case "phase4_record_history_verification":
+      return {
+        operation,
+        input: parseOr(
+          HistoryVerificationBatchSchema,
+          payload,
+          invalid("history verification input invalid"),
+        ),
+      };
+    case "phase4_read_history_verification_page":
+      return {
+        operation,
+        input: parseOr(
+          HistoryInventoryPageInputSchema,
+          payload,
+          invalid("history verification page input invalid"),
+        ),
+      };
+    case "phase4_begin_history_inventory":
+      return {
+        operation,
+        input: parseOr(
+          HistoryInventoryBeginSchema,
+          payload,
+          invalid("history inventory input invalid"),
+        ),
+      };
+    case "phase4_read_history_inventory_page":
+      return {
+        operation,
+        input: parseOr(
+          HistoryInventoryPageInputSchema,
+          payload,
+          invalid("history inventory input invalid"),
+        ),
+      };
+    case "phase4_read_history_inventory_item":
+      return {
+        operation,
+        input: parseOr(
+          HistoryInventoryItemInputSchema,
+          payload,
+          invalid("history inventory input invalid"),
+        ),
+      };
+    case "phase4_begin_history_gap":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({
+            scopeKey: MemoryPolicyStampSchema.shape.scopeKey,
+            gap: MemoryHistoryGapSchema,
+          }),
+          payload,
+          invalid("history gap input invalid"),
+        ),
+      };
+    case "phase4_apply_resource_invalidation":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({
+            scopeKey: MemoryPolicyStampSchema.shape.scopeKey,
+            event: MemoryResourceInvalidationSchema,
+          }),
+          payload,
+          invalid("resource invalidation input invalid"),
+        ),
+      };
+    case "phase4_read_local_visibility":
+      return {
+        operation,
+        input: parseOr(
+          LocalInputVisibilityRequestSchema,
+          payload,
+          invalid("local visibility input invalid"),
+        ),
+      };
+    case "phase4_read_prepared_tool":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({ sessionId: UuidSchema, toolRunId: UuidSchema }),
+          payload,
+          invalid("prepared tool scope invalid"),
+        ),
+      };
+    case "phase4_read_tool_call":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({ sessionId: UuidSchema, toolRunId: UuidSchema }),
+          payload,
+          invalid("tool call scope invalid"),
+        ),
+      };
+    case "phase4_read_provider_state":
+      return {
+        operation,
+        input: parseOr(ProviderStateScopeSchema, payload, invalid("provider state scope invalid")),
+      };
+    case "phase4_write_provider_state":
+      return {
+        operation,
+        input: parseOr(
+          ProviderStateScopeSchema.extend({
+            expectedRevision: ProviderRevisionSchema,
+            state: JsonValueSchema,
+          }),
+          payload,
+          invalid("provider state write invalid"),
+        ),
+      };
+    case "phase4_prepare_effects":
+      return {
+        operation,
+        input: parseOr(
+          EffectPreparationSchema,
+          payload,
+          invalid("phase4_prepare_effects payload invalid"),
+        ),
+      };
+    case "phase4_bind_audio_segment":
+      return {
+        operation,
+        input: parseOr(
+          AudioSegmentBindingSchema,
+          payload,
+          invalid("phase4_bind_audio_segment payload invalid"),
+        ),
+      };
+    case "phase4_confirm_effect":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({
+            sessionId: UuidSchema,
+            connectionGeneration: UuidSchema,
+            receipt: StageEffectReceiptSchema,
+          }),
+          payload,
+          invalid("phase4_confirm_effect payload invalid"),
+        ),
+      };
+    case "phase4_close_effects":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({ sessionId: UuidSchema, sceneId: UuidSchema }),
+          payload,
+          invalid("phase4_close_effects payload invalid"),
+        ),
+      };
+    case "phase4_read_confirmed_speech":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({
+            sessionId: UuidSchema,
+            limit: z.number().int().min(1).max(64),
+            policy: MemoryPolicyStampSchema.optional(),
+          }),
+          payload,
+          invalid("phase4_read_confirmed_speech payload invalid"),
+        ),
+      };
+    case "phase4_read_context_manifest":
+      return {
+        operation,
+        input: parseOr(
+          z.strictObject({ sessionId: UuidSchema, cycleId: UuidSchema }),
+          payload,
+          invalid("context manifest read payload failed validation"),
+        ),
+      };
+    case "read_disk_status":
+      parseOr(z.strictObject({}), payload, invalid("invalid disk status query"));
+      return { operation, input: undefined };
     case "ping":
     case "migrate":
     case "read_outbox_stats":
@@ -663,6 +1157,8 @@ export function decodeOperationPayload(
       return {
         operation,
         input: {
+          ...(parsed.policy === undefined ? {} : { policy: parsed.policy }),
+          ...(parsed.observations === undefined ? {} : { observations: parsed.observations }),
           sessionId: parsed.sessionId,
           signal: parsed.signal,
           priorityClass: parsed.priorityClass,
@@ -690,6 +1186,7 @@ export function decodeOperationPayload(
       return {
         operation,
         input: {
+          ...(parsed.context === undefined ? {} : { context: parsed.context }),
           sessionId: parsed.sessionId,
           turnId: parsed.turnId,
           cycleId: parsed.cycleId,
@@ -764,6 +1261,51 @@ export function decodeOperationPayload(
 /** Worker→Client Result 编码（typed 结果 → JsonValue）。 */
 export function encodeOperationResult(message: OperationResultMessage): Record<string, unknown> {
   switch (message.operation) {
+    case "phase4_ensure_memory_policy":
+    case "phase4_read_memory_policy":
+    case "phase4_change_memory_policy":
+      return { ...message.result };
+    case "phase4_read_history_recovery_state":
+      return { ...message.result };
+    case "phase4_read_revalidation_request":
+      return { request: message.result };
+    case "phase4_record_history_verification":
+    case "phase4_record_recall_request":
+    case "phase4_save_prepared_tool":
+      return {};
+    case "phase4_begin_memory_forget":
+    case "phase4_complete_memory_forget":
+      return { ...message.result };
+    case "phase4_read_memory_forget":
+      return { operation: message.result };
+    case "phase4_read_history_verification_page":
+    case "phase4_begin_history_inventory":
+    case "phase4_read_history_inventory_page":
+    case "phase4_read_history_inventory_item":
+    case "phase4_begin_history_gap":
+    case "phase4_apply_resource_invalidation":
+    case "phase4_read_local_visibility":
+      return { ...message.result };
+    case "phase4_read_prepared_tool":
+      return { prepared: message.result };
+    case "phase4_read_tool_call":
+      return { call: message.result };
+    case "phase4_read_provider_state":
+      return { snapshot: message.result };
+    case "phase4_write_provider_state":
+      return { revision: message.result };
+    case "phase4_prepare_effects":
+    case "phase4_bind_audio_segment":
+    case "phase4_close_effects":
+      return {};
+    case "phase4_confirm_effect":
+      return { ...message.result };
+    case "phase4_read_confirmed_speech":
+      return { items: message.result.items };
+    case "phase4_read_context_manifest":
+      return { context: message.result };
+    case "read_disk_status":
+      return { ...message.result };
     case "ping":
       return { pongMs: message.result.pongMs };
     case "migrate":
@@ -838,6 +1380,213 @@ export function decodeOperationResult(
   payload: unknown,
 ): OperationResultMessage {
   switch (operation) {
+    case "phase4_ensure_memory_policy":
+    case "phase4_read_memory_policy":
+    case "phase4_change_memory_policy":
+      return {
+        operation,
+        result: parseOr(
+          MemoryPolicySnapshotSchema,
+          payload,
+          internal("invalid memory policy result"),
+        ),
+      };
+    case "phase4_begin_memory_forget":
+    case "phase4_complete_memory_forget":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({
+            operation: MemoryForgetOperationSchema,
+            policy: MemoryPolicySnapshotSchema,
+          }),
+          payload,
+          internal("invalid memory forget transition"),
+        ),
+      };
+    case "phase4_read_memory_forget":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({ operation: MemoryForgetOperationSchema.nullable() }),
+          payload,
+          internal("invalid memory forget result"),
+        ).operation,
+      };
+    case "phase4_read_history_recovery_state":
+      return {
+        operation,
+        result: parseOr(
+          HistoryRecoveryStateSchema,
+          payload,
+          internal("history recovery state invalid"),
+        ),
+      };
+    case "phase4_read_revalidation_request":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({ request: MemoryRecallRequestSchema.nullable() }),
+          payload,
+          internal("revalidation request result invalid"),
+        ).request,
+      };
+    case "phase4_record_history_verification":
+    case "phase4_record_recall_request":
+    case "phase4_save_prepared_tool":
+      return { operation, result: undefined };
+    case "phase4_read_history_verification_page":
+      return {
+        operation,
+        result: parseOr(
+          HistoryVerificationPageSchema,
+          payload,
+          internal("history verification page invalid"),
+        ),
+      };
+    case "phase4_begin_history_inventory":
+      return {
+        operation,
+        result: parseOr(
+          HistoryInventorySchema,
+          payload,
+          internal("history inventory result invalid"),
+        ),
+      };
+    case "phase4_read_history_inventory_page":
+      return {
+        operation,
+        result: parseOr(
+          HistoryInventoryPageSchema,
+          payload,
+          internal("history inventory result invalid"),
+        ),
+      };
+    case "phase4_read_history_inventory_item":
+      return {
+        operation,
+        result: parseOr(
+          HistoryInventoryItemSchema,
+          payload,
+          internal("history inventory result invalid"),
+        ),
+      };
+    case "phase4_begin_history_gap":
+    case "phase4_apply_resource_invalidation":
+      return {
+        operation,
+        result: parseOr(
+          MemoryPolicySnapshotSchema,
+          payload,
+          internal("resource invalidation result invalid"),
+        ),
+      };
+    case "phase4_read_local_visibility":
+      return {
+        operation,
+        result: parseOr(
+          LocalInputVisibilitySchema,
+          payload,
+          internal("local visibility result invalid"),
+        ),
+      };
+    case "phase4_read_prepared_tool":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({ prepared: PreparedToolCallSchema.nullable() }),
+          payload,
+          internal("prepared tool result invalid"),
+        ).prepared,
+      };
+    case "phase4_read_tool_call":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({ call: ToolCallSchema.nullable() }),
+          payload,
+          internal("tool call result invalid"),
+        ).call,
+      };
+    case "phase4_read_provider_state":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({
+            snapshot: z
+              .strictObject({ revision: ProviderRevisionSchema, state: JsonValueSchema })
+              .nullable(),
+          }),
+          payload,
+          internal("provider state snapshot invalid"),
+        ).snapshot,
+      };
+    case "phase4_write_provider_state":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({ revision: ProviderRevisionSchema }),
+          payload,
+          internal("provider state revision invalid"),
+        ).revision,
+      };
+    case "phase4_prepare_effects":
+    case "phase4_bind_audio_segment":
+    case "phase4_close_effects":
+      parseOr(z.strictObject({}), payload, internal("effect write result invalid"));
+      return { operation, result: undefined };
+    case "phase4_confirm_effect":
+      return {
+        operation,
+        result: parseOr(StageEffectAckSchema, payload, internal("effect acknowledgment invalid")),
+      };
+    case "phase4_read_confirmed_speech":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({
+            items: z
+              .array(
+                z.strictObject({
+                  cycleId: UuidSchema,
+                  receiptId: UuidSchema,
+                  text: z.string().min(1).max(2000),
+                  start: z.number().int().min(0).max(2000),
+                  end: z.number().int().min(1).max(2000),
+                  confirmedAtMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+                }),
+              )
+              .max(64),
+          }),
+          payload,
+          internal("confirmed speech result invalid"),
+        ),
+      };
+    case "phase4_read_context_manifest":
+      return {
+        operation,
+        result: parseOr(
+          z.strictObject({
+            context: z
+              .strictObject({
+                manifest: ContextManifestSchema,
+                manifestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+              })
+              .nullable(),
+          }),
+          payload,
+          internal("context manifest read result failed validation"),
+        ).context,
+      };
+    case "read_disk_status":
+      return {
+        operation,
+        result: parseOr(
+          PersistenceDiskStatusSchema,
+          payload,
+          internal("invalid disk status result"),
+        ),
+      };
     case "ping":
       return {
         operation,

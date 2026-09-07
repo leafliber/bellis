@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T15:59:40.361216+00:00",
+  "status": "foundation-verified-phase4-incomplete",
+  "validation": {
+    "command": "pnpm check",
+    "unitAndPropertyTests": 980,
+    "integrationTests": 209,
+    "logSha256": "cda98691413355dd8ff1701b7791720a32b8beffe36e149446b196b6eb800515",
+    "realStageCoreReport": "phase4-tool-foundation-stage-core-probe.json",
+    "realStageCoreReportSha256": "cda8739c4cdd9500d882bbd3e635bb0c7266921927f09c2c7644a85133b26d0d"
+  },
+  "verified": [
+    "Original model ToolCall and original idempotency key persist in adoption transaction",
+    "Exact call read after Worker restart; running becomes uncertain without automatic execution",
+    "Modified call, key, or invocation set rejected on adoption replay",
+    "Invalid identity, key hash, or payload size rolls back cycle, tool rows, and watermark",
+    "Legacy calls return null; audit excludes original body and key",
+    "Empty bootstrap host rebind restores actual Session pending Signals",
+    "Turn tool context, adoption, and Tool Run events share actual Session",
+    "Pending input append prevents cross-Session rebind",
+    "Real Chromium/Core closure and privacy interruption remain passing"
+  ],
+  "remaining": [
+    "Trusted Iris actual request freezing and host business keys",
+    "Iris four tools, confirmation, lease and public unknown-result reconciliation",
+    "Privacy-generation filtering of pending Signals and Tool Results; Core Session mapping",
+    "Real deletion, Legal Hold, Persona revoke and external invalidation matrix",
+    "Whole-database/WAL/audit quotas; A4 stress/crash gates; Phase 4B"
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/migrations/state/0011-phase4-tool-calls.ts": "e8b7629494f773a65e7ef18dfc18bcde981fc0ecdcd9189e7ef0ab145a4100fe",
+    "packages/persistence/src/repositories/phase4-tool-calls.ts": "3a9682a24f3500be5b328786cc448fbd28e1be14bd84663c1197e9d59ba36332",
+    "packages/persistence/src/repositories/phase3.ts": "209a2e47a840b517ad9f8604b343f7b59d73771c2232e9358da1cd798714560c",
+    "packages/persistence/src/rpc/operations.ts": "0b9ec0f7965c406b373d5fc067d6f1957cef373587f37b1bc6b8b14ae9fee5c2",
+    "packages/persistence/src/client/persistence-client.ts": "5f1500c51f27a469a905788946a747c1e80110b1c4826333c00293b6c8de70d1",
+    "packages/persistence/src/worker/operations.ts": "4296220df388b0fb60f4a30e60a3defca2a61c571798a31595f85a450509e0dc",
+    "packages/decision-loop/src/loop/decision-loop.ts": "efbfa0b05a613a418fc92b7269738b4d3824a002a6f33ae7056cc017a9ff4108",
+    "packages/decision-loop/src/loop/ports.ts": "1772b146cdb4691dc739ac9af873b2f035091f2f7d587b7f0298624cfe189568",
+    "packages/tool-runtime/src/runtime.ts": "8b3c695cad3a0c4f069dbdc991a8454a1bdf6ce50f1417baf5c59b4cb198618d",
+    "apps/runtime/src/application/phase-3/adapters.ts": "1abcb5b5bf94d7397e8d9fb08b2ec8ac02295769651def17d6b543e2a5dd3e67",
+    "apps/runtime/src/application/phase-3/host.ts": "8dfb77750dd36e9b7edd622ac787ef57e956162daa9e1bcc35fb1ca1e7a638c1",
+    "apps/runtime/src/application/phase-2/performance-service.ts": "8f55560c15f35464e71c68aa0d008220a0cee748793f1559e489652a1dded086",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "f6dec33ebee2ae5a40255bb52ed32c262b7d262e0833cc0e86b19da24a338c80",
+    "packages/persistence/test/integration/phase4-tool-calls.integration.test.ts": "ef149c3a4b9a44446619a3fe3751c279eb334779dd04461890b8b92f63f26a71",
+    "apps/runtime/test/integration/phase4-session-binding.integration.test.ts": "bf3a3855f5eb7c16f3b42f30db3b73567d6ea5971879f37930a6d37bf3168e4c",
+    "apps/runtime/test/unit/phase-3-host.test.ts": "3d5d06d545484f7e1fe4e02667ded25d0e2e33bf45457ee120fe71f7048326b7"
+  }
+}

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isMemoryResourceBlocked } from "../src/memory/policy.js";
 
 import {
   ContextBlockSchema,
@@ -26,6 +27,24 @@ const block = {
 } as const;
 
 describe("memory plugin contract", () => {
+  it("applies tombstones to each referenced revision without confusing neighboring resources or providers", () => {
+    const tombstones = [
+      { providerId: "iris", resourceRef: "iris:claim:one", throughRevision: "2" },
+    ];
+    expect(isMemoryResourceBlocked(tombstones, "iris", ["iris:claim:one@2"], "99")).toBe(true);
+    expect(isMemoryResourceBlocked(tombstones, "iris", ["iris:claim:one@3"], "3")).toBe(false);
+    expect(isMemoryResourceBlocked(tombstones, "iris", ["iris:claim:one-more@1"], "1")).toBe(false);
+    expect(isMemoryResourceBlocked(tombstones, "other", ["iris:claim:one@1"], "1")).toBe(false);
+    expect(
+      isMemoryResourceBlocked(
+        [{ ...tombstones[0]!, throughRevision: null }],
+        "iris",
+        ["iris:claim:one@999"],
+        "999",
+      ),
+    ).toBe(true);
+  });
+
   it("accepts the frozen query, block and contribution shapes", () => {
     expect(
       MemoryQuerySchema.safeParse({

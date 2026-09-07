@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T20:51:00.769221+00:00",
+  "status": "database-page-caps-and-full-rollback-verified-wal-reservation-and-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1035,
+    "integrationTests": 234,
+    "runtimeUnitTests": 147,
+    "persistenceUnitTests": 47,
+    "persistenceIntegrationTests": 112,
+    "runtimeIntegrationTests": 111,
+    "generatedContractFiles": 160,
+    "irisProviderTests": 80,
+    "irisProviderTypecheckExitCode": 0,
+    "realCoreToolsSseAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "repetitionsPerWindowAndTarget": 1,
+    "rootCheckLogSha256": "cac16611cf216cb6625f047623fc4aaf937b80e678db7e3a0433731c7a82e484",
+    "providerTestLogSha256": "3fd3c24b4f39fc9b3ebde03bf45a0d63728581daf9f6f352be6aa4ebf1ffc1e9"
+  },
+  "verified": [
+    "Both SQLite connections set and verify max_page_count derived from configured byte limits and actual page size; every Worker write through those connections is constrained",
+    "Public appendRecord writes exhaust a 16MiB state allocation budget without direct fixture SQL; the rejected record is absent and every accepted record remains readable after restart",
+    "A failing large Provider state replacement retains the original barrier and revision; native SQLITE_FULL auto-rollback no longer has its safe error masked by ROLLBACK/SAVEPOINT cleanup",
+    "Normal rollback mistakes are not suppressed: no-op cleanup requires an observed FULL error and an inactive SQLite transaction",
+    "Restart reapplies actual limits; a smaller-than-existing database budget refuses startup without deleting data or silently raising its limit",
+    "Opening failure releases the state/telemetry connections and Worker lock, including failure while opening the second database; restoring a sufficient budget allows reopen",
+    "An internal telemetry migration fixture allocating 32MiB fails at a 16MiB cap and succeeds at 64MiB, with the failed transaction rolled back",
+    "Disk status reports actual page limits and allocated/used bytes; less than 8MiB logical headroom reports database_limit and stops new admission",
+    "Real Core public tools, deletion SSE, three Chromium cycles, four Observations and three Usage ACKs pass with the configured default limits",
+    "All 24 already-covered recovery combinations pass one smoke repetition with limits reapplied at restart"
+  ],
+  "limits": [
+    "SQLite max_page_count bounds allocated database pages, not total WAL length or aggregate data-directory storage",
+    "No physically isolated completion reserve or worst-case four-plan/32-segment/eight-provider allocation bound is claimed",
+    "Background updates can still grow WAL and consume free filesystem space; full capacity, checkpoint behavior and ENOSPC completion guarantees remain open",
+    "Historical 480-case recovery evidence is not rerun at 20 repetitions here; the present run is 24-case smoke only",
+    "Core Session mapping, production tool authority, full Persona lifecycle, SSE gaps/corrections, remaining recovery and Phase4B/full demo are not completed"
+  ],
+  "diagnostics": [
+    "Initial capacity test exposed savepoint-cleanup masking of SQLite automatic rollback. The driver was corrected and the complete root check and requested real-service probes passed afterward."
+  ],
+  "observedCapacity": {
+    "stateLimitBytes": 1073741824,
+    "stateAllocatedBytes": 331776,
+    "stateUsedBytes": 331776,
+    "telemetryLimitBytes": 67108864,
+    "telemetryAllocatedBytes": 20480,
+    "telemetryUsedBytes": 20480
+  },
+  "reports": [
+    {
+      "file": "phase4-database-capacity-core-probe.json",
+      "sha256": "1088f562160a2c8abe4e62fc84f9ff3ba6e245b2b0e5822c3b73c1dce85f88c0",
+      "exitCode": 0
+    },
+    {
+      "file": "phase4-database-capacity-recovery-smoke.json",
+      "sha256": "6ab495f71696975d673449f46d33cc4d0792e9a141a2f3cab3d5d5f24fd1bd53",
+      "exitCode": 2
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/disk-admission.ts": "1e52913628fef83152a2c7274d619cb3e4137e205416adfb33f563f2b34d469b",
+    "packages/persistence/src/worker/disk-admission.ts": "da8f9424714436d660f7cfa96e79c20045e9e10d680d60846ad3ef0dd7cec575",
+    "packages/persistence/src/worker/database.ts": "0bf38c81534222e5552e1e6fb3801afdc90e9fca1bd753cff628d71ef4e5256c",
+    "packages/persistence/src/rpc/operations.ts": "e631408abf7a8a291f04e555deb4c1ddf8112a537da950826bef2696d7bca66b",
+    "apps/runtime/src/bootstrap/config.ts": "81919568bf3d0ebe3f78162d2e7d8ebea5b622cfff3dea4ce7e7f6623bf928bb",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "7dc644fba30173c504ecae4634a7a83d43f833ef1d2a5303816add9a4df1b351",
+    "packages/persistence/test/integration/database-capacity.integration.test.ts": "31570c3d6b54d61610d14b4d449b02400cbee2b1a67bfd4a4bc53c59e63de92e",
+    "scripts/iris-host-context-probe.mjs": "c10d034f5a1d5fcca3c6e67c018046cd40d69deaea49264c665b0dd908580bc6"
+  }
+}

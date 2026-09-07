@@ -65,3 +65,32 @@ export type {
   OutboxPublishResult,
   OutboxPublisher,
 } from "./outbox/dispatcher.js";
+
+export type { ConfirmEffectInput, ConfirmedSpeech } from "./repositories/phase4-effects.js";
+
+export {
+  MINIMUM_COMPLETION_HEADROOM_BYTES,
+  DISK_ADMISSION_WRITE_MARGIN_BYTES,
+} from "./disk-admission.js";
+export type { PersistenceDiskAdmissionOptions, PersistenceDiskStatus } from "./disk-admission.js";
+
+export type {
+  HistoryInventoryBegin,
+  HistoryInventory,
+  HistoryInventoryPageInput,
+  HistoryInventoryPage,
+  HistoryInventoryItemInput,
+  HistoryInventoryItem,
+} from "./repositories/phase4-history-inventory.js";
+
+export type { RecallRequestWrite } from "./repositories/phase4-recall-requests.js";
+
+export type {
+  HistoryVerificationBatch,
+  HistoryVerificationPage,
+} from "./repositories/phase4-history-verification.js";
+
+export type {
+  HistoryRecoveryInput,
+  HistoryRecoveryState,
+} from "./repositories/phase4-history-inventory.js";

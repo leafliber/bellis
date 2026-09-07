@@ -50,6 +50,7 @@ const DEFAULT_STATUS = new Map<ErrorCode, number>([
 /** Persistence 错误码 → ErrorEnvelope 机器码 + HTTP 状态。 */
 const PERSISTENCE_CODE_MAP: ReadonlyMap<string, { code: ErrorCode; status: number }> = new Map([
   ["not_migrated", { code: "not_ready", status: 503 }],
+  ["storage_not_ready", { code: "not_ready", status: 503 }],
   ["unavailable", { code: "not_ready", status: 503 }],
   ["closed", { code: "not_ready", status: 503 }],
   ["deadline_exceeded", { code: "deadline_exceeded", status: 504 }],

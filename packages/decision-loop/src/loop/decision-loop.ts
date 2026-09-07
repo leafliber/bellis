@@ -18,7 +18,13 @@ import {
   type DegradationPolicy,
   type DegradationReason,
 } from "./degradation.js";
-import { buildModelRequest, packetDigest } from "./request-assembly.js";
+import {
+  buildModelRequest,
+  packetDigest,
+  type RequestAssemblyInput,
+  type ModelContextPort,
+  type PreparedModelContext,
+} from "./request-assembly.js";
 
 /**
  * Decision Loop：唯一拥有提交权的 Turn/Cycle 状态机
@@ -58,6 +64,9 @@ export const DEFAULT_DECISION_LOOP_CONFIG: DecisionLoopConfig = {
 };
 
 export interface DecisionLoopOptions {
+  readonly contextBuilder?: ModelContextPort;
+  /** Trusted host identity, captured once for the entire Turn. */
+  readonly currentSessionId?: () => string;
   readonly sessionId: string;
   readonly provider: ModelProvider;
   readonly tools: ToolRuntime;
@@ -91,6 +100,7 @@ export interface DecisionLoopOptions {
 export type TurnResult = "completed" | "cancelled" | "failed" | "degraded";
 
 interface TurnState {
+  readonly sessionId: string;
   readonly turnId: string;
   readonly trigger: "normal_batch" | "interrupt" | "next_turn";
   readonly abort: AbortController;
@@ -170,6 +180,7 @@ export class DecisionLoop implements TurnOwnerPort {
       return false; // Trigger owns the only waiting queue, including interrupts.
     }
     const turn: TurnState = {
+      sessionId: this.#options.currentSessionId?.() ?? this.#options.sessionId,
       turnId: this.#options.ids.turnId(),
       trigger,
       abort: new AbortController(),
@@ -398,252 +409,274 @@ export class DecisionLoop implements TurnOwnerPort {
       toolResultsTruncated: false,
     };
     // ── requesting ──
-    const request = buildModelRequest({
+    const assemblyInput: RequestAssemblyInput = {
       requestId,
       snapshot,
       provider: this.#options.provider.name,
       model: this.#options.model,
       tools: this.#options.tools.listDeclarations().map(buildToolModelSpec),
       instructions: this.#options.instructions,
-    });
-    const streamAbort = new AbortController();
-    const onTurnAbort = () => streamAbort.abort(turn.abort.signal.reason);
-    turn.abort.signal.addEventListener("abort", onTurnAbort, { once: true });
-    const assembler = new StreamAssembler({
-      cycleId,
-      tools: request.tools,
-      validateArguments: (toolName, args) => this.#options.tools.validateArguments(toolName, args),
-      maxToolCalls: this.#config.maxParallelTools,
-    });
-    const startedUs = this.#options.clock.nowUs();
-    const deadlineUs = startedUs + BigInt(this.#config.modelTimeoutMs) * 1_000n;
-    const timeoutAbort = new AbortController();
-    const onStreamAbort = () => timeoutAbort.abort(streamAbort.signal.reason);
-    streamAbort.signal.addEventListener("abort", onStreamAbort, { once: true });
-    const timeoutPromise = this.#options.clock
-      .sleepUntil(deadlineUs, timeoutAbort.signal)
-      .then(() => "timeout" as const)
-      .catch(() => "aborted" as const);
-    const streamPromise = this.#consumeStream(request, assembler, streamAbort.signal);
-    const race = await Promise.race([
-      streamPromise.then(() => "stream_done" as const),
-      timeoutPromise,
-    ]);
-    let degradedReason: DegradationReason | null = null;
-    let degradedDetail = "";
-    let firstEventUs: bigint | null = null;
-    if (race === "timeout") {
-      // 失败分支真正 Abort（不是裸 Promise race）：中止 Provider 流。
-      streamAbort.abort(new Error("model_timeout"));
-      await streamPromise.catch(() => undefined);
-      degradedReason = "timeout";
-      degradedDetail = "model stream exceeded deadline";
-    } else {
-      timeoutAbort.abort(new Error("stream_completed"));
-      const result = await streamPromise;
-      firstEventUs = result.firstEventUs;
-      if (result.error !== null) {
-        degradedReason = turn.abort.signal.aborted ? "aborted" : "stream_broken";
-        degradedDetail = result.error;
-      }
-    }
-    streamAbort.signal.removeEventListener("abort", onStreamAbort);
-    turn.abort.signal.removeEventListener("abort", onTurnAbort);
-    const durationUs = this.#options.clock.nowUs() - startedUs;
-    if (degradedReason === "aborted") {
-      this.#options.audit?.modelRequest({
+    };
+    const prepared: PreparedModelContext =
+      this.#options.contextBuilder === undefined
+        ? { request: buildModelRequest(assemblyInput) }
+        : await this.#options.contextBuilder.build(assemblyInput, turn.abort.signal);
+    try {
+      turn.abort.signal.throwIfAborted();
+      prepared.assertCurrent?.();
+      const request = prepared.request;
+      const streamAbort = new AbortController();
+      const requestSignal =
+        prepared.signal === undefined
+          ? turn.abort.signal
+          : AbortSignal.any([turn.abort.signal, prepared.signal]);
+      const onTurnAbort = () => streamAbort.abort(requestSignal.reason);
+      requestSignal.addEventListener("abort", onTurnAbort, { once: true });
+      const assembler = new StreamAssembler({
         cycleId,
-        provider: this.#options.provider.name,
-        outcome: "aborted",
-        degradationReason: "aborted",
+        tools: request.tools,
+        validateArguments: (toolName, args) =>
+          this.#options.tools.validateArguments(toolName, args),
+        maxToolCalls: this.#config.maxParallelTools,
       });
-      turn.result = "cancelled";
-      return { kind: "cancel" };
-    }
-    // ── validating ──
-    let packet: DecisionPacket | null = null;
-    let degradedPacket = false;
-    if (degradedReason === null) {
-      const outcome = assembler.finish();
-      if (outcome.ok) {
-        packet = outcome.packet;
+      const startedUs = this.#options.clock.nowUs();
+      const deadlineUs = startedUs + BigInt(this.#config.modelTimeoutMs) * 1_000n;
+      const timeoutAbort = new AbortController();
+      const onStreamAbort = () => timeoutAbort.abort(streamAbort.signal.reason);
+      streamAbort.signal.addEventListener("abort", onStreamAbort, { once: true });
+      const timeoutPromise = this.#options.clock
+        .sleepUntil(deadlineUs, timeoutAbort.signal)
+        .then(() => "timeout" as const)
+        .catch(() => "aborted" as const);
+      const streamPromise = this.#consumeStream(request, assembler, streamAbort.signal);
+      const race = await Promise.race([
+        streamPromise.then(() => "stream_done" as const),
+        timeoutPromise,
+      ]);
+      let degradedReason: DegradationReason | null = null;
+      let degradedDetail = "";
+      let firstEventUs: bigint | null = null;
+      if (race === "timeout") {
+        // 失败分支真正 Abort（不是裸 Promise race）：中止 Provider 流。
+        streamAbort.abort(new Error("model_timeout"));
+        await streamPromise.catch(() => undefined);
+        degradedReason = "timeout";
+        degradedDetail = "model stream exceeded deadline";
+      } else {
+        timeoutAbort.abort(new Error("stream_completed"));
+        const result = await streamPromise;
+        firstEventUs = result.firstEventUs;
+        if (result.error !== null) {
+          degradedReason = turn.abort.signal.aborted ? "aborted" : "stream_broken";
+          degradedDetail = result.error;
+        }
+      }
+      streamAbort.signal.removeEventListener("abort", onStreamAbort);
+      requestSignal.removeEventListener("abort", onTurnAbort);
+      if (requestSignal.aborted) return { kind: "cancel" };
+      const durationUs = this.#options.clock.nowUs() - startedUs;
+      if (degradedReason === "aborted") {
         this.#options.audit?.modelRequest({
           cycleId,
           provider: this.#options.provider.name,
-          outcome: "final",
-          ...(firstEventUs === null ? {} : { ttftMs: Number((firstEventUs - startedUs) / 1000n) }),
-          durationMs: Number(durationUs / 1000n),
-          ...(outcome.usage.inputTokens === undefined
-            ? {}
-            : { inputTokens: outcome.usage.inputTokens }),
-          ...(outcome.usage.outputTokens === undefined
-            ? {}
-            : { outputTokens: outcome.usage.outputTokens }),
-          ...(outcome.usage.cachedInputTokens === undefined
-            ? {}
-            : { cachedInputTokens: outcome.usage.cachedInputTokens }),
+          outcome: "aborted",
+          degradationReason: "aborted",
         });
-      } else {
-        degradedReason = "invalid_packet";
-        degradedDetail = `${outcome.error.code}: ${outcome.error.detail}`;
+        turn.result = "cancelled";
+        return { kind: "cancel" };
       }
-    }
-    if (packet === null) {
-      packet = buildSafetyPacket(
-        cycleId,
-        degradedReason ?? "invalid_packet",
-        this.#options.degradationPolicy,
-      );
-      degradedPacket = true;
-      turn.degraded = true;
-      this.#options.audit?.modelRequest({
-        cycleId,
-        provider: this.#options.provider.name,
-        outcome: degradedReason === "invalid_packet" ? "degraded" : "failed",
-        degradationReason: degradedReason ?? "invalid_packet",
-        durationMs: Number(durationUs / 1000n),
-      });
-    }
-    // 交叉规则：after_tools 必须至少有一个前台 Tool；DAG 必须可编译。
-    if (!degradedPacket && packet.next === "after_tools" && packet.toolCalls.length === 0) {
-      packet = buildSafetyPacket(cycleId, "invalid_packet", this.#options.degradationPolicy);
-      degradedPacket = true;
-      degradedDetail = "after_tools without foreground tool calls";
-    }
-    let compiledTools: ReturnType<ToolRuntime["compileDag"]> | null = null;
-    if (!degradedPacket && packet.toolCalls.length > 0) {
-      const dag = this.#options.tools.compileDag(packet.toolCalls);
-      compiledTools = dag;
-      if (!dag.ok) {
+      // ── validating ──
+      let packet: DecisionPacket | null = null;
+      let degradedPacket = false;
+      if (degradedReason === null) {
+        const outcome = assembler.finish();
+        if (outcome.ok) {
+          packet = outcome.packet;
+          this.#options.audit?.modelRequest({
+            cycleId,
+            provider: this.#options.provider.name,
+            outcome: "final",
+            ...(firstEventUs === null
+              ? {}
+              : { ttftMs: Number((firstEventUs - startedUs) / 1000n) }),
+            durationMs: Number(durationUs / 1000n),
+            ...(outcome.usage.inputTokens === undefined
+              ? {}
+              : { inputTokens: outcome.usage.inputTokens }),
+            ...(outcome.usage.outputTokens === undefined
+              ? {}
+              : { outputTokens: outcome.usage.outputTokens }),
+            ...(outcome.usage.cachedInputTokens === undefined
+              ? {}
+              : { cachedInputTokens: outcome.usage.cachedInputTokens }),
+          });
+        } else {
+          degradedReason = "invalid_packet";
+          degradedDetail = `${outcome.error.code}: ${outcome.error.detail}`;
+        }
+      }
+      if (packet === null) {
+        packet = buildSafetyPacket(
+          cycleId,
+          degradedReason ?? "invalid_packet",
+          this.#options.degradationPolicy,
+        );
+        degradedPacket = true;
+        turn.degraded = true;
+        this.#options.audit?.modelRequest({
+          cycleId,
+          provider: this.#options.provider.name,
+          outcome: degradedReason === "invalid_packet" ? "degraded" : "failed",
+          degradationReason: degradedReason ?? "invalid_packet",
+          durationMs: Number(durationUs / 1000n),
+        });
+      }
+      // 交叉规则：after_tools 必须至少有一个前台 Tool；DAG 必须可编译。
+      if (!degradedPacket && packet.next === "after_tools" && packet.toolCalls.length === 0) {
         packet = buildSafetyPacket(cycleId, "invalid_packet", this.#options.degradationPolicy);
         degradedPacket = true;
-        degradedDetail = `dag compile failed: ${dag.issues.map((issue) => issue.code).join(",")}`;
+        degradedDetail = "after_tools without foreground tool calls";
       }
-    }
-    if (degradedPacket) {
-      turn.degraded = true;
-      this.#options.logger?.log("warn", "model_stream_degraded", {
-        cycleId,
-        detail: degradedDetail.slice(0, 256),
-      });
-    }
-    // ── adopting ──（失败 → 不推进水位/不执行 Tool/不提交 Scene）
-    try {
-      await this.#options.adoption.adoptCycle({
+      let compiledTools: ReturnType<ToolRuntime["compileDag"]> | null = null;
+      if (!degradedPacket && packet.toolCalls.length > 0) {
+        const dag = this.#options.tools.compileDag(packet.toolCalls);
+        compiledTools = dag;
+        if (!dag.ok) {
+          packet = buildSafetyPacket(cycleId, "invalid_packet", this.#options.degradationPolicy);
+          degradedPacket = true;
+          degradedDetail = `dag compile failed: ${dag.issues.map((issue) => issue.code).join(",")}`;
+        }
+      }
+      if (degradedPacket) {
+        turn.degraded = true;
+        this.#options.logger?.log("warn", "model_stream_degraded", {
+          cycleId,
+          detail: degradedDetail.slice(0, 256),
+        });
+      }
+      // ── adopting ──（失败 → 不推进水位/不执行 Tool/不提交 Scene）
+      try {
+        prepared.assertCurrent?.();
+        await this.#options.adoption.adoptCycle({
+          sessionId: turn.sessionId,
+          ...(prepared.adoption === undefined ? {} : { context: prepared.adoption }),
+          turnId: turn.turnId,
+          cycleId,
+          cycleIndex: snapshot.cycleIndex,
+          packet,
+          packetDigest: packetDigest(packet),
+          batchId: batch.id,
+          watermarkFrom: BigInt(batch.watermarkFrom),
+          watermarkTo: BigInt(batch.watermarkTo),
+          degraded: degradedPacket,
+          traceId,
+        });
+      } catch (error) {
+        this.#options.logger?.log("error", "cycle_adoption_failed", {
+          turnId: turn.turnId,
+          cycleId,
+          error: error instanceof Error ? error.message : "unknown",
+        });
+        this.#options.metrics?.counter("bellis_decision_cycles_total", { result: "failed" }).inc();
+        this.#options.audit?.cycleFinished({
+          turnId: turn.turnId,
+          cycleId,
+          result: "failed",
+          next: packet.next,
+          sceneSubmitted: false,
+        });
+        return { kind: "fail" };
+      }
+      turn.adoptedCount += 1;
+      turn.snapshotBatch = null;
+      turn.lastConsumedTo = BigInt(batch.watermarkTo);
+      this.#options.metrics
+        ?.counter("bellis_decision_cycles_total", {
+          result: degradedPacket ? "degraded" : "adopted",
+        })
+        .inc();
+      this.#options.onWatermarkConsumed?.(BigInt(batch.watermarkTo));
+      if ("speech" in packet.action && packet.action.speech !== undefined) {
+        turn.recentSpeech = [
+          ...turn.recentSpeech,
+          {
+            schemaVersion: 1 as const,
+            cycleId,
+            text: packet.action.speech.text,
+            purpose: packet.action.speech.purpose,
+          },
+        ].slice(-8);
+      }
+      if (turn.abort.signal.aborted || this.#closed) return { kind: "cancel" };
+      // ── dispatching：Scene 与 Tool 并行（不变量 5；不等待 Scene done）──
+      let sceneSubmitted = false;
+      const sceneResult = this.#options.performance.submitDecision(packet, {
+        traceId,
         turnId: turn.turnId,
         cycleId,
         cycleIndex: snapshot.cycleIndex,
-        packet,
-        packetDigest: packetDigest(packet),
-        batchId: batch.id,
-        watermarkFrom: BigInt(batch.watermarkFrom),
-        watermarkTo: BigInt(batch.watermarkTo),
-        degraded: degradedPacket,
-        traceId,
+        signal: turn.abort.signal,
       });
-    } catch (error) {
-      this.#options.logger?.log("error", "cycle_adoption_failed", {
-        turnId: turn.turnId,
-        cycleId,
-        error: error instanceof Error ? error.message : "unknown",
-      });
-      this.#options.metrics?.counter("bellis_decision_cycles_total", { result: "failed" }).inc();
+      if (sceneResult.kind === "scene_submitted") {
+        sceneSubmitted = true;
+        this.#trackBackground(sceneResult.done.then((outcome) => outcome));
+      }
+      if (packet.toolCalls.length > 0) {
+        const dag = compiledTools;
+        if (dag?.ok) {
+          const execution = await this.#options.tools.executeDag(dag, {
+            traceId,
+            sessionId: turn.sessionId,
+            turnId: turn.turnId,
+            cycleId,
+            signal: turn.abort.signal,
+            capabilities: this.#options.capabilities ?? new Set<string>(),
+            idempotencyKeys: new Map(
+              packet.toolCalls
+                .filter((call) => call.idempotencyKey !== undefined)
+                .map((call) => [call.toolRunId, call.idempotencyKey as string]),
+            ),
+            maxParallelTools: this.#config.maxParallelTools,
+          });
+          this.#trackBackgroundSet(execution.background);
+          if (packet.next === "after_tools") {
+            // 工具结果只进后续 Cycle（不变量 6）。
+            turn.pendingToolResults = [...execution.results];
+          } else {
+            turn.pendingToolResults = [];
+          }
+        }
+      } else {
+        turn.pendingToolResults = [];
+      }
+      // ── awaiting_next ──
+      let next = packet.next;
+      if (next === "continue") {
+        const hadNewInput = batch.highlights.length > 0 || batch.urgentSignals.length > 0;
+        if (!hadNewInput && turn.pendingToolResults.length === 0) {
+          turn.idleSpins += 1;
+          if (turn.idleSpins >= this.#config.idleSpinLimit) {
+            await this.#finishWithSafety(turn, "invalid_packet", "idle_spin");
+            next = "finish";
+          }
+        } else {
+          turn.idleSpins = 0;
+        }
+      }
       this.#options.audit?.cycleFinished({
         turnId: turn.turnId,
         cycleId,
-        result: "failed",
+        result: "completed",
         next: packet.next,
-        sceneSubmitted: false,
+        sceneSubmitted,
       });
-      return { kind: "fail" };
-    }
-    turn.adoptedCount += 1;
-    turn.snapshotBatch = null;
-    turn.lastConsumedTo = BigInt(batch.watermarkTo);
-    this.#options.metrics
-      ?.counter("bellis_decision_cycles_total", {
-        result: degradedPacket ? "degraded" : "adopted",
-      })
-      .inc();
-    this.#options.onWatermarkConsumed?.(BigInt(batch.watermarkTo));
-    if ("speech" in packet.action && packet.action.speech !== undefined) {
-      turn.recentSpeech = [
-        ...turn.recentSpeech,
-        {
-          schemaVersion: 1 as const,
-          cycleId,
-          text: packet.action.speech.text,
-          purpose: packet.action.speech.purpose,
-        },
-      ].slice(-8);
-    }
-    if (turn.abort.signal.aborted || this.#closed) return { kind: "cancel" };
-    // ── dispatching：Scene 与 Tool 并行（不变量 5；不等待 Scene done）──
-    let sceneSubmitted = false;
-    const sceneResult = this.#options.performance.submitDecision(packet, {
-      traceId,
-      turnId: turn.turnId,
-      cycleId,
-      cycleIndex: snapshot.cycleIndex,
-      signal: turn.abort.signal,
-    });
-    if (sceneResult.kind === "scene_submitted") {
-      sceneSubmitted = true;
-      this.#trackBackground(sceneResult.done.then((outcome) => outcome));
-    }
-    if (packet.toolCalls.length > 0) {
-      const dag = compiledTools;
-      if (dag?.ok) {
-        const execution = await this.#options.tools.executeDag(dag, {
-          traceId,
-          sessionId: this.#options.sessionId,
-          turnId: turn.turnId,
-          cycleId,
-          signal: turn.abort.signal,
-          capabilities: this.#options.capabilities ?? new Set<string>(),
-          idempotencyKeys: new Map(
-            packet.toolCalls
-              .filter((call) => call.idempotencyKey !== undefined)
-              .map((call) => [call.toolRunId, call.idempotencyKey as string]),
-          ),
-          maxParallelTools: this.#config.maxParallelTools,
-        });
-        this.#trackBackgroundSet(execution.background);
-        if (packet.next === "after_tools") {
-          // 工具结果只进后续 Cycle（不变量 6）。
-          turn.pendingToolResults = [...execution.results];
-        } else {
-          turn.pendingToolResults = [];
-        }
+      if (next === "finish") {
+        turn.status = "finishing";
       }
-    } else {
-      turn.pendingToolResults = [];
+      return { kind: "advance", next };
+    } finally {
+      prepared.dispose?.();
     }
-    // ── awaiting_next ──
-    let next = packet.next;
-    if (next === "continue") {
-      const hadNewInput = batch.highlights.length > 0 || batch.urgentSignals.length > 0;
-      if (!hadNewInput && turn.pendingToolResults.length === 0) {
-        turn.idleSpins += 1;
-        if (turn.idleSpins >= this.#config.idleSpinLimit) {
-          await this.#finishWithSafety(turn, "invalid_packet", "idle_spin");
-          next = "finish";
-        }
-      } else {
-        turn.idleSpins = 0;
-      }
-    }
-    this.#options.audit?.cycleFinished({
-      turnId: turn.turnId,
-      cycleId,
-      result: "completed",
-      next: packet.next,
-      sceneSubmitted,
-    });
-    if (next === "finish") {
-      turn.status = "finishing";
-    }
-    return { kind: "advance", next };
   }
 
   #trackBackground(promise: Promise<unknown>): void {

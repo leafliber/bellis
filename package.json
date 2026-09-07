@@ -2,12 +2,8 @@
   "name": "bellis",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Bellis Autonomous Live — 自主游戏直播系统",
-  "engines": {
-    "node": ">=26.5 <27"
-  },
-  "packageManager": "pnpm@11.11.0",
+  "type": "module",
   "scripts": {
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
@@ -23,7 +19,17 @@
     "demo:phase2:crash": "node scripts/phase-2-crash-windows.mjs",
     "test:browser": "pnpm --filter @bellis/stage test:browser",
     "demo:phase3": "node scripts/phase-3-demo.mjs",
-    "test:acceptance": "pnpm demo:phase1 && pnpm demo:phase2 && pnpm demo:phase2:crash && pnpm demo:phase3 && pnpm test:browser"
+    "test:memory:iris": "pnpm build && pnpm --dir providers/memory-iris typecheck && pnpm --dir providers/memory-iris test && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs",
+    "test:memory:iris:invalidations": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --invalidations",
+    "test:memory:iris:tools": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --tools",
+    "demo:phase4:iris": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --stage",
+    "test:acceptance": "pnpm demo:phase1 && pnpm demo:phase2 && pnpm demo:phase2:crash && pnpm demo:phase3 && pnpm test:browser",
+    "test:memory:iris:continuous": "pnpm build && pnpm --dir providers/memory-iris build && node --test scripts/test/phase4-cycle-audit.test.mjs && node scripts/iris-public-probe.mjs --continuous",
+    "test:memory:iris:recovery": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --recovery",
+    "test:memory:iris:stage-recovery": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --stage-recovery",
+    "test:memory:iris:stage-observe-recovery": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --stage-observe-recovery",
+    "test:memory:iris:snapshots": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --observe-snapshot-restore --host-snapshot-restore --snapshot-restore",
+    "start:iris": "node scripts/start-iris-runtime.mjs"
   },
   "devDependencies": {
     "@types/node": "26.2.0",
@@ -31,5 +37,9 @@
     "oxlint": "1.79.0",
     "typescript": "7.0.2",
     "ws": "8.21.3"
-  }
+  },
+  "engines": {
+    "node": ">=26.5 <27"
+  },
+  "packageManager": "pnpm@11.11.0"
 }

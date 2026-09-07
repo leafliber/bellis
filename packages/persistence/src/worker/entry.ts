@@ -26,6 +26,7 @@ import { startRouter } from "./rpc-router.js";
 interface PersistenceWorkerData {
   readonly dataDirectory: string;
   readonly checkpointsEnabled?: boolean;
+  readonly diskAdmission?: import("../disk-admission.js").PersistenceDiskAdmissionOptions;
   readonly stateMigrations?: unknown;
   readonly telemetryMigrations?: unknown;
   readonly retryPolicy?: OutboxRetryPolicyConfigWire;
@@ -58,6 +59,7 @@ function safeStartupError(error: unknown): { code: string; message: string } {
 try {
   const databases = new WorkerDatabases({
     dataDirectory: data.dataDirectory,
+    diskAdmission: data.diskAdmission,
     wallClockMs: data.wallClockMs,
     recordIds: data.recordIds,
   });

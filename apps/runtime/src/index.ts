@@ -22,6 +22,10 @@ export type {
   ParseConfigResult,
 } from "./bootstrap/config.js";
 export { startRuntime } from "./bootstrap/lifecycle.js";
+export { Phase4MemoryHost } from "./application/phase-4/memory-host.js";
+export { Phase3DecisionHost } from "./application/phase-3/host.js";
+export type { Phase3HostOptions } from "./application/phase-3/host.js";
+export type { Phase4MemoryOptions, MemoryReadiness } from "./application/phase-4/memory-host.js";
 export type {
   RuntimeHandle,
   RuntimeOptions,
@@ -81,3 +85,20 @@ export type {
 export type { ExportedControlClaim } from "./websocket/session-store.js";
 
 export type { SpeechProvider, PcmSpeechSource } from "./application/performance/speech-provider.js";
+
+export {
+  Phase4HistoryRevalidator,
+  type HistoryRevalidationProgress,
+} from "./application/phase-4/history-revalidator.js";
+
+export type {
+  HistoryRecoveryWorker,
+  HistoryRecoveryWorkerOptions,
+  HistoryRecoveryWorkerStatus,
+} from "./application/phase-4/history-recovery-worker.js";
+
+export {
+  loadIrisRuntimeConfiguration,
+  type LoadedIrisConfiguration,
+  type IrisLaunchConfig,
+} from "./bootstrap/iris-config.js";

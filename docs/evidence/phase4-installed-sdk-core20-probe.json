@@ -1,0 +1,362 @@
+{
+  "credentialRevocation": {
+    "status": "passed",
+    "authority": "installed-Core-public-console-service-credential-revoke",
+    "oldContextCancelled": true,
+    "liveStatus": 200,
+    "readyBefore": 200,
+    "readyAfter": 503,
+    "rotation": {
+      "status": "passed",
+      "overlapSeconds": 0,
+      "obsoleteCredentialRestart": "rejected",
+      "secretReplacement": "private-file-atomic-rename",
+      "sameDirectoryRestart": "ready",
+      "newRecall": "passed",
+      "originalUsageReplayWithSuccessor": "accepted-same-body-and-id",
+      "preservedRequests": 2,
+      "preservedManifests": 1,
+      "preservedAcknowledgedUsage": 1
+    },
+    "personaFallback": "blocked",
+    "scope": "Actual public zero-overlap credential rotation, obsolete-file refusal, private-file replacement, same-directory restart and successor revocation; not overlap rotation, automatic hot reload, cross-process global fencing or every permission-change variant"
+  },
+  "launcher": {
+    "status": "passed",
+    "results": [
+      {
+        "mode": "enabled",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "mode": "restart",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "mode": "disabled",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "mode": "missing-credential",
+        "status": "passed",
+        "exitCode": 1
+      }
+    ],
+    "credentialSource": "environment-reference",
+    "schemaVersion": 20,
+    "defaultSupportWindowChanged": false,
+    "scope": "Actual CLI startup/restart/disabled/missing-credential and graceful SIGTERM with installed Provider/SDK and real Core; no new model turn or full production authorization claim"
+  },
+  "eventCheckpoint": {
+    "status": "passed",
+    "sdkVersion": "0.11.2",
+    "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "anchor": {
+      "cursor": "2",
+      "eventId": "claim-revision:01a079d6-1b4d-79e7-96da-a9f54fcba94b"
+    },
+    "checkedSuccessors": 0,
+    "acceptedCheckpointStatus": 200,
+    "rejectedCheckpointStatuses": [
+      410,
+      410
+    ],
+    "scope": "Production installed SDK -> real installed Core API/Worker; original event anchor, mismatched identity and unknown cursor. No Bellis gap revalidation or old-backup restoration claim."
+  },
+  "historyGap": {
+    "status": "passed",
+    "coreResponseStatus": 410,
+    "providerCheckpoint": {
+      "eventCursor": "2",
+      "eventId": "divergent-history:16437284-541b-423d-b78d-54e69db17732"
+    },
+    "gapId": "8c0619221079315a5a81ccfb154c0304d1af62ac0032d10f2d1952e254af7e00",
+    "contextCancelled": true,
+    "historyInventory": {
+      "itemCount": 4,
+      "inventoryDigest": "bc0c574b52ec611e475e94c598d7533332cd5a8c160421c559f4f05b3b7523b1",
+      "kinds": [
+        "manifest",
+        "provider_state",
+        "recall_request",
+        "usage"
+      ],
+      "originalBodiesVerified": true,
+      "restart": "same-inventory-gap-still-blocked",
+      "storedRecallRequest": "actual-prepared-body-restored-and-publicly-revalidated",
+      "recallVerdict": "valid-gap-remains-blocked",
+      "durableVerification": "background-worker-durable-discovery-restart-resume-passed",
+      "backgroundRecovery": "automatic-polling-one-public-request-and-restart-reuse",
+      "runtimeRecovery": "bootstrap-maintenance-live-200-ready-auth-503-no-decision-pipeline-restart-reuse",
+      "uncheckedInventoryItems": 3,
+      "remoteRevalidation": "incomplete"
+    },
+    "hostAndProviderState": "durable-across-worker-restart",
+    "retainedOriginalUsageRows": 1,
+    "newEventRequestsAfterGap": 0,
+    "restart": "original-gap-reported-before-persona-or-events",
+    "productionSdk": "0.11.2",
+    "checkpointSource": "Provider persisted pair; probe does not alter SDK options",
+    "productionSdkSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "scope": "Production Provider persisted checkpoint -> installed SDK -> Core 410 -> Provider error handler -> MemoryHost/DB Worker barrier; intentionally seeded divergent identity, not an actual old Core backup restore or full public revalidation"
+  },
+  "resourceInvalidation": {
+    "status": "passed",
+    "source": "external-public-Forget-and-real-Core-Worker-SSE",
+    "eventType": "revision.invalidated.v1",
+    "durableCursor": "1",
+    "contextCancelled": true,
+    "permanentTombstone": true,
+    "workerRestart": "policy-and-provider-cursor-preserved",
+    "generationBefore": 0,
+    "generationAfter": 1,
+    "stops": 1,
+    "scope": "Received public deletion event only; no SSE history-gap or ordinary-correction notification proof"
+  },
+  "resourceCorrection": {
+    "status": "passed",
+    "source": "external-public-correct-canonical-transaction-SSE",
+    "eventType": "revision.invalidated.v1",
+    "durableCursor": "2",
+    "contextCancelled": true,
+    "permanentTombstone": false,
+    "throughRevision": "1",
+    "newRevisionAllowed": true,
+    "correctedRevisionModelVisible": true,
+    "coreWorkerStoppedDuringCorrectionAndHostAck": true,
+    "originalKeyReplayEvents": 1,
+    "recallReplay": "unchanged-replay-stable-corrected-replay-409",
+    "originalUsage": "same-report-id-and-counts-after-rejected-recall",
+    "batchRevalidation": "public-http-valid-before-correction-unavailable-after-original-deadline-expired-no-body-returned",
+    "workerRestart": "policy-and-provider-cursor-preserved",
+    "generationBefore": 1,
+    "generationAfter": 2,
+    "stops": 2,
+    "scope": "Public Claim supersede while Core Worker is stopped -> finite old-revision tombstone and Context cancellation; not full history revalidation or other resource update notifications"
+  },
+  "hostContext": {
+    "diskAdmission": {
+      "ready": true,
+      "reason": "ready",
+      "databaseBytes": 8192,
+      "walBytes": 1038304,
+      "walHighWaterBytes": 67108864,
+      "transactionCacheMaxBytes": 8388608,
+      "auxiliaryBytes": 78344,
+      "totalBytes": 1124840,
+      "availableBytes": 37987381248,
+      "highWaterBytes": 536870912,
+      "completionHeadroomBytes": 167772160,
+      "admissionWriteMarginBytes": 8388608,
+      "capacity": {
+        "stateLimitBytes": 1073741824,
+        "stateWalLimitBytes": 433348768,
+        "stateAllocatedBytes": 413696,
+        "stateUsedBytes": 413696,
+        "stateReservedBytes": 0,
+        "stateReservedWalBytes": 0,
+        "stateReservedAuxiliaryBytes": 0,
+        "activeCompletionReservations": 0,
+        "telemetryLimitBytes": 67108864,
+        "telemetryWalLimitBytes": 75616288,
+        "telemetryAllocatedBytes": 20480,
+        "telemetryUsedBytes": 20480
+      }
+    },
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stageOutput": {
+    "schemaVersion": 1,
+    "mode": "real-core",
+    "privacyGeneration": 1,
+    "adoptedCycles": 3,
+    "usageCount": 3,
+    "observations": [
+      {
+        "eventId": "bellis:0ae9c251-2829-4b2c-9f79-667ecd022c6f",
+        "outboxId": "3017818b-d664-4497-9d57-87a77352102e",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "1",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 4,
+            "scene_id": "06cc59b5-0538-4d10-8855-261047a49c57",
+            "segment_id": "628cceba-bfaa-4211-97f9-9f0518981792",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第一句。"
+      },
+      {
+        "eventId": "bellis:40d3a4c1-8e93-4c59-affb-317298fdc084",
+        "outboxId": "e6bb59a7-0cd2-405c-a5ec-fca1faf3701d",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "2",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 4,
+            "end": 8,
+            "scene_id": "06cc59b5-0538-4d10-8855-261047a49c57",
+            "segment_id": "36807217-27a5-4dcc-8c4e-253c60a1138a",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第二句。"
+      },
+      {
+        "eventId": "bellis:44866842-672c-476c-8bc0-10a6755c2f5e",
+        "outboxId": "dcad5de8-4d58-48da-8dfa-518b9fdd778d",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "3",
+        "effectState": "committed",
+        "content": "收到。"
+      },
+      {
+        "eventId": "bellis:7b37916e-8833-4d9f-b364-86dc01d7ef06",
+        "outboxId": "d58f84c3-667b-45e1-b5d5-ca3256789df8",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "4",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 3,
+            "scene_id": "c22bc8bd-e30b-47d4-9bf6-99c452700500",
+            "segment_id": "52bf549c-abf9-4061-93bb-7f12bb77555c",
+            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
+            "lane": "audio"
+          }
+        },
+        "content": "完成。"
+      }
+    ],
+    "confirmedConversationInNextRequest": true,
+    "cycleAudit": [
+      {
+        "cycleId": "89a8cf12-f389-47ab-89fa-c467c1ed7828",
+        "manifestId": "41721713-50a7-4332-87e8-2413544f5e2d",
+        "manifestDigest": "8015095e4b40ab475385b6a3ad6e276ad00496eb52924af0e838e290e740371c",
+        "promptEpoch": "73b8d8cabd005556f77d0db427b9c9885d6a42f8738a330e59da62ca4a7f2730",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "6e7c0794-1077-42f5-9684-75929de21387",
+        "estimatedInputTokens": 2192,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:cf1d32be4290cf4b",
+          "cand:899a90d79e6a714a"
+        ],
+        "hostSelected": [
+          "cand:cf1d32be4290cf4b"
+        ],
+        "modelVisible": [
+          "cand:cf1d32be4290cf4b"
+        ],
+        "usageOutboxId": "52c20dae-1973-4f80-8def-aba064282839"
+      },
+      {
+        "cycleId": "2e2c84b3-703b-4a7d-b3f5-b9cbc968a335",
+        "manifestId": "ad94cfac-9e75-43e0-a3be-06fbf9e87327",
+        "manifestDigest": "c0251d55d2a22968517ab3eaf12f918ef49c6ee5087fe2b91ae8aa89535e89d1",
+        "promptEpoch": "73b8d8cabd005556f77d0db427b9c9885d6a42f8738a330e59da62ca4a7f2730",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "e42d8aa2-d56f-4667-b14e-07f8b3a72c83",
+        "estimatedInputTokens": 2919,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:40a7a4f74eb1f53b",
+          "cand:08c1c829e40cb2c2",
+          "cand:cf1d32be4290cf4b",
+          "cand:899a90d79e6a714a"
+        ],
+        "hostSelected": [
+          "cand:40a7a4f74eb1f53b",
+          "cand:08c1c829e40cb2c2",
+          "cand:cf1d32be4290cf4b"
+        ],
+        "modelVisible": [
+          "cand:40a7a4f74eb1f53b",
+          "cand:08c1c829e40cb2c2",
+          "cand:cf1d32be4290cf4b"
+        ],
+        "usageOutboxId": "d6850ef4-4a25-4cec-ba3c-d3446a1bf56a"
+      },
+      {
+        "cycleId": "02950688-7ff5-41b1-99bd-60894c863e35",
+        "manifestId": "9aed579d-64fa-4b49-8255-faaf75b3d80b",
+        "manifestDigest": "4d775c2ddaab2088e8d8dd867344012e8e07e5bc16e50c18a279e4f234f595e2",
+        "promptEpoch": "73b8d8cabd005556f77d0db427b9c9885d6a42f8738a330e59da62ca4a7f2730",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "607f42ff-c2d8-4c89-9f64-a7640db919a9",
+        "estimatedInputTokens": 3212,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:106244801e291b9c",
+          "cand:40a7a4f74eb1f53b",
+          "cand:08c1c829e40cb2c2",
+          "cand:cf1d32be4290cf4b",
+          "cand:899a90d79e6a714a"
+        ],
+        "hostSelected": [
+          "cand:106244801e291b9c",
+          "cand:40a7a4f74eb1f53b",
+          "cand:08c1c829e40cb2c2",
+          "cand:cf1d32be4290cf4b"
+        ],
+        "modelVisible": [
+          "cand:106244801e291b9c",
+          "cand:40a7a4f74eb1f53b",
+          "cand:08c1c829e40cb2c2",
+          "cand:cf1d32be4290cf4b"
+        ],
+        "usageOutboxId": "babde9d6-1097-40e1-b0cf-80f080c7cb2c"
+      }
+    ],
+    "coreSourceCursor": "4",
+    "chromium": "passed",
+    "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
+  },
+  "stage": "A0/A1 and A2 real Chromium output/input public boundary probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+  "installedCoreFilesVerified": 178,
+  "schemaVersion": 20,
+  "sdkVersion": "0.11.2",
+  "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+  "installedSdkFilesVerified": 4,
+  "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+}

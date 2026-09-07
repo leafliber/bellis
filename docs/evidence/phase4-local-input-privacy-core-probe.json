@@ -1,0 +1,151 @@
+{
+  "tools": {
+    "status": "passed",
+    "preparedWrite": {
+      "status": "passed",
+      "adapter": "registerIrisTools",
+      "preparations": 1,
+      "confirmations": 1,
+      "executions": 1,
+      "durableBeforeConfirmation": true,
+      "actualKeyUsed": true,
+      "unknownOutcome": true,
+      "workerRestart": "exact-request-recovered-without-auto-dispatch",
+      "scope": "Registered adapter with trusted remember authority and real MemoryHost policy; production target authorization, Forget coordination and other tools remain separate gates"
+    },
+    "coordinatedForget": {
+      "status": "passed",
+      "confirmations": 1,
+      "dispatched": 1,
+      "targetReads": 2,
+      "barrierBeforeHttp": true,
+      "receiptAndTombstone": "durable-and-recovered",
+      "finalGeneration": 2,
+      "finalBlocked": false,
+      "scope": "Real registered Forget of probe-owned claim; Legal Hold/protected outcomes and crash windows remain separate gates"
+    },
+    "searchReasons": [],
+    "scope": "Public SDK transport plus trusted prepared remember fixture; production authorization/privacy barriers and Legal Hold not covered",
+    "surfaceMode": "off",
+    "remember": "accepted-and-original-key-replayed",
+    "responseLoss": "unknown-then-original-key-reconciled",
+    "search": "remembered-claim-found",
+    "correct": "revision-increment-and-original-key-replay",
+    "staleRevision": "definite-409-rejection",
+    "forget": {
+      "target": 1,
+      "erased": 1,
+      "protected": 0,
+      "held": 0,
+      "duplicate": "same-result",
+      "searchAfter": "absent",
+      "claimReadAfter": "not-found"
+    }
+  },
+  "hostContext": {
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stageOutput": {
+    "schemaVersion": 1,
+    "mode": "real-core",
+    "privacyGeneration": 1,
+    "adoptedCycles": 3,
+    "usageCount": 3,
+    "observations": [
+      {
+        "eventId": "bellis:e5372321-7ef8-4017-bdb8-0ddce0870512",
+        "outboxId": "ee67b036-f762-4841-96d7-318ae35c7822",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "1",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 4,
+            "scene_id": "1f32194c-c77e-4980-b537-3074b7e16fb3",
+            "segment_id": "353c1e48-7969-4bcc-b77d-1ba9cefbfc31",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第一句。"
+      },
+      {
+        "eventId": "bellis:3dea9f88-3a78-4eb4-af1e-afc2af565bbc",
+        "outboxId": "4bdef18e-011e-42ce-ba70-98cce8660ed2",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "2",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 4,
+            "end": 8,
+            "scene_id": "1f32194c-c77e-4980-b537-3074b7e16fb3",
+            "segment_id": "6eecbd81-9559-4341-a72a-217a626a5860",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第二句。"
+      },
+      {
+        "eventId": "bellis:e844783e-081d-4de7-b6a2-e8b4c3f8b546",
+        "outboxId": "7875d60f-98bf-4642-8761-1fbf10daf988",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "3",
+        "effectState": "committed",
+        "content": "收到。"
+      },
+      {
+        "eventId": "bellis:e5c06d93-d8d5-417e-8a73-704e8d744e9f",
+        "outboxId": "1e449217-8e94-4f74-9718-b602f07401ac",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "4",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 3,
+            "scene_id": "73ede259-90b1-40a4-a467-65c3c209d0dd",
+            "segment_id": "266dd524-e7b5-4e92-b265-7dd8f03e59ad",
+            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
+            "lane": "audio"
+          }
+        },
+        "content": "完成。"
+      }
+    ],
+    "confirmedConversationInNextRequest": true,
+    "coreSourceCursor": "4",
+    "chromium": "passed",
+    "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Not an A4 crash/stress gate."
+  },
+  "stage": "A0/A1 and A2 real Chromium output/input public boundary probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "a05519411c395de34ddedca419498ec066567680e4fef6aa26b4b12717770e35",
+  "installedCoreFilesVerified": 156,
+  "schemaVersion": 15,
+  "sdkVersion": "0.11.1",
+  "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+}

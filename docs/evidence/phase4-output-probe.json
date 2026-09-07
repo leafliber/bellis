@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-09-06",
+  "status": "passed-real-core-output-slice",
+  "scope": "Real Chromium Worklet, Control/Media, Runtime and DB Worker with installed Iris Core, including trusted host privacy interruption. Historical fixture baseline is separately identified. Not full Phase 4 acceptance.",
+  "runtime": "Node 26.8.1 on macOS",
+  "validation": {
+    "rootCheck": {
+      "command": "pnpm check",
+      "unitAndPropertyTests": 979,
+      "integrationTests": 206
+    },
+    "browserBaseline": {
+      "command": "pnpm test:browser",
+      "tests": 3,
+      "underruns": 0,
+      "observedHardLaneSkewMs": 3.13,
+      "observedInterruptLatencyMs": 3.2,
+      "physicalSpeakerOrP99Claim": false,
+      "note": "Full three-test browser baseline from the preceding seal slice; final A3 changes separately passed the real Core/Stage probe."
+    },
+    "outputCancellation": {
+      "command": "pnpm --filter @bellis/stage exec playwright test phase4-effects-e2e.test.ts",
+      "tests": 1,
+      "durationSeconds": 16.4,
+      "adoptedCycles": 3,
+      "observations": 4,
+      "checks": [
+        "two distinct partial audio facts",
+        "single complete committed fact",
+        "confirmed fragments in next model request",
+        "cancelled incomplete segment creates no extra fact",
+        "durable receipt ACK and reservation-release handshake"
+      ],
+      "privacyGeneration": 1,
+      "interruption": "trusted host privacy barrier"
+    },
+    "dbOutput": {
+      "tests": 3,
+      "checks": [
+        "commit and binding required; identity and range validation",
+        "atomic rollback, deduplication, restart replay",
+        "admission watermark and reserved capacity"
+      ]
+    },
+    "stageCoreReport": "phase4-stage-core-probe.json",
+    "terminalSeal": {
+      "runtimeTest": "in-flight DB binding finishes after caller cancellation",
+      "stageTest": "final binding prefix arrives sixty seconds after terminal",
+      "fixedTerminalBindingTimeout": false
+    }
+  },
+  "limitations": [
+    "100-cycle and per-window crash matrix remain open",
+    "Core tool/event integration of tombstones and complete privacy recovery remain open",
+    "Phase 4B Presence/Avatar and MCP remain open"
+  ],
+  "sourceSha256": {
+    "apps/runtime/src/application/phase-4/effects-host.ts": "872f7e5f0fce73798a7cace8ea6aeba8e24121579e9432bc0a25ec98b4fefb65",
+    "apps/runtime/src/application/phase-4/speech-effects.ts": "52ee755614c06e9f13db75a1dabecbc578b39823b876f6268f8874438eb597e4",
+    "apps/stage/src/scenes/effect-tracker.ts": "d60d78d0c61a60d37dbdb4cbd6376cc119952914e9304d186e89e6524a3b8bf0",
+    "packages/persistence/src/repositories/phase4-effects.ts": "f49e2c7ac4c3156439663ab336436815e2eeb2c9b3c553b6bf8f948f2b661e16",
+    "apps/stage/test/browser/phase4-effects-e2e.test.ts": "70c4b02d7ab501b88f11373696f05d2686287357838b3c5a6a1bdedce1a5b6b9",
+    "scripts/phase-4-demo-child.mjs": "f648d8368292a371a88805ec2b32bd99f5f2a832d5b5a82da9a3743a2ff02756",
+    "scripts/iris-stage-probe.mjs": "0fe384c454206dc97d6fae8dacd5c36ce81d141cc24f8d397c1fcef877f5f96d"
+  }
+}

@@ -36,6 +36,8 @@ export interface ControlChannel {
   }): boolean;
   /** 当前是否有活跃 Stage 连接（无连接时 prepare 立即 unavailable）。 */
   hasStageConnection(): boolean;
+  /** Trusted transport identity; never read from a Stage payload. */
+  activeConnectionId?(): string | null;
   /** Stage 连接断开通知（等待中的 commit 转为结果不确定）。 */
   onDisconnected(handler: () => void): void;
 }
@@ -55,6 +57,8 @@ export class ControlStagePortAdapter implements StagePort {
   readonly #cancelWaiters = new Map<string, PendingWaiter<CancelOutcome>>();
   readonly #disconnectHandlers: (() => void)[] = [];
   #latestCapabilities: unknown = null;
+  onPrepareSent?: (plan: ScenePlan) => void;
+  beforePrepare?: (plan: ScenePlan, signal: AbortSignal) => Promise<void>;
 
   constructor(options: {
     readonly channel: ControlChannel;
@@ -153,6 +157,17 @@ export class ControlStagePortAdapter implements StagePort {
   }
 
   prepare(plan: ScenePlan, deadlineUs: bigint, signal: AbortSignal): Promise<StageReady> {
+    if (plan.effects !== undefined && this.beforePrepare !== undefined) {
+      return this.beforePrepare(plan, signal).then(() => {
+        signal.throwIfAborted();
+        if (this.#clock.nowUs() >= deadlineUs) throw new Error("effect_prepare_deadline");
+        return this.#sendPrepare(plan, deadlineUs, signal);
+      });
+    }
+    return this.#sendPrepare(plan, deadlineUs, signal);
+  }
+
+  #sendPrepare(plan: ScenePlan, deadlineUs: bigint, signal: AbortSignal): Promise<StageReady> {
     if (!this.#channel.hasStageConnection()) {
       return Promise.resolve({
         lanes: plan.scene.groups.flatMap((group) =>
@@ -181,6 +196,7 @@ export class ControlStagePortAdapter implements StagePort {
         preparedAtStageUs: 0n,
       });
     }
+    this.onPrepareSent?.(plan);
     return new Promise<StageReady>((resolve, reject) => {
       const timer = new AbortController();
       const waiter: PendingWaiter<StageReady> = {

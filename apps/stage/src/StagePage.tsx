@@ -109,10 +109,14 @@ export function StagePage({ profile }: { profile: string }) {
     // token 由 Demo/E2E 注入页面查询参数；Cookie 对当前源生效。
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token") ?? "";
+    const resumeSessionId = params.get("resumeSessionId");
     const response = await fetch("/api/v1/auth/exchange", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ startupToken: token }),
+      body: JSON.stringify({
+        startupToken: token,
+        ...(resumeSessionId === null ? {} : { resumeSessionId }),
+      }),
     });
     if (!response.ok) {
       throw new Error(`stage_auth_failed_${response.status}`);
@@ -132,9 +136,21 @@ export function StagePage({ profile }: { profile: string }) {
       environment: audioEnvironment,
       clock,
       minPreparedFrames: 6,
+      onRendered: (event) =>
+        appRef.current?.audioRendered(event.sceneId, event.renderedSamples, event.appliedAtStageUs),
     });
     const subtitleDocument = new DomSubtitleDocument(subtitleRootRef.current ?? document.body);
-    const subtitleLane = new SubtitleLaneAdapter({ document: subtitleDocument, clock });
+    const subtitleLane = new SubtitleLaneAdapter({
+      document: subtitleDocument,
+      clock,
+      onApplied: (event) =>
+        appRef.current?.subtitleApplied(
+          event.sceneId,
+          event.start,
+          event.end,
+          event.appliedAtStageUs,
+        ),
+    });
     const avatarLane = new DomAvatarLane(
       { adapter: "recording", motions: ["nod_agree"], expressions: ["happy"] },
       avatarBadgeRef.current ?? document.body,

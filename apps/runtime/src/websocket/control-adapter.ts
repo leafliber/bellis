@@ -655,6 +655,8 @@ export class ControlConnection {
       "scene.started",
       "scene.finished",
       "scene.cancel.ack",
+      "scene.effect.receipt",
+      "scene.effect.release",
       "media.stream.ready",
     ];
     if (STAGE_MESSAGE_TYPES.includes(envelope.type)) {

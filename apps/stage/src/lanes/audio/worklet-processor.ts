@@ -16,7 +16,7 @@ import { PcmSceneBuffer } from "./pcm-scene-buffer.js";
  * - { v: 1, op: "clear" }：连接代际变化/关闭，全部丢弃（静音）。
  * 未知版本/未知 op 稳定忽略并回执 error 事件；上报告在
  * { v: 1, op: "stats", underruns, activeScene } 周期回报。
- * ended 是音频 Lane 的**真实完成信号**：PCM 全部经扬声器时钟放出（不是
+ * ended 是音频 Lane 的渲染完成信号：PCM 已写入 Worklet 输出（不是
  * 「已收到」也不是「已入缓冲」）。
  *
  * 逻辑核心是 PcmSceneBuffer（与 Node 测试共用）；本文件只做
@@ -61,6 +61,7 @@ const state: WorkletState = {
 class PcmSceneProcessor extends ProcessorBase {
   #underrunsReported = 0;
   #startedScene: string | null = null;
+  readonly #reportedSamples = new Map<string, number>();
 
   constructor() {
     super();
@@ -80,7 +81,12 @@ class PcmSceneProcessor extends ProcessorBase {
           if (typeof message.sceneId === "string" && message.samples instanceof Int16Array) {
             const accepted = state.buffer.appendFrame(message.sceneId, message.samples);
             if (!accepted) {
-              this.port.postMessage({ v: PROTOCOL_VERSION, op: "error", code: "buffer_full" });
+              this.port.postMessage({
+                v: PROTOCOL_VERSION,
+                op: "error",
+                code: "buffer_full",
+                sceneId: message.sceneId,
+              });
             }
           }
           break;
@@ -91,6 +97,7 @@ class PcmSceneProcessor extends ProcessorBase {
           break;
         case "end":
           if (typeof message.sceneId === "string") {
+            this.#reportProgress(message.sceneId, true);
             if (state.buffer.endScene(message.sceneId)) {
               this.port.postMessage({ v: PROTOCOL_VERSION, op: "ended", sceneId: message.sceneId });
             }
@@ -98,16 +105,34 @@ class PcmSceneProcessor extends ProcessorBase {
           break;
         case "cancel":
           if (typeof message.sceneId === "string") {
+            this.#reportProgress(message.sceneId, true);
+            this.#reportedSamples.delete(message.sceneId);
             state.buffer.cancelScene(message.sceneId);
           }
           break;
         case "clear":
           state.buffer.clearAll();
+          this.#reportedSamples.clear();
           break;
         default:
           this.port.postMessage({ v: PROTOCOL_VERSION, op: "error", code: "unknown_op" });
       }
     };
+  }
+
+  #reportProgress(sceneId: string, force = false): void {
+    if (!state.buffer.hasContiguousRendering(sceneId)) return;
+    const renderedSamples = state.buffer.renderedSamples(sceneId);
+    const previous = this.#reportedSamples.get(sceneId) ?? 0;
+    if (renderedSamples <= previous || (!force && renderedSamples - previous < 960)) return;
+    this.#reportedSamples.set(sceneId, renderedSamples);
+    this.port.postMessage({
+      v: PROTOCOL_VERSION,
+      op: "progress",
+      sceneId,
+      renderedSamples,
+      renderedAtAudioSeconds: currentTime,
+    });
   }
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
@@ -132,8 +157,11 @@ class PcmSceneProcessor extends ProcessorBase {
     for (let i = 0; i < frames; i += 1) {
       output[i] = (pcm[i] ?? 0) / 32768;
     }
+    if (renderingScene !== null) this.#reportProgress(renderingScene);
     // EOS 耗尽上报（播放完成信号；每 Scene 至多一次）。
     for (const endedSceneId of state.buffer.drainEndedScenes()) {
+      this.#reportProgress(endedSceneId, true);
+      this.#reportedSamples.delete(endedSceneId);
       this.port.postMessage({ v: PROTOCOL_VERSION, op: "ended", sceneId: endedSceneId });
       // 完成回报入队后即可释放零样本 Scene 记录；否则每场留下一个空
       // SceneBuffer，长期连接会随累计场次数增长。

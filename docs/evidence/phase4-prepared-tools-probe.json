@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T16:58:20.958720+00:00",
+  "status": "prepared-tool-boundary-verified-phase4-incomplete",
+  "validation": {
+    "command": "pnpm check",
+    "exitCode": 0,
+    "unitAndPropertyTests": 997,
+    "integrationTests": 215,
+    "toolRuntimeUnitTests": 36,
+    "persistenceIntegrationTests": 98,
+    "generatedContractFiles": 150,
+    "rootCheckLogSha256": "105a8c6e60d9d4978d6beb90d1cda060226037bf5cfc775be6347df76fe71bcb",
+    "irisProviderTests": 46,
+    "irisProviderTypecheckAndBuild": "passed"
+  },
+  "realCore": {
+    "command": "node scripts/iris-public-probe.mjs --tools",
+    "exitCode": 2,
+    "report": "phase4-prepared-tools-core-probe.json",
+    "reportSha256": "b82ba40ce869eca43fdb78412b739918e5b6418a0052fe1aa81151ebe0f40a1b",
+    "preparedRemember": "passed",
+    "fourToolsGate": "incomplete",
+    "reason": [
+      "fts_rebuild_pending",
+      "internal_error"
+    ]
+  },
+  "verified": [
+    "Trusted prepared request binds the adopted original call, execution identity, version, effective key and confirmation description",
+    "Write-once request rejects parameter/key replacement; DB Worker restart retains original request",
+    "Invalid identity, missing original call and oversized request reject without a prepared row",
+    "Save ACK is required before confirmation; lost ACK recovery loads the original material without another prepare",
+    "Exact retry revalidates current generation, tombstones and Session scope; historical read remains available for trusted reconciliation",
+    "Approval binds the full prepared request; post-approval persistence and capability rechecks precede Handler",
+    "Late preparation after cancellation cannot save or execute",
+    "Real Decision Host, DB Worker, installed Iris SDK and Core remember write execute once after durable confirmation; injected success-response loss persists uncertain",
+    "After Worker restart the real Core probe reconciles the recovered exact request with its original host business key"
+  ],
+  "remaining": [
+    "Production Iris four-tool target authorization and privacy-coordinator registration",
+    "Pinned Core FTS initialization and public search gate",
+    "Real Legal Hold/protected targets, external invalidations and Persona revocation",
+    "Public unknown-outcome recovery matrix, Signal/Tool Result privacy filtering and Core Session mapping",
+    "A4 100-cycle stress and 20 runs per crash window, total DB/WAL quotas, Phase4B and complete demo:phase4"
+  ],
+  "sourceSha256": {
+    "packages/contracts/src/decision/prepared-tool-call.ts": "4eb847f78460b82b4dedb67e87ee5b68b5541f6aa13d31522c0159098939e69e",
+    "packages/persistence/src/migrations/state/0012-phase4-prepared-tools.ts": "87687954106069570db234579b637086956d4b5b42e5ac9230bfa68ab6daa5a1",
+    "packages/persistence/src/repositories/phase4-prepared-tools.ts": "8189d7bfcd159b8320a200557c5d4540d6f9e0966c33de47d0da1260698ff681",
+    "packages/persistence/test/integration/phase4-prepared-tools.integration.test.ts": "b0dbed03face2757ef66301cc4fa7b33fca4da9611ae3224722f5cf7d2f38849",
+    "packages/tool-runtime/src/permissions/preparation.ts": "038c676f32af4a55e24ad3b05b4a620b43da6399f54cea88dd42156075a72ac6",
+    "packages/tool-runtime/src/port.ts": "93c05b1850efd1403c4ee98fa1da1f0729d352508d3cc5a75e2e11ebddd57ffc",
+    "packages/tool-runtime/src/runtime.ts": "5dfcce1d71dbdda18f30df8b63230e9e37359cb3dce2bacd361cd23bd96122e7",
+    "packages/tool-runtime/test/unit/preparation.test.ts": "2b6b8332255c6ddfd79a12e8dbb51e7fa108d55e761fb179951cbeeb90b988b0",
+    "apps/runtime/src/application/phase-3/host.ts": "cdd2d618b1cb427c9a445eeb63ca60e900513fe2f0e9c73411d3c0c4444bca74",
+    "apps/runtime/test/integration/phase4-session-binding.integration.test.ts": "1a588f227ed8ab4162b45b6bb9dd73b5ddc37a4f1a722d0492b041ad05c44913",
+    "scripts/iris-prepared-tool-probe.mjs": "0e7c12e06a1f189985acc7c2a8fa893d64a1f81ea0ba05b7c2ab37b02aa5335a",
+    "scripts/iris-tools-probe.mjs": "75541fd5ed9ec7dcba5a16ae97136818b3ddd5180c816196a19df23c0862df1c",
+    "scripts/iris-public-probe.mjs": "cea64751a56c5d6fea6844dd1d00a700b4d3c31d0ce864b3227abbd960328a34"
+  }
+}

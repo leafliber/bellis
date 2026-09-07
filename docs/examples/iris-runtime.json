@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "dataDirectory": "/absolute/path/to/bellis-data",
+    "runtimeVersion": "0.1.0",
+    "port": 17890,
+    "phase2": { "enabled": true },
+    "phase3": {
+      "enabled": true,
+      "model": {
+        "provider": "openai-compatible",
+        "model": "configured-model",
+        "baseUrl": "https://model.example.invalid/v1",
+        "apiKeyEnv": "BELLIS_MODEL_API_KEY"
+      }
+    }
+  },
+  "iris": {
+    "enabled": true,
+    "baseUrl": "http://127.0.0.1:4874",
+    "allowedOrigins": ["http://127.0.0.1:4874"],
+    "credential": { "kind": "environment", "name": "BELLIS_IRIS_TOKEN" },
+    "activeSurfaceMode": "off",
+    "appInstanceId": "bellis-local",
+    "agentId": "configured-agent-id",
+    "spaceId": "configured-space-id",
+    "identityScope": "configured-profile",
+    "privacyRevision": "1",
+    "scope": { "kind": "space", "acknowledgeCrossSession": true },
+    "actors": [{ "provider": "configured-identity-provider", "externalId": "configured-actor-id" }],
+    "publicLabels": ["space:configured-space-id"],
+    "coreSchema": { "minimum": 14, "maximum": 15 },
+    "deadlineMs": 200,
+    "maxInputTokens": 16000,
+    "memoryTokenBudget": 2000
+  }
+}

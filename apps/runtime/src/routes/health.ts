@@ -12,13 +12,26 @@ import type { RouteContext } from "./context.js";
  * - 两者都不返回数据库路径、异常 Stack 或内部拓扑。
  * - 响应结构经共享 Schema（schemas.ts）运行时校验，与 OpenAPI 同源。
  */
-export function registerHealthRoutes(app: FastifyInstance, ctx: RouteContext): void {
+export function registerHealthRoutes(
+  app: FastifyInstance,
+  ctx: RouteContext & {
+    readonly isDiskReady: () => Promise<boolean>;
+  },
+): void {
   app.get("/api/v1/health/live", async () => {
     return HealthLiveResponseSchema.parse({ status: "live" });
   });
 
   app.get("/api/v1/health/ready", async (_request, reply) => {
+    let ready = false;
     if (ctx.status.ready) {
+      try {
+        ready = await ctx.isDiskReady();
+      } catch {
+        /* Report unavailable storage as not ready. */
+      }
+    }
+    if (ready) {
       return HealthReadyResponseSchema.parse({ status: "ready" });
     }
     await reply.code(503).send({

@@ -157,7 +157,13 @@ describe("phase3 cycle adoption", () => {
       next: "after_tools",
       degraded: false,
       packetDigest: "a".repeat(64),
-      toolRuns: [],
+      toolRuns: [
+        {
+          toolRunId: "88888888-8888-4888-8888-888888888888",
+          toolName: "lookup_quest",
+          idempotencyKeyHash: null,
+        },
+      ],
       trace: TRACE,
     });
     const afterReplay = await client.phase3ReadDecisionState(SESSION_ID);

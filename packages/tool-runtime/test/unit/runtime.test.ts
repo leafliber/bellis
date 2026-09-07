@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { VirtualClock } from "@bellis/testkit";
 import type { ToolCall } from "@bellis/contracts";
-import { StandardToolRuntime } from "../../src/index.js";
+import { StandardToolRuntime, ToolRejectedError, type ToolRunEvent } from "../../src/index.js";
 import type { ToolDeclaration, ToolExecutionContext, ToolHandler } from "../../src/index.js";
 
 const RUN = (n: number): string =>
@@ -81,6 +81,69 @@ const flush = async (ticks = 40): Promise<void> => {
 };
 
 describe("StandardToolRuntime", () => {
+  it("persists uncertain for a started write with a lost response, and publishes no false no-write claim", async () => {
+    const clock = new VirtualClock();
+    const events: ToolRunEvent[] = [];
+    let effects = 0;
+    const runtime = new StandardToolRuntime({
+      clock,
+      wallClockMs: () => 0,
+      persistRunEvent: async (event) => {
+        events.push(event);
+      },
+    });
+    runtime.registerTool(declaration({ semantic: "idempotent", cache: null }), async () => {
+      effects++;
+      throw new Error("lost response containing private text");
+    });
+    const result = await runtime.executeDag(runtime.compileDag([call(RUN(1))]), context());
+    expect(effects).toBe(1);
+    expect(result.results[0]).toMatchObject({
+      outcome: "failed",
+      errorCode: "tool_outcome_unknown",
+      value: { remoteOutcome: "unknown" },
+    });
+    expect(events.at(-1)).toMatchObject({
+      transition: "finished",
+      state: "uncertain",
+      sessionId: context().sessionId,
+    });
+    expect(JSON.stringify(result)).not.toContain("private text");
+    await runtime.close("done");
+  });
+
+  it("preserves definite public write rejection without claiming uncertainty", async () => {
+    const clock = new VirtualClock();
+    const runtime = makeRuntime(clock, [
+      {
+        declaration: declaration({ semantic: "idempotent", cache: null }),
+        handler: async () => {
+          throw new ToolRejectedError("revision_conflict");
+        },
+      },
+    ]);
+    const result = await runtime.executeDag(runtime.compileDag([call(RUN(1))]), context());
+    expect(result.results[0]).toMatchObject({ outcome: "failed", errorCode: "revision_conflict" });
+    expect(result.results[0]?.value).toBeUndefined();
+    await runtime.close("done");
+  });
+
+  it("treats invalid write results as unknown but keeps pure tool failures ordinary", async () => {
+    for (const semantic of ["idempotent", "pure"] as const) {
+      const clock = new VirtualClock();
+      const runtime = makeRuntime(clock, [
+        {
+          declaration: declaration({ semantic, cache: null }),
+          handler: async () => ({ value: { invalid: 1n } }),
+        },
+      ]);
+      const result = await runtime.executeDag(runtime.compileDag([call(RUN(1))]), context());
+      expect(result.results[0]?.errorCode).toBe(
+        semantic === "pure" ? "result_not_json_safe" : "tool_outcome_unknown",
+      );
+      await runtime.close("done");
+    }
+  });
   it("runs independent parallel_read tools with real time overlap", async () => {
     const clock = new VirtualClock();
     const spans: { toolRunId: string; startUs: bigint; endUs: bigint }[] = [];
@@ -238,7 +301,8 @@ describe("StandardToolRuntime", () => {
     clock.advanceBy(200_000n);
     const execution = await dagPromise;
     expect(execution.results[0]?.outcome).toBe("timeout");
-    expect(execution.results[0]?.errorCode).toBe("tool_timeout");
+    expect(execution.results[0]?.errorCode).toBe("tool_outcome_unknown");
+    expect(execution.results[0]?.value).toEqual({ remoteOutcome: "unknown" });
   });
 
   it("cancels waiting and running nodes on parent abort", async () => {
@@ -267,6 +331,8 @@ describe("StandardToolRuntime", () => {
     const execution = await dagPromise;
     expect(execution.results[0]?.outcome).toBe("cancelled");
     expect(execution.results[1]?.outcome).toBe("cancelled");
+    expect(execution.results[0]?.errorCode).toBe("tool_outcome_unknown");
+    expect(execution.results[1]?.errorCode).not.toBe("tool_outcome_unknown");
   });
 
   it("serves repeat invocations from L0/L1 caches with audit-visible source", async () => {
@@ -465,4 +531,215 @@ describe("task lifetime and durable facts", () => {
       await runtime.close("test");
     },
   );
+});
+
+describe("concrete bounded confirmation", () => {
+  it("freezes the registered declaration and compiled arguments before presenting approval", async () => {
+    const clock = new VirtualClock();
+    const seen: import("../../src/index.js").ToolConfirmationRequest[] = [];
+    const observed: unknown[] = [];
+    const runtime = new StandardToolRuntime({
+      clock,
+      wallClockMs: () => 0,
+      confirmation: {
+        confirm: async (request) => {
+          seen.push(request);
+          expect(Object.isFrozen(request.arguments)).toBe(true);
+          expect(() => {
+            (request.arguments as Record<string, unknown>).target = "changed-by-confirmation";
+          }).toThrow();
+          return true;
+        },
+      },
+    });
+    const spec = declaration({ semantic: "idempotent", requiresConfirmation: true, cache: null });
+    runtime.registerTool(spec, async (input) => {
+      observed.push(input.arguments);
+      return { value: null };
+    });
+    (spec as { requiresConfirmation: boolean }).requiresConfirmation = false;
+    expect(runtime.listDeclarations()[0]?.requiresConfirmation).toBe(true);
+    const args = { target: "original", nested: { value: "frozen" } };
+    const dag = runtime.compileDag([
+      call(RUN(1), "probe", args, undefined, "private-business-key"),
+    ]);
+    args.target = "changed-after-compile";
+    args.nested.value = "changed";
+    const result = await runtime.executeDag(dag, context());
+    expect(result.results[0]?.outcome).toBe("succeeded");
+    expect(observed).toEqual([{ target: "original", nested: { value: "frozen" } }]);
+    expect(seen[0]).toMatchObject({
+      toolVersion: 1,
+      sessionId: context().sessionId,
+      turnId: context().turnId,
+      cycleId: context().cycleId,
+    });
+    expect(seen[0]?.requestDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(seen[0]?.idempotencyKeyHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      JSON.stringify(seen[0], (_, value) => (typeof value === "bigint" ? String(value) : value)),
+    ).not.toContain("private-business-key");
+    await runtime.close("done");
+  });
+
+  it("times out a hanging confirmation, retains its permit, and ignores late approval", async () => {
+    const clock = new VirtualClock();
+    let approve!: (value: boolean) => void;
+    let signal: AbortSignal | undefined;
+    const confirm = vi.fn(async (request: import("../../src/index.js").ToolConfirmationRequest) => {
+      signal = request.signal;
+      return new Promise<boolean>((resolve) => {
+        approve = resolve;
+      });
+    });
+    const handler = vi.fn(async () => ({ value: null }));
+    const runtime = new StandardToolRuntime({
+      clock,
+      wallClockMs: () => 0,
+      confirmation: { confirm },
+    });
+    runtime.registerTool(
+      declaration({
+        semantic: "idempotent",
+        requiresConfirmation: true,
+        cache: null,
+        timeoutMs: 100,
+      }),
+      handler,
+    );
+    const execution = runtime.executeDag(runtime.compileDag([call(RUN(1))]), context());
+    await flush();
+    clock.advanceBy(100_000n);
+    expect((await execution).results[0]).toMatchObject({
+      outcome: "timeout",
+      errorCode: "confirmation_timeout",
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(
+      (await runtime.executeDag(runtime.compileDag([call(RUN(2))]), context())).results[0],
+    ).toMatchObject({ outcome: "denied", errorCode: "confirmation_busy" });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    approve(true);
+    await flush();
+    expect(handler).not.toHaveBeenCalled();
+    confirm.mockResolvedValue(false);
+    expect(
+      (await runtime.executeDag(runtime.compileDag([call(RUN(3))]), context())).results[0]
+        ?.errorCode,
+    ).toBe("confirmation_rejected");
+    await runtime.close("done");
+    expect(clock.pendingCount()).toBe(0);
+  });
+
+  it("closes while confirmation ignores cancellation, without allowing its late approval to write", async () => {
+    const clock = new VirtualClock();
+    let approve!: (value: boolean) => void;
+    let signal: AbortSignal | undefined;
+    const handler = vi.fn(async () => ({ value: null }));
+    const runtime = new StandardToolRuntime({
+      clock,
+      wallClockMs: () => 0,
+      confirmation: {
+        confirm: async (request) => {
+          signal = request.signal;
+          return new Promise((resolve) => {
+            approve = resolve;
+          });
+        },
+      },
+    });
+    runtime.registerTool(
+      declaration({ semantic: "idempotent", requiresConfirmation: true, cache: null }),
+      handler,
+    );
+    const execution = runtime.executeDag(runtime.compileDag([call(RUN(1))]), context());
+    await flush();
+    await runtime.close("session closed");
+    expect((await execution).results[0]).toMatchObject({
+      outcome: "cancelled",
+      errorCode: "confirmation_cancelled",
+    });
+    expect(signal?.aborted).toBe(true);
+    approve(true);
+    await flush();
+    expect(handler).not.toHaveBeenCalled();
+    expect(clock.pendingCount()).toBe(0);
+  });
+
+  it("shares the tool deadline between confirmation and execution", async () => {
+    const clock = new VirtualClock();
+    const runtime = new StandardToolRuntime({
+      clock,
+      wallClockMs: () => 0,
+      confirmation: {
+        confirm: async (request) => {
+          await clock.sleepUntil(clock.nowUs() + 80_000n, request.signal);
+          return true;
+        },
+      },
+    });
+    runtime.registerTool(
+      declaration({
+        semantic: "idempotent",
+        requiresConfirmation: true,
+        cache: null,
+        timeoutMs: 100,
+      }),
+      async (input) => {
+        expect(input.deadlineUs).toBe(100_000n);
+        await clock.sleepUntil(clock.nowUs() + 40_000n, input.context.signal);
+        return { value: "too late" };
+      },
+    );
+    const execution = runtime.executeDag(runtime.compileDag([call(RUN(1))]), context());
+    await flush();
+    clock.advanceBy(80_000n);
+    await flush();
+    clock.advanceBy(20_000n);
+    expect((await execution).results[0]).toMatchObject({
+      outcome: "timeout",
+      errorCode: "tool_outcome_unknown",
+    });
+    await runtime.close("done");
+    expect(clock.pendingCount()).toBe(0);
+  });
+
+  it("rechecks revoked capabilities and requires separate confirmation even for cached identical calls", async () => {
+    const clock = new VirtualClock();
+    const capabilities = new Set(["memory.write"]);
+    const handler = vi.fn(async () => ({ value: "written" }));
+    const confirm = vi.fn(async () => true);
+    const runtime = new StandardToolRuntime({
+      clock,
+      wallClockMs: () => 0,
+      confirmation: { confirm },
+    });
+    runtime.registerTool(
+      declaration({
+        semantic: "idempotent",
+        requiresConfirmation: true,
+        requiredCapabilities: ["memory.write"],
+      }),
+      handler,
+    );
+    confirm.mockImplementationOnce(async () => {
+      capabilities.clear();
+      return true;
+    });
+    expect(
+      (await runtime.executeDag(runtime.compileDag([call(RUN(1))]), context({ capabilities })))
+        .results[0]?.errorCode,
+    ).toBe("capability_missing");
+    expect(handler).not.toHaveBeenCalled();
+    capabilities.add("memory.write");
+    confirm.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const results = await runtime.executeDag(
+      runtime.compileDag([call(RUN(2)), call(RUN(3))]),
+      context({ capabilities, maxParallelTools: 1 }),
+    );
+    expect(results.results.map((result) => result.outcome)).toEqual(["succeeded", "denied"]);
+    expect(confirm).toHaveBeenCalledTimes(3);
+    expect(handler).toHaveBeenCalledTimes(1);
+    await runtime.close("done");
+  });
 });

@@ -46,6 +46,7 @@ export const RESOLVE_HOOK_URL = pathToFileURL(
 ).href;
 
 export interface TestRuntimeOptions {
+  readonly tools?: import("../src/index.js").RuntimeOptions["tools"];
   readonly dataDirectory: string;
   readonly port?: number;
   readonly allowMissingOrigin?: boolean;
@@ -104,6 +105,7 @@ export async function startTestRuntime(options: TestRuntimeOptions): Promise<Run
       ...(Object.keys(mergedLimits).length === 0 ? {} : { limits: mergedLimits }),
     },
     persistenceWorker: WORKER_FIXTURE,
+    ...(options.tools === undefined ? {} : { tools: options.tools }),
     ...(options.persistenceClient === undefined
       ? {}
       : { persistenceClient: options.persistenceClient }),

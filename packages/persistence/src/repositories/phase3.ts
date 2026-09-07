@@ -1,4 +1,17 @@
-import { parseDecimalString } from "@bellis/contracts";
+import { insertToolCall, assertToolCallReplay } from "./phase4-tool-calls.js";
+import {
+  type MemoryInputObservation,
+  type MemoryPolicyStamp,
+  parseDecimalString,
+  ContextAdoptionSchema,
+  ContextManifestSchema,
+  type ContextManifest,
+  type ContextAdoption,
+} from "@bellis/contracts";
+import { assertMemoryAdmissionCapacity, enqueueInputObservations } from "./phase4-observe.js";
+import { insertOutboxMessages } from "./outbox.js";
+import { assertContextPolicy, bindMemorySession } from "./phase4-memory-policy.js";
+import { createHash } from "node:crypto";
 import type { IngestedSignal, SessionRecord, Signal, SignalPriorityClass } from "@bellis/contracts";
 import { PersistenceError } from "../errors.js";
 import { appendSessionRecord, nextAggregateSeq } from "./session-records.js";
@@ -16,6 +29,9 @@ import type { SqliteDatabase } from "./sqlite-port.js";
  */
 
 export interface Phase3AppendSignalInput {
+  readonly policy?: MemoryPolicyStamp;
+  readonly observations?: readonly MemoryInputObservation[];
+  readonly leaseNowMs?: number;
   readonly sessionId: string;
   readonly signal: Signal;
   readonly priorityClass: SignalPriorityClass;
@@ -72,6 +88,23 @@ function lastAssignedSequence(db: SqliteDatabase, sessionId: string): bigint {
 export function appendPhase3Signal(
   db: SqliteDatabase,
   input: Phase3AppendSignalInput,
+  assertAdmission?: () => void,
+): Phase3AppendSignalOutcome {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = appendSignalAndObservations(db, input, assertAdmission);
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function appendSignalAndObservations(
+  db: SqliteDatabase,
+  input: Phase3AppendSignalInput,
+  assertAdmission?: () => void,
 ): Phase3AppendSignalOutcome {
   const existing = db
     .prepare(
@@ -81,6 +114,7 @@ export function appendPhase3Signal(
   if (existing !== undefined) {
     return { result: "deduplicated", sequence: parseDecimalString(readText(existing, "sequence")) };
   }
+  assertAdmission?.();
   const consumed = readConsumedWatermark(db, input.sessionId);
   const pendingRow = db
     .prepare(
@@ -104,6 +138,14 @@ export function appendPhase3Signal(
       reason: input.priorityClass === "urgent" ? "urgent_capacity" : "normal_capacity",
     };
   }
+  const policy =
+    input.policy ?? input.observations?.find((item) => item.policy !== undefined)?.policy;
+  bindMemorySession(db, input.sessionId, policy);
+  if (
+    policy !== undefined &&
+    Number(db.prepare("SELECT COUNT(*) AS n FROM phase4_signal_policy").get()?.n) >= 16_384
+  )
+    throw new PersistenceError("database_busy", "signal policy capacity reached");
   const next = lastAssignedSequence(db, input.sessionId) + 1n;
   db.prepare(
     `INSERT INTO phase3_signals (session_id, sequence, signal_id, priority_class, received_at_ms, signal_json)
@@ -116,6 +158,20 @@ export function appendPhase3Signal(
     input.receivedAtMs,
     JSON.stringify(input.signal),
   );
+  if (policy !== undefined)
+    db.prepare("INSERT INTO phase4_signal_policy VALUES (?, ?, ?, ?)").run(
+      input.sessionId,
+      next.toString(10),
+      policy.scopeKey,
+      policy.generation,
+    );
+  enqueueInputObservations(db, {
+    sessionId: input.sessionId,
+    signal: input.signal,
+    observations: input.observations ?? [],
+    receivedAtMs: input.receivedAtMs,
+    leaseNowMs: input.leaseNowMs ?? input.receivedAtMs,
+  });
   return { result: "accepted", sequence: next };
 }
 
@@ -156,6 +212,8 @@ export function markPhase3Consumed(
 }
 
 export interface Phase3AdoptCycleInput {
+  readonly context?: ContextAdoption;
+  readonly leaseNowMs?: number;
   readonly sessionId: string;
   readonly turnId: string;
   readonly cycleId: string;
@@ -171,23 +229,74 @@ export interface Phase3AdoptCycleInput {
     readonly toolRunId: string;
     readonly toolName: string;
     readonly idempotencyKeyHash: string | null;
+    readonly originalCall?: import("@bellis/contracts").ToolCall | undefined;
   }[];
   readonly nowMs: number;
   readonly recordId: () => string;
 }
 
 /** Cycle adoption 原子事务：任一步失败整体回滚（ADR 0004 §4）。 */
-export function adoptPhase3Cycle(db: SqliteDatabase, input: Phase3AdoptCycleInput): void {
+export function adoptPhase3Cycle(
+  db: SqliteDatabase,
+  input: Phase3AdoptCycleInput,
+  assertAdmission?: () => void,
+): void {
   db.exec("BEGIN IMMEDIATE");
   try {
     const existing = db
-      .prepare("SELECT adopted_at_ms FROM phase3_cycles WHERE session_id = ? AND cycle_id = ?")
+      .prepare(
+        "SELECT adopted_at_ms, packet_digest FROM phase3_cycles WHERE session_id = ? AND cycle_id = ?",
+      )
       .get(input.sessionId, input.cycleId);
     if (existing !== undefined) {
+      if (readText(existing, "packet_digest") !== input.packetDigest)
+        throw new PersistenceError("idempotency_conflict", "cycle adoption replay changed");
+      assertToolCallReplay(db, input.sessionId, input.cycleId, input.toolRuns);
+      const stored = readPhase4ContextManifest(db, input.sessionId, input.cycleId);
+      if (stored !== null || input.context !== undefined) {
+        const replay = input.context;
+        if (
+          stored === null ||
+          replay === undefined ||
+          stored.manifestDigest !== replay.manifestDigest ||
+          createHash("sha256")
+            .update(JSON.stringify(ContextManifestSchema.parse(replay.manifest)))
+            .digest("hex") !== stored.manifestDigest ||
+          readText(existing, "packet_digest") !== input.packetDigest
+        ) {
+          throw new PersistenceError("idempotency_conflict", "context adoption replay changed");
+        }
+        const usageCount = db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM outbox WHERE session_id = ? AND topic = 'memory.usage.v1' AND json_extract(payload_json, '$.report.hostCycleId') = ?",
+          )
+          .get(input.sessionId, input.cycleId);
+        if (Number(usageCount?.n) !== replay.usage.length)
+          throw new PersistenceError("idempotency_conflict", "context usage replay changed");
+        for (const item of replay.usage) {
+          const outbox = db
+            .prepare(
+              "SELECT payload_json FROM outbox WHERE outbox_id = ? AND session_id = ? AND topic = 'memory.usage.v1'",
+            )
+            .get(item.report.outboxId, input.sessionId);
+          const payload =
+            outbox === undefined ? null : JSON.parse(readText(outbox, "payload_json"));
+          if (
+            payload?.providerId !== item.providerId ||
+            JSON.stringify(payload.report) !== JSON.stringify(item.report)
+          )
+            throw new PersistenceError("idempotency_conflict", "context usage replay changed");
+        }
+      }
       // 幂等重放：同一 cycleId 重复采用不重复推进（水位单调保护兜底）。
       db.exec("ROLLBACK");
       return;
     }
+    assertAdmission?.();
+    if (input.context !== undefined) {
+      assertMemoryAdmissionCapacity(db);
+      assertContextPolicy(db, input.context.manifest);
+    } else bindMemorySession(db, input.sessionId);
     db.prepare(
       `INSERT INTO phase3_cycles (session_id, cycle_id, turn_id, cycle_index, batch_id,
          watermark_from, watermark_to, next_action, degraded, packet_digest, adopted_at_ms)
@@ -211,8 +320,73 @@ export function adoptPhase3Cycle(db: SqliteDatabase, input: Phase3AdoptCycleInpu
            idempotency_key_hash, started_at_ms, finished_at_ms)
          VALUES (?, ?, ?, ?, 'planned', ?, NULL, NULL)`,
       ).run(input.sessionId, run.toolRunId, input.cycleId, run.toolName, run.idempotencyKeyHash);
+      insertToolCall(db, input.sessionId, run);
     }
     advanceConsumedWatermark(db, input.sessionId, input.watermarkTo, input.nowMs);
+    if (input.context !== undefined) {
+      const context = ContextAdoptionSchema.parse(input.context);
+      if (
+        context.manifest.sessionId !== input.sessionId ||
+        context.manifest.cycleId !== input.cycleId
+      ) {
+        throw new PersistenceError("invalid_request", "context adoption identity mismatch");
+      }
+      const encoded = JSON.stringify(context.manifest);
+      if (
+        Buffer.byteLength(encoded) > 1_048_576 ||
+        createHash("sha256").update(encoded).digest("hex") !== context.manifestDigest ||
+        context.manifest.budget.estimatedInputTokens > context.manifest.budget.maxInputTokens
+      ) {
+        throw new PersistenceError("invalid_request", "context digest or budget mismatch");
+      }
+      if (new Set(context.usage.map((item) => item.providerId)).size !== context.usage.length) {
+        throw new PersistenceError("invalid_request", "duplicate usage target");
+      }
+      for (const { providerId, report } of context.usage) {
+        const lineage = context.manifest.providers.find((item) => item.providerId === providerId);
+        if (
+          report.hostCycleId !== input.cycleId ||
+          lineage?.requestId !== report.requestId ||
+          lineage.personaRevision !== report.personaRevision ||
+          JSON.stringify(lineage.returned) !== JSON.stringify(report.returnedBlockIds) ||
+          JSON.stringify(lineage.hostSelected) !== JSON.stringify(report.hostSelectedBlockIds) ||
+          JSON.stringify(lineage.modelVisible) !== JSON.stringify(report.modelVisibleBlockIds) ||
+          !report.hostSelectedBlockIds.every((id) => report.returnedBlockIds.includes(id)) ||
+          !report.modelVisibleBlockIds.every((id) => report.hostSelectedBlockIds.includes(id))
+        ) {
+          throw new PersistenceError("invalid_request", "context usage lineage mismatch");
+        }
+      }
+      db.prepare(`INSERT INTO phase4_context_manifests
+        (manifest_id, session_id, cycle_id, manifest_digest, manifest_json, adopted_at_ms)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(
+        context.manifest.manifestId,
+        input.sessionId,
+        input.cycleId,
+        context.manifestDigest,
+        JSON.stringify(context.manifest),
+        input.nowMs,
+      );
+      insertOutboxMessages(
+        db,
+        input.sessionId,
+        context.usage.map(({ providerId, report }) => ({
+          schemaVersion: 1,
+          outboxId: report.outboxId,
+          topic: "memory.usage.v1",
+          partitionKey: providerId,
+          payload: {
+            providerId,
+            report,
+            traceId: input.traceId,
+            ...(context.manifest.policy === undefined ? {} : { policy: context.manifest.policy }),
+          },
+          createdAtMs: input.nowMs,
+        })),
+        input.nowMs,
+        input.leaseNowMs ?? input.nowMs,
+      );
+    }
     const aggregateId = `cycle:${input.cycleId}`;
     const record: SessionRecord = {
       schemaVersion: 1,
@@ -257,6 +431,24 @@ export interface Phase3ToolRunEventInput {
   readonly cacheSource: string | null;
   readonly resultSummaryJson: string | null;
   readonly nowMs: number;
+}
+
+export function readPhase4ContextManifest(
+  db: SqliteDatabase,
+  sessionId: string,
+  cycleId: string,
+): { manifest: ContextManifest; manifestDigest: string } | null {
+  const row = db
+    .prepare(
+      "SELECT manifest_json, manifest_digest FROM phase4_context_manifests WHERE session_id = ? AND cycle_id = ?",
+    )
+    .get(sessionId, cycleId);
+  if (row === undefined) return null;
+  const encoded = readText(row, "manifest_json");
+  const manifestDigest = readText(row, "manifest_digest");
+  if (createHash("sha256").update(encoded).digest("hex") !== manifestDigest)
+    throw new PersistenceError("record_invalid", "stored context manifest digest mismatch");
+  return { manifest: ContextManifestSchema.parse(JSON.parse(encoded)), manifestDigest };
 }
 
 export function recordPhase3ToolRunEvent(db: SqliteDatabase, input: Phase3ToolRunEventInput): void {

@@ -29,11 +29,21 @@ jobs:
           node-version: 26.5.0
           cache: pnpm
 
+      - name: Configure Windows C compiler
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Check (runtime baseline, build, typecheck, lint, format, contracts, tests)
         run: pnpm check
+
+      - name: Install standalone Iris Provider with the frozen SDK archive
+        run: pnpm --dir providers/memory-iris install --frozen-lockfile
+
+      - name: Check standalone Iris Provider
+        run: pnpm --dir providers/memory-iris check
 
       - name: Install Chromium for offline acceptance
         run: pnpm --filter @bellis/stage exec playwright install chromium

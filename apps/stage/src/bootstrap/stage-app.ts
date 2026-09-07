@@ -152,6 +152,7 @@ export class StageApp {
     });
     this.#control = control;
     this.#scenes = new SceneClient({
+      sessionId: auth.sessionId,
       clock: this.#clock,
       timeline: this.#timeline,
       lanes: this.#lanes,
@@ -221,12 +222,31 @@ export class StageApp {
     }
   }
 
+  audioRendered(sceneId: string, samples: number, atUs: bigint): void {
+    this.#scenes?.audioRendered(sceneId, samples, atUs);
+  }
+  subtitleApplied(sceneId: string, start: number, end: number, atUs: bigint): void {
+    this.#scenes?.subtitleApplied(sceneId, start, end, atUs);
+  }
+
   #dispatchServerMessage(type: string, payload: unknown): void {
     const scenes = this.#scenes;
     if (scenes === null) {
       return;
     }
     switch (type) {
+      case "scene.effect.seal":
+        scenes.sealEffects(payload);
+        break;
+      case "scene.effect.released":
+        scenes.releaseEffect(payload);
+        break;
+      case "scene.effect.binding":
+        scenes.bindAudioEffect(payload);
+        return;
+      case "scene.effect.ack":
+        scenes.acknowledgeEffect(payload);
+        return;
       case "scene.prepare":
         void scenes.handlePrepare(payload);
         return;

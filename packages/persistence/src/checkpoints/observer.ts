@@ -9,6 +9,8 @@
 
 export const PERSISTENCE_CHECKPOINTS = [
   "before_scene_transaction_commit",
+  "before_effect_transaction_commit",
+  "after_effect_transaction_commit_before_ack",
   "after_scene_transaction_commit_before_outbox_dispatch",
   "after_outbox_publish_before_mark_delivered",
 ] as const;

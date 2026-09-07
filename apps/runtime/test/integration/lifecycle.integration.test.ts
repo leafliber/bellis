@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { parseDecimalString } from "@bellis/contracts";
 import type { PersistenceClient } from "@bellis/persistence";
 import { VirtualClock } from "@bellis/testkit";
@@ -197,7 +197,6 @@ describe("Fake Scene Commit 顺序与幂等", () => {
   });
 
   it("同一幂等键重放返回第一次结果，不产生第二条 committed/Outbox", async () => {
-    const before = handle.outboxDeliveries().length;
     const replay = await handle.commitFakeScene({ sessionId, ...SCENE_INPUT });
     expect(replay.duplicate).toBe(true);
     expect(replay.committedAtMs).toBeGreaterThan(0);
@@ -206,9 +205,10 @@ describe("Fake Scene Commit 顺序与幂等", () => {
       (envelope) => envelope.type === "scene.committed",
     ).length;
     expect(committedCount).toBe(1);
-    // 等待一个调度周期，交付记录只增加一次。
+    // 首次交付可能发生在重放之前；最终总数必须为一，不能要求重放使它增长。
+    await vi.waitFor(() => expect(handle.outboxDeliveries()).toHaveLength(1), { timeout: 2_000 });
     await new Promise((resolve) => setTimeout(resolve, 400));
-    expect(handle.outboxDeliveries().length).toBe(before + 1);
+    expect(handle.outboxDeliveries()).toHaveLength(1);
     const delivery = handle.outboxDeliveries().at(-1);
     expect(delivery?.topic).toBe("scene.committed");
     // Outbox Payload 携带的是第一次提交的 trace（本次重放没有新事务）。

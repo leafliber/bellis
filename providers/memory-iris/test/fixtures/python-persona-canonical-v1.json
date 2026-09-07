@@ -1,0 +1,12 @@
+[
+  {
+    "wire": "{\"revision\":{\"core\":{\"language\":\"中文\",\"name\":\"Iris\"},\"traits\":{\"warmth\":1.0,\"negative_zero\":-0.0,\"tiny\":1e-07},\"narrative\":{\"values\":[\"你好\",\"😀\",{\"\":1,\"𐀀\":2}]}}}",
+    "canonical": "{\"canonical_json_version\":1,\"content\":{\"core\":{\"language\":\"中文\",\"name\":\"Iris\"},\"narrative\":{\"values\":[\"你好\",\"😀\",{\"\":1,\"𐀀\":2}]},\"traits\":{\"negative_zero\":-0.0,\"tiny\":1e-07,\"warmth\":1.0}}}",
+    "sha256": "05248eec9784ccc703ed3f148e7fff22345c169ba9e698d6f9c5b5f7ed2339a7"
+  },
+  {
+    "wire": "{\"revision\":{\"core\":{\"language\":\"und\",\"name_placeholder\":true},\"traits\":{},\"narrative\":{}}}",
+    "canonical": "{\"canonical_json_version\":1,\"content\":{\"core\":{\"language\":\"und\",\"name_placeholder\":true},\"narrative\":{},\"traits\":{}}}",
+    "sha256": "600539efb1440fd91e4ddab3810a1bd096c91c69c2e96684516140133b0de066"
+  }
+]

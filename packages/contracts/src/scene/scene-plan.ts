@@ -1,3 +1,4 @@
+import { SpeechEffectPlanSchema } from "./effect.js";
 import { z } from "zod";
 import { extensibleJsonObject } from "../common/json-value.js";
 import { CueSchema } from "./cue.js";
@@ -39,6 +40,7 @@ export const SceneExecutionStateSchema = z.enum([
  */
 export const ScenePlanSchema = extensibleJsonObject({
   schemaVersion: z.literal(1),
+  effects: SpeechEffectPlanSchema.optional(),
   scene: SceneSchema,
   cues: z.array(CueSchema).min(1).max(64),
   /** soft Lane 准备预算；缺省由 Stage 按 500ms 处理。 */

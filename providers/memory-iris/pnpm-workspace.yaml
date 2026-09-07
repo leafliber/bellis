@@ -3,5 +3,9 @@
 # its own policy file. The Core SDK is published to the local Verdaccio moments
 # before it is consumed, so it can never satisfy minimumReleaseAge; the exclusion
 # goes away with the move to public npm, when this whole file does.
+packages:
+  - '.'
 minimumReleaseAgeExclude:
   - '@iris-memory/sdk@0.11.1'
+# Match isolated CI installation rather than switching store modes on every run.
+enableGlobalVirtualStore: false

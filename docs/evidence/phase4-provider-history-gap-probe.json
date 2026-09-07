@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T23:36:35.702469+00:00",
+  "status": "provider-history-gap-reporting-and-durable-restart-verified-full-revalidation-incomplete",
+  "validation": {
+    "providerTests": 89,
+    "providerTestsExitCode": 0,
+    "providerTypecheckLintFormatBuildExitCode": 0,
+    "newProviderTests": 7,
+    "finalCoreHistoryGapAndStageExitCode": 0,
+    "coreToolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "providerTestsLogSha256": "8a509752d675ffca4198a216de5065b07ed8a6d23e288ca9d4ceb80d0491df61",
+    "providerChecksLogSha256": "cbec7db4bd3d1d96538e8af9d75136e92e121d7252943ac0fbc25ddd7a152894",
+    "rootChecks": "unchanged host baseline; not rerun for this Provider/scripts-only increment",
+    "rootBaselineEvidence": "phase4-history-barrier-probe.json"
+  },
+  "verified": [
+    "Only an events-request history_unavailable/410 creates a gap; unrelated HTTP errors do not invent a history-gap receipt",
+    "Checkpoint-capable Core negotiation rejects a positive legacy cursor without an identity before Persona or SSE requests, preserving the original cursor without inventing an event id",
+    "Provider attempts its own state save and the host callback even when either fails; it retries only the same gap, preserving the original checkpoint, pending payloads and attempts",
+    "Host ACK retains the Provider gap, stops further SSE requests and leaves reads/delivery paused; restart reports the same gap before Persona or event access",
+    "Persona/cache fallback, Recall, Observe, Usage and legacy delivery cannot cross the barrier, including Persona baseline-save completion racing a newly received gap",
+    "A separately installed candidate SDK sends a deliberately divergent saved identity to the real installed Core; its 410 travels through the Provider handler into MemoryHost/DB Worker, cancels old Context and holds the original Usage row unchanged across Worker restart",
+    "Existing deletion SSE and real Chromium output/next-context tests pass on the final build; existing tools and 24 Runtime/Core recovery combinations pass smoke revalidation"
+  ],
+  "limits": [
+    "The default installed Provider SDK is still 0.11.1 and does not send the paired checkpoint header. The new end-to-end probe explicitly injects an installed 0.11.2 candidate client; it does not upgrade or publish the default dependency",
+    "The divergence was created by seeding a saved event identity through the host-owned Provider state API. Actual old Core backup restoration, full public revalidation, safe barrier release and ordinary correction notifications remain unfinished",
+    "The 24-case recovery probe ran before the final extra guard for a Persona baseline-save race; that extra guard is covered by the final 89 tests and final Core/Chromium probe. No full 20-repetition matrix is claimed for this increment",
+    "The root host code did not change this turn; its previous 1040 unit/property and 250 integration checks are historical baseline evidence, not a new run",
+    "Actual ENOSPC, directory hard quota, full Stage/Core crash coupling, production tool authority, Core Session mapping, remote CI, long resource-growth audit, Phase4B and full demo remain open"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "schema": 18,
+    "wheelSha256": "65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9",
+    "installedCoreFilesVerified": 168,
+    "defaultProviderSdk": "0.11.1",
+    "candidateSdk": "0.11.2",
+    "candidateSdkSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762"
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "target": "http://localhost:4873/",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-provider-history-gap-core-probe.json",
+      "exitCode": 0,
+      "sha256": "5e8638c1372b6ea06d17f7df5c5846ebe302696ff4efcc26bb2819843288306e"
+    },
+    {
+      "file": "phase4-provider-history-gap-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "161903392d69e6b6582a77f23316c4727da957247a1504d0efd84d2e69e76f0a"
+    }
+  ],
+  "sourceSha256": {
+    "providers/memory-iris/src/index.ts": "2c8000cdd359f011f0a164e8e080e1131bf6260a575003783815b2743a6d3ccb",
+    "providers/memory-iris/src/state-store.ts": "3a59f84826cca72aba80ed2f972695ed3c7f13ad1800eea86afe48108ed58d83",
+    "providers/memory-iris/test/provider.test.ts": "0de5220f2819cc54a48f37babc19887c61fd2c230871ca51811e11f88fadfbc3",
+    "providers/memory-iris/test/event-checkpoint-state.test.ts": "97ae32bfea5d085a5f259f7d52f277aacf727608427835dcb40647c9f4ad9004",
+    "scripts/iris-history-gap-probe.mjs": "baa3f3380946fe6328a975416e5db3155cc1af39748369f48c9137ac52f3fc33",
+    "scripts/iris-public-probe.mjs": "9ec87fd9c1d28f2f74ea1dee40e8654b9a4ac28cd4342e99d4f23f156a07c792"
+  }
+}

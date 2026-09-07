@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
+  MemoryInputObservation,
+  MemoryPolicyStamp,
   IngestedSignal,
   JsonValue,
   SessionRecord,
@@ -35,6 +37,8 @@ import type { LoggerPort } from "@bellis/observability";
  */
 
 export interface Phase3AdapterOptions {
+  readonly inputPolicy?: () => MemoryPolicyStamp | undefined;
+  readonly inputObservations?: (signal: Signal) => readonly MemoryInputObservation[];
   readonly persistence: PersistenceClient;
   readonly logger?: LoggerPort;
   readonly normalCapacity: number;
@@ -56,7 +60,12 @@ export class DurableSignalStore implements SignalStorePort {
   }
 
   async append(signal: Signal, priorityClass: SignalPriorityClass): Promise<SignalAppendOutcome> {
+    const policy = this.#options.inputPolicy?.();
     return this.#options.persistence.phase3AppendSignal({
+      ...(policy === undefined ? {} : { policy }),
+      ...(this.#options.inputObservations === undefined
+        ? {}
+        : { observations: this.#options.inputObservations(signal) }),
       sessionId: this.#sessionId,
       signal,
       priorityClass,
@@ -104,7 +113,10 @@ export class DurableCycleAdoption implements CycleAdoptionPort {
   }
 
   async adoptCycle(input: CycleAdoptionInput): Promise<void> {
+    if (input.sessionId !== undefined && input.sessionId !== this.#sessionId)
+      throw new Error("cycle session changed before adoption");
     await this.#options.persistence.phase3AdoptCycle({
+      ...(input.context === undefined ? {} : { context: input.context }),
       sessionId: this.#sessionId,
       turnId: input.turnId,
       cycleId: input.cycleId,
@@ -118,6 +130,7 @@ export class DurableCycleAdoption implements CycleAdoptionPort {
       toolRuns: input.packet.toolCalls.map((call) => ({
         toolRunId: call.toolRunId,
         toolName: call.toolName,
+        originalCall: call,
         idempotencyKeyHash: call.idempotencyKey === undefined ? null : hashKey(call.idempotencyKey),
       })),
       trace: { traceId: normalizeTrace(input.traceId) },

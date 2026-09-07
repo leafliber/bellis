@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T16:24:36.560338+00:00",
+  "status": "implementation-progress-tool-gate-incomplete",
+  "validation": {
+    "rootCheck": "passed",
+    "unitAndPropertyTests": 983,
+    "integrationTests": 210,
+    "irisStandaloneTests": 46,
+    "rootCheckLogSha256": "06473b8f34da9548847b11060be016c61c39465cfca323d0815eade2e2bdc908",
+    "publicToolProbeExitCode": 2,
+    "publicToolProbeReport": "phase4-tools-core-probe.json",
+    "publicToolProbeReportSha256": "f2456c0ad758985e1819da56f1c19ca738f418d75dc8302edaaed1138d94dc02"
+  },
+  "verified": [
+    "Installed SDK four-route request mapping, frozen original parameters and keys, lease/revision preservation",
+    "Actual fetch cancellation and retained permit for uncooperative transport",
+    "Definite public rejection versus unknown dispatched writes; redacted errors and safe numeric responses",
+    "Real Core remember: server success followed by response loss, original-key recovery and duplicate identity",
+    "Real Core correct: increment, original-key replay and definite stale-revision 409",
+    "Real Core forget: target/erased=1, protected/held=0, duplicate result and deleted claim not found",
+    "Tool Runtime persists uncertain after started-write response loss and warns next Cycle without automatic repeat"
+  ],
+  "notVerified": [
+    "Fresh pinned Core FTS generation: observed fts_rebuild_pending and intermittent internal_error; search gate incomplete",
+    "Host four-tool registration, trusted actual-request persistence and authorization",
+    "Confirmation content, deadline and cancellation boundary",
+    "Privacy tombstone coordination with tool writes and external events",
+    "Real Legal Hold and protected resources",
+    "Core package/schema migration from current pinned 0.12.0/schema14 to newer source",
+    "A4 stress/crash/disk gates and Phase4B"
+  ],
+  "sourceSha256": {
+    "providers/memory-iris/src/tool-boundary.ts": "32d791dda307c26e457a3b66825efba33701739c3174d1226b363132435fdd52",
+    "providers/memory-iris/src/http.ts": "3a07efb7ed2fd90b79ad6b7b0d9eac1e64f8a9ac59b6af3a93275cb1ae2d5e98",
+    "providers/memory-iris/test/tool-boundary.test.ts": "53e3d61b1586b90093eae613d0ea3482d543e00964eab754b6db35ceed3cd55b",
+    "packages/tool-runtime/src/permissions/rejection.ts": "24e994b4370a3bcc912676d3cdb39900d63c2a7222598083820feda6170e6b26",
+    "packages/tool-runtime/src/runtime.ts": "5e56168d3874cfddac10cdfe2b5015d287ca41ea0658b7388eb0daac6de345f0",
+    "packages/tool-runtime/test/unit/runtime.test.ts": "92420a7efad0570a28c8bca215494edbb48bda7fe2a1b91db14e3480116cd8a5",
+    "packages/decision-loop/src/loop/request-assembly.ts": "09246f49ef5840d0aeeefebe80dcadb090ed8eed646e877ba16aca60549cecc2",
+    "apps/runtime/src/application/phase-3/host.ts": "455395cc415b813e12dcb1341abf6f5b7e7a518a7ddf3938c470543df0b0186f",
+    "apps/runtime/test/integration/phase4-session-binding.integration.test.ts": "1051ac73bee7155e3b74ef659fd1c78ef84bdea64ceb8a1867a74bdf165ab4f4",
+    "scripts/iris-tools-probe.mjs": "ad8a7388af6af87e8d77391e53a3e23e51fd70f491b2b5abb98d872d8cac40e1",
+    "scripts/iris-public-probe.mjs": "2c56a095633832de2afb2fe06882bc5ce221632bba2c69bf88a26d14a1883ef0"
+  }
+}

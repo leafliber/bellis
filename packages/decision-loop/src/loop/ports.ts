@@ -1,4 +1,4 @@
-import type { DecisionPacket } from "@bellis/contracts";
+import type { DecisionPacket, ContextAdoption } from "@bellis/contracts";
 
 /**
  * Decision Loop 的宿主侧 Port（P0 草案；P4 由 Runtime/Persistence 实现）。
@@ -21,6 +21,9 @@ import type { DecisionPacket } from "@bellis/contracts";
  * Prepare、不推进水位、不执行可变 Tool、不提交 Scene。
  */
 export interface CycleAdoptionInput {
+  /** Frozen trusted Turn identity; absent only for legacy direct callers. */
+  readonly sessionId?: string;
+  readonly context?: ContextAdoption;
   readonly turnId: string;
   readonly cycleId: string;
   readonly cycleIndex: number;

@@ -1,4 +1,35 @@
+import {
+  MemoryRecallVerificationRequestsSchema,
+  MemoryRecallVerificationSchema,
+} from "./memory/recall-verification.js";
+import { MemoryHistoryGapSchema } from "./memory/history-gap.js";
+import { MemoryRecallRequestSchema } from "./memory/recall-request.js";
+import { MemoryResourceInvalidationSchema } from "./memory/resource-invalidation.js";
+import {
+  LocalInputVisibilityRequestSchema,
+  LocalInputVisibilitySchema,
+} from "./memory/local-input-visibility.js";
+import { MemoryForgetReceiptSchema, MemoryForgetOperationSchema } from "./memory/forget.js";
+import { PreparedToolCallSchema } from "./decision/prepared-tool-call.js";
+import { MemoryOutputTargetSchema, EffectPreparationSchema } from "./memory/effect-preparation.js";
+import {
+  MemoryPolicyStampSchema,
+  MemoryTombstoneSchema,
+  MemoryPolicySnapshotSchema,
+  MemoryPolicyChangeSchema,
+} from "./memory/policy.js";
+import {
+  EffectSegmentSchema,
+  SpeechEffectPlanSchema,
+  AudioSegmentBindingSchema,
+  StageEffectReceiptSchema,
+  StageEffectAckSchema,
+  StageEffectReleaseSchema,
+  StageEffectSealSchema,
+} from "./scene/effect.js";
+import { MemoryInputObservationSchema } from "./memory/input-observation.js";
 import { z } from "zod";
+import { ContextManifestSchema, ContextAdoptionSchema } from "./memory/context-manifest.js";
 import { ActionFrameSchema } from "./decision/action-frame.js";
 import { DecisionPacketSchema } from "./decision/decision-packet.js";
 import {
@@ -95,6 +126,20 @@ import {
 
 /** 参与双目标生成的全部公开 Schema。key 即生成文件名。 */
 export const CONTRACT_SCHEMA_ENTRIES = {
+  "context-manifest": ContextManifestSchema,
+  "memory-resource-invalidation": MemoryResourceInvalidationSchema,
+  "memory-history-gap": MemoryHistoryGapSchema,
+  "memory-recall-request": MemoryRecallRequestSchema,
+  "memory-recall-verification-requests": MemoryRecallVerificationRequestsSchema,
+  "memory-recall-verification": MemoryRecallVerificationSchema,
+  "local-input-visibility-request": LocalInputVisibilityRequestSchema,
+  "local-input-visibility": LocalInputVisibilitySchema,
+  "memory-policy-stamp": MemoryPolicyStampSchema,
+  "memory-tombstone": MemoryTombstoneSchema,
+  "memory-policy-snapshot": MemoryPolicySnapshotSchema,
+  "memory-policy-change": MemoryPolicyChangeSchema,
+  "memory-input-observation": MemoryInputObservationSchema,
+  "context-adoption": ContextAdoptionSchema,
   "json-value": JsonValueSchema,
   "trace-context": TraceContextSchema,
   "error-envelope": ErrorEnvelopeSchema,
@@ -106,6 +151,9 @@ export const CONTRACT_SCHEMA_ENTRIES = {
   "overlay-intent": OverlayIntentSchema,
   "sync-policy": SyncPolicySchema,
   "action-frame": ActionFrameSchema,
+  "prepared-tool-call": PreparedToolCallSchema,
+  "memory-forget-receipt": MemoryForgetReceiptSchema,
+  "memory-forget-operation": MemoryForgetOperationSchema,
   "tool-call": ToolCallSchema,
   "decision-packet": DecisionPacketSchema,
   "ingested-signal": IngestedSignalSchema,
@@ -120,6 +168,15 @@ export const CONTRACT_SCHEMA_ENTRIES = {
   cue: CueSchema,
   scene: SceneSchema,
   "scene-plan": ScenePlanSchema,
+  "memory-output-target": MemoryOutputTargetSchema,
+  "effect-preparation": EffectPreparationSchema,
+  "effect-segment": EffectSegmentSchema,
+  "speech-effect-plan": SpeechEffectPlanSchema,
+  "audio-segment-binding": AudioSegmentBindingSchema,
+  "stage-effect-receipt": StageEffectReceiptSchema,
+  "stage-effect-ack": StageEffectAckSchema,
+  "stage-effect-release": StageEffectReleaseSchema,
+  "stage-effect-seal": StageEffectSealSchema,
   "scene-execution-state": SceneExecutionStateSchema,
   "stage-capabilities": StageCapabilitiesSchema,
   "session-record": SessionRecordSchema,

@@ -109,6 +109,42 @@ const RuntimeConfigSchema = z
     persistence: z
       .object({
         defaultDeadlineMs: PositiveInt(120_000).default(10_000),
+        transactionCacheMaxBytes: z
+          .number()
+          .int()
+          .min(4 * 1024 ** 2)
+          .max(64 * 1024 ** 2)
+          .default(8 * 1024 ** 2),
+        walHighWaterBytes: z
+          .number()
+          .int()
+          .min(16 * 1024 ** 2)
+          .max(1024 ** 4)
+          .default(64 * 1024 ** 2),
+        stateMaxBytes: z
+          .number()
+          .int()
+          .min(16 * 1024 ** 2)
+          .max(1024 ** 4)
+          .default(1024 ** 3),
+        telemetryMaxBytes: z
+          .number()
+          .int()
+          .min(16 * 1024 ** 2)
+          .max(1024 ** 4)
+          .default(64 * 1024 ** 2),
+        highWaterBytes: z
+          .number()
+          .int()
+          .min(16 * 1024 ** 2)
+          .max(1024 ** 4)
+          .default(512 * 1024 ** 2),
+        completionHeadroomBytes: z
+          .number()
+          .int()
+          .min(160 * 1024 ** 2)
+          .max(1024 ** 4)
+          .default(160 * 1024 ** 2),
       })
       .prefault({}),
     /**
@@ -163,7 +199,7 @@ const RuntimeConfigSchema = z
              */
             apiKeyEnv: z.string().min(1).max(128).default("BELLIS_MODEL_API_KEY"),
             /** 事件间隔毫秒（demo-scripted 节奏；中断演示）。 */
-            paceMs: PositiveInt(60_000).default(0),
+            paceMs: z.number().int().min(0).max(60_000).default(0),
           })
           .prefault({}),
       })

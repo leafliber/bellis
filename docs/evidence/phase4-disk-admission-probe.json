@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T20:34:03.008983+00:00",
+  "status": "actual-disk-high-water-admission-verified-hard-quota-and-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1035,
+    "integrationTests": 232,
+    "runtimeUnitTests": 147,
+    "persistenceUnitTests": 47,
+    "persistenceIntegrationTests": 110,
+    "runtimeIntegrationTests": 111,
+    "generatedContractFiles": 160,
+    "irisProviderTests": 80,
+    "irisProviderTypecheckExitCode": 0,
+    "realCoreToolsSseAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "repetitionsPerWindowAndTarget": 1,
+    "rootCheckLogSha256": "e232ac55dd2d58a760a7a1bba8493fdfc9f760c2060369ede2586434364ca614",
+    "providerTestLogSha256": "5e50f90c3eef5996c7ca424a9ceab83a2fce38fa7b9c6d99955926789890d9cf"
+  },
+  "verified": [
+    "Actual state/telemetry database, WAL, SHM and worker-lock file lengths are measured by the DB Worker; filesystem available space is read through statfs",
+    "New Signal, adoption, effect preparation and Scene commit are gated before their new-fact writes; exact accepted retries retain their existing results",
+    "Real SQLite pressure fixture writes a 16MiB blob and asserts WAL exceeds 16MiB; new work is rejected without a new Manifest or consumed-watermark advance",
+    "Previously admitted effect confirmation commits once under high-water pressure; duplicate receipt remains duplicate, and confirmed speech plus pending Observe survive DB Worker restart",
+    "Missing mandatory database files fail closed rather than reporting zero usage",
+    "Runtime health ready transitions from 200 to 503 on actual disk pressure while live remains 200 and recovery reads stay available; no file path enters the error",
+    "Disk preflight cancellation aborts Context before provider queries; elapsed preflight/assembly time reduces the remaining Recall budget",
+    "Real Core public tools, external deletion SSE and three-cycle Chromium path pass; the real host records actual disk status",
+    "All 24 already-covered recovery combinations pass one smoke repetition; complete recovery Gate correctly remains incomplete"
+  ],
+  "limits": [
+    "This is admission-time measurement and gating, not an enforced hard bound on all database/WAL growth",
+    "160MiB completion headroom and 8MiB admission margin are configured floors, not a proved worst-case SQLite allocation bound or filesystem preallocation",
+    "Full capacity Gate still requires maximum four active plans, 32 segments each and eight-provider fan-out, accounting for JSON copies, indexes, WAL and all finalization writes",
+    "Other processes and existing background state/privacy/delivery writes may consume filesystem space; ENOSPC can still prevent confirmation",
+    "This run does not rerun the historical 480 cases at 20 repetitions, and does not close old-snapshot, remaining effect/crash or quota windows",
+    "Production authority, full Persona lifecycle, Core Session mapping, SSE gap/correction handling, Phase4B and complete demo remain open"
+  ],
+  "retries": {
+    "initialProbeSampling": "Two initial probe runs exited 1 due to a newly added sampler referencing an undefined signal; fixed to an explicit bounded signal and both full requested probes rerun. Initial failures are not counted as passes."
+  },
+  "observedDiskStatus": {
+    "ready": true,
+    "reason": "ready",
+    "databaseBytes": 8192,
+    "walBytes": 865264,
+    "auxiliaryBytes": 78344,
+    "totalBytes": 951800,
+    "availableBytes": 39493193728,
+    "highWaterBytes": 536870912,
+    "completionHeadroomBytes": 167772160,
+    "admissionWriteMarginBytes": 8388608
+  },
+  "reports": [
+    {
+      "file": "phase4-disk-admission-core-probe.json",
+      "sha256": "ef1448590b7d9bdd48575a7d455bf66969b05ca8dca9da42f94ed256915760b6",
+      "exitCode": 0
+    },
+    {
+      "file": "phase4-disk-admission-recovery-smoke.json",
+      "sha256": "91d008e518610e7a070e26d6636eec213d3af786c540883854603369d090317f",
+      "exitCode": 2
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/disk-admission.ts": "9b98f614f8304d6d7c8c463641ee6ed63ed0b69d4d9e94311bd8c7d59e6ddd23",
+    "packages/persistence/src/worker/disk-admission.ts": "50703d0d52c64f4e121272276ae13feb4a796645588d9db825629a4b605616d3",
+    "packages/persistence/src/worker/database.ts": "3ba0debdbac353cd44de34bda452b8e031304ab913a13f1cdc2c2af4b415b430",
+    "packages/persistence/src/worker/entry.ts": "c3374a4468a5dfb1eec86536c598bc094ad2a116be6dd34ce901bdabc567b5ba",
+    "packages/persistence/src/worker/operations.ts": "33f02885d67ee2e1a2bac90af3a4863f4cd52f842c1add5b3a89670d09b4ba96",
+    "packages/persistence/src/client/persistence-client.ts": "51ff63a18c977e3f7c312b1f8b2f52bd3b52fceed4311dedd3c527ab8c9fbff3",
+    "packages/persistence/src/rpc/operations.ts": "e631408abf7a8a291f04e555deb4c1ddf8112a537da950826bef2696d7bca66b",
+    "packages/persistence/src/errors.ts": "53cc4b98bf6c52f1795bd1e7e6960d0efdf0551933f60cfd4cad226901f1b44b",
+    "packages/persistence/src/index.ts": "a3e3888bdb566d7038c316bd3c009a505362d3f85ad1825121a671ff68be8910",
+    "packages/persistence/src/repositories/phase3.ts": "ad3c45e187be35821a838b5f36b02e32f539734c507bafd8951efdf5079962ad",
+    "packages/persistence/src/repositories/phase4-effects.ts": "17c9d6b5a84aa00c483fb10d2be8985555ef7dea87d9f17d352b8b27795e3351",
+    "apps/runtime/src/bootstrap/config.ts": "a39217aa5d2d56199b40ec6d42bb436afe897e7a9605e7d817f0bab05f0ea8ea",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "9a80ca04ed0581e5a520ec16628767b11adc1d4a58f7fbb2aee591e396a3a298",
+    "apps/runtime/src/bootstrap/server.ts": "92b20d322401592e554369a080cc115549987ee654eef783df798c8936328f00",
+    "apps/runtime/src/routes/health.ts": "a4237932b8e194a1c1c181792cd3b27b86447fb27354445ef6c07209647b5f2b",
+    "apps/runtime/src/errors/mapping.ts": "31f3afcdcc2b6d6af4876792b25c5fecd707a35951f2c739466d9de2f6037808",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "f64a4678463562a1cf328155cb5065439a09d0895579b03f4125d675f02facca",
+    "packages/persistence/test/unit/disk-admission.test.ts": "dbb9dfb1b269c2cb703caf0af5ec89c563fbbd22d1acc3a7f8a60d394bec2667",
+    "packages/persistence/test/integration/phase4-effects.integration.test.ts": "3de4ed578486e001e4905669cd80df107789697d41a9545693400e8b3a9a95bc",
+    "apps/runtime/test/integration/disk-readiness.integration.test.ts": "f87205e177cf037eebdd961f7ed231106e3dd456ed1469b6b6e59f77e2625ce1",
+    "apps/runtime/test/unit/commit-fake-scene.test.ts": "c565814ef556a3ad2627a762f83fdc3493a6443a283d7b13c124413e82aaacb4",
+    "apps/runtime/test/unit/error-mapping.test.ts": "5f0b87e70befb53bc8beeddceb3f07b41af3b9ca6d50c09c163d352ebb852560",
+    "apps/runtime/test/unit/phase4-memory-host.test.ts": "51e1e89c7fc669b919162b62b9d59c65e240d241162306f24c769dc6664f87ad",
+    "scripts/iris-host-context-probe.mjs": "c10d034f5a1d5fcca3c6e67c018046cd40d69deaea49264c665b0dd908580bc6"
+  }
+}

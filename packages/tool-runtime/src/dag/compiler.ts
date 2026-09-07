@@ -1,6 +1,7 @@
 import type { ToolCall } from "@bellis/contracts";
 import type { ToolRegistry } from "../registry/registry.js";
 import type { DagCompileIssue, DagCompileResult, DagIssueCode, DagNodePlan } from "../port.js";
+import { frozenJsonCopy } from "../registry/frozen-json.js";
 
 /** Independent call-plan validation. Legacy DAG API names remain for source compatibility.
  * Explicit dependencies are rejected; dependent work belongs to the next Cycle.
@@ -22,7 +23,14 @@ export function compileDag(registry: ToolRegistry, calls: readonly ToolCall[]): 
     });
   }
 
-  for (const call of calls) {
+  for (const input of calls) {
+    let call: ToolCall;
+    try {
+      call = frozenJsonCopy(input);
+    } catch {
+      issues.push({ code: "arguments_invalid", toolRunId: input.toolRunId });
+      continue;
+    }
     const registered = registry.get(call.toolName);
     if (registered === null) {
       issues.push({ code: "unknown_tool", toolRunId: call.toolRunId, detail: call.toolName });
@@ -56,22 +64,23 @@ export function compileDag(registry: ToolRegistry, calls: readonly ToolCall[]): 
       }
       lockKey = `keyed:${declaration.name}:${String(rawKey).normalize("NFKC").toLowerCase()}`;
     }
-    const node: DagNodePlan = {
+    const node: DagNodePlan = Object.freeze({
       call,
       declaration,
       lockKey,
-      dependsOn: [],
-    };
+      dependsOn: Object.freeze([]),
+    });
     nodes.push(node);
     byRunId.set(call.toolRunId, node);
   }
 
-  return {
+  Object.freeze(nodes);
+  return Object.freeze({
     ok: issues.length === 0,
-    issues,
-    layers: issues.length === 0 && nodes.length > 0 ? [nodes] : [],
+    issues: Object.freeze(issues),
+    layers: Object.freeze(issues.length === 0 && nodes.length > 0 ? [nodes] : []),
     nodes: issues.length === 0 ? nodes : [],
-  };
+  });
 }
 
 export type { DagIssueCode };

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T20:11:23.703495+00:00",
+  "status": "explicit-space-scope-and-startup-local-session-binding-verified-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1033,
+    "integrationTests": 230,
+    "runtimeUnitTests": 146,
+    "runtimeIntegrationTests": 110,
+    "persistenceIntegrationTests": 109,
+    "generatedContractFiles": 160,
+    "irisProviderTests": 80,
+    "realCoreToolsSseAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "repetitionsPerWindowAndTarget": 1,
+    "rootCheckLogSha256": "421e18dcf04c5ba37e15375787aff48c1ee029465b1bfee8e57334d67ffa06e9",
+    "providerTestLogSha256": "944807e5a5165fc5d42602e8ba43b574fe7329647176b5abf5f46e3198859eb4"
+  },
+  "verified": [
+    "Runtime validates explicit space scope and acknowledgement of cross-Session semantics before allocating workers or listeners; unverified Core Session/group configuration is rejected",
+    "Provider startup waits for atomic local Session scope initialization; changing app, agent, space, identity, privacy scope or privacy revision after restart is rejected even before first Signal/adoption",
+    "Conflicting startup binding rolls back new policy insertion; original scope and a different local Session sharing that explicit space scope restore successfully",
+    "Blocked policy restores its original binding without clearing the privacy barrier; a late binding ACK cannot authorize a different newly selected Session",
+    "Recall and Observe projections use the host configuration snapshot; caller mutation of the provider registry and output labels cannot retarget effects",
+    "Restored Observe with missing or different space, different agent, Session or group scope is not sent to a provider and is not rewritten; the Outbox retains its failed delivery record",
+    "Real Core public tools, external deletion SSE and Chromium three-cycle/four-Observe/three-Usage paths pass with the explicit space configuration",
+    "All 24 previously covered recovery combinations pass one smoke repetition on this code; the aggregate correctly remains incomplete with exit code 2"
+  ],
+  "limits": [
+    "No remote Core Session existence or authorization verification, durable Bellis-to-Core Session mapping, group-scope host support or full production tool scope coordination is claimed",
+    "Current local binding reuses Migration 10 and policy scope hashing; it is not proof of remote Session identity",
+    "Historical 480-case recovery evidence was not rerun at 20 repetitions after this change; the present evidence covers 24 smoke cases only",
+    "SSE gaps, ordinary corrections, full production tool authorization, held/protected and Persona lifecycle cases, remaining recovery windows, disk quotas, Phase4B and full demo remain open"
+  ],
+  "reports": [
+    {
+      "file": "phase4-explicit-scope-core-probe.json",
+      "sha256": "15ddd459177ded7da28bbdc05097db1a2bed1a10062e6a4114750cfc8bc37306",
+      "exitCode": 0
+    },
+    {
+      "file": "phase4-explicit-scope-recovery-smoke.json",
+      "sha256": "04a41ac9e4ebcbc067cbe45ea76ccc122908c42a415d7e1b6b0baf3eaa575311",
+      "exitCode": 2
+    }
+  ],
+  "sourceSha256": {
+    "apps/runtime/src/application/phase-4/memory-host.ts": "039e2ab0394f516548dcd006ba6d8c3f476f49fd7295ffdc0517690cbcaa86c3",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "123ceac4a3569dc43b02f73514bb8b81ceba46b81c9fb87a7819f1876f2d2fb0",
+    "packages/persistence/src/client/persistence-client.ts": "8bc702f65ae7ed4c43f736eb3a0be57e41d0be6e5455fd7d5a5e04f44e940bd4",
+    "packages/persistence/src/rpc/operations.ts": "f0f401be5143fe8ec6c82fb369f2dc24b6da9a4cc0bee41e51e4a853b8d40ade",
+    "packages/persistence/src/worker/operations.ts": "7aec62c8108fcfb3369cbbd8407959a9e7fb6ec00665b040772275c5bbd8569f",
+    "packages/persistence/src/repositories/phase4-memory-policy.ts": "8c920d18bbdaed999aae1ba93b032678f12013cdba37e2b926b639c028592fe5",
+    "apps/runtime/test/unit/phase4-memory-host.test.ts": "47cd73b07d616d1411167fbd7f802063530cb425e693c5906a285c322dd90aeb",
+    "apps/runtime/test/integration/phase4-memory-scope.integration.test.ts": "26076b1fd5bfb0a909aebe5aff0bb4718b5333c4a362ac9a98e9e0087a6774e5",
+    "apps/runtime/test/integration/phase4-local-privacy.integration.test.ts": "faf53cf14733e1fa4532a9fd112bee6bf499a3b57b86078f1438a5becece342b",
+    "scripts/iris-observe-recovery-child.mjs": "0653e49787a834af9105a4fe1cca86d7454c0846eb7bc5e126b86f0962b53fd8",
+    "scripts/iris-host-context-probe.mjs": "b3241c80fdd3e93276793cc7873ee6803d5861dcca08367e7fb9a13637025af1",
+    "scripts/iris-resource-invalidation-probe.mjs": "2059a355694c045772f0453d4ac1da57caf8637e4616cb4fb78c39d3d1947103",
+    "scripts/iris-prepared-tool-probe.mjs": "10fd558900f92544e928533a5dd814b3ff888abfe4338e617d029cc3e881679e",
+    "scripts/phase-4-demo-child.mjs": "9a79b8ee7403bdefe5d468ae5e71d99747b6a5ddde5fbce098704da9fc0bd76f",
+    "scripts/iris-forget-probe.mjs": "5384ad2c3178ed388544ed4d3dd9013c25ed244d6f748645a98cbf8acd747fca",
+    "scripts/iris-recovery-child.mjs": "01b56e68474778c9b7dafff2351a8c7e8aa1ec9e7048771ffd42c9f3da1103af",
+    "scripts/iris-cycle-recovery-child.mjs": "ccf13cc9c5fc4769fc79883edd75c7587f3e69f18286c9e56f65fa989c18c56f"
+  },
+  "corePublicSurfaceInspection": {
+    "openApiPathCount": 85,
+    "openApiSha256": "929f80ecd1ee4a97ba94a6da5700464bf0d2c912ccb2b99acca0d3d2ede3abe2",
+    "installedSdkDeclarationSha256": "bce66a7d20b6543e61a0ebaa73cfe8a601be840e507d133e11f8e9881e2a4ef9",
+    "sessionLookupPresent": false,
+    "scope": "Inspection of the checked local application OpenAPI and installed SDK declarations; not a newly added Core API capability"
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T00:23:09.777505+00:00",
+  "status": "recall-publication-and-replay-canonical-checks-verified-full-history-revalidation-incomplete",
+  "validation": {
+    "coreRelatedTests": 227,
+    "newTests": 13,
+    "testBatches": [
+      {
+        "tests": 144,
+        "exitCode": 0,
+        "logSha256": "da6c627e861dfa89aeb3c07e667b40660fdae53aa6e1eeaab2f817108496729f"
+      },
+      {
+        "tests": 82,
+        "exitCode": 0,
+        "logSha256": "01153761517cb1d6e5c7575e9d02582030209f58554a32ec34bb7a22b18118a1"
+      },
+      {
+        "tests": 15,
+        "includes": "13 focused tests (12 already counted in first batch) and 2 performance tests",
+        "exitCode": 0,
+        "logSha256": "faa55403858093a33691c94062bf764b2cfbebbf350a18c2f1a7a7202d90fd4a"
+      }
+    ],
+    "coreMypyExitCode": 0,
+    "coreRuffCheckAndFormatExitCode": 0,
+    "probeSyntaxExitCode": 0,
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "fullRecoveryGate": "incomplete",
+    "performance": {
+      "tests": 2,
+      "status": "passed",
+      "samplesPerTest": 40,
+      "structuredP95BudgetMs": 50,
+      "ftsP95BudgetMs": 100,
+      "scope": "existing sequential hot-index RecallService benchmarks, including persistence; not long growth or Bellis end-to-end latency acceptance"
+    },
+    "bellisRootCheck": "not-rerun; prior 1040 unit/property and 254 integration baseline, host production source unchanged"
+  },
+  "verified": [
+    "Replay checks candidates and current Persona in the same read snapshot as saved-response lookup; initial publication and concurrent-winner replay check in their write transaction",
+    "Supersede, retract, expiration and Persona publication reject stale results at all three boundaries without revealing affected resource identities",
+    "Failed initial publication leaves no Recall request row; rejected replay preserves the entire original response/returned set, while a fresh independent request can read current valid resources",
+    "Authorized historical replay retains its original as_of evaluation instant; unrelated changes and fresh deadlines preserve the unchanged original result",
+    "Installed SDK 0.11.1 through checked HTTP confirms stable valid replay, public Correct while Worker stopped, rejected old Recall with 409 conflict, and unchanged original Usage report identity/stage counts",
+    "Final installation passes new-revision Context, cancellation, durable event checkpoint, deletion, gap barrier/inventory and Chromium regression; tools and existing 24-case crash smoke pass"
+  ],
+  "limits": [
+    "This does not create a public cross-request snapshot, inventory item verdicts, reconciled Observation/Usage authority or safe atomic history-gap release",
+    "Existing per-resource hard filters are reused; this is not independent rehashing of all persisted response bodies. Pending event identities and original watermarks are not upgraded to new consistency proofs",
+    "The real HTTP case covers Claim supersede; other changes and publication interleavings are Core integration-test cases. No new SIGKILL window or full Core regression is claimed",
+    "Default SDK 0.11.1 and default Provider Core schema window are unchanged; candidate SDK 0.11.2 is isolated for checkpoint/gap probes pending registry approval",
+    "Actual old backups, external StateStore coverage, full A4 recovery/capacity/production tool authority, Core Session mapping, remote CI, long growth, Phase4B and complete demo remain open"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 19,
+    "bellisStateMigration": 18,
+    "wheelSha256": "c3114eec8208aff4b527d261fcee285bc6f347cfb5837ac7e14dd23ef04b8beb",
+    "installedFilesVerified": 170,
+    "defaultSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "applicationOpenapiVsPreviousCandidate": "byte-identical"
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-recall-revalidation-core-probe.json",
+      "exitCode": 0,
+      "sha256": "06c094c87a756e39e8f92f6dff64f58d1c02ffcbd67db7eb5ef78b3739e66676"
+    },
+    {
+      "file": "phase4-recall-revalidation-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "992528c0159c5370c341b1f0641642c5cc48f0212f090989f060c40ca9666117"
+    }
+  ],
+  "sourceSha256": {
+    "scripts/iris-public-probe.mjs": "e41e50fef87665d4b04e8a15e6446897ad70078810d76919497204f249eefdea",
+    "scripts/iris-resource-invalidation-probe.mjs": "ff02c4f84bada50721aaebd04af1475f78aab8baa6c22729f23c48a9d6c368ea",
+    "../iris_memory_core/src/iris_memory_core/application/recall.py": "3f69767bc7a1d456ac5743549f34ea1dd6ce0a3e00bb3e0332ff83aec6d5175a",
+    "../iris_memory_core/tests/integration/test_recall_publication_revalidation.py": "5bb2300bee8a6e4e40d2202825c3a1c300451172b87313b26fb3205281dec979",
+    "../iris_memory_core/docs/adr/0014-phase6-fts-recall.md": "61c75c535d22577103930691c5cfba2442f7f6b07098ae5a8717bd827c3eff9c"
+  }
+}

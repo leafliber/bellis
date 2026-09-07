@@ -176,7 +176,422 @@ function envelope(overrides: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+const contextManifest = {
+  schemaVersion: 1,
+  manifestId: MESSAGE_ID,
+  sessionId: SESSION_ID,
+  cycleId: CYCLE_ID,
+  modelRequestId: "request",
+  identityScope: "profile:one",
+  privacyScope: "space:one",
+  privacyRevision: "1",
+  generation: 0,
+  promptEpoch: "a".repeat(64),
+  promptHash: "b".repeat(64),
+  recordedAtMs: 1,
+  persona: {
+    sourceId: "iris",
+    agentId: "agent",
+    revision: "1",
+    contentHash: "hash",
+    rendererVersion: 1,
+  },
+  budget: {
+    estimator: "utf8-upper-bound-v1",
+    maxInputTokens: 4000,
+    estimatedInputTokens: 1000,
+    memoryTokens: 0,
+    localTruncated: false,
+  },
+  providers: [],
+  blocks: [],
+};
+
+const effectSegment = {
+  segmentId: MESSAGE_ID,
+  cueId: CUE_ID,
+  lane: "audio",
+  start: 0,
+  end: 4,
+  textHash: "a".repeat(64),
+};
+const effectPlan = {
+  schemaVersion: 1,
+  sessionId: SESSION_ID,
+  connectionGeneration: SIGNAL_ID,
+  contentHash: "b".repeat(64),
+  textLength: 4,
+  segments: [effectSegment],
+};
+const effectIdentity = {
+  sessionId: SESSION_ID,
+  connectionGeneration: SIGNAL_ID,
+  sceneId: SCENE_ID,
+  cueId: CUE_ID,
+  segmentId: MESSAGE_ID,
+  contentHash: "b".repeat(64),
+};
+const audioBinding = {
+  schemaVersion: 1,
+  ...effectIdentity,
+  streamId: STREAM_ID,
+  sampleRateHz: 48000,
+  startSample: 0,
+  endSample: 960,
+};
+const effectReceipt = {
+  schemaVersion: 1,
+  ...effectIdentity,
+  receiptId: TOOL_RUN_ID,
+  start: 0,
+  end: 4,
+  appliedAtStageUs: "100",
+  lane: "audio",
+  boundary: "worklet_rendered",
+  streamId: STREAM_ID,
+  renderedSamples: 960,
+};
+const effectAck = {
+  schemaVersion: 1,
+  sessionId: SESSION_ID,
+  connectionGeneration: SIGNAL_ID,
+  sceneId: SCENE_ID,
+  receiptId: TOOL_RUN_ID,
+  outcome: "recorded",
+  reason: null,
+};
+
 export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
+  "memory-history-gap": {
+    valid: [
+      {
+        schemaVersion: 1,
+        providerId: "iris",
+        agentId: "agent",
+        gapId: "a".repeat(64),
+        reason: "history_unavailable",
+        cursor: "7",
+        eventId: "old:7",
+      },
+    ],
+    invalid: [
+      {
+        schemaVersion: 1,
+        providerId: "iris",
+        agentId: "agent",
+        gapId: "a".repeat(64),
+        reason: "history_unavailable",
+        cursor: "07",
+      },
+    ],
+  },
+  "memory-recall-verification-requests": {
+    valid: [
+      [
+        {
+          schemaVersion: 1,
+          attemptId: "11111111-1111-4111-8111-111111111111",
+          requestId: "q",
+          agentId: "agent",
+          spaceId: "space",
+          body: { request_id: "q" },
+        },
+      ],
+    ],
+    invalid: [[], {}],
+  },
+  "memory-recall-verification": {
+    valid: [
+      {
+        schemaVersion: 1,
+        checkedAt: "2026-09-07T00:00:00Z",
+        results: [{ requestId: "q", status: "valid" }],
+      },
+    ],
+    invalid: [
+      {},
+      { schemaVersion: 1, checkedAt: "2026-09-07T00:00:00Z", results: [] },
+      {
+        schemaVersion: 1,
+        checkedAt: "2026-02-30T00:00:00Z",
+        results: [{ requestId: "q", status: "valid" }],
+      },
+    ],
+  },
+  "memory-recall-request": {
+    valid: [
+      {
+        schemaVersion: 1,
+        attemptId: "11111111-1111-4111-8111-111111111111",
+        requestId: "original-query",
+        agentId: "agent-1",
+        spaceId: "space-1",
+        body: {
+          request_id: "original-query",
+          topic: "example",
+          deadline_at: "2026-09-07T00:00:00Z",
+        },
+      },
+    ],
+    invalid: [{}],
+  },
+  "memory-forget-receipt": {
+    valid: [
+      { requestId: "receipt", targetCount: 1, erasedCount: 1, protectedSkipped: 0, heldSkipped: 0 },
+    ],
+    invalid: [{ requestId: "", targetCount: -1 }],
+  },
+  "memory-forget-operation": {
+    valid: [
+      {
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        toolRunId: "22222222-2222-4222-8222-222222222222",
+        scopeKey: "a".repeat(64),
+        preparedDigest: "b".repeat(64),
+        barrierGeneration: 1,
+        state: "blocked",
+        receipt: null,
+      },
+    ],
+    invalid: [{ state: "unknown" }],
+  },
+  "memory-output-target": {
+    valid: [
+      {
+        providerId: "iris",
+        agentId: "agent",
+        spaceId: "space",
+        sourceStream: "effects",
+        privacyLabels: ["space:space"],
+      },
+    ],
+    invalid: [{ providerId: "iris" }],
+  },
+  "effect-preparation": {
+    valid: [{ schemaVersion: 1, plan: { ...scenePlan, effects: effectPlan }, targets: [] }],
+    invalid: [{ schemaVersion: 1, plan: {}, targets: [] }],
+  },
+  "effect-segment": {
+    valid: [effectSegment],
+    invalid: [
+      { ...effectSegment, start: -1 },
+      { ...effectSegment, text: "client supplied" },
+    ],
+  },
+  "speech-effect-plan": {
+    valid: [effectPlan],
+    invalid: [
+      { ...effectPlan, segments: [] },
+      { ...effectPlan, connectionGeneration: "0" },
+    ],
+  },
+  "audio-segment-binding": {
+    valid: [audioBinding],
+    invalid: [
+      { ...audioBinding, sampleRateHz: 44100 },
+      { ...audioBinding, endSample: 28800001 },
+    ],
+  },
+  "stage-effect-receipt": {
+    valid: [
+      effectReceipt,
+      {
+        schemaVersion: 1,
+        ...effectIdentity,
+        receiptId: TOOL_RUN_ID,
+        start: 0,
+        end: 4,
+        appliedAtStageUs: "100",
+        lane: "subtitle",
+        boundary: "subtitle_applied",
+      },
+    ],
+    invalid: [
+      { ...effectReceipt, text: "forged" },
+      { ...effectReceipt, boundary: "received" },
+      { ...effectReceipt, lane: "subtitle" },
+    ],
+  },
+  "stage-effect-seal": {
+    valid: [
+      {
+        schemaVersion: 1,
+        sessionId: effectAck.sessionId,
+        connectionGeneration: effectAck.connectionGeneration,
+        sceneId: effectAck.sceneId,
+        bindings: [audioBinding],
+      },
+    ],
+    invalid: [{ schemaVersion: 1 }],
+  },
+  "stage-effect-release": {
+    valid: [
+      {
+        schemaVersion: 1,
+        sessionId: effectAck.sessionId,
+        connectionGeneration: effectAck.connectionGeneration,
+        sceneId: effectAck.sceneId,
+      },
+    ],
+    invalid: [{ schemaVersion: 1 }],
+  },
+  "stage-effect-ack": { valid: [effectAck], invalid: [{ ...effectAck, outcome: "received" }] },
+  "memory-input-observation": {
+    valid: [
+      {
+        providerId: "iris",
+        agentId: "agent",
+        spaceId: "space",
+        actorExternalIdentityId: "trusted-actor",
+        sourceStream: "input",
+        role: "user",
+        content: "hello",
+        privacyLabels: ["space:space"],
+      },
+    ],
+    invalid: [
+      {},
+      {
+        providerId: "iris",
+        agentId: "agent",
+        spaceId: "space",
+        actorExternalIdentityId: "trusted-actor",
+        sourceStream: "input",
+        role: "assistant",
+        content: "planned",
+        privacyLabels: ["space:space"],
+      },
+    ],
+  },
+  "local-input-visibility-request": {
+    valid: [
+      {
+        sessionId: SESSION_ID,
+        policy: { scopeKey: "a".repeat(64), generation: 0 },
+        signalIds: [MESSAGE_ID],
+        toolRuns: [{ toolRunId: TOOL_RUN_ID, toolName: "memory_search" }],
+      },
+    ],
+    invalid: [
+      {
+        sessionId: SESSION_ID,
+        policy: { scopeKey: "a".repeat(64), generation: 0 },
+        signalIds: Array(165).fill(MESSAGE_ID),
+        toolRuns: [],
+      },
+      {
+        sessionId: SESSION_ID,
+        policy: { scopeKey: "a".repeat(64), generation: -1 },
+        signalIds: [],
+        toolRuns: [],
+      },
+    ],
+  },
+  "local-input-visibility": {
+    valid: [
+      {
+        signals: [{ signalId: MESSAGE_ID, result: "stale_policy" }],
+        tools: [{ toolRunId: TOOL_RUN_ID, result: "included" }],
+      },
+    ],
+    invalid: [
+      { signals: [{ signalId: MESSAGE_ID, result: "allowed" }], tools: [] },
+      { signals: [], tools: [], privateText: "must not be here" },
+    ],
+  },
+  "memory-resource-invalidation": {
+    valid: [
+      {
+        schemaVersion: 1,
+        providerId: "iris",
+        agentId: "agent",
+        eventId: "event:one",
+        cursor: "1",
+        resources: [{ resourceRef: "iris:claim:one", throughRevision: null }],
+      },
+    ],
+    invalid: [
+      {
+        schemaVersion: 1,
+        providerId: "iris",
+        agentId: "agent",
+        eventId: "event:one",
+        cursor: "1",
+        resources: [],
+      },
+      {
+        schemaVersion: 1,
+        providerId: "iris",
+        agentId: "agent",
+        eventId: "event:one",
+        cursor: "1",
+        resources: [{ resourceRef: "iris:claim:one", throughRevision: -1 }],
+      },
+    ],
+  },
+  "context-manifest": {
+    valid: [contextManifest],
+    invalid: [
+      { ...contextManifest, role: "system" },
+      { ...contextManifest, generation: -1 },
+      { ...contextManifest, promptHash: "invalid" },
+    ],
+  },
+  "memory-policy-stamp": {
+    valid: [{ scopeKey: "a".repeat(64), generation: 0 }],
+    invalid: [{ scopeKey: "a".repeat(64), generation: -1 }],
+  },
+  "memory-tombstone": {
+    valid: [{ providerId: "iris", resourceRef: "iris:claim:one", throughRevision: null }],
+    invalid: [{ providerId: "iris", resourceRef: "iris:claim:one" }],
+  },
+  "memory-policy-snapshot": {
+    valid: [
+      {
+        scopeKey: "a".repeat(64),
+        generation: 0,
+        privacyRevision: "1",
+        blocked: false,
+        tombstones: [],
+      },
+    ],
+    invalid: [{ scopeKey: "a".repeat(64), generation: 0, privacyRevision: "1", tombstones: [] }],
+  },
+  "memory-policy-change": {
+    valid: [
+      {
+        scopeKey: "a".repeat(64),
+        expectedGeneration: 0,
+        changeId: CYCLE_ID,
+        privacyRevision: "2",
+        blocked: true,
+        reason: "privacy",
+        tombstones: [],
+      },
+    ],
+    invalid: [
+      {
+        scopeKey: "a".repeat(64),
+        expectedGeneration: 0,
+        changeId: CYCLE_ID,
+        privacyRevision: "2",
+        blocked: true,
+        reason: "guess",
+        tombstones: [],
+      },
+    ],
+  },
+  "context-adoption": {
+    valid: [{ manifest: contextManifest, manifestDigest: "c".repeat(64), usage: [] }],
+    invalid: [
+      { manifest: contextManifest, manifestDigest: "invalid", usage: [] },
+      {
+        manifest: contextManifest,
+        manifestDigest: "c".repeat(64),
+        usage: [{ providerId: "iris", report: {} }],
+      },
+    ],
+  },
   "json-value": {
     valid: [
       null,
@@ -494,6 +909,26 @@ export const SCHEMA_FIXTURES: Record<ContractSchemaKey, SchemaFixtures> = {
         speech,
       },
     ],
+  },
+  "prepared-tool-call": {
+    valid: [
+      {
+        schemaVersion: 1,
+        sessionId: SESSION_ID,
+        turnId: TURN_ID,
+        cycleId: CYCLE_ID,
+        toolRunId: TOOL_RUN_ID,
+        toolName: "remember",
+        toolVersion: 1,
+        originalCallDigest: "a".repeat(64),
+        providerId: "iris",
+        idempotencyKey: "trusted-key",
+        request: { agent_id: "a", value: "fact" },
+        confirmation: { action: "remember" },
+        resources: [],
+      },
+    ],
+    invalid: [{ schemaVersion: 1 }, { schemaVersion: 2 }],
   },
   "tool-call": {
     valid: [

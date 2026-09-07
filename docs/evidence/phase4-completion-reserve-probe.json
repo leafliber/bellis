@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T22:23:59.451Z",
+  "status": "worker-completion-reservations-and-local-transaction-recovery-verified-full-capacity-and-phase4-incomplete",
+  "validation": {
+    "rootCheckStatus": "passed-all-phases-completed",
+    "unitAndPropertyTests": 1035,
+    "integrationTests": 245,
+    "persistenceIntegrationTests": 123,
+    "runtimeIntegrationTests": 111,
+    "transportIntegrationTests": 11,
+    "generatedContractFiles": 160,
+    "maximumShapeAndEffectTests": 8,
+    "localCompletionCrashWindows": 2,
+    "repetitionsPerLocalWindow": 20,
+    "localCrashCasesPassed": 40,
+    "uniqueKilledChildPids": 40,
+    "irisProviderTests": 80,
+    "irisProviderTypecheckExitCode": 0,
+    "irisProviderBuildExitCode": 0,
+    "realCoreToolsSseAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "recoverySmokeRepetitionsPerCombination": 1,
+    "rootCheckLogSha256": "5729fa9847575a3825bd498a359db3777ba0fb1b296e60cd3914b5ceef6d8b6d",
+    "providerTestLogSha256": "f4bf41eb569a116e76bfdd8e4cd31946ae607e11c3450e9348d7d7bd96f75eec",
+    "coreLogSha256": "b229e14b319a067b640b592dd09f4240310e476f8ad2212e1afaa27c05ce259a",
+    "recoveryLogSha256": "56ad3668b5f3b430363b2f6386c1cd2142fd103153dfe2c4f3963797cb7b2a16"
+  },
+  "verified": [
+    "Migration 16 stores per-Scene binding, confirmation and close credits in the preparation transaction; Core schema remains 15",
+    "All ordinary state and telemetry writes retain the remaining completion database, WAL and wal-index budgets plus unmaterialized database pages and ordinary transaction headroom",
+    "Only validated binding, confirmation and close operations enter smaller private native budgets; committed facts and credit consumption are atomic, duplicates and invalid receipts do not consume credits",
+    "Four maximum audio plans with 32 segments and eight large Provider targets complete all 128 bindings and confirmations, 1024 Observe projections and close operations after a pinned reader stops ordinary WAL writes",
+    "Near the state page limit, a 16MiB ordinary transaction budget correctly makes readiness false while an original admitted confirmation can still commit",
+    "Existing 64KiB database pages scale completion budgets and preserve confirmation and close behavior",
+    "Two local confirmation transaction boundaries each pass 20 real SIGKILL cases with WAL pressure: precommit leaves no receipt or Observe; lost postcommit ACK preserves the original receipt and all eight observations and retries as duplicate",
+    "Restart releases unused completion credits while retaining committed text, receipts and pending Observe rows; old uncommitted Stage receipts cannot create new facts",
+    "Private native ABI 2 is checked at startup; compilation replaces the binary only after successful compilation",
+    "Final native build passes real Core tools, SSE and Chromium output and 24 existing process recovery smoke combinations"
+  ],
+  "limits": [
+    "Credits are Worker-managed accounting and checked filesystem headroom, not operating-system exclusive preallocated disk blocks",
+    "Actual ENOSPC, external disk consumers, filesystem metadata and allocation granularity, temporary files and an aggregate directory hard quota remain unverified",
+    "External pinned readers across restart, older backups, active Stage/Core process combinations and privacy operations under capacity pressure still require the full recovery matrix",
+    "The 40 new local transaction cases are separate from historical 480-case Core recovery evidence; this version reruns the latter at 24 smoke cases only",
+    "Native compiler and ABI behavior is verified on local macOS arm64; remote Windows and Linux CI have not been executed here",
+    "Core Session mapping, production tool authority and Persona/SSE lifecycle, resource-growth audit, Phase4B and the full demo remain incomplete"
+  ],
+  "observedDiskAdmission": {
+    "ready": true,
+    "reason": "ready",
+    "databaseBytes": 8192,
+    "walBytes": 885864,
+    "walHighWaterBytes": 67108864,
+    "transactionCacheMaxBytes": 8388608,
+    "auxiliaryBytes": 78344,
+    "totalBytes": 972400,
+    "availableBytes": 39126753280,
+    "highWaterBytes": 536870912,
+    "completionHeadroomBytes": 167772160,
+    "admissionWriteMarginBytes": 8388608,
+    "capacity": {
+      "stateLimitBytes": 1073741824,
+      "stateWalLimitBytes": 433348768,
+      "stateAllocatedBytes": 339968,
+      "stateUsedBytes": 339968,
+      "stateReservedBytes": 0,
+      "stateReservedWalBytes": 0,
+      "stateReservedAuxiliaryBytes": 0,
+      "activeCompletionReservations": 0,
+      "telemetryLimitBytes": 67108864,
+      "telemetryWalLimitBytes": 75616288,
+      "telemetryAllocatedBytes": 20480,
+      "telemetryUsedBytes": 20480
+    }
+  },
+  "nativeBuild": {
+    "signature": "419b5f537b9467fd36e53af749ff1a54a261591568724982027e99d77cf18ed2",
+    "platform": "darwin",
+    "arch": "arm64",
+    "binarySha256": "87dcd90ddc3dc4fd19f9d9532ce649193aca394e9d0e7dc247d3e07cce9c257f",
+    "privateGuardAbi": 2,
+    "compiler": "Apple clang 21.0.0 (clang-2100.1.1.101)",
+    "sqliteVersion": "3.53.4"
+  },
+  "reports": [
+    {
+      "file": "phase4-completion-reserve-core-probe.json",
+      "exitCode": 0,
+      "sha256": "fbc61ccf72fc2a5e3142436c9f687faa7629a41d6059cf6dce39bcb66f2ab14e"
+    },
+    {
+      "file": "phase4-completion-reserve-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "6a67c7c06cfc6dbd2eee78d78f927ff5e2c5a476f65a5e9fe808aa5ed071076e"
+    },
+    {
+      "file": "phase4-completion-reserve-crash-cases.json",
+      "exitCode": 0,
+      "sha256": "7025218f8497ee17a5bb63910efc5aa42fc805c993e958a3eb7d3fc65ac9b89c"
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/completion-budget.ts": "4e34dcf3d403cbe835f3e389ab8c2ad77361af82cb2c1f37464ceab45bf59cf1",
+    "packages/persistence/src/disk-admission.ts": "ec35202df2782b69a5d30569edfa4427cd0f8dbfc8a0ef346c3ca51de2e30b74",
+    "packages/persistence/src/worker/disk-admission.ts": "0dab250a20b157edf7a432ee3dc0217d050695f0da3618c8961c32a7d1439dc8",
+    "packages/persistence/src/worker/database.ts": "587d1a067a6f57e934bf4d01f0801d8946ef0de9c9a77be1db4ba0b45ce71b7f",
+    "packages/persistence/src/worker/operations.ts": "3d2312cb7f136e68c95c4f4a638aeaf66648d17f2207453ccea5d8fceb7dcb60",
+    "packages/persistence/src/worker/rpc-router.ts": "04f714362a3992766f5707227d9165d25e49e1436fc9e70937c76f92317ec727",
+    "packages/persistence/src/checkpoints/observer.ts": "da30b938053f2d60f89be0833298353b2853eb60f9e419669a8f648c3c4029c0",
+    "packages/persistence/src/repositories/phase4-effects.ts": "acfca21c046a11c95c06da864b1a1206459002bdea40a27acb2653923e15785f",
+    "packages/persistence/src/migrations/registry.ts": "dc4ade067acfd87bb533490bf1c8e24434f09737b05ffc26e3c12a164b6fb74b",
+    "packages/persistence/src/migrations/state/0016-phase4-completion-reservations.ts": "91373b8f5a01d2b76c1b10d03cff6195375c616067df11ac3f63bfba609d7689",
+    "packages/persistence/native/sqlite-guard.c": "69432e816f81a95830a65b1ea28840c152f9f0017f959aba886509a1ec00822b",
+    "packages/persistence/native/sqlite/sqlite3.h": "919e7f2e8ed1d8f56ac17b412b8971c76aa5d1a879752cc6058f75e7d5910e1d",
+    "packages/persistence/native/sqlite/sqlite3ext.h": "ac9645e5c9ff0cf176efdd6e75cb5e98f46295d38e02db5c4d208826a39ab4be",
+    "packages/persistence/scripts/build-sqlite-guard.mjs": "18096bcc81abc9476affe5ef350edd09be945b243d1c1b0125e4228173f46e16",
+    "packages/persistence/test/phase4-effect-fixtures.ts": "a3bfd01cbc6b6240b4efd10fd09117695b318ba9f84511c6b9f968d6aec8f731",
+    "packages/persistence/test/fixtures/completion-crash-harness.ts": "9f8c6d2fe2ef4a66dd9928cbc802091b4a1371e32725bcbae80405df0a96df62",
+    "packages/persistence/test/integration/completion-crash.integration.test.ts": "0020bf876523b5c8964d823fdfc279332cd660d44614ddceb5d24d44f946051e",
+    "packages/persistence/test/integration/phase4-effects.integration.test.ts": "be51cb425bbb7ca49f9eeea70ff3ba3f356e5b13259388f84ff6f95023f16178"
+  }
+}

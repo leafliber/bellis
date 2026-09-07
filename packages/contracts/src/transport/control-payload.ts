@@ -1,3 +1,10 @@
+import {
+  AudioSegmentBindingSchema,
+  StageEffectReceiptSchema,
+  StageEffectAckSchema,
+  StageEffectReleaseSchema,
+  StageEffectSealSchema,
+} from "../scene/effect.js";
 import { z } from "zod";
 import { DecimalStringSchema } from "../common/decimal-string.js";
 import { UuidSchema } from "../common/ids.js";
@@ -45,9 +52,15 @@ export const KNOWN_CONTROL_MESSAGE_TYPES = [
   // ---- Phase 2 演出纵向链路（scene-execution.md）----
   "stage.capabilities",
   "scene.prepare",
+  "scene.effect.binding",
+  "scene.effect.ack",
+  "scene.effect.released",
+  "scene.effect.seal",
   "scene.ready",
   "scene.commit",
   "scene.started",
+  "scene.effect.receipt",
+  "scene.effect.release",
   "scene.finished",
   "scene.cancel",
   "scene.cancel.ack",
@@ -69,6 +82,10 @@ export const SERVER_TO_CLIENT_MESSAGE_TYPES = [
   "scene.cancelled",
   "error",
   "scene.prepare",
+  "scene.effect.binding",
+  "scene.effect.ack",
+  "scene.effect.released",
+  "scene.effect.seal",
   "scene.commit",
   "scene.cancel",
   "media.stream.announce",
@@ -84,6 +101,8 @@ export const CLIENT_TO_SERVER_MESSAGE_TYPES = [
   "stage.capabilities",
   "scene.ready",
   "scene.started",
+  "scene.effect.receipt",
+  "scene.effect.release",
   "scene.finished",
   "scene.cancel.ack",
   "media.stream.ready",
@@ -398,6 +417,30 @@ export const ControlPayloadSchema = z
       rawExtensibleJsonObject({
         type: z.literal("scene.commit"),
         payload: SceneCommitPayloadSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.effect.seal"),
+        payload: StageEffectSealSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.effect.binding"),
+        payload: AudioSegmentBindingSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.effect.receipt"),
+        payload: StageEffectReceiptSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.effect.release"),
+        payload: StageEffectReleaseSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.effect.released"),
+        payload: StageEffectReleaseSchema,
+      }),
+      rawExtensibleJsonObject({
+        type: z.literal("scene.effect.ack"),
+        payload: StageEffectAckSchema,
       }),
       rawExtensibleJsonObject({
         type: z.literal("scene.started"),

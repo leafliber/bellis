@@ -110,12 +110,16 @@ export class BrowserAudioEnvironment implements AudioEnvironment {
     }
     node.port.onmessage = (event: MessageEvent) => {
       const message = event.data as WorkletMessage;
-      if (message.op === "started" && message.renderedAtAudioSeconds !== undefined) {
+      if (
+        (message.op === "started" || message.op === "progress") &&
+        message.renderedAtAudioSeconds !== undefined
+      ) {
         // Map the render clock into performance.now's domain; excludes device output latency.
         const atMs =
           performance.now() + (message.renderedAtAudioSeconds - context.currentTime) * 1000;
         this.#workletHandler?.({
           ...message,
+          renderedAtStageUs: BigInt(Math.round(Math.max(0, atMs) * 1000)),
           startedAtStageUs: BigInt(Math.max(0, Math.round(atMs * 1000))),
         });
       } else this.#workletHandler?.(message);

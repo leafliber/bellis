@@ -42,6 +42,8 @@ export const PERSISTENCE_ERROR_CODES = [
   "not_claimed",
   /** SQLite Busy/Locked（可重试）。 */
   "database_busy",
+  /** Disk high watermark stops new admission; existing facts remain readable. */
+  "storage_not_ready",
   /** Migration 注册表非法（版本缺口/重复/降级）。 */
   "migration_invalid",
   /** 受控检查点观察器主动中止（仅测试装配会触发）。 */

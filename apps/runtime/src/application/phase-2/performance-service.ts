@@ -1,3 +1,7 @@
+import { Phase4EffectsHost, type SpeechEffectsPort } from "../phase-4/effects-host.js";
+import { streamSpeechEffectSegments } from "../phase-4/speech-effects.js";
+import type { PersistenceClient } from "@bellis/persistence";
+import type { MemoryOutputTarget } from "@bellis/contracts";
 import type {
   DecisionPacket,
   JsonValue,
@@ -133,6 +137,7 @@ function readPlanSpeech(plan: { readonly speech?: unknown }): SpeechIntent | nul
 
 export class Phase2PerformanceService {
   readonly #director: SceneDirector;
+  #effects: SpeechEffectsPort | undefined;
   readonly #stagePort: ControlStagePortAdapter;
   readonly #options: Phase2PerformanceServiceOptions;
   readonly #mediaSender: RuntimeMediaSender;
@@ -202,6 +207,7 @@ export class Phase2PerformanceService {
       },
     });
     this.#stagePort.onStageDisconnected(() => {
+      this.#effects?.disconnect();
       this.#director.notifyStageDisconnected("control_channel_closed");
       // Stream 状态随连接丢弃：停止全部帧任务（重连后必须重新 announce）。
       // 未能送达的 closed 转入待发集合：连接恢复时冲刷（Stage 侧随控制
@@ -225,6 +231,22 @@ export class Phase2PerformanceService {
     if (!options.capabilities.audio.contentTypes.includes(PHASE_2_PCM_CONTENT_TYPE)) {
       throw new Error("stage capabilities must accept the phase 2 PCM baseline");
     }
+  }
+
+  enableEffects(
+    persistence: PersistenceClient,
+    targets: () => readonly MemoryOutputTarget[],
+  ): void {
+    if (this.#effects !== undefined) throw new Error("effects_already_enabled");
+    const effects = new Phase4EffectsHost({
+      persistence,
+      targets,
+      channel: this.#options.channel,
+      onError: (code) => this.#options.logger?.log("warn", code, {}),
+    });
+    this.#effects = effects;
+    this.#stagePort.onPrepareSent = (plan) => effects.sent(plan.scene.sceneId);
+    this.#stagePort.beforePrepare = (plan, signal) => effects.ready(plan, signal);
   }
 
   /** 出站媒体统计（仅聚合计数，不含帧内容）。 */
@@ -324,8 +346,14 @@ export class Phase2PerformanceService {
         issues: compile.issues.map((issue: { code: string }) => ({ code: issue.code })),
       };
     }
-    const sceneId = compile.plan.scene.sceneId;
-    this.#stagePort.registerScene(sceneId, compile.plan.scene.cycleId, rootTraceId);
+    const generation = this.#options.channel.activeConnectionId?.();
+    if (this.#effects !== undefined && !generation)
+      return { kind: "rejected", issues: [{ code: "effect_stage_not_connected" }] };
+    const plan =
+      this.#effects?.prepare(compile.plan, this.#sessionId, generation!, rootTraceId) ??
+      compile.plan;
+    const sceneId = plan.scene.sceneId;
+    this.#stagePort.registerScene(sceneId, plan.scene.cycleId, rootTraceId);
     // durable commit 与生命周期 Record 携带同一 trace 根（跨层连续）。
     this.#options.repository.bindSceneTrace?.(sceneId, rootTraceId);
     void this.#audit(
@@ -334,35 +362,37 @@ export class Phase2PerformanceService {
       {
         payloadVersion: PHASE_2_AUDIT_PAYLOAD_VERSION,
         sceneId,
-        cycleId: compile.plan.scene.cycleId,
-        cueCount: compile.plan.cues.length,
-        lanes: [...new Set(compile.plan.cues.map((cue) => cue.lane))],
+        cycleId: plan.scene.cycleId,
+        cueCount: plan.cues.length,
+        lanes: [...new Set(plan.cues.map((cue) => cue.lane))],
       },
       rootTraceId,
     );
-    this.#announceSpeechStream(compile.plan, rootTraceId);
+    this.#announceSpeechStream(plan, rootTraceId);
     this.#activeScenes.set(sceneId, {
-      cycleId: compile.plan.scene.cycleId,
+      cycleId: plan.scene.cycleId,
       startedAt: null,
       starts: new Map(),
     });
     let handle: SceneHandle;
     try {
-      handle = this.#director.submit(compile.plan, {
+      handle = this.#director.submit(plan, {
         sessionId: this.#sessionId,
         idempotencyKey: `phase2:${sceneId}`,
-        requestFingerprint: `phase2:${packet.cycleId}:${compile.plan.cues.length}`,
+        requestFingerprint: `phase2:${packet.cycleId}:${plan.cues.length}`,
       });
     } catch (error) {
       // Admission 拒绝（活跃上限/重复提交）：回滚预分配状态——announce
       // 已发出不可撤回，以 media.stream.closed 释放 Stage 槽位；异常
       // 如实上抛（不吞错、不虚报提交成功）。
+      this.#effects?.finish(sceneId);
       this.#activeScenes.delete(sceneId);
       this.#closeStreamForScene(sceneId, "admission_rejected");
       throw error;
     }
     void handle.done.finally(() => {
       // 终态清理：活动索引、Stream（closed 通知）与帧任务一并释放。
+      this.#effects?.finish(sceneId);
       this.#activeScenes.delete(sceneId);
       this.#closeStreamForScene(sceneId, "scene_terminal");
     });
@@ -494,6 +524,16 @@ export class Phase2PerformanceService {
 
   /** ControlConnection 阶段消息入口（stage.ready/started/finished/cancel.ack…）。 */
   handleStageMessage(type: string, payload: unknown, nowUs: bigint): void {
+    if (type === "scene.effect.release") {
+      const generation = this.#options.channel.activeConnectionId?.();
+      if (generation) this.#effects?.release(payload, this.#sessionId, generation);
+      return;
+    }
+    if (type === "scene.effect.receipt") {
+      const generation = this.#options.channel.activeConnectionId?.();
+      if (generation) this.#effects?.receive(payload, this.#sessionId, generation);
+      return;
+    }
     if (type === "stage.capabilities") {
       // 能力驱动媒体预算：maxFutureUs 跟随 Stage 声明的 audio.maxBufferedUs
       // （未来音频提前量不得超过 Stage 缓冲预算）。
@@ -595,8 +635,14 @@ export class Phase2PerformanceService {
   /** Stage 连接出现（clientType=stage 的活跃连接）。 */
   markStageConnected(sessionId?: string): void {
     if (sessionId !== undefined && sessionId !== this.#sessionId) {
+      const previousSessionId = this.#sessionId;
       this.#sessionId = sessionId;
-      this.#options.onSessionIdResolved?.(sessionId);
+      try {
+        this.#options.onSessionIdResolved?.(sessionId);
+      } catch (error) {
+        this.#sessionId = previousSessionId;
+        throw error;
+      }
     }
     // 新连接可承载出站：冲刷此前未送达的 closed（幂等）。
     this.#flushPendingStreamClosures();
@@ -616,6 +662,7 @@ export class Phase2PerformanceService {
   async close(): Promise<void> {
     await this.#director.close("phase2_service_close");
     this.#mediaSender.close();
+    await this.#effects?.close();
     this.#activeScenes.clear();
     this.#pendingStreams.clear();
   }
@@ -669,6 +716,18 @@ export class Phase2PerformanceService {
         frames: (signal) => {
           const provider = this.#options.speechProvider;
           if (provider === undefined) throw new Error("speech_provider_not_configured");
+          if (pending.plan.effects !== undefined) {
+            const effects = this.#effects;
+            if (effects === undefined) throw new Error("effect_host_missing");
+            return streamSpeechEffectSegments({
+              plan: pending.plan,
+              speech: pending.speech,
+              streamId,
+              provider,
+              signal,
+              bind: (binding, bindSignal) => effects.bind(binding, bindSignal),
+            });
+          }
           return provider.stream(pending.speech, signal);
         },
       },

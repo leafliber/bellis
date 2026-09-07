@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "scopeKey": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "privacyRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "blocked": {
+      "type": "boolean"
+    },
+    "historyBlocked": {
+      "type": "boolean",
+      "const": true
+    },
+    "tombstones": {
+      "maxItems": 4096,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "resourceRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "throughRevision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "providerId",
+          "resourceRef",
+          "throughRevision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "scopeKey",
+    "generation",
+    "privacyRevision",
+    "blocked",
+    "tombstones"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,402 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "manifestId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "cycleId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "modelRequestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "identityScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "privacyScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "privacyRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "scopeKey": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "scopeKey",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "localInputs": {
+      "type": "object",
+      "properties": {
+        "aggregatesVisible": {
+          "type": "boolean"
+        },
+        "signals": {
+          "maxItems": 164,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "signalId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "included",
+                  "unbound",
+                  "stale_policy",
+                  "tombstone"
+                ]
+              }
+            },
+            "required": [
+              "signalId",
+              "result"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "tools": {
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "toolRunId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "included",
+                  "unbound",
+                  "stale_policy",
+                  "tombstone"
+                ]
+              }
+            },
+            "required": [
+              "toolRunId",
+              "result"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "topicsSuppressed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "signals",
+        "tools",
+        "topicsSuppressed"
+      ],
+      "additionalProperties": false
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "promptEpoch": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "promptHash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "recordedAtMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "persona": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+        },
+        "contentHash": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "rendererVersion": {
+          "type": "number",
+          "const": 1
+        }
+      },
+      "required": [
+        "sourceId",
+        "agentId",
+        "revision",
+        "contentHash",
+        "rendererVersion"
+      ],
+      "additionalProperties": false
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "estimator": {
+          "type": "string",
+          "const": "utf8-upper-bound-v1"
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "estimatedInputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "memoryTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "localTruncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "estimator",
+        "maxInputTokens",
+        "estimatedInputTokens",
+        "memoryTokens",
+        "localTruncated"
+      ],
+      "additionalProperties": false
+    },
+    "providers": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "timeout",
+              "failed",
+              "no_actor",
+              "busy"
+            ]
+          },
+          "requestId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "personaRevision": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+          },
+          "returned": {
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "hostSelected": {
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "modelVisible": {
+            "maxItems": 256,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        },
+        "required": [
+          "providerId",
+          "outcome",
+          "returned",
+          "hostSelected",
+          "modelVisible"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "blocks": {
+      "maxItems": 2048,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "blockId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "revision": {
+            "type": "string",
+            "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+          },
+          "contentHash": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "textHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "normalizedHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "modelTextHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "sourceHashScheme": {
+            "type": "string",
+            "enum": [
+              "iris-canonical-v1",
+              "sha256-text-v1"
+            ]
+          },
+          "sourceHashVerification": {
+            "type": "string",
+            "enum": [
+              "passthrough",
+              "verified",
+              "failed"
+            ]
+          },
+          "privacyScope": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "sourceRefs": {
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "included",
+              "privacy",
+              "expired",
+              "duplicate",
+              "budget",
+              "invalid",
+              "tombstone"
+            ]
+          }
+        },
+        "required": [
+          "providerId",
+          "blockId",
+          "revision",
+          "contentHash",
+          "textHash",
+          "normalizedHash",
+          "sourceHashScheme",
+          "sourceHashVerification",
+          "privacyScope",
+          "sourceRefs",
+          "result"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "manifestId",
+    "sessionId",
+    "cycleId",
+    "modelRequestId",
+    "identityScope",
+    "privacyScope",
+    "privacyRevision",
+    "generation",
+    "promptEpoch",
+    "promptHash",
+    "recordedAtMs",
+    "persona",
+    "budget",
+    "providers",
+    "blocks"
+  ],
+  "additionalProperties": false
+}

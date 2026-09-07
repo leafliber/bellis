@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T02:45:58.446483+00:00",
+  "status": "memory-readiness-and-real-credential-revocation-implemented-full-phase4-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": 0,
+    "unitAndPropertyTests": 1054,
+    "integrationTests": 275,
+    "persistenceIntegrationTests": 138,
+    "runtimeIntegrationTests": 126,
+    "transportIntegrationTests": 11,
+    "generatedContracts": 168,
+    "focusedRuntimeIntegrationTests": 15,
+    "providerTests": 99,
+    "providerTypecheckLintFormatBuild": "passed",
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newCredentialRevocationSigkillWindow": "not-claimed",
+    "fullCoreRegression": "not-rerun",
+    "resolvedProbePrerequisites": [
+      "Installed the repository-locked Console extra from local cache into the isolated test environment; Core wheel payload remains unchanged",
+      "Explicitly granted the temporary operator the required data purposes; public credential listing correctly hid out-of-grant credentials before correction"
+    ]
+  },
+  "verified": [
+    "Host readiness reads the current observed admission state without network I/O and exposes only a bounded reason; Runtime recovering/unavailable status controls existing readiness gates",
+    "Revoked Persona, late old responses and verified-cache responses keep readiness 503; a new valid live revision restores Persona readiness. Durable privacy block/unblock and close also update readiness",
+    "Iris 401/403 and hidden 404 access_denied latch authorization rejection, cancel other provider calls, mark unhealthy, stop event/lease/legacy-delivery scheduling and persist the existing Persona barrier",
+    "Calling start on the still-running rejected Provider does not clear the latch; explicit stop/start with a usable test transport revalidates live Persona",
+    "Installed Core public Console API actually revokes the temporary application credential. The active Runtime cancels its old Context, reports live 200 and ready 503, blocks Persona fallback and exposes unhealthy Provider status",
+    "Final installed Core/Chromium, actual launch CLI, history recovery, tools and existing 24-case recovery smoke pass"
+  ],
+  "limits": [
+    "Readiness describes the last observed local admission state, not instantaneous remote permission knowledge or a cross-process HTTP authorization fence",
+    "Single Iris/Persona ownership is covered; multi-provider health aggregation, credential rotation and all permission-tightening variants remain open",
+    "Auth latch is per lifecycle; the existing durable Persona barrier and fresh startup negotiation prevent offline fallback. This is not a new credential-management API or automatic secret rotation",
+    "Actual credential revocation does not undo already completed remote side effects; original stored requests/Usage/Observation facts remain governed by existing durable accounting",
+    "Old policy requests, independent Observation/Usage and other facts, common cross-batch consistency and safe atomic history release remain open",
+    "Actual backup/fork restore, full Stage/Core crash matrix, ENOSPC, total directory quota, long-growth, Phase4B and full demo remain incomplete"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false,
+    "consoleExtra": {
+      "cryptography": "50.0.1",
+      "cffi": "2.1.1",
+      "pycparser": "3.0",
+      "source": "repository lock, offline cached installation into isolated Core environment"
+    }
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-memory-readiness-core-probe.json",
+      "exitCode": 0,
+      "sha256": "7b4749f17cf6822742ea59bd7f55662382c3a0e1ddd35a6ea2d054ba2576f538"
+    },
+    {
+      "file": "phase4-memory-readiness-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "981ed4a7fdaecf542d7f19c225e43d20ee6e61566c694ed52acb2131567e54bb"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-readiness-check.log",
+      "sha256": "cff2a270fcd4556ca89cf3385f36aeeb1108c75184c8c057cb607cbb598ac189"
+    },
+    {
+      "file": "/tmp/bellis-readiness-runtime-tests.log",
+      "sha256": "9e8500085ab150ea19da4d76d5cd6a96ad28e4df9e3709a3eb01048008bc195a"
+    },
+    {
+      "file": "/tmp/bellis-readiness-provider-tests.log",
+      "sha256": "c0c78961e3edec6597e9ae0c215eaf6d2c2478faea6121bf714f0c2e346d633e"
+    },
+    {
+      "file": "/tmp/bellis-readiness-provider-types.log",
+      "sha256": "70685b4df7789c854b9e1ceab7d78a6d0f9a0831c11eb0010b7b5fdbe0e50c39"
+    },
+    {
+      "file": "/tmp/bellis-readiness-provider-lint.log",
+      "sha256": "70d749813373d92d42472600f3fb9578ec01b307f011c91c2f08aed48f2ef838"
+    },
+    {
+      "file": "/tmp/bellis-readiness-provider-format.log",
+      "sha256": "e64476291c74b317aaac970789801ad38213353d14b128fc5275d5d647ce9172"
+    },
+    {
+      "file": "/tmp/bellis-readiness-provider-build.log",
+      "sha256": "29c5ee0f6b0b20dbb259b99d01276198c3d28190090706394608d4deda6d2c0b"
+    },
+    {
+      "file": "/tmp/bellis-readiness-console-extra.log",
+      "sha256": "f6442af17a61d935242905e74879f8e8a6acbeeb250282c4932acc49f10c23c7"
+    },
+    {
+      "file": "/tmp/bellis-readiness-core.log",
+      "sha256": "68c5d94aa7de73dc771908aebddace2b7c85496ce3cf342b46b8225fd8a69dbc"
+    },
+    {
+      "file": "/tmp/bellis-readiness-recovery.log",
+      "sha256": "391b26c53351fc989151fae694384cb026e1034ccf97578c17f6792043f23c76"
+    }
+  ],
+  "sourceSha256": {
+    "apps/runtime/src/application/phase-4/memory-host.ts": "728e3d6dc2f82a7e79b01ba808ddba547b44b580646bf6298f6c034ecd627c91",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "84b580ce324e81106ce21a1f977fb57243665e48685b68fe729cb84a7a30d9ad",
+    "apps/runtime/src/index.ts": "094efe6d23dadf234822ad2ed1a047bc203beff6b62c6ac14c197099230fa1f5",
+    "apps/runtime/test/integration/phase4-history-revalidation.integration.test.ts": "53f337258c25a5e6dede600fccede6a7e6fd9230e6b577a118d65f487a1b9181",
+    "providers/memory-iris/src/index.ts": "c7a31d3440edc1e75872fc1dc091b53a1a15e2aa35d11bc858e6034fe7933fb5",
+    "providers/memory-iris/test/provider.test.ts": "ef94b4bc80dc35105fc50bc5075114d8876e88d66291396602ef6cb8e27135d8",
+    "scripts/iris-credential-revocation-probe.mjs": "3fb821158ccdca6ac6ac6c0b6e0dda0486733c55d8126fc9cdb2111287c38a92",
+    "scripts/iris-public-probe.mjs": "902dedb8b4d9f4441b63f675cdce024f9af143dde6db152724d7b716b03a5aca"
+  }
+}

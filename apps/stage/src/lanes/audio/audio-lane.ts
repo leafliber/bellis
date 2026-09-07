@@ -30,11 +30,14 @@ export interface WorkletMessage {
     | "stats"
     | "end"
     | "ended"
+    | "progress"
     | "started";
   readonly sceneId?: string;
   readonly samples?: Int16Array;
   readonly underruns?: number;
   readonly renderedAtAudioSeconds?: number;
+  readonly renderedSamples?: number;
+  readonly renderedAtStageUs?: bigint;
   readonly startedAtStageUs?: bigint;
   readonly code?: string;
 }
@@ -56,10 +59,18 @@ export interface AudioLaneOptions {
   readonly clock: MonotonicClock;
   /** Ready 前置：已缓冲帧数阈值（默认 6 帧 = 120ms 预缓冲）。 */
   readonly minPreparedFrames?: number;
+  readonly onRendered?: (progress: {
+    sceneId: string;
+    renderedSamples: number;
+    appliedAtStageUs: bigint;
+  }) => void;
 }
 
 interface AudioScene {
   frames: number;
+  receivedSamples: number;
+  renderedSamples: number;
+  contiguous: boolean;
   /** 已追加样本的预期播放时长（微秒；随帧累加）。 */
   playedUs: bigint;
   waiters: Array<(satisfied: boolean) => void>;
@@ -86,6 +97,7 @@ export class AudioLaneAdapter implements StageLaneAdapter {
   readonly #environment: AudioEnvironment;
   readonly #clock: MonotonicClock;
   readonly #minPreparedFrames: number;
+  readonly #onRendered: AudioLaneOptions["onRendered"];
   readonly #scenes = new Map<string, AudioScene>();
   /** 已停止 Scene 墓碑：拒绝 Cancel/Media 跨通道乱序到达的尾帧。 */
   readonly #stoppedScenes = new Set<string>();
@@ -97,7 +109,41 @@ export class AudioLaneAdapter implements StageLaneAdapter {
     this.#environment = options.environment;
     this.#clock = options.clock;
     this.#minPreparedFrames = options.minPreparedFrames ?? 6;
+    this.#onRendered = options.onRendered;
     this.#environment.onWorkletMessage((message) => {
+      if (message.op === "error" && message.sceneId !== undefined) {
+        const record = this.#scenes.get(message.sceneId);
+        if (record !== undefined) record.contiguous = false;
+      }
+      if (message.op === "progress" && message.sceneId !== undefined) {
+        const record = this.#scenes.get(message.sceneId);
+        const samples = message.renderedSamples;
+        if (
+          record === undefined ||
+          !record.contiguous ||
+          record.startedAtUs === null ||
+          this.#stoppedScenes.has(message.sceneId)
+        )
+          return;
+        if (
+          samples === undefined ||
+          !Number.isSafeInteger(samples) ||
+          samples < record.renderedSamples ||
+          samples > record.receivedSamples ||
+          samples > 28_800_000
+        ) {
+          record.contiguous = false;
+          return;
+        }
+        if (samples === record.renderedSamples) return;
+        record.renderedSamples = samples;
+        this.#onRendered?.({
+          sceneId: message.sceneId,
+          renderedSamples: samples,
+          appliedAtStageUs: message.renderedAtStageUs ?? this.#clock.nowUs(),
+        });
+        return;
+      }
       if (message.op === "stats" && message.underruns !== undefined) {
         this.#underruns = message.underruns;
         return;
@@ -132,7 +178,17 @@ export class AudioLaneAdapter implements StageLaneAdapter {
     if (this.#closed) {
       return false;
     }
-    this.#armed = await this.#environment.arm();
+    const resumed = await this.#environment.arm();
+    if (resumed) {
+      try {
+        // Media can arrive before Scene.prepare finishes loading the module.
+        // Complete the receiving endpoint before advertising Audio Arm readiness.
+        await this.#environment.ensureNode();
+      } catch {
+        return false;
+      }
+    }
+    this.#armed = resumed && !this.#closed;
     return this.#armed;
   }
 
@@ -143,6 +199,9 @@ export class AudioLaneAdapter implements StageLaneAdapter {
     }
     const record: AudioScene = {
       frames: 0,
+      receivedSamples: 0,
+      renderedSamples: 0,
+      contiguous: true,
       playedUs: 0n,
       waiters: [],
       completions: [],
@@ -202,6 +261,8 @@ export class AudioLaneAdapter implements StageLaneAdapter {
       return;
     }
     record.frames += 1;
+    record.receivedSamples += samples.length;
+    if (!this.#armed) record.contiguous = false;
     record.playedUs += BigInt(Math.round((samples.length / 48_000) * 1_000_000));
     this.#environment.postToWorklet({ v: 1, op: "frame", sceneId, samples });
     if (record.frames >= this.#minPreparedFrames) {

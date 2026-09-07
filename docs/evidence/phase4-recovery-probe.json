@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T19:21:03.101693+00:00",
+  "status": "sse-process-crash-windows-verified-recovery-gate-incomplete",
+  "validation": {
+    "entrypoint": "pnpm test:memory:iris:recovery",
+    "entrypointExitCode": 2,
+    "exitReason": "incomplete: other required crash/capacity windows remain unimplemented",
+    "finalProbeExitCode": 2,
+    "casesPassed": 120,
+    "windowTargetCombinations": 6,
+    "repetitionsPerCombination": 20,
+    "matrix": [
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "core-worker",
+        "passed": 20
+      }
+    ],
+    "smokeCasesPassed": 6,
+    "rootAndProviderBuild": "passed through recovery command",
+    "scriptSyntaxAndFormatting": "passed",
+    "productionSourceChanged": false,
+    "finalLogSha256": "65c5cfad6d8d3c62760933abdf689f5b0a00e961b88db9a475d1d7033d97a030"
+  },
+  "verified": [
+    "Each test child starts the real Runtime, MemoryHost, Phase 2/3 hosts and DB Worker; restart uses the same host database and Session",
+    "Fault wrappers await real DB Worker ACK before pausing; test parent reads pending event, tombstone and cursor at the checkpoint",
+    "Runtime, Core API and Core Worker targets are each confirmed alive before explicit termination and observed exiting with SIGKILL; replacement process identity differs",
+    "Pending event ID stays durable while provider cursor remains behind; restart completes original event without a second generation change when policy was already committed",
+    "Policy-commit checkpoint proves old Context cancellation; final policy has permanent tombstone and no additional blocked flag",
+    "Public getClaim remains 404 and original Forget key returns exactly the original deletion receipt after recovery",
+    "Original public SSE event identity and resource reference remain readable; no test client reads Core database internals",
+    "Prior public events are drained through real provider processing before each new case; no forged cursor skips earlier events",
+    "Successful cases close current Runtime/DB Worker; parent stops its own Core processes and deletes temporary directories"
+  ],
+  "limits": [
+    "Manifest formation/adoption before and after Usage ACK",
+    "effect record/Observe projection transaction before and after commit",
+    "Core Observation commit before HTTP ACK and host delivered commit",
+    "both-side older snapshots and all cursor divergence cases",
+    "disk/WAL quotas, active-scene reserved capacity and full Runtime/Stage recovery",
+    "No browser/active Stage Scene is started in these SSE cases; effect confirmation and scene replay need their own crash evidence",
+    "No whole A4 recovery pass, CI pass, production authorization pass or complete Phase4 claim",
+    "Core source regression still has four Console contract failures recorded separately; the fixed wheel public application boundary is the tested installation"
+  ],
+  "installation": {
+    "coreVersion": "0.13.0",
+    "coreWheelSha256": "74f8105d0607d44475d0d7b0c9c5afcb8bcba3e5e4067a40850f33b453f9f105",
+    "schemaVersion": 15,
+    "sdkVersion": "0.11.1",
+    "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+    "installedCoreFilesVerified": 159,
+    "surfaceMode": "off"
+  },
+  "report": {
+    "file": "phase4-recovery-core-probe.json",
+    "sha256": "4190935f8cb9ea2c558a1b4a5bc62d824da4d31142a6bc575072dcf6561f9c64"
+  },
+  "sourceSha256": {
+    "scripts/iris-recovery-child.mjs": "2f5fd6e6ca6412e913efc7adbe48cee2504480d5f37feedf9ff86bad7e8d1654",
+    "scripts/iris-recovery-probe.mjs": "c6b451fdfde4650dac2e41afd97d73d352dcf67709e37d1f7e11875312714648",
+    "scripts/iris-public-probe.mjs": "d4f5a7caf611c8e2fc8b892d38c1e14e63e86c1450f78669665e55b205abdb59",
+    "package.json": "5d4eb16ec3d8622df74a4a62f00eb5017e66060c91bb74f3c5b6bd695a451e43"
+  }
+}

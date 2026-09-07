@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ToolDeclaration } from "../registry/definition.js";
 import type { ToolExecutionContext } from "../port.js";
+import type { JsonValue, PreparedToolCall } from "@bellis/contracts";
 
 /**
  * 权限与副作用门（phase-3-development-guide.md §8.4）。
@@ -13,12 +14,23 @@ export type PermissionVerdict =
   | { readonly allowed: false; readonly errorCode: string; readonly detail: string };
 
 /** 确认 Port：Phase 3 无交互装配时确认型工具必须拒绝。 */
+export interface ToolConfirmationRequest {
+  readonly prepared?: PreparedToolCall;
+  readonly toolName: string;
+  readonly toolVersion: number;
+  readonly toolRunId: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly cycleId: string;
+  readonly arguments: Readonly<Record<string, JsonValue>>;
+  readonly idempotencyKeyHash: string | null;
+  /** Digest binds the concrete frozen call and trusted execution identity. */
+  readonly requestDigest: string;
+  readonly deadlineUs: bigint;
+  readonly signal: AbortSignal;
+}
 export interface ConfirmationPort {
-  confirm(request: {
-    readonly toolName: string;
-    readonly toolRunId: string;
-    readonly cycleId: string;
-  }): Promise<boolean>;
+  confirm(request: ToolConfirmationRequest): Promise<boolean>;
 }
 
 export function checkPermission(

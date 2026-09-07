@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T23:04:24.617Z",
+  "status": "paired-event-identity-and-isolated-candidate-transport-verified-provider-gap-revalidation-incomplete",
+  "validation": {
+    "providerTests": 82,
+    "providerTestsExitCode": 0,
+    "providerTypecheckExitCode": 0,
+    "providerLintExitCode": 0,
+    "providerFormatExitCode": 0,
+    "providerBuildExitCode": 0,
+    "coreMigrationAndStateDeletionTests": 32,
+    "coreMigrationTestsExitCode": 0,
+    "candidateCoreStageAndCheckpointExitCode": 0,
+    "candidateCoreToolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "recoveryRepetitionsPerCombination": 1,
+    "providerLogSha256": "693428078d6fb6ec7c4f8a083bb6f9547566e4f7e7d8c12447f761f6465094d2",
+    "migrationLogSha256": "bcfa00731b5ed142506168a5e7955a78e340bffbbdabd74a25a55138358e63ea"
+  },
+  "verified": [
+    "Provider state saves eventId and eventCursor together after event handling and host invalidation acknowledgment; invalid pairs are rejected during recovery",
+    "Failed checkpoint persistence restores both prior fields in memory and retries the prior cursor; legacy cursor-only state stays readable without an invented identity",
+    "Actual public deletion SSE preserves a cursor and event identity that match the public Core event after host Worker restart",
+    "An offline tarball-installed SDK 0.11.2 candidate sends both original headers to the installed Core API: a verified empty stream returns 200 and changed identity or unknown cursor returns 410",
+    "The exact Schema 18 wheel has 168 installed files verified against its contents; Migration 16-18 were inspected and their focused tests passed",
+    "Application OpenAPI comparison changes only /v1/events, with identical component schemas and only events.checkpoint.v1 added to capabilities",
+    "Real Chromium output and next-context history pass; public tools and 24 existing Core/Runtime recovery smoke combinations pass on the candidate wheel"
+  ],
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+    "files": [
+      "README.md",
+      "dist/src/index.d.ts",
+      "dist/src/index.js",
+      "package.json"
+    ],
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "isolatedLocalTarballInstallation": "completed-without-registry-publication",
+    "defaultProviderSdk": "0.11.1"
+  },
+  "candidateInstallation": {
+    "core": "0.13.0",
+    "schema": 18,
+    "wheelSha256": "65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9",
+    "installedFilesVerified": 168,
+    "providerSdk": "0.11.1",
+    "checkpointConsumerSdk": "0.11.2",
+    "checkpointConsumerInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "profile": "exact-wheel-sha-only",
+    "wireComparison": {
+      "changedApplicationPaths": [
+        "/v1/events"
+      ],
+      "componentsEqual": true,
+      "addedCapabilities": [
+        "events.checkpoint.v1"
+      ]
+    }
+  },
+  "limits": [
+    "The official Provider dependency remains SDK 0.11.1; paired fields are persisted but the Provider does not yet send the checkpoint header. Separate candidate consumption does not publish or replace that dependency",
+    "History-unavailable host barriers, full public revalidation, legacy identity migration and actual old-backup restoration remain unfinished",
+    "Schema 18 is admitted by one exact candidate wheel SHA in the test harness; the default Provider Schema maximum and supported installation window are unchanged",
+    "No new 20-repetition crash matrix, full Core regression, directory quota, ENOSPC, Phase4B or full Phase4 demo completion claim is made"
+  ],
+  "reports": [
+    {
+      "file": "phase4-event-identity-core-probe.json",
+      "exitCode": 0,
+      "sha256": "b37b09e9b731cdee62da7f60d384dbb65fd34ad0f3a06cb5b7587e4589500e94"
+    },
+    {
+      "file": "phase4-event-identity-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "ec11342fb4fe0ae07c8bd730eedae911d472c6072b0c3ead33ea24c117f8d438"
+    }
+  ],
+  "sourceSha256": {
+    "providers/memory-iris/src/index.ts": "19f822445c4a683d95cb7f1fbda0f9fd8ead8b5ed1075c041198de6c5a522423",
+    "providers/memory-iris/src/state-store.ts": "f69d3a95d9c2ab7f13c4858cce8dd45c0b8698010346a4292bdbde77b723e984",
+    "providers/memory-iris/test/provider.test.ts": "b292cb3f9f2fcac6706edd8fed44a9388b62f7127ac713493c321627b6d5b5e3",
+    "providers/memory-iris/test/event-checkpoint-state.test.ts": "9a7ce496b514ecf339a0322ee43b0ffe09c1b52a8c3fe7ed1a3839ccbc4532cc",
+    "scripts/iris-public-probe.mjs": "b72c8f9b66cbf3e16f62b72072c16e3a507701d9fc57d839afc45cca0497790b",
+    "scripts/iris-event-checkpoint-probe.mjs": "42c02e932556973c2cca238f28d3a8e1c8f04f1a01f13d27cbe88901a04f1e5e",
+    "scripts/iris-resource-invalidation-probe.mjs": "50397eaa65ae9034359e85e52ad56c37c155ffa242f4b2807962f004a86acd68"
+  },
+  "coreMigrationSha256": {
+    "0016_console_command_previews.sql": "ee30cbc8ad1adbd01624f52c8b1fbaee1d3da459dd847b7408cefbec8d10093c",
+    "0017_entity_tombstone_ledger.sql": "5e47593f6102005bec47364429e6af3dfaafb0e4325d5483cad9eea0c7bb44df",
+    "0018_state_deletion_generation.sql": "48715e0c1ac5c40a30d394ffcc8687e1fc4ca9a49bb091783803890511ec29bc"
+  }
+}

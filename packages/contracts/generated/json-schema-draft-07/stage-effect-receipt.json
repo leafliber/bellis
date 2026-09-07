@@ -1,0 +1,166 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "connectionGeneration": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "sceneId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "cueId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "segmentId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "receiptId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "appliedAtStageUs": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+        },
+        "lane": {
+          "type": "string",
+          "const": "audio"
+        },
+        "boundary": {
+          "type": "string",
+          "const": "worklet_rendered"
+        },
+        "streamId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "renderedSamples": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 28800000
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "sessionId",
+        "connectionGeneration",
+        "sceneId",
+        "cueId",
+        "segmentId",
+        "contentHash",
+        "receiptId",
+        "start",
+        "end",
+        "appliedAtStageUs",
+        "lane",
+        "boundary",
+        "streamId",
+        "renderedSamples"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "connectionGeneration": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "sceneId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "cueId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "segmentId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "receiptId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65536
+        },
+        "appliedAtStageUs": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+        },
+        "lane": {
+          "type": "string",
+          "const": "subtitle"
+        },
+        "boundary": {
+          "type": "string",
+          "const": "subtitle_applied"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "sessionId",
+        "connectionGeneration",
+        "sceneId",
+        "cueId",
+        "segmentId",
+        "contentHash",
+        "receiptId",
+        "start",
+        "end",
+        "appliedAtStageUs",
+        "lane",
+        "boundary"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

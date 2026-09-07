@@ -25,6 +25,10 @@ interface SceneBuffer {
   chunkOffset: number;
   /** 当前未播样本数（容量执行的账目）。 */
   buffered: number;
+  /** Source samples actually rendered; silence and cancel fade are excluded. */
+  rendered: number;
+  /** Once a source chunk is lost, later counts cannot prove a contiguous prefix. */
+  lossy: boolean;
   underruns: number;
   fading: boolean;
   fadeRemaining: number;
@@ -65,6 +69,8 @@ export class PcmSceneBuffer {
       chunks: [],
       chunkOffset: 0,
       buffered: 0,
+      rendered: 0,
+      lossy: false,
       underruns: 0,
       fading: false,
       fadeRemaining: 0,
@@ -85,6 +91,7 @@ export class PcmSceneBuffer {
       this.#scenes.set(sceneId, scene);
     }
     if (scene.ended || scene.buffered + samples.length > this.#maxSamples) {
+      scene.lossy = true;
       return false;
     }
     // 复制入队：调用方的帧缓冲不驻留引用（Memory 共享边界）。
@@ -112,6 +119,15 @@ export class PcmSceneBuffer {
 
   underrunCount(sceneId: string): number {
     return this.#scenes.get(sceneId)?.underruns ?? 0;
+  }
+
+  renderedSamples(sceneId: string): number {
+    return this.#scenes.get(sceneId)?.rendered ?? 0;
+  }
+
+  hasContiguousRendering(sceneId: string): boolean {
+    const scene = this.#scenes.get(sceneId);
+    return scene !== undefined && !scene.lossy && !this.#cancelledScenes.has(sceneId);
   }
 
   /**
@@ -170,6 +186,7 @@ export class PcmSceneBuffer {
         return count;
       } else {
         out.set(head.subarray(scene.chunkOffset, scene.chunkOffset + take), filled);
+        scene.rendered += take;
       }
       scene.chunkOffset += take;
       scene.buffered -= take;

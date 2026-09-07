@@ -129,6 +129,7 @@ test("Audio Arm → 媒体流 → 三 Lane 生效 → 偏差/打断指标", asyn
   const skewsMs = laneStarts.map(
     (start) => Number(BigInt(start.startedAtStageUs) - BigInt(start.targetLocalUs)) / 1000,
   );
+  console.info(`laneStartEvidence=${JSON.stringify(laneStarts)}`);
   for (const skew of skewsMs) {
     expect(Math.abs(skew)).toBeLessThanOrEqual(50);
   }

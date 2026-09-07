@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T23:23:55.453101+00:00",
+  "status": "host-history-barrier-verified-provider-detection-and-revalidation-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1040,
+    "integrationTests": 250,
+    "persistenceIntegrationTests": 128,
+    "runtimeIntegrationTests": 111,
+    "transportIntegrationTests": 11,
+    "generatedContractFiles": 162,
+    "providerTests": 82,
+    "providerTypecheckTestsBuildExitCode": 0,
+    "newHistoryGapWorkerTests": 3,
+    "newHistoryGapHostTests": 1,
+    "coreToolsSseCheckpointAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "rootCheckLogSha256": "a1a5fa6ac3af607750a06c5790eda786e851f20cef8b6d315e05a281c78b0ee4",
+    "providerLogSha256": "82d39a618333e90ee366f534a32a335acf26805c941edc7f2330fd125fec74cc"
+  },
+  "verified": [
+    "Migration 17 records a bounded idempotent scope/provider history-gap receipt and derives blocked/historyBlocked without changing the adopted policy generation or inventing tombstones",
+    "Host validates the reporting provider and agent, cancels existing Context/delivery, waits for durable persistence and active-effect stop before ACK, and keeps an in-memory barrier after persistence failure",
+    "Affected Memory Outbox rows cannot be claimed; a leased failure returns to pending without changing original payload, identity, attempt count or availability and without becoming dead solely because history is unknown",
+    "A verified actual Stage effect still records its confirmation and held Observe in one transaction; real privacy generation and tombstone checks remain enforced",
+    "A real remote ACK may finish during a gap; subsequent actual privacy revocation rejects late effects",
+    "Worker restart retains the barrier, original confirmed facts and pending observations; an ordinary policy change cannot clear the unresolved gap",
+    "Failed receipt insertion rolls back cleanly and another scope remains claimable",
+    "The installed candidate Core/SDK public event identity probe and existing tools, deletion SSE and Chromium paths pass; existing 24 recovery smoke combinations pass"
+  ],
+  "limits": [
+    "Provider automatic gap detection/reporting, production paired checkpoint requests, full public revalidation, safe release and old-backup restoration remain unfinished; no unconditional release RPC exists",
+    "The default Provider SDK remains 0.11.1; SDK 0.11.2 is only used by the existing isolated local candidate consumer, pending publication approval",
+    "Schema 18 is tested only under the existing exact wheel hash profile; the default Provider schema window is unchanged",
+    "No new gap SIGKILL windows or complete Stage/Core crash matrix is claimed; root check includes existing local confirmation crash tests but no separate per-case report was emitted this run",
+    "Actual ENOSPC, directory hard quota, production authority/Persona lifecycle, remote CI, long resource-growth validation, Phase4B and full Phase4 demo remain open"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "schema": 18,
+    "wheelSha256": "65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9",
+    "installedFilesVerified": 168,
+    "defaultProviderSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2"
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "target": "http://localhost:4873/",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-history-barrier-core-probe.json",
+      "exitCode": 0,
+      "sha256": "878521460ac9b768143860975aebb91ceb392e01cdc875d68b9316174d4e19da"
+    },
+    {
+      "file": "phase4-history-barrier-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "2bc0cf2811f0b5c56a1dc114bbd31916c7cca406d16520f8890dce3cc037092c"
+    }
+  ],
+  "sourceSha256": {
+    "packages/contracts/src/memory/history-gap.ts": "903efaf8a593750f326d8a954cee4eb0db58ad07c9edaee6f3703028729c234a",
+    "packages/contracts/src/memory/index.ts": "74555f2048612ea230748377c658fba48a0cf03719312599b55c093d75a2922b",
+    "packages/contracts/src/memory/policy.ts": "600e141b056e324eb40a9c1fcabe6cf8c975b7ce8a60da5f3495955c5cb28b3f",
+    "packages/contracts/src/index.ts": "0c559027b63a87fedbd632060374f417704f9c93ea1be61a4daad796242628a7",
+    "packages/contracts/src/json-schema.ts": "7a1398f3edec71fe7c95da6ec73197d719d47d0c1104905ae4f6555166d0d09c",
+    "packages/contracts/test/history-gap.test.ts": "15f64ab0bed823e0ec7cb074e8f49aee461103946a8604cb2f4bdfe89fb37392",
+    "packages/contracts/test/fixtures.ts": "0849cf89ba50ac1ac880e1b2b6acd5c31bc918e506414d47aeec371b9ae4994b",
+    "packages/persistence/src/migrations/registry.ts": "bb68e073dc576e378c027929c50a21461e1ea9009d67392a4c7ebbda14cf8d7b",
+    "packages/persistence/src/migrations/state/0017-phase4-history-gaps.ts": "03cb490a4a48d0e27d679ee182a9e8e6bca07402c0ccdf5a02dcf3644bce831d",
+    "packages/persistence/src/repositories/history-blocked.ts": "5ed004795d33d4facbef10f986506c79f6ee51d7eadc5cf63002a96cbd05dc98",
+    "packages/persistence/src/repositories/phase4-history-gaps.ts": "069868f9dba13ab432702057b2b3ef2e4e950d209d90296a31ba0e19cb354da1",
+    "packages/persistence/src/repositories/phase4-memory-policy.ts": "372ab1c5bae00f84aa713218bb0755b42af9af969e5a9b87492b9d45ddbe8443",
+    "packages/persistence/src/repositories/phase4-effects.ts": "5186a80e84192ca86481e9a87c902c0f76a1276b0549a48127f1e3a4fd00985e",
+    "packages/persistence/src/repositories/phase4-observe.ts": "4b51f3861725f1e4c37634226d88650a3dbb5e6e83a6e48a5cf922b7ba2b9b09",
+    "packages/persistence/src/repositories/outbox.ts": "984f1a5d4e18202588ba852942bce802e691a1b2f5981ae197eccb3f6aadfd4b",
+    "packages/persistence/src/rpc/operations.ts": "5a5bf4628ffedf7dc5829a23603ba5ad24486506387f4f70f5e72b8017e4d008",
+    "packages/persistence/src/client/persistence-client.ts": "2abfedab8bbd77e4d73956058da5939359b8e0e5fe7199b9dbcf4b340478c672",
+    "packages/persistence/src/worker/operations.ts": "bfe4a35f1b2c4895a1decc5a01fd750ba0a0d92c5e523766aeb5c6e4bfa87eb9",
+    "packages/persistence/test/integration/migration.integration.test.ts": "4daff8fb93b80f644f4fdd2ec6d75d414ee459e9c2ca811f4555de41a35fe419",
+    "packages/persistence/test/integration/phase4-history-gaps.integration.test.ts": "852c49a77f81af97c629464a87210d2e46e14309046eade2f64f091fbe5ab6f2",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "d3a2d4ffb10e1b40a8b10651995171626a1442ac1139f476d5d33614d36e384f",
+    "apps/runtime/test/unit/phase4-memory-host.test.ts": "17ffa6c05edc38fb38c111dbc97f06fa3feac13a0fcc8a7d6e1098781c70b221",
+    "apps/runtime/test/unit/commit-fake-scene.test.ts": "c0ff33221dab12dc0bd4c9a91749ab8d668ec96d8224ce3247015a4adb482a41"
+  }
+}

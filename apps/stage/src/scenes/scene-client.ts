@@ -1,3 +1,4 @@
+import { StageEffectTracker } from "./effect-tracker.js";
 import type { CueLane, MonotonicClock, ScenePlan } from "@bellis/contracts";
 import { ScenePlanSchema } from "@bellis/contracts";
 import type { ClockEstimate } from "@bellis/transport/browser";
@@ -45,6 +46,7 @@ export interface SpeechTextPublisher {
 }
 
 export interface SceneClientOptions {
+  readonly sessionId?: string;
   readonly clock: MonotonicClock;
   readonly timeline: CueTimeline;
   readonly lanes: LaneRegistry;
@@ -84,8 +86,20 @@ export class SceneClient {
   readonly #speechPublisher: SpeechTextPublisher | null;
   readonly #lateToleranceUs: bigint;
   readonly #scenes = new Map<string, PreparedScene>();
+  readonly #effects: StageEffectTracker | null;
+  readonly #effectTimer: ReturnType<typeof setInterval> | undefined;
+  #connectionGeneration = 0;
 
   constructor(options: SceneClientOptions) {
+    this.#effects =
+      options.sessionId === undefined
+        ? null
+        : new StageEffectTracker({
+            sessionId: options.sessionId,
+            clock: options.clock,
+            send: options.send,
+          });
+    if (this.#effects !== null) this.#effectTimer = setInterval(() => this.#effects?.flush(), 250);
     this.#clock = options.clock;
     this.#timeline = options.timeline;
     this.#lanes = options.lanes;
@@ -108,6 +122,8 @@ export class SceneClient {
    * 对账交由协议（uncertain 快照），本地绝不自行重播。
    */
   onConnectionGenerationChange(): void {
+    this.#connectionGeneration++;
+    this.#effects?.clear();
     for (const [sceneId, scene] of this.#scenes) {
       scene.controller.abort(new Error("connection_generation_changed"));
       scene.scheduled?.cancel();
@@ -139,12 +155,8 @@ export class SceneClient {
     if (this.#scenes.has(sceneId)) {
       return; // 重复 prepare：幂等忽略。
     }
-    // plan.speech 单一发言来源 → 字幕 Lane 暂存（不可见）。
-    const speech = (scenePlan as { speech?: { text?: unknown } }).speech;
-    if (this.#speechPublisher !== null && typeof speech?.text === "string") {
-      this.#speechPublisher.setSpeechText(sceneId, speech.text);
-    }
     if (this.#scenes.size >= MAX_CONCURRENT_SCENES) {
+      this.#effects?.releaseUnprepared(scenePlan);
       this.#send("scene.ready", {
         sceneId,
         cycleId: scenePlan.scene.cycleId,
@@ -159,6 +171,33 @@ export class SceneClient {
         preparedAtStageUs: this.#clock.nowUs().toString(),
       });
       return;
+    }
+    if (scenePlan.effects !== undefined) {
+      const generation = this.#connectionGeneration;
+      const ready = await this.#effects?.prepare(scenePlan);
+      if (generation !== this.#connectionGeneration || this.#scenes.has(sceneId)) return;
+      if (ready !== true) {
+        this.#effects?.releaseUnprepared(scenePlan);
+        this.#send("scene.ready", {
+          sceneId,
+          cycleId: scenePlan.scene.cycleId,
+          lanes: [
+            {
+              lane: firstLane(scenePlan),
+              status: "unavailable",
+              reason: "effect_plan_unavailable",
+              cueIds: [],
+            },
+          ],
+          preparedAtStageUs: this.#clock.nowUs().toString(),
+        });
+        return;
+      }
+    }
+    // plan.speech 单一发言来源 → 字幕 Lane 暂存（不可见）。
+    const speech = (scenePlan as { speech?: { text?: unknown } }).speech;
+    if (this.#speechPublisher !== null && typeof speech?.text === "string") {
+      this.#speechPublisher.setSpeechText(sceneId, speech.text);
     }
     const scene: PreparedScene = {
       plan: scenePlan,
@@ -270,6 +309,7 @@ export class SceneClient {
         .filter((group) => group.level === "hard")
         .flatMap((group) => group.lanes),
     );
+    this.#effects?.commit(sceneId);
     scene.scheduled = this.#timeline.schedule(
       sceneId,
       targetLocalUs,
@@ -359,6 +399,7 @@ export class SceneClient {
       }),
     );
     this.#scenes.delete(sceneId);
+    this.#effects?.finish(sceneId);
     this.#emit(sceneId, "cancelled", reason);
     this.#send("scene.cancel.ack", {
       sceneId,
@@ -369,7 +410,29 @@ export class SceneClient {
   }
 
   /** 关闭：取消全部调度并释放（页面关闭/StageApp close）。 */
+  sealEffects(payload: unknown): void {
+    this.#effects?.seal(payload);
+  }
+  releaseEffect(payload: unknown): void {
+    this.#effects?.released(payload);
+  }
+  bindAudioEffect(payload: unknown): void {
+    this.#effects?.bindAudio(payload);
+  }
+  acknowledgeEffect(payload: unknown): void {
+    this.#effects?.acknowledge(payload);
+  }
+  audioRendered(sceneId: string, samples: number, atUs: bigint): void {
+    this.#effects?.audioRendered(sceneId, samples, atUs);
+  }
+  subtitleApplied(sceneId: string, start: number, end: number, atUs: bigint): void {
+    this.#effects?.subtitleApplied(sceneId, start, end, atUs);
+  }
+
   close(): void {
+    this.#connectionGeneration++;
+    clearInterval(this.#effectTimer);
+    this.#effects?.clear();
     for (const scene of this.#scenes.values()) {
       scene.controller.abort(new Error("stage_closing"));
       scene.scheduled?.cancel();
@@ -410,6 +473,7 @@ export class SceneClient {
   ): void {
     const sceneId = scene.plan.scene.sceneId;
     this.#scenes.delete(sceneId);
+    this.#effects?.finish(sceneId);
     this.#emit(sceneId, "finished");
     this.#send("scene.finished", {
       sceneId,

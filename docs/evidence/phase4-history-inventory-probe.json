@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T23:51:08.348270+00:00",
+  "status": "durable-history-inventory-verified-public-revalidation-and-release-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1040,
+    "integrationTests": 254,
+    "persistenceIntegrationTests": 132,
+    "runtimeIntegrationTests": 111,
+    "transportIntegrationTests": 11,
+    "generatedContractFiles": 162,
+    "newInventoryIntegrationTests": 4,
+    "finalFocusedTests": 4,
+    "finalScopeIsolationAssertions": "passed after root run, with focused persistence typecheck",
+    "providerTests": 89,
+    "providerTypecheckTestsBuildExitCode": 0,
+    "realCoreGapInventoryAndStageExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "rootCheckLogSha256": "c15937600a36890d59eb2eb97aeccd8806705955897597dd1d7728f11bd5e02c",
+    "focusedLogSha256": "59959c8ca8f068a3dd5b11e4f5892fea4d0d258a17718d673dd552cb8c4f1260"
+  },
+  "verified": [
+    "Bellis Migration 18 stores one inventory per scope/provider gap, binding exact gap id, policy generation, run identity and ordered fact digests; original facts are not copied or rewritten",
+    "The inventory covers all scoped Context Manifests and confirmed effects, provider-specific Observation/outbox payload/ACK state, Usage payload/status, and host-persisted Provider state",
+    "Stored source digests are checked before inventory creation; pages and individual original bodies match the saved inventory and survive Worker restart",
+    "Late actual effect confirmation, original remote ACK or policy generation change invalidates an older inventory; a new explicit run may replace it atomically",
+    "Failed item insertion restores the old inventory, corrupted source or inventory digests are rejected, unrelated scope facts/state are excluded, and unrelated scope delivery remains claimable",
+    "An empty inventory does not release the gap; a 4097-item fixture is refused without truncation or replacing the prior inventory",
+    "Actual installed Core 410 -> Provider -> MemoryHost/DB Worker produces a three-kind inventory, verifies original body digests and restores the same inventory after restart while the gap remains blocked",
+    "Real Chromium/deletion-SSE regression and existing public tools pass; the 24-case recovery smoke passes under the new Bellis migration"
+  ],
+  "limits": [
+    "This inventory is only the durable coverage obligation. Public resource/privacy/deletion verification, remote consistency boundary, per-item conclusions, original-request reconciliation and atomic safe release remain unfinished",
+    "The current bounded inventory admits at most 4096 items and 64 MiB of original bodies, reads one item up to 1 MiB and up to 64 descriptors per page; each read revalidates the whole bounded collection. Larger histories and performance/resource-growth acceptance require further work",
+    "Provider StateStore configured outside the host DB is not covered by this inventory and requires independent proof before any future release",
+    "Only explicitly scoped host facts are included. Unsupported/unbound legacy identity migration and actual old Core backup restoration remain open",
+    "The isolated candidate SDK is used only by the explicit gap probe; default SDK 0.11.1, pending registry approval and default Provider Core schema window are unchanged",
+    "No new SIGKILL window or full Stage/Core matrix is claimed; actual ENOSPC, directory hard quota, production tool authority, Core Session mapping, remote CI, Phase4B and the full demo remain incomplete"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 18,
+    "bellisStateMigration": 18,
+    "wheelSha256": "65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9",
+    "installedFilesVerified": 168,
+    "defaultSdk": "0.11.1",
+    "candidateSdk": "0.11.2"
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-history-inventory-core-probe.json",
+      "exitCode": 0,
+      "sha256": "93b88ef6245b67051e4532eb297e837074992e63601fe574a4571ef1fd4093d0"
+    },
+    {
+      "file": "phase4-history-inventory-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "1c6dfb01d4b17750267bce9292ec0b0d5e754a7da7d66df69c37800a1f98e34d"
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/repositories/phase4-history-inventory.ts": "92c4015fe78412611c23a834912210220eac8585ccf22dfc5ac461933ce08db1",
+    "packages/persistence/src/migrations/state/0018-phase4-history-inventory.ts": "aa949d5e19ba2c213de3f0b22fb8a098b6272405c5268d1338ab6298f0c06582",
+    "packages/persistence/src/migrations/registry.ts": "0b76a075940c3f320f39d07208d8969ad8a7dcb16d84231b32b119444d98e9cf",
+    "packages/persistence/src/rpc/operations.ts": "67dbaee36c2e41d497a3b3641b2abbfccf990418bf4b0a78ded7ca55fdf1810c",
+    "packages/persistence/src/client/persistence-client.ts": "80ae5030e36e681ae8b56667aed9bb66e9be35d0d7cb33713e74f9e4882e46a8",
+    "packages/persistence/src/worker/operations.ts": "f0f3acc7c3f0cdd3f838e69b35ae3f9069049ac5af8dc80ec40d1f26dd673eea",
+    "packages/persistence/src/index.ts": "c7bb118e03089a3ff118ac425cfe1311b8fee9ecca7fcf3e264194a3e705d048",
+    "packages/persistence/test/integration/phase4-history-inventory.integration.test.ts": "ef1f471ed182846c0792e1955aa46682f7d1b667ae5bac9e1d3b68b0d63e83ea",
+    "packages/persistence/test/integration/migration.integration.test.ts": "9bc7f81dcf43e3a843d606d3d9cb255785586b0ad20cc6099526fae825e35dce",
+    "apps/runtime/test/unit/commit-fake-scene.test.ts": "31b9095261e3141fa35d55625efda747f982165d300866bbccae997eaf78c415",
+    "scripts/iris-history-gap-probe.mjs": "47e0c3a0e99f47d83da1448f5d86684ace1199fb2c395146cf58db449f6206ef"
+  }
+}

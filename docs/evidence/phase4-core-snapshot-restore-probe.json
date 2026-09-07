@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T03:25:44.882233+00:00",
+  "status": "two-real-core-cold-snapshot-restore-paths-verified-full-phase4-incomplete",
+  "validation": {
+    "command": "IRIS_CORE_PYTHON=<verified schema20 environment> IRIS_PROBE_REPORT=<report path> pnpm test:memory:iris:snapshots",
+    "exitCode": 0,
+    "build": "root workspace and independent Provider builds passed as part of the command",
+    "casesPassed": 2,
+    "repetitionsPerCase": 1,
+    "syntaxAndFormat": "passed",
+    "rootCheck": "not-rerun; production application/Provider sources unchanged",
+    "priorRootBaseline": {
+      "evidence": "phase4-memory-readiness-probe.json",
+      "unitAndPropertyTests": 1054,
+      "integrationTests": 275,
+      "generatedContracts": 168
+    },
+    "priorProviderBaseline": {
+      "evidence": "phase4-installed-checkpoint-sdk-probe.json",
+      "tests": 100,
+      "checkExitCode": 0
+    },
+    "priorRecoverySmoke": "24 cases with installed SDK 0.11.2 in ADR 0044; not rerun this turn",
+    "fullCoreRegression": "not-rerun",
+    "initialHarnessCorrections": [
+      "Core API SIGTERM is reported as a signal rather than exit code zero",
+      "Use the checked HTTP Adapter structured 410 error",
+      "OutboxPublisher blocks with a failure result, not a thrown exception"
+    ]
+  },
+  "verified": [
+    "Core public CLI creates and verifies signed backup with no migration applied; Core API and Worker are observed stopped before public restore into a new isolated directory",
+    "Normal Provider consumes and durably acknowledges actual public events; no seeded or rewritten checkpoint",
+    "Restored backup retains its original positive cursor and identity, which remain publicly valid",
+    "Missing post-backup anchor returns 410; a new event reusing the original numeric cursor with a different identity also returns 410",
+    "Independent original Usage body/key replay on restored Core returns the same report ID and stage counts",
+    "Actual Provider 410 cancels the previously current Context and persists its unchanged original checkpoint and history gap",
+    "Original Bellis request, Manifest and delivered Usage rows remain byte-equivalent; Host rejects Usage publication with history_unavailable",
+    "Same-directory Bellis restart retains gap identity and maintenance mode with live 200, ready 503 and no ordinary decision pipeline"
+  ],
+  "limits": [
+    "Two deterministic cold-restore cases, one run each; not twenty SIGKILL repetitions or full A4 matrix",
+    "No Bellis old snapshot, latest deletion-ledger merge, in-place Core directory switch fault or every cursor divergence variant",
+    "No claim of retaining Core writes made after the restored backup; those require independent reconciliation",
+    "No safe history release, full fact verification, Stage crash recovery or Phase4B completion",
+    "Temporary event-read delay controls observation timing but does not modify request/response contents or Provider checkpoints"
+  ],
+  "installation": {
+    "coreVersion": "0.13.0",
+    "schemaVersion": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedCoreFilesVerified": 178,
+    "sdkVersion": "0.11.2",
+    "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+    "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "installedSdkFilesVerified": 4
+  },
+  "reports": [
+    {
+      "file": "phase4-core-snapshot-restore-raw.json",
+      "exitCode": 0,
+      "sha256": "20e14fba011e5c16c138eb22bfd6e226f440ce1dd7b02aa27d47ac9e4d7cbdce"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-snapshot-restore-final.log",
+      "sha256": "c4b89c501b06e7501c0e843eb1257eb142b853706938fbf35cdfcc2aa5a2e681"
+    }
+  ],
+  "sourceSha256": {
+    "scripts/iris-snapshot-restore-probe.mjs": "b3ba7cddb05b2b83e173d05d26f8788aff9d0be3454bba1bf928a93e2fa86e54",
+    "scripts/iris-public-probe.mjs": "bf141d7cdeee8ba3cd47a4f6950eb6007b6e63c1f26883928e9fc9da7a514d23",
+    "package.json": "e8683ea93c7bdf77546ac16ca13d6f8bb5c95f91b02b0f7b4b2439714d792089"
+  },
+  "unchangedProductionAndProviderTestSources": {
+    "apps/runtime/src/application/phase-4/memory-host.ts": "728e3d6dc2f82a7e79b01ba808ddba547b44b580646bf6298f6c034ecd627c91",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "84b580ce324e81106ce21a1f977fb57243665e48685b68fe729cb84a7a30d9ad",
+    "apps/runtime/src/index.ts": "094efe6d23dadf234822ad2ed1a047bc203beff6b62c6ac14c197099230fa1f5",
+    "apps/runtime/test/integration/phase4-history-revalidation.integration.test.ts": "53f337258c25a5e6dede600fccede6a7e6fd9230e6b577a118d65f487a1b9181",
+    "providers/memory-iris/src/index.ts": "7a234fb3139ebc4192f013032732c92068047a264e604a6cfbf7857af6b8481a",
+    "providers/memory-iris/test/provider.test.ts": "5dbb19b75a5461010078da7488078305a255372c2e1e1c9100ea1c0c3d457ab0"
+  }
+}

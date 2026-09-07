@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T22:35:59.887Z",
+  "status": "external-reader-restart-and-policy-credit-release-verified-full-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1035,
+    "integrationTests": 247,
+    "persistenceIntegrationTests": 125,
+    "runtimeIntegrationTests": 111,
+    "transportIntegrationTests": 11,
+    "generatedContractFiles": 160,
+    "newExternalReaderRestartCases": 2,
+    "focusedTests": 17,
+    "localConfirmationCrashCasesRevalidated": 40,
+    "uniqueKilledChildPids": 40,
+    "realCoreToolsSseAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "recoverySmokeRepetitionsPerCombination": 1,
+    "rootCheckLogSha256": "d6002de39bb47d732f941f0a128cfc29c6a53524782c3cd04efc051438e9aa11",
+    "focusedLogSha256": "4cc642674deb01f9a1d9e9473e5bfd58c393754dcf97bcd5a06218eb349916d8"
+  },
+  "verified": [
+    "An independent read-only SQLite transaction remains live across two Worker restarts and continues seeing its old four reservation rows while WAL checkpoint is blocked",
+    "Recovery consumes one saved close credit per Scene and retains four original confirmed facts and four pending Outbox rows; old committed receipts retry as duplicate and uncommitted old-generation receipts are rejected",
+    "An already applied migration registry and empty boot-recovery work are read-only; a second restart with nothing left to close does not extend WAL",
+    "Readiness remains wal_pressure and new adoption is rejected until the external snapshot is released; pending facts then deliver in source-cursor order without additional observations",
+    "A genuine in-flight lease requires an ordinary recovery write: blocked migrate does not open business operations, leaves the row intact, and succeeds on the same Client after the external snapshot closes",
+    "The successful migrated flag is set only after boot recovery completes",
+    "Privacy policy closure atomically releases closed Scene completion credits while retaining existing tombstone, suppression and late-effect rejection behavior",
+    "Real Core tools, deletion SSE and Chromium output/next-context/privacy interruption pass on the final build; existing 24 Runtime/Core recovery combinations pass smoke revalidation"
+  ],
+  "limits": [
+    "The two new cases use clean Worker shutdown/restart while a separate reader remains live; they are not additional SIGKILL windows",
+    "The 40 confirmation transaction SIGKILL cases are revalidation on this source, separate from the historical 480-case Core matrix; only 24 Core smoke cases run here",
+    "No operating-system exclusive reservation, actual ENOSPC, aggregate directory hard quota, old-backup or complete Stage/Core recovery proof is claimed",
+    "A blocked ordinary lease-recovery write intentionally prevents startup until capacity or checkpoint progress returns; Scene close credits do not authorize arbitrary recovery writes",
+    "Remote CI, Core Session mapping, production tool authority, remaining Persona/SSE lifecycle, resource-growth audit, Phase4B and the full demo remain incomplete"
+  ],
+  "diagnostics": [
+    "The new external-reader test failed with persistence WAL checkpoint required before the fix and passes afterward",
+    "The first full check found a pre-existing 10ms lease assertion racing real Worker RPC scheduling. The test now allows a 1s lease and waits past expiry, preserving both exclusion and reclaim assertions; the final full check passes"
+  ],
+  "coreInstallation": {
+    "core": "0.13.0",
+    "schema": 15,
+    "sdk": "0.11.1",
+    "wheelSha256": "74f8105d0607d44475d0d7b0c9c5afcb8bcba3e5e4067a40850f33b453f9f105",
+    "installedFilesVerified": 159
+  },
+  "nativeBuild": {
+    "signature": "419b5f537b9467fd36e53af749ff1a54a261591568724982027e99d77cf18ed2",
+    "platform": "darwin",
+    "arch": "arm64",
+    "binarySha256": "87dcd90ddc3dc4fd19f9d9532ce649193aca394e9d0e7dc247d3e07cce9c257f"
+  },
+  "reports": [
+    {
+      "file": "phase4-completion-restart-pressure-core-probe.json",
+      "exitCode": 0,
+      "sha256": "52617bccedbc0cffe69a86da83e47d87f21f37b06193667daa7c03e72571e73a"
+    },
+    {
+      "file": "phase4-completion-restart-pressure-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "de499245538dec2cdd7ffd87800c8af9cc02a2f7e6426e672572742e2c175daf"
+    },
+    {
+      "file": "phase4-completion-restart-pressure-crash-cases.json",
+      "exitCode": 0,
+      "sha256": "ead36f692158b66993d3eef12952ce782d5e17f290a2477ccb42634e1be5926d"
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/migrations/runner.ts": "520191b350af65811b60cdd399dda93fe1f0f16ad509056c81a099b179fe79f4",
+    "packages/persistence/src/migrations/state/0016-phase4-completion-reservations.ts": "91373b8f5a01d2b76c1b10d03cff6195375c616067df11ac3f63bfba609d7689",
+    "packages/persistence/src/repositories/outbox.ts": "7ad1f468ee4f5e577cab7fdfd659b6b40d2c3be93183fa94e97859c2b24514ed",
+    "packages/persistence/src/repositories/phase4-effects.ts": "38305d048af6fdb21fc563f23bb8d445873e13bf05590f043ac44052af093afc",
+    "packages/persistence/src/repositories/phase4-memory-policy.ts": "5894eb71295cf42a8fe70c0764359dbdb3927b08269bfd060ec19dd860075ddf",
+    "packages/persistence/src/worker/operations.ts": "d6d0428de2168ac6e42e742ab86cfd6a40959bac534a95d9075d87eb58abe4fc",
+    "packages/persistence/src/worker/database.ts": "587d1a067a6f57e934bf4d01f0801d8946ef0de9c9a77be1db4ba0b45ce71b7f",
+    "packages/persistence/src/completion-budget.ts": "4e34dcf3d403cbe835f3e389ab8c2ad77361af82cb2c1f37464ceab45bf59cf1",
+    "packages/persistence/test/integration/completion-restart-pressure.integration.test.ts": "bd4476ff95f81b998c9ba47ee1d6c8a2e87c7422c7f94618b56a202205ec6e66",
+    "packages/persistence/test/integration/phase4-effects.integration.test.ts": "0d53e7070682a2c3358e8fb42028b0f260f00e26b8fbb9c1fd9b09be13fe6f5b",
+    "packages/persistence/test/integration/review-regressions.integration.test.ts": "0161b57c2862832277aadfb2e7fdbf170ea0a96c9b51bfaa36ac62b6e5e443bd",
+    "packages/persistence/test/integration/completion-crash.integration.test.ts": "0020bf876523b5c8964d823fdfc279332cd660d44614ddceb5d24d44f946051e",
+    "packages/persistence/native/sqlite-guard.c": "69432e816f81a95830a65b1ea28840c152f9f0017f959aba886509a1ec00822b",
+    "packages/persistence/scripts/build-sqlite-guard.mjs": "18096bcc81abc9476affe5ef350edd09be945b243d1c1b0125e4228173f46e16"
+  }
+}

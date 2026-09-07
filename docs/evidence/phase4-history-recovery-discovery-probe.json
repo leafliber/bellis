@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T01:46:17.502151+00:00",
+  "status": "durable-recovery-discovery-and-host-cancellation-implemented-full-recovery-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": 0,
+    "unitAndPropertyTests": 1049,
+    "integrationTests": 266,
+    "persistenceIntegrationTests": 138,
+    "runtimeIntegrationTests": 117,
+    "transportIntegrationTests": 11,
+    "generatedContracts": 168,
+    "focusedPersistenceTests": 8,
+    "focusedRuntimeTests": 6,
+    "providerTests": "not-rerun; production Provider source unchanged, prior final 96-test baseline",
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newRecoveryDiscoverySigkillWindow": "not-claimed",
+    "fullCoreRegression": "not-rerun"
+  },
+  "verified": [
+    "DB Worker discovers selected scope/provider gap, raw privacy state and current inventory in a single read snapshot; absent/current/stale are distinct and inspected source/inventory integrity failures are not treated as normal stale replacement",
+    "Resume discovers durable gap/generation/run identities, reuses a current run after restart and skips its recorded verdicts without caller-held runId; missing or normally stale inventory gets a new explicitly selected run through the existing transaction",
+    "MemoryHost creates the coordinator with its configured scope/provider/agent/space and current cancellation epoch; unregistered verifier, pending transition and closed-host checks remain enforced",
+    "Live host privacy change cancels an uncooperative verifier before its policy transition; stop also aborts it. A late verdict does not resume writes and the old coordinator cannot cross the host epoch",
+    "Final installed Core probe constructs a fresh maintenance-only MemoryHost without starting ordinary providers, obtains a host-owned coordinator, discovers the original run, verifies once and resumes after Worker restart with no repeated HTTP",
+    "Current original Usage and three unchecked inventory facts remain intact, history barrier remains held, and final Core/Chromium plus tools and existing recovery smoke paths pass"
+  ],
+  "limits": [
+    "This is explicit maintenance recovery with durable discovery and host cancellation; automatic background retry/wakeup is not implemented",
+    "Cancellation ownership covers the same MemoryHost object. Other processes changing policy/remote authority are still handled by pre-send admission, cancellation and result transaction checks; no cross-process HTTP lock is claimed",
+    "Old preparation policy generations, independent Observation/Usage and other facts, external StateStore/legacy scope coverage, common cross-batch snapshot and safe release remain open",
+    "Actual backup/fork restore, full Stage/Core crash matrix, ENOSPC, total directory quota, long-growth, Phase4B and full demo remain incomplete",
+    "Default SDK and schema support window remain unchanged"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-history-recovery-discovery-core-probe.json",
+      "exitCode": 0,
+      "sha256": "3ea542edaf69c31c3dd36d1432e843de726a69db79a2fbd1bfb4b852c2ceb61d"
+    },
+    {
+      "file": "phase4-history-recovery-discovery-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "2d78f34485a659a976bbc3621d03bb630c757a877dd433f8c72144822b54e0bc"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-resume-check.log",
+      "sha256": "b1060441d3ba1d4d3176b439bc145f04d8b8e21bf5ccfcdc808578d3da6c2686"
+    },
+    {
+      "file": "/tmp/bellis-resume-db-tests.log",
+      "sha256": "382f5cb95a37dff90815176883c19b1c500551ad191f67edd7d3035634d6ade2"
+    },
+    {
+      "file": "/tmp/bellis-resume-runtime-tests.log",
+      "sha256": "83b481bb52c90c98c4e6b9a9d8ff3294891f2ff569148ef47f3a60acaf7518b5"
+    },
+    {
+      "file": "/tmp/bellis-resume-core.log",
+      "sha256": "3ce15c6618b84a4cf5491f20b9a8daecafdf247c55374c4ac68c701241953ba2"
+    },
+    {
+      "file": "/tmp/bellis-resume-recovery.log",
+      "sha256": "2eef5fe71621ea36b44566f4611230390cb81b53ca7b1f90a32ee5066a1082e5"
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/repositories/phase4-history-inventory.ts": "965c44ec504f791256e22505b88e2288ca4d813964fe55375ce4620eefc27011",
+    "packages/persistence/src/rpc/operations.ts": "b3fa944e429632489a020b5b06eb7332e8c66ebbcc330a7e3734cb7862522ead",
+    "packages/persistence/src/client/persistence-client.ts": "2bf4d9ff579b47dbfbdfd12de76fd74032cda7670096a2b49953bf7f4d304a38",
+    "packages/persistence/src/worker/operations.ts": "0ba8360cd34f0e514a4dd6cffaeaa8015a0f770c87b634e3de6906f12f581640",
+    "packages/persistence/src/index.ts": "023b2186a49f19ebc734f34c3f67457f8e7a0a6c80d475dcad026528e90721cc",
+    "packages/persistence/test/integration/phase4-history-inventory.integration.test.ts": "0e71981fbe4d93f31cf394c6063bb2fd2cd4c675fdcbbe4a990f9353961f0300",
+    "apps/runtime/src/application/phase-4/history-revalidator.ts": "bd42a7a77f506a8c1f9fa7e4092b0289089764e558fddcd28591452417292195",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "44fa4742e7382719280015fae83147fad2d34173a7abd606d76e780676922ecf",
+    "apps/runtime/test/unit/commit-fake-scene.test.ts": "82cfc2092a318a4b89dd8b76d77b361a40c82964471a28d81d3e731afe462d3d",
+    "apps/runtime/test/integration/phase4-history-revalidation.integration.test.ts": "9a38c3a6ca66320f4728db4193a5d12ce85ffd6c11d33b4251c625a7d422dadc",
+    "scripts/iris-history-gap-probe.mjs": "2b70ae08be6537aeefeaec1a48260a13aab81cedfb9bcf0b6fa158f0938cabfb"
+  }
+}

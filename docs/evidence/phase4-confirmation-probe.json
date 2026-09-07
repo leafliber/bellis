@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T16:36:14.249355+00:00",
+  "status": "confirmation-boundary-verified-phase4-incomplete",
+  "validation": {
+    "command": "pnpm check",
+    "unitAndPropertyTests": 988,
+    "integrationTests": 211,
+    "toolRuntimeUnitTests": 30,
+    "rootCheckLogSha256": "5161165de3689bf400f5d5421052b2e51c4242d451f112b1e8b23c4cd4a7a512"
+  },
+  "verified": [
+    "Registered declarations and compiled calls are immutable deep copies",
+    "Confirmation binds concrete arguments, execution identity, tool version and key digest",
+    "Confirmation timeout and Session close cancel the Port; late approval never invokes Handler",
+    "An uncooperative confirmation retains its permit until settlement",
+    "Approval and Handler share one monotonic tool deadline",
+    "Capabilities revoked during approval deny execution",
+    "Identical cached calls cannot share a confirmation decision through L0 promise reuse",
+    "Real DB Worker confirms the already durable call; Session close persists cancelled with zero effects"
+  ],
+  "remaining": [
+    "Freeze and persist the actual trusted Iris SDK request before confirming or executing it",
+    "Register four Iris tools through the host with target authorization and privacy coordination",
+    "Pinned Core FTS initialization and public search gate",
+    "Real Legal Hold, external invalidations, recovery and A4/Phase4B gates"
+  ],
+  "sourceSha256": {
+    "packages/tool-runtime/src/permissions/gate.ts": "e675dc2e3ed2a441d62868671580d8f29a2915e9349227e50f83c54fd66da832",
+    "packages/tool-runtime/src/permissions/confirmation.ts": "1fa57ef53b5b9c099f5e00d6455ee41ed212b8157c39ba97f0da053e77de0978",
+    "packages/tool-runtime/src/registry/frozen-json.ts": "a83fe035ddf47cb6644a4f90f97e67c9244c2ece673b8741c2e1c0a7bc59044c",
+    "packages/tool-runtime/src/registry/registry.ts": "fe9cbfe1a6fad88c05d58abb9c92fa8f0532cc8e25228c89339d6239acffced4",
+    "packages/tool-runtime/src/dag/compiler.ts": "597e4098298b3cf412f8ba97811e1c061e5164b3678f49644856279dff858abe",
+    "packages/tool-runtime/src/runtime.ts": "d8f9099ce31869c810eaacb2fe68e6e7e85137c297801d2f5e10eb16bf3e734f",
+    "packages/tool-runtime/test/unit/runtime.test.ts": "f8b667f85bfcf8c8aeeb0331cfa9a70ccb5c3aae24b026b9fedd321338438362",
+    "apps/runtime/test/integration/phase4-session-binding.integration.test.ts": "1fabd638daac7c5173f5cf7198079637d49f61b3fc8bb7101ae2be645a5ef87f"
+  }
+}

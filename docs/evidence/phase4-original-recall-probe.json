@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T01:00:59.617231+00:00",
+  "status": "original-recall-preparation-durable-and-publicly-verified-history-release-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": 0,
+    "unitAndPropertyTests": 1043,
+    "integrationTests": 256,
+    "persistenceIntegrationTests": 134,
+    "runtimeIntegrationTests": 111,
+    "transportIntegrationTests": 11,
+    "generatedContracts": 164,
+    "providerTests": 92,
+    "providerTypeLintFormatBuildExitCode": 0,
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newRecallCrashWindow": "not-claimed",
+    "fullCoreRegression": "not-rerun"
+  },
+  "verified": [
+    "Iris prepares an attempt identity and complete actual SDK body; trusted Host/DB Worker persistence ACK precedes HTTP. Storage failure and cancellation prevent the call",
+    "Worker checks current policy, bound Session ownership, disk admission and bounded storage in the insertion transaction; exact attempts replay without overwriting different attempts for the same native request id",
+    "Injected insert failure rolls back; restart restores original requests and inventory binds scope/provider, digest and exact body",
+    "Real installed SDK HTTP body equals the request read from the restarted DB Worker inventory; public Core batch endpoint returns valid and the durable gap remains blocked",
+    "Final host/provider build passes real Core correction/deletion/checkpoint/history-gap/Chromium paths, tools and 24 existing recovery smoke combinations"
+  ],
+  "bounds": {
+    "recordBytes": 65536,
+    "globalRecords": 4096,
+    "globalBytes": 67108864,
+    "retention": "no automatic eviction; long-growth gate remains open"
+  },
+  "limits": [
+    "Prepared records do not prove HTTP acceptance, adoption or Usage and can include unsent attempts",
+    "Durable per-item verdicts, production batch orchestration, cross-batch consistency and safe atomic history-gap release remain incomplete",
+    "Observation/Usage reconciliation, external StateStore and unbound legacy coverage remain open",
+    "Actual old-backup/fork recovery, full Stage/Core crash matrix, ENOSPC, total directory quota, long-growth and Phase4B remain incomplete",
+    "No default SDK dependency or schema support window change; isolated SDK 0.11.2 is only a candidate"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 19,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-original-recall-core-probe.json",
+      "exitCode": 0,
+      "sha256": "d49607a1998c651b0796e2eedcd29bf8e96e32ac3a567cc13484602ca900f4b3"
+    },
+    {
+      "file": "phase4-original-recall-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "2a8bd244527515ceb5180b360baebfac49bbe9904c96be313c38a4b0b1082ebf"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-request-record-check.log",
+      "sha256": "ba7d2448c69e2dde37fdd8c715cfc6c8a7b6570c047a3ec796dbad4ef325591a"
+    },
+    {
+      "file": "/tmp/bellis-request-record-provider-tests.log",
+      "sha256": "226487f359f7b3d4be69bafd087f1eab757da56dca70eefaf8105f09784e0cc0"
+    },
+    {
+      "file": "/tmp/bellis-request-record-provider-final.log",
+      "sha256": "29c5ee0f6b0b20dbb259b99d01276198c3d28190090706394608d4deda6d2c0b"
+    },
+    {
+      "file": "/tmp/bellis-original-recall-core.log",
+      "sha256": "1372d06f1098f08768ea7a1496703528bad494871b67d8c02e63403969ac6e5d"
+    },
+    {
+      "file": "/tmp/bellis-original-recall-recovery.log",
+      "sha256": "c01f03f8e1f19f832577b1cb31e5abb1ca169fef65d33a214c96855df3d7992b"
+    }
+  ],
+  "sourceSha256": {
+    "packages/contracts/src/memory/recall-request.ts": "c8efd6c5d1179d1e29f416fec5f72192495324bc3fc69d78762fa8a78bdc9d9d",
+    "packages/contracts/src/memory/index.ts": "d626c3d89d6ba1def8e528ec632f73a39d6d6d8dcbe6fa69d7d2eadb16e2f61d",
+    "packages/contracts/src/index.ts": "dcf57ebcc6f49a6e30c2dc15125b8fbf55f610b70af89ad77b4a03436177db13",
+    "packages/contracts/src/json-schema.ts": "c83a425cfa2d5ee83f8d0da6002fde8c65f631ac116ca8fb3c45e4a0501262be",
+    "packages/contracts/test/fixtures.ts": "3bc3ddcecbe707774be4863b89506a05481448d0af608c5919d115b4acd12d4c",
+    "packages/contracts/generated/json-schema-2020-12/memory-recall-request.json": "a658edcc574037921330741ab0e0176181e26ab31e8d008588b9b5cb62b8298e",
+    "packages/contracts/generated/json-schema-draft-07/memory-recall-request.json": "74386cf9f058e1726bca945444329d9a667a06fe0edd384e30ed2ae0fd902dfa",
+    "packages/persistence/src/repositories/phase4-recall-requests.ts": "7e369b8177e041b9a3f43c8b6c13a46740932e73245f7b414b30c5507472ea19",
+    "packages/persistence/src/repositories/phase4-history-inventory.ts": "5f4a4f612e59d31ce267e5a87fdbd70f33fdcf2be54992b9dfa3f8f7c80d575e",
+    "packages/persistence/src/migrations/state/0019-phase4-recall-requests.ts": "776a3c025ffa94d5ac489fd1348fd915ab7e55fe34db973588cb9c5a1ab080d1",
+    "packages/persistence/src/migrations/registry.ts": "46b90438fc713d7b6a9e4153820fa2401ce7b9ace0fb8cc4367d381f7cf00221",
+    "packages/persistence/src/rpc/operations.ts": "a4990055c19f500ab36a6278480c900288dc823205fb1ff487b27b31857070fa",
+    "packages/persistence/src/client/persistence-client.ts": "e64eaf43b8d19103554f09baecec7a5447f9dbd19c318b530a25dc1ec9efbf6a",
+    "packages/persistence/src/worker/operations.ts": "447779df3a4abb6b1196170063277501021c05179c3841e8137f8891f516435a",
+    "packages/persistence/src/index.ts": "43b395d509399406645f0058fe06d663e272e30d74a5320b7b42d1656cbf0cf2",
+    "packages/persistence/test/integration/phase4-recall-requests.integration.test.ts": "c27be680b8df5dbac8d19c18c7a5e112ecd7db57ca17830d732062a4864c7f3b",
+    "packages/persistence/test/integration/migration.integration.test.ts": "d5fa452eccc9d78f5fb25d102dfdd679a287c22916d4eb9e0d4cc13d4ac7e393",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "f5811af6926db0543004fe7b2f9eb994f93268dcf38327f76ceeee8d86cc5d2d",
+    "apps/runtime/test/unit/commit-fake-scene.test.ts": "0481b5272e3ecbc9bdab2d1fdca7aecc39da9fd217123c1a744af6e912fd6019",
+    "providers/memory-iris/src/index.ts": "ea854fd9e7afa01a207047aa67598056fb5070e07246f569fe501f64b3f6ac88",
+    "providers/memory-iris/test/provider.test.ts": "6e14498fc13c86f6cdad65822a23806f68c410aa8eafbc0f858b3e8bf9015e81",
+    "scripts/iris-history-gap-probe.mjs": "b589c441b7b9ebb5716c32d98ec0441e7bc4301160549ca1c09dcfc22e6dddc2"
+  }
+}

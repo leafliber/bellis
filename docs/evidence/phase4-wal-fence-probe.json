@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T21:04:44.621780+00:00",
+  "status": "wal-transaction-write-fence-verified-hard-cap-reservation-and-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1035,
+    "integrationTests": 237,
+    "persistenceIntegrationTests": 115,
+    "runtimeIntegrationTests": 111,
+    "generatedContractFiles": 160,
+    "irisProviderTests": 80,
+    "irisProviderTypecheckExitCode": 0,
+    "realCoreToolsSseAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "repetitionsPerWindowAndTarget": 1,
+    "walPressureIntegrationTests": 3,
+    "rootCheckLogSha256": "cc91a7bab171012e7107e22f412c025a2db96e0c31e927e1ecdd70b48637f8dd",
+    "providerTestLogSha256": "dd192c84642793bf0039c76bc2496b3fa58cb508def7db84b179cba255213070"
+  },
+  "verified": [
+    "Real pinned read transactions prevent WAL reclamation; subsequent public Provider state writes stop with storage_not_ready and repeated attempts leave WAL file length unchanged",
+    "Previously committed state and revision remain readable; releasing the snapshot allows a zero-busy-timeout TRUNCATE checkpoint, readiness recovery, successful write and restart with the same saved value",
+    "Both state and telemetry adapters fence cached UPDATE, CTE UPDATE RETURNING via get/all, and exec writes while preserving read transactions and rollback",
+    "SQLite operation authorization identifies writes when preparing statements and gates them again on each execution; internal checkpoint operations restore the normal busy timeout in finally",
+    "The real public Core tools/SSE/Chromium regression and all 24 previously covered recovery smoke combinations pass with the new adapter"
+  ],
+  "limits": [
+    "This is a transaction-boundary fence, not a hard WAL byte cap; a single admitted transaction can overshoot and cache spill remains enabled",
+    "Completion and cancellation writes without an already-admitted transaction also stop at this threshold; physically protected completion space and the worst-case four-plan/32-segment/eight-provider bound remain open",
+    "No new 20-repeat full recovery run or ENOSPC, old-backup, active Stage crash and full capacity matrix proof is claimed",
+    "External SQLite writers bypass this connection fence; production ownership remains the single Worker contract",
+    "Core Session mapping, production tool authority, remaining Persona/SSE lifecycle and Phase4B/full demo are not completed"
+  ],
+  "diagnostics": [
+    "The first public pressure fixture changed only a small payload prefix, so SQLite did not rewrite enough pages to reach the threshold. The fixture was corrected to rewrite the payload, then all three pressure tests passed",
+    "An initial root check could not bind Runtime loopback ports in the default sandbox. The complete check was rerun with approved local-port access and exited 0"
+  ],
+  "observedDiskAdmission": {
+    "ready": true,
+    "reason": "ready",
+    "databaseBytes": 8192,
+    "walBytes": 865264,
+    "walHighWaterBytes": 67108864,
+    "auxiliaryBytes": 78344,
+    "totalBytes": 951800,
+    "availableBytes": 39429476352,
+    "highWaterBytes": 536870912,
+    "completionHeadroomBytes": 167772160,
+    "admissionWriteMarginBytes": 8388608,
+    "capacity": {
+      "stateLimitBytes": 1073741824,
+      "stateAllocatedBytes": 331776,
+      "stateUsedBytes": 331776,
+      "telemetryLimitBytes": 67108864,
+      "telemetryAllocatedBytes": 20480,
+      "telemetryUsedBytes": 20480
+    }
+  },
+  "reports": [
+    {
+      "file": "phase4-wal-fence-core-probe.json",
+      "exitCode": 0,
+      "sha256": "7a961cd15c2353d759ae03550c6b22d193cd14d14fa96f72289a2a51924862bd"
+    },
+    {
+      "file": "phase4-wal-fence-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "eca1228834bffb1f557a5dc1afbd92d4e67b931d19df2e4964eccc2d9ab4165d"
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/disk-admission.ts": "2f562bfae9bee85968edea59ace83650f9a3d8a143b5ca73b41f09f60c8e08d6",
+    "packages/persistence/src/worker/disk-admission.ts": "831612335f30685f36026d2b518e327047f939656fde6d33bb41750579e1d0f3",
+    "packages/persistence/src/worker/database.ts": "a511a94c6564d2c5987da58006e0f046ca48902a9b207cfe7ab992ad263ecb12",
+    "apps/runtime/src/bootstrap/config.ts": "4ba2cea34ff45ba501b843fed01ae95cca27b424ecb35868f2dcfdf50ffb1287",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "feff80a1be23606017bef75414957809a46cf21d711b17e571248794ece3c69f",
+    "packages/persistence/test/integration/wal-pressure.integration.test.ts": "d6a860a4e5f16fb00e7a81df73d7139487456fa814bc1db78ac4271d67903d87"
+  }
+}

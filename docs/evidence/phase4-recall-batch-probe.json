@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T00:41:41.970362+00:00",
+  "status": "public-original-recall-batch-verification-implemented-host-orchestration-and-release-incomplete",
+  "validation": {
+    "coreRelatedTests": 135,
+    "recallAndHttpTests": 102,
+    "newFocusedTests": 6,
+    "schema20ConsoleMigrationAndOperationTests": 33,
+    "batches": [
+      {
+        "tests": 101,
+        "exitCode": 0,
+        "logSha256": "e18df0b3a88d2a3911186253a5b5d849043ce5ca1bed286e4bf928a0f9b5bcec"
+      },
+      {
+        "tests": 6,
+        "includes": "five repeated cases plus one new fixed evaluation-time case",
+        "exitCode": 0,
+        "logSha256": "28f165acd49496bf929ff93bf89b2d7d92f0637c03d6f904c450c4aa7b8ae73a"
+      },
+      {
+        "tests": 33,
+        "exitCode": 0,
+        "logSha256": "86fe89fff6b8316306cfcef6adceb70ac2d8f7bf9d510c6abc29e88813375639"
+      }
+    ],
+    "mypyRuffFormatExitCode": 0,
+    "generatedContractsPublicApiAndCompatibilityExitCode": 0,
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "bellisRootCheck": "not-rerun; host production source unchanged, previous 1040/254 baseline",
+    "coreFullRegression": "not-claimed"
+  },
+  "verified": [
+    "New capability-gated POST /v1/recall:revalidate requires original requests and fresh batch deadline, checks stored request fingerprints, canonical candidate validity and Persona in one read snapshot",
+    "Concurrent correction between verdicts does not split the batch snapshot; a subsequent batch observes invalidation. TTL checks use one fixed evaluation instant",
+    "Unknown request, fingerprint mismatch, scrubbed response or invalid candidates/Persona are unavailable; no resource bodies or failure identities are returned and no new Recall/Usage/event is produced by the revalidation service",
+    "Duplicate request ids, missing capability, invalid scope, expired deadline, oversized HTTP body, stored body and candidate count are rejected without partial verdicts",
+    "Application OpenAPI adds one operation and two schemas; prior paths/components and SDK/public Python/TypeScript surfaces remain unchanged",
+    "Final installed Core public HTTP returns valid before correction and unavailable after, accepts an expired original deadline with a fresh batch deadline, preserves original Usage identity, and passes new Context/deletion/history-gap/inventory/Chromium regression",
+    "Schema20 console operation/problem-record migration was inspected and its associated 33 tests passed; exact wheel hash is probe-only"
+  ],
+  "bounds": {
+    "requests": 16,
+    "httpRequestBytes": 1048576,
+    "storedResponseBytes": 1048576,
+    "totalStoredResponseBytes": 8388608,
+    "totalCandidates": 512,
+    "deadlineMaxMs": 60000,
+    "limitScope": "stored body limits are checked after SQLite row loading and before JSON decoding; not a SQLite materialization memory hard limit"
+  },
+  "limits": [
+    "Bellis Manifests are digest audits and cannot reconstruct complete original Recall requests. Trusted original-request persistence, inventory binding, SDK method and production orchestration are not yet connected",
+    "This batch is not a cross-batch snapshot, credential-revocation transaction fence, complete historical coverage or authority to clear a history-gap barrier; ordinary transport authentication remains before the read transaction",
+    "Independent Observation/Usage request reconciliation, resources with no stored Recall, permission/deletion coverage, external StateStore and unbound legacy identities still need proof",
+    "No new SIGKILL window, full Core regression, new latency/long-growth benchmark or full A4/Phase4B/demo claim is made",
+    "Default Provider SDK and Core schema window remain unchanged; isolated SDK 0.11.2 is only used for the event checkpoint/gap probe"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 18,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-recall-batch-core-probe.json",
+      "exitCode": 0,
+      "sha256": "92bb62163947d42e5d9914bd8101ae0df5becb57528fdf62cc4a27f596c01364"
+    },
+    {
+      "file": "phase4-recall-batch-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "2dd3f532ca563683579e5cc315f2276a4cbe0ce5ef1f5024e78168f68d82eb25"
+    }
+  ],
+  "sourceSha256": {
+    "scripts/iris-public-probe.mjs": "5478917d6531bd6fcd940b8bd331496dd2e88faa098f70cd594168834fca7917",
+    "scripts/iris-resource-invalidation-probe.mjs": "c0e0ffaed37e8b710aa09332adb46d0cc15fb11348129e12e9039ac9bf520f46",
+    "../iris_memory_core/src/iris_memory_core/application/recall.py": "58a76e5cfa3b905d6dfafd11cf34fb1e7f0c64068885e6bc8efbf7c418d66f16",
+    "../iris_memory_core/src/iris_memory_core/api/app.py": "9cb4d89c0e5c82102594daad9c7a8c98ccc2dd92bb2e51c2dc94a60ba48846e7",
+    "../iris_memory_core/src/iris_memory_core/bootstrap.py": "12c1d6256161b24aa2f8322653f45ee900197ff8cb47f5023320c5e7701bf932",
+    "../iris_memory_core/src/iris_memory_core/application/console/credentials.py": "b7006919a8d76ee1f9d2e18a68b54780f9af62ef727da07c818d8d2a054b2d5d",
+    "../iris_memory_core/tools/generate_contracts.py": "55877a5e6da42e4359a6f9aba3b12bb4dc90f830204cd36cde61d0f2cada228b",
+    "../iris_memory_core/contracts/source/contracts.json": "0db68931e6f9baacc9a7c65326cf667b8bc8e052467336459cc08066163355d9",
+    "../iris_memory_core/contracts/public-api.json": "73b89cdd27377bd599686eb3554247685427165953a14704c46d8dff525f7671",
+    "../iris_memory_core/schemas/openapi/openapi.json": "4fc4ee2e2024cf725b94adc660821c98fdde852e3f85a37ce28e6dd4f1903150",
+    "../iris_memory_core/schemas/version-manifest.json": "6e86cdc833fe69eafcda6b5fd9402c02ea586408d292c1e98ea9d20a83472e94",
+    "../iris_memory_core/tests/contract/test_recall_batch_revalidation.py": "78e78a3b9c08cdd63730ebc141ec2c2a5972d77c81e5c8284aeadfb3fbf94a59",
+    "../iris_memory_core/migrations/0020_console_operations.sql": "015b469d5f33e956e9412284c6deb1957dbd56218b5db4b82f6ec2df23025190"
+  }
+}

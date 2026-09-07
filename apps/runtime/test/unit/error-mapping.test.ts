@@ -40,7 +40,7 @@ describe("mapErrorToEnvelope", () => {
   });
 
   it("not_migrated/unavailable → not_ready 且可重试", () => {
-    for (const code of ["not_migrated", "unavailable", "closed"] as const) {
+    for (const code of ["not_migrated", "unavailable", "closed", "storage_not_ready"] as const) {
       const mapped = mapErrorToEnvelope(new PersistenceError(code, "x"), TRACE_ID);
       expect(mapped.code).toBe("not_ready");
       expect(mapped.status).toBe(503);

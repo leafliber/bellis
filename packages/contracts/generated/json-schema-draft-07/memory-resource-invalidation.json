@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "agentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "cursor": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+    },
+    "resources": {
+      "minItems": 1,
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "resourceRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "throughRevision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "resourceRef",
+          "throughRevision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "providerId",
+    "agentId",
+    "eventId",
+    "cursor",
+    "resources"
+  ],
+  "additionalProperties": false
+}

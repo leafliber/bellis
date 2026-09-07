@@ -1,3 +1,9 @@
+import { BoundedToolPreparation, ToolPreparationError } from "./permissions/preparation.js";
+import type { PreparedToolCall } from "@bellis/contracts";
+import type { ToolPreparationHook, ToolPreparationStore } from "./port.js";
+import { createHash } from "node:crypto";
+import { BoundedToolConfirmation } from "./permissions/confirmation.js";
+import { ToolRejectedError } from "./permissions/rejection.js";
 import type { MonotonicClock, ToolResult } from "@bellis/contracts";
 import type {
   DagCompileResult,
@@ -34,6 +40,7 @@ const require = createRequire(import.meta.url);
 const AjvCtor = require("ajv") as unknown as new () => AjvLike;
 
 export interface ToolRunEvent {
+  readonly sessionId: string;
   readonly toolRunId: string;
   readonly cycleId: string;
   readonly toolName: string;
@@ -44,7 +51,8 @@ export interface ToolRunEvent {
     | "timeout"
     | "cancelled"
     | "denied"
-    | "dependency_failed";
+    | "dependency_failed"
+    | "uncertain";
   readonly durationMs?: number;
   readonly errorCode?: string;
   readonly idempotencyKeyHash?: string;
@@ -59,6 +67,7 @@ export interface StandardToolRuntimeOptions {
   readonly cache?: ToolCache;
   readonly cacheStore?: ToolCacheStore | null;
   readonly confirmation?: ConfirmationPort | null;
+  readonly preparationStore?: ToolPreparationStore;
   readonly logger?: LoggerPort;
   readonly metrics?: MetricsPort;
   /** Recovery facts: awaited before handler invocation and before result publication. */
@@ -80,6 +89,8 @@ const basicResult = (node: DagNodePlan, outcome: "cancelled" | "failed"): ToolRe
 export class StandardToolRuntime implements ToolRuntime {
   readonly #options: StandardToolRuntimeOptions;
   readonly #registry: ToolRegistry;
+  readonly #confirmation: BoundedToolConfirmation | null;
+  readonly #preparation: BoundedToolPreparation | null;
   readonly #cache: ToolCache;
   readonly #ajv: AjvLike;
   readonly #validators = new Map<string, (data: unknown) => boolean>();
@@ -93,6 +104,14 @@ export class StandardToolRuntime implements ToolRuntime {
 
   constructor(options: StandardToolRuntimeOptions) {
     this.#options = options;
+    this.#confirmation =
+      options.confirmation == null
+        ? null
+        : new BoundedToolConfirmation(options.confirmation, options.clock);
+    this.#preparation =
+      options.preparationStore === undefined
+        ? null
+        : new BoundedToolPreparation(options.clock, options.preparationStore);
     this.#registry = options.registry ?? new ToolRegistry();
     this.#cache =
       options.cache ??
@@ -100,8 +119,12 @@ export class StandardToolRuntime implements ToolRuntime {
     this.#ajv = new AjvCtor();
   }
 
-  registerTool(declaration: ToolDeclaration, handler: ToolHandler): void {
-    this.#registry.register(declaration, handler);
+  registerTool(
+    declaration: ToolDeclaration,
+    handler: ToolHandler,
+    preparation?: ToolPreparationHook,
+  ): void {
+    this.#registry.register(declaration, handler, preparation);
     this.#validators.delete(declaration.name);
   }
 
@@ -189,6 +212,7 @@ export class StandardToolRuntime implements ToolRuntime {
     signal.addEventListener("abort", notify);
     const run = async (node: DagNodePlan): Promise<void> => {
       const base = {
+        sessionId: context.sessionId,
         toolRunId: node.call.toolRunId,
         cycleId: context.cycleId,
         toolName: node.call.toolName,
@@ -207,9 +231,10 @@ export class StandardToolRuntime implements ToolRuntime {
           if (signal.aborted) {
             result = basicResult(node, "cancelled");
           } else {
-            const key = ToolCache.cacheable(node.declaration)
-              ? ToolCache.keyOf(node.declaration, node.call.arguments as Record<string, unknown>)
-              : null;
+            const key =
+              ToolCache.cacheable(node.declaration) && !node.declaration.requiresConfirmation
+                ? ToolCache.keyOf(node.declaration, node.call.arguments as Record<string, unknown>)
+                : null;
             const existing = key === null ? undefined : shared.get(key);
             if (existing !== undefined) {
               const value = await existing;
@@ -234,7 +259,8 @@ export class StandardToolRuntime implements ToolRuntime {
         const finished = {
           ...base,
           transition: "finished" as const,
-          state: result.outcome,
+          state:
+            result.errorCode === "tool_outcome_unknown" ? ("uncertain" as const) : result.outcome,
           durationMs,
           ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
           ...(result.cacheSource === undefined ? {} : { cacheSource: result.cacheSource }),
@@ -335,6 +361,7 @@ export class StandardToolRuntime implements ToolRuntime {
   ): Promise<ToolResult> {
     const declaration = node.declaration;
     const call = node.call;
+    const deadlineUs = this.#options.clock.nowUs() + BigInt(declaration.timeoutMs) * 1_000n;
     const permission = checkPermission(
       declaration,
       context,
@@ -370,26 +397,114 @@ export class StandardToolRuntime implements ToolRuntime {
         truncated: false,
       };
     }
-    const confirmation = this.#options.confirmation ?? null;
-    if (declaration.requiresConfirmation && confirmation !== null) {
-      const confirmed = await confirmation.confirm({
-        toolName: declaration.name,
-        toolRunId: call.toolRunId,
-        cycleId: context.cycleId,
-      });
-      if (!confirmed) {
+    let prepared: PreparedToolCall | undefined;
+    const preparation = this.#registry.get(call.toolName)?.preparation;
+    if (preparation !== undefined) {
+      if (this.#preparation === null)
         return {
           schemaVersion: 1,
           toolRunId: call.toolRunId,
           toolName: call.toolName,
           outcome: "denied",
-          errorCode: "confirmation_rejected",
+          errorCode: "preparation_store_unavailable",
+          truncated: false,
+        };
+      try {
+        prepared = await this.#preparation.run(node, preparation, context, deadlineUs);
+      } catch (error) {
+        return this.#preparationFailure(node, error);
+      }
+    }
+    const effectiveKey =
+      prepared === undefined ? permission.idempotencyKey : prepared.idempotencyKey;
+    if (declaration.requiresConfirmation && this.#confirmation !== null) {
+      const concrete = {
+        ...(prepared === undefined ? {} : { prepared }),
+        toolName: declaration.name,
+        toolVersion: declaration.version,
+        toolRunId: call.toolRunId,
+        sessionId: context.sessionId,
+        turnId: context.turnId,
+        cycleId: context.cycleId,
+        arguments: call.arguments,
+        idempotencyKeyHash: effectiveKey === null ? null : hashIdempotencyKey(effectiveKey),
+      };
+      const confirmed = await this.#confirmation.confirm(
+        {
+          ...concrete,
+          requestDigest: createHash("sha256").update(stableStringify(concrete)).digest("hex"),
+          deadlineUs,
+        },
+        context.signal,
+      );
+      if (confirmed !== "approved") {
+        return {
+          schemaVersion: 1,
+          toolRunId: call.toolRunId,
+          toolName: call.toolName,
+          outcome:
+            confirmed === "cancelled"
+              ? "cancelled"
+              : confirmed === "timeout"
+                ? "timeout"
+                : "denied",
+          errorCode: `confirmation_${confirmed}`,
           truncated: false,
         };
       }
+      // Capability changes while a human is deciding must take effect before execution/cache use.
+      const current = checkPermission(
+        declaration,
+        context,
+        call.idempotencyKey,
+        this.#options.confirmation ?? null,
+      );
+      if (!current.allowed)
+        return {
+          schemaVersion: 1,
+          toolRunId: call.toolRunId,
+          toolName: call.toolName,
+          outcome: "denied",
+          errorCode: current.errorCode,
+          truncated: false,
+        };
     }
     const args = call.arguments as Record<string, unknown>;
     const cached = await this.#cache.lookup(declaration, args, { l0 });
+    if (context.signal.aborted) {
+      return {
+        schemaVersion: 1,
+        toolRunId: call.toolRunId,
+        toolName: call.toolName,
+        outcome: "cancelled",
+        errorCode: "aborted",
+        truncated: false,
+      };
+    }
+    if (this.#options.clock.nowUs() >= deadlineUs)
+      return {
+        schemaVersion: 1,
+        toolRunId: call.toolRunId,
+        toolName: call.toolName,
+        outcome: "timeout",
+        errorCode: "tool_timeout",
+        truncated: false,
+      };
+    const latest = checkPermission(
+      declaration,
+      context,
+      call.idempotencyKey,
+      this.#options.confirmation ?? null,
+    );
+    if (!latest.allowed)
+      return {
+        schemaVersion: 1,
+        toolRunId: call.toolRunId,
+        toolName: call.toolName,
+        outcome: "denied",
+        errorCode: latest.errorCode,
+        truncated: false,
+      };
     if (cached !== null) {
       return {
         schemaVersion: 1,
@@ -401,15 +516,27 @@ export class StandardToolRuntime implements ToolRuntime {
         cacheSource: cached.source,
       };
     }
-    if (context.signal.aborted) {
-      return {
-        schemaVersion: 1,
-        toolRunId: call.toolRunId,
-        toolName: call.toolName,
-        outcome: "cancelled",
-        errorCode: "aborted",
-        truncated: false,
-      };
+    if (prepared !== undefined && preparation !== undefined && this.#preparation !== null) {
+      try {
+        prepared = await this.#preparation.run(node, preparation, context, deadlineUs, prepared);
+      } catch (error) {
+        return this.#preparationFailure(node, error);
+      }
+      const current = checkPermission(
+        declaration,
+        context,
+        effectiveKey ?? undefined,
+        this.#options.confirmation ?? null,
+      );
+      if (!current.allowed)
+        return {
+          schemaVersion: 1,
+          toolRunId: call.toolRunId,
+          toolName: call.toolName,
+          outcome: "denied",
+          errorCode: current.errorCode,
+          truncated: false,
+        };
     }
     // 执行域：节点 Abort = 父域 + 超时；失败分支真正 Abort handler。
     const nodeAbort = new AbortController();
@@ -422,7 +549,6 @@ export class StandardToolRuntime implements ToolRuntime {
     const timeoutAbort = new AbortController();
     const onNodeAbort = () => timeoutAbort.abort(nodeAbort.signal.reason);
     nodeAbort.signal.addEventListener("abort", onNodeAbort, { once: true });
-    const deadlineUs = this.#options.clock.nowUs() + BigInt(declaration.timeoutMs) * 1_000n;
     const timeoutPromise = this.#options.clock
       .sleepUntil(deadlineUs, timeoutAbort.signal)
       .then(() => "timeout" as const)
@@ -439,17 +565,20 @@ export class StandardToolRuntime implements ToolRuntime {
         truncated: false,
       };
     }
+    let handlerStarted = false;
     const handlerPromise: Promise<{ readonly value: unknown }> = Promise.resolve().then(() => {
       nodeAbort.signal.throwIfAborted();
+      handlerStarted = true;
       return registered.handler({
+        ...(prepared === undefined ? {} : { prepared }),
         arguments: args,
         context: { ...context, signal: nodeAbort.signal },
         deadlineUs,
-        idempotencyKey: permission.idempotencyKey,
+        idempotencyKey: effectiveKey,
       });
     });
     const guardedHandler = handlerPromise.catch((error: unknown) => ({
-      thrown: error instanceof Error ? error.message : "tool handler failed",
+      failure: error,
     }));
     const winner = await Promise.race([guardedHandler.then(() => "done" as const), timeoutPromise]);
     let outcome: ToolResult;
@@ -476,13 +605,18 @@ export class StandardToolRuntime implements ToolRuntime {
     } else {
       timeoutAbort.abort(new Error("tool_completed"));
       const raw = await guardedHandler;
-      if ("thrown" in raw) {
+      if ("failure" in raw) {
         outcome = {
           schemaVersion: 1,
           toolRunId: call.toolRunId,
           toolName: call.toolName,
           outcome: nodeAbort.signal.aborted ? "cancelled" : "failed",
-          errorCode: nodeAbort.signal.aborted ? "aborted" : "tool_failed",
+          errorCode:
+            raw.failure instanceof ToolRejectedError
+              ? raw.failure.code
+              : declaration.semantic !== "pure" && handlerStarted
+                ? "tool_outcome_unknown"
+                : "tool_failed",
           truncated: false,
         };
       } else {
@@ -492,9 +626,46 @@ export class StandardToolRuntime implements ToolRuntime {
         }
       }
     }
+    // Cancellation, lost response, or invalid result cannot prove a started write was absent.
+    // Preserve the observable execution outcome, but publish unknown remote effect explicitly.
+    if (
+      declaration.semantic !== "pure" &&
+      handlerStarted &&
+      (outcome.outcome === "timeout" ||
+        outcome.outcome === "cancelled" ||
+        outcome.errorCode === "tool_outcome_unknown" ||
+        outcome.errorCode === "result_not_json_safe")
+    ) {
+      outcome = {
+        schemaVersion: 1,
+        toolRunId: call.toolRunId,
+        toolName: call.toolName,
+        outcome: outcome.outcome,
+        truncated: false,
+        errorCode: "tool_outcome_unknown",
+        value: { remoteOutcome: "unknown" },
+      };
+    }
     nodeAbort.signal.removeEventListener("abort", onNodeAbort);
     context.signal.removeEventListener("abort", onParentAbort);
     return outcome;
+  }
+
+  #preparationFailure(node: DagNodePlan, error: unknown): ToolResult {
+    const code = error instanceof ToolPreparationError ? error.code : "preparation_failed";
+    return {
+      schemaVersion: 1,
+      toolRunId: node.call.toolRunId,
+      toolName: node.call.toolName,
+      outcome:
+        code === "preparation_cancelled"
+          ? "cancelled"
+          : code === "preparation_timeout"
+            ? "timeout"
+            : "failed",
+      errorCode: code,
+      truncated: false,
+    };
   }
 
   /** JSON-safe、大小与敏感字段处理；超限结构化截断。 */

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T02:18:34.156793+00:00",
+  "status": "runtime-startup-and-live-history-recovery-implemented-full-recovery-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": 0,
+    "unitAndPropertyTests": 1049,
+    "integrationTests": 274,
+    "persistenceIntegrationTests": 138,
+    "runtimeIntegrationTests": 125,
+    "transportIntegrationTests": 11,
+    "generatedContracts": 168,
+    "historyRecoveryRuntimeIntegrationTestsInRootCheck": 14,
+    "providerTests": "not-rerun; production Provider source unchanged, prior final 96-test baseline",
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newRuntimeRecoverySigkillWindow": "not-claimed",
+    "fullCoreRegression": "not-rerun",
+    "resolvedValidationFailure": "Initial root check failed 8 native TypeScript harness cases because of a constructor parameter property. Replaced it with an ordinary private field; final complete root check passed all cases."
+  },
+  "verified": [
+    "Trusted historyRecovery configuration requires one verifier per registered provider, validates bounded timing and is copied at construction; normal startup registers background workers",
+    "Already durable history gaps boot maintenance without starting ordinary Provider/Persona or constructing the decision pipeline; a gap durably acknowledged during Provider startup transitions after stopping started owners",
+    "Live history-gap callbacks interrupt performance and close the decision pipeline; host Context, transmission admission, input projection and publishing retain a latched barrier and Persona refresh stops",
+    "Runtime status becomes recovering, live remains 200, readiness and auth exchange return 503; existing new-WebSocket and registered decision-HTTP readiness gates apply",
+    "Runtime restart reuses stored verdicts without another verification request, never starts ordinary providers and retains incomplete progress and the original Usage",
+    "Unrelated credential startup failures still fail; invalid recovery configuration during Runtime assembly closes the DB Worker and original errors remain visible",
+    "Final installed Core and real Chromium joint probe passes through Runtime bootstrap and background maintenance; tools and existing 24-case recovery smoke pass"
+  ],
+  "limits": [
+    "Recovery ports and credentials still require trusted Runtime composition; no general production credential/config loader is provided by this change",
+    "Existing-gap and restart behavior uses actual installed Core; startup-discovery and live Runtime transition cases additionally use real DB integration with controlled Provider callbacks",
+    "Old policy preparation requests, independent Observation/Usage and other facts, external StateStore/legacy scope coverage, cross-batch consistency and safe atomic history release remain open",
+    "No cross-process privacy lock or forcible termination of uncooperative transport is claimed",
+    "Actual backup/fork restore, full Stage/Core crash matrix, ENOSPC, total directory quota, long-growth, Phase4B and full demo remain incomplete",
+    "Default SDK and schema support window remain unchanged"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-runtime-history-recovery-core-probe.json",
+      "exitCode": 0,
+      "sha256": "04e67e5a14fea87604681cc4d91f07b03e91681300a5a9761f2244e5b942de43"
+    },
+    {
+      "file": "phase4-runtime-history-recovery-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "21e83d628c8001ab7f25a889f4968ad0293a2596e30aab24f0b3ad161eaf788e"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-startup-check.log",
+      "sha256": "48ec1ba3fc1943707ad23a3e3b1689b9cd9ef4d08348ddc45699a7b73224b69f"
+    },
+    {
+      "file": "/tmp/bellis-startup-check-before-native-fix.log",
+      "sha256": "864c76199477b5682cb5c3d01fb0fe8f4629ee310a36de8145adab932035e603"
+    },
+    {
+      "file": "/tmp/bellis-startup-core.log",
+      "sha256": "b9040872dc131692f688b75c189bfc0035619cf3f35bfa6035df69e7be149193"
+    },
+    {
+      "file": "/tmp/bellis-startup-recovery.log",
+      "sha256": "72f0749df3b9cca1cf1bed1101938fbd787b6537dbff1e202f56489b847ac06f"
+    }
+  ],
+  "sourceSha256": {
+    "apps/runtime/src/application/phase-4/memory-host.ts": "4d072e139996a2ecc6b055251ccbf049c4567a3923d296641496e81143b6fc8b",
+    "apps/runtime/src/application/phase-4/history-recovery-worker.ts": "e5be84714806465acaadb83b38ccba75c1322a6867f2f16b5227966d75ffa23b",
+    "apps/runtime/src/application/phase-4/history-revalidator.ts": "6dee77e5bcb47d319d5844131cea13c65955ab2261febb8b3136838982268930",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "ca2288068b121679d2d6367f0802ecbf666a9d1a5c156f7d6532e25de639ef99",
+    "apps/runtime/test/integration/phase4-history-revalidation.integration.test.ts": "b8f0e7fcdde9c59175fce7977979a4a074ccf80fb70f45c6ad2d5d7cde07cf16",
+    "scripts/iris-history-gap-probe.mjs": "7681e54b69ae5363a8e75f3416c52187092986475f1a0df4e161413825e79bb9"
+  }
+}

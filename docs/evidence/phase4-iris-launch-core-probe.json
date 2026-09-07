@@ -1,0 +1,337 @@
+{
+  "launcher": {
+    "status": "passed",
+    "results": [
+      {
+        "mode": "enabled",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "mode": "restart",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "mode": "disabled",
+        "status": "passed",
+        "exitCode": 0
+      },
+      {
+        "mode": "missing-credential",
+        "status": "passed",
+        "exitCode": 1
+      }
+    ],
+    "credentialSource": "environment-reference",
+    "schemaVersion": 20,
+    "defaultSupportWindowChanged": false,
+    "scope": "Actual CLI startup/restart/disabled/missing-credential and graceful SIGTERM with installed Provider/SDK and real Core; no new model turn or full production authorization claim"
+  },
+  "eventCheckpoint": {
+    "status": "passed",
+    "sdkVersion": "0.11.2",
+    "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "anchor": {
+      "cursor": "2",
+      "eventId": "claim-revision:01a079b1-4fda-7b3d-893f-e5eebbeb2567"
+    },
+    "checkedSuccessors": 0,
+    "acceptedCheckpointStatus": 200,
+    "rejectedCheckpointStatuses": [
+      410,
+      410
+    ],
+    "scope": "Separate installed SDK candidate -> real installed Core API/Worker; original event anchor, mismatched identity and unknown cursor. No Bellis gap revalidation or old-backup restoration claim."
+  },
+  "historyGap": {
+    "status": "passed",
+    "coreResponseStatus": 410,
+    "providerCheckpoint": {
+      "eventCursor": "2",
+      "eventId": "divergent-history:37af2fbc-8b4b-4c07-8f82-809010ccfac4"
+    },
+    "gapId": "fae2e38f979df0eb0f56b6b53bd7fa908286ad2ba27e9f275017411157a74b17",
+    "contextCancelled": true,
+    "historyInventory": {
+      "itemCount": 4,
+      "inventoryDigest": "31f38cf3fc338a6f1e37d5514a6b866e20c835ea0f026815748d99b21b2698bc",
+      "kinds": [
+        "manifest",
+        "provider_state",
+        "recall_request",
+        "usage"
+      ],
+      "originalBodiesVerified": true,
+      "restart": "same-inventory-gap-still-blocked",
+      "storedRecallRequest": "actual-prepared-body-restored-and-publicly-revalidated",
+      "recallVerdict": "valid-gap-remains-blocked",
+      "durableVerification": "background-worker-durable-discovery-restart-resume-passed",
+      "backgroundRecovery": "automatic-polling-one-public-request-and-restart-reuse",
+      "runtimeRecovery": "bootstrap-maintenance-live-200-ready-auth-503-no-decision-pipeline-restart-reuse",
+      "uncheckedInventoryItems": 3,
+      "remoteRevalidation": "incomplete"
+    },
+    "hostAndProviderState": "durable-across-worker-restart",
+    "retainedOriginalUsageRows": 1,
+    "newEventRequestsAfterGap": 0,
+    "restart": "original-gap-reported-before-persona-or-events",
+    "candidateSdk": "0.11.2",
+    "candidateSdkSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "scope": "Actual installed candidate SDK -> Core 410 -> production Provider error handler -> MemoryHost/DB Worker barrier; intentionally seeded divergent identity, not an actual old Core backup restore or full public revalidation"
+  },
+  "resourceInvalidation": {
+    "status": "passed",
+    "source": "external-public-Forget-and-real-Core-Worker-SSE",
+    "eventType": "revision.invalidated.v1",
+    "durableCursor": "1",
+    "contextCancelled": true,
+    "permanentTombstone": true,
+    "workerRestart": "policy-and-provider-cursor-preserved",
+    "generationBefore": 0,
+    "generationAfter": 1,
+    "stops": 1,
+    "scope": "Received public deletion event only; no SSE history-gap or ordinary-correction notification proof"
+  },
+  "resourceCorrection": {
+    "status": "passed",
+    "source": "external-public-correct-canonical-transaction-SSE",
+    "eventType": "revision.invalidated.v1",
+    "durableCursor": "2",
+    "contextCancelled": true,
+    "permanentTombstone": false,
+    "throughRevision": "1",
+    "newRevisionAllowed": true,
+    "correctedRevisionModelVisible": true,
+    "coreWorkerStoppedDuringCorrectionAndHostAck": true,
+    "originalKeyReplayEvents": 1,
+    "recallReplay": "unchanged-replay-stable-corrected-replay-409",
+    "originalUsage": "same-report-id-and-counts-after-rejected-recall",
+    "batchRevalidation": "public-http-valid-before-correction-unavailable-after-original-deadline-expired-no-body-returned",
+    "workerRestart": "policy-and-provider-cursor-preserved",
+    "generationBefore": 1,
+    "generationAfter": 2,
+    "stops": 2,
+    "scope": "Public Claim supersede while Core Worker is stopped -> finite old-revision tombstone and Context cancellation; not full history revalidation or other resource update notifications"
+  },
+  "hostContext": {
+    "diskAdmission": {
+      "ready": true,
+      "reason": "ready",
+      "databaseBytes": 8192,
+      "walBytes": 1038304,
+      "walHighWaterBytes": 67108864,
+      "transactionCacheMaxBytes": 8388608,
+      "auxiliaryBytes": 78344,
+      "totalBytes": 1124840,
+      "availableBytes": 38154629120,
+      "highWaterBytes": 536870912,
+      "completionHeadroomBytes": 167772160,
+      "admissionWriteMarginBytes": 8388608,
+      "capacity": {
+        "stateLimitBytes": 1073741824,
+        "stateWalLimitBytes": 433348768,
+        "stateAllocatedBytes": 413696,
+        "stateUsedBytes": 413696,
+        "stateReservedBytes": 0,
+        "stateReservedWalBytes": 0,
+        "stateReservedAuxiliaryBytes": 0,
+        "activeCompletionReservations": 0,
+        "telemetryLimitBytes": 67108864,
+        "telemetryWalLimitBytes": 75616288,
+        "telemetryAllocatedBytes": 20480,
+        "telemetryUsedBytes": 20480
+      }
+    },
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stageOutput": {
+    "schemaVersion": 1,
+    "mode": "real-core",
+    "privacyGeneration": 1,
+    "adoptedCycles": 3,
+    "usageCount": 3,
+    "observations": [
+      {
+        "eventId": "bellis:23634d5b-85fa-44ad-99f8-d0d7622a02b9",
+        "outboxId": "9eeebd00-15fc-44d8-8c7e-703c519cca44",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "1",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 4,
+            "scene_id": "4602d8d3-6b79-4bd7-adc6-08027d494754",
+            "segment_id": "dd3f83cb-9cf3-41b2-9054-66b5fe989c3d",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第一句。"
+      },
+      {
+        "eventId": "bellis:bf977e0c-5c47-4a64-993c-8959fa467633",
+        "outboxId": "fe227579-178a-4790-b463-161976e7fb56",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "2",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 4,
+            "end": 8,
+            "scene_id": "4602d8d3-6b79-4bd7-adc6-08027d494754",
+            "segment_id": "aa1548e0-601f-48bf-80fd-db26ec504c47",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第二句。"
+      },
+      {
+        "eventId": "bellis:cf3cb47b-0652-4bae-ab6a-f804ff139f9e",
+        "outboxId": "b757622d-ff76-4449-a5c0-ebffb7cb2f4d",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "3",
+        "effectState": "committed",
+        "content": "收到。"
+      },
+      {
+        "eventId": "bellis:6e47c06f-be72-4d1f-b6c3-353d48d9e02a",
+        "outboxId": "b8f4c31f-fdc9-4c34-bdbe-1fc8274f1a0d",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "4",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 3,
+            "scene_id": "e4dc624d-dd73-4338-82eb-75db5629bb3e",
+            "segment_id": "fec447a0-8096-4bbf-a463-b09295be22b2",
+            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
+            "lane": "audio"
+          }
+        },
+        "content": "完成。"
+      }
+    ],
+    "confirmedConversationInNextRequest": true,
+    "cycleAudit": [
+      {
+        "cycleId": "8b4445cc-b3ca-4aa8-9e71-75c086587ee8",
+        "manifestId": "222c7a30-5a40-42a7-b42e-26ce2a432ae7",
+        "manifestDigest": "92af9c670d022c77b0af9787ec97ea8cd28115c79f6ed161392e7254a7b15c71",
+        "promptEpoch": "7bfc62fc56e8474c7319a7eb140ad554fa7e21e2f6bf159f7bf39465222b5114",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "242dc7f4-7a27-4fbc-9450-af563ecf7998",
+        "estimatedInputTokens": 2192,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:494d8157241600e9",
+          "cand:c1c98743a1745027"
+        ],
+        "hostSelected": [
+          "cand:494d8157241600e9"
+        ],
+        "modelVisible": [
+          "cand:494d8157241600e9"
+        ],
+        "usageOutboxId": "fc8045bd-08d6-4c11-ba58-38d29be07c51"
+      },
+      {
+        "cycleId": "3d567828-00ad-40a0-8132-cd76777363a8",
+        "manifestId": "9f2db0e2-acb7-4e29-b777-ea45845c48f3",
+        "manifestDigest": "771e5005e677982989995442e7813181e585711b8ef8657f08875d5c46d242b0",
+        "promptEpoch": "7bfc62fc56e8474c7319a7eb140ad554fa7e21e2f6bf159f7bf39465222b5114",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "1f850e18-37a0-40f5-892e-83f42b339d91",
+        "estimatedInputTokens": 2919,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:897406900f328f45",
+          "cand:b500c1e4eab94098",
+          "cand:494d8157241600e9",
+          "cand:c1c98743a1745027"
+        ],
+        "hostSelected": [
+          "cand:897406900f328f45",
+          "cand:b500c1e4eab94098",
+          "cand:494d8157241600e9"
+        ],
+        "modelVisible": [
+          "cand:897406900f328f45",
+          "cand:b500c1e4eab94098",
+          "cand:494d8157241600e9"
+        ],
+        "usageOutboxId": "3d8dd76d-aa75-473e-9ab9-0f7aacb98815"
+      },
+      {
+        "cycleId": "1fad366c-8f35-4da1-920b-805f1573e1e8",
+        "manifestId": "cd151e68-438a-40ae-a48b-d5c44b5d3de4",
+        "manifestDigest": "e98103499f5821d2d110118124b25a36451794f6d1671705f207ef8fbf6fb000",
+        "promptEpoch": "7bfc62fc56e8474c7319a7eb140ad554fa7e21e2f6bf159f7bf39465222b5114",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "8f2aa82e-513a-48e6-a23b-573265831e75",
+        "estimatedInputTokens": 3212,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:ba0bfcd356c3697f",
+          "cand:897406900f328f45",
+          "cand:b500c1e4eab94098",
+          "cand:494d8157241600e9",
+          "cand:c1c98743a1745027"
+        ],
+        "hostSelected": [
+          "cand:ba0bfcd356c3697f",
+          "cand:897406900f328f45",
+          "cand:b500c1e4eab94098",
+          "cand:494d8157241600e9"
+        ],
+        "modelVisible": [
+          "cand:ba0bfcd356c3697f",
+          "cand:897406900f328f45",
+          "cand:b500c1e4eab94098",
+          "cand:494d8157241600e9"
+        ],
+        "usageOutboxId": "6e715e11-808f-4199-88c6-3fa4cbb9f47a"
+      }
+    ],
+    "coreSourceCursor": "4",
+    "chromium": "passed",
+    "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
+  },
+  "stage": "A0/A1 and A2 real Chromium output/input public boundary probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+  "installedCoreFilesVerified": 178,
+  "schemaVersion": 20,
+  "sdkVersion": "0.11.1",
+  "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+}

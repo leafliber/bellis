@@ -11,6 +11,87 @@ import { ApplicationError, FakeSceneCommitService } from "../../src/index.js";
 
 /** 记录调用顺序的假持久化客户端（恢复语义由真实 Worker 集成测试覆盖）。 */
 class RecordingClient implements PersistenceClient {
+  async readDiskStatus(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ReadHistoryRecoveryState(): Promise<never> {
+    throw new Error("not used");
+  }
+  async phase4ReadRevalidationRequest(): Promise<never> {
+    throw new Error("not used");
+  }
+  async phase4RecordHistoryVerification(): Promise<void> {
+    throw new Error("not used");
+  }
+  async phase4ReadHistoryVerificationPage(): Promise<never> {
+    throw new Error("not used");
+  }
+  async phase4BeginHistoryInventory(): Promise<never> {
+    throw new Error("not used");
+  }
+  async phase4RecordRecallRequest(): Promise<void> {
+    throw new Error("not used");
+  }
+  async phase4ReadHistoryInventoryPage(): Promise<never> {
+    throw new Error("not used");
+  }
+  async phase4ReadHistoryInventoryItem(): Promise<never> {
+    throw new Error("not used");
+  }
+  async phase4BeginHistoryGap(): Promise<never> {
+    throw new Error("not used");
+  }
+  async phase4ApplyResourceInvalidation(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ReadLocalVisibility(): Promise<import("@bellis/contracts").LocalInputVisibility> {
+    throw new Error("not used by scene fixture");
+  }
+  async phase4BeginMemoryForget(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4CompleteMemoryForget(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ReadMemoryForget(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4EnsureMemoryPolicy(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ReadMemoryPolicy(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ChangeMemoryPolicy(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ReadPreparedTool(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4SavePreparedTool(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ReadToolCall(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4ReadProviderState(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4WriteProviderState(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4PrepareEffects() {}
+  async phase4BindAudioSegment() {}
+  async phase4ConfirmEffect(): Promise<never> {
+    throw new Error("unused");
+  }
+  async phase4CloseEffects() {}
+  async phase4ReadConfirmedSpeech() {
+    return [];
+  }
+  async phase4ReadContextManifest() {
+    return null;
+  }
   listActiveScenes = async (): Promise<readonly never[]> => [];
   readonly commits: CommitSceneInput[] = [];
   #result: CommitSceneResult;

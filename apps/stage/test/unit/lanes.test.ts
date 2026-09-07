@@ -55,6 +55,14 @@ class FakeAudioEnvironment implements AudioEnvironment {
     this.#handler?.({ v: 1, op: "ended", sceneId });
   }
 
+  reportProgress(sceneId: string, renderedSamples: number): void {
+    this.#handler?.({ v: 1, op: "progress", sceneId, renderedSamples });
+  }
+
+  reportError(sceneId: string): void {
+    this.#handler?.({ v: 1, op: "error", sceneId, code: "buffer_full" });
+  }
+
   reportStarted(sceneId: string, startedAtStageUs: bigint): void {
     this.#handler?.({ v: 1, op: "started", sceneId, startedAtStageUs });
   }
@@ -76,6 +84,75 @@ const AUDIO_CUES: readonly Cue[] = [
 ];
 
 describe("AudioLaneAdapter", () => {
+  it("exposes only Worklet source progress after start; received frames, started and ended cannot confirm text", async () => {
+    const clock = new VirtualClock();
+    const environment = new FakeAudioEnvironment();
+    const rendered: number[] = [];
+    const lane = new AudioLaneAdapter({
+      clock,
+      environment,
+      onRendered: (event) => rendered.push(event.renderedSamples),
+    });
+    await lane.arm();
+    lane.appendFrame("effect", new Int16Array(1920));
+    environment.reportProgress("effect", 960);
+    expect(rendered).toEqual([]);
+    const finished = lane.start("effect", 0n, AUDIO_CUES);
+    environment.reportStarted("effect", 0n);
+    expect(rendered).toEqual([]);
+    environment.reportProgress("effect", 960);
+    environment.reportProgress("effect", 960);
+    environment.reportEnded("effect");
+    await finished;
+    expect(rendered).toEqual([960]);
+    await lane.close();
+  });
+
+  it("stops confirmation after a rejected source chunk or impossible sample counter", async () => {
+    const clock = new VirtualClock();
+    const environment = new FakeAudioEnvironment();
+    const rendered: number[] = [];
+    const lane = new AudioLaneAdapter({
+      clock,
+      environment,
+      onRendered: (event) => rendered.push(event.renderedSamples),
+    });
+    await lane.arm();
+    for (const sceneId of ["loss", "counter"]) {
+      lane.appendFrame(sceneId, new Int16Array(1920));
+      void lane.start(sceneId, 0n, AUDIO_CUES);
+      if (sceneId === "loss") environment.reportError(sceneId);
+      else environment.reportProgress(sceneId, 1921);
+      environment.reportProgress(sceneId, 1920);
+    }
+    expect(rendered).toEqual([]);
+    await lane.close();
+  });
+  it("does not expose armed or accept prepare while the Worklet is loading", async () => {
+    let finish!: () => void;
+    const loaded = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    class LoadingEnvironment extends FakeAudioEnvironment {
+      override async ensureNode(): Promise<void> {
+        await loaded;
+        await super.ensureNode();
+      }
+    }
+    const env = new LoadingEnvironment();
+    const lane = new AudioLaneAdapter({ environment: env, clock: new VirtualClock() });
+    const arming = lane.arm();
+    await Promise.resolve();
+    expect(lane.armed).toBe(false);
+    expect(await lane.prepare("s1", AUDIO_CUES, new AbortController().signal)).toEqual({
+      ready: false,
+      reason: "audio_not_armed",
+    });
+    finish();
+    expect(await arming).toBe(true);
+    expect(env.nodeReady).toBe(true);
+    await lane.close();
+  });
   it("未 Arm：prepare 返回 audio_not_armed，绝不虚报 Ready", async () => {
     const env = new FakeAudioEnvironment();
     const lane = new AudioLaneAdapter({ environment: env, clock: new VirtualClock() });

@@ -1,4 +1,42 @@
+import { readHistoryRecoveryState } from "../repositories/phase4-history-inventory.js";
+import { readRevalidationRequest } from "../repositories/phase4-history-verification.js";
+import {
+  recordHistoryVerification,
+  readHistoryVerificationPage,
+} from "../repositories/phase4-history-verification.js";
+import { recordRecallRequest } from "../repositories/phase4-recall-requests.js";
+import {
+  beginHistoryInventory,
+  readHistoryInventoryPage,
+  readHistoryInventoryItem,
+} from "../repositories/phase4-history-inventory.js";
+import { beginHistoryGap } from "../repositories/phase4-history-gaps.js";
+import type { PersistenceCheckpoint } from "../checkpoints/observer.js";
+import { applyResourceInvalidation } from "../repositories/phase4-resource-invalidations.js";
+import { readLocalInputVisibility } from "../repositories/phase4-local-inputs.js";
+import {
+  beginMemoryForget,
+  completeMemoryForget,
+  readMemoryForget,
+} from "../repositories/phase4-forget.js";
+import { readPreparedTool, savePreparedTool } from "../repositories/phase4-prepared-tools.js";
+import { readToolCall } from "../repositories/phase4-tool-calls.js";
+import {
+  prepareEffects,
+  bindAudioSegment,
+  confirmEffect,
+  closeEffects,
+  closeRecoveredEffects,
+  readConfirmedSpeech,
+} from "../repositories/phase4-effects.js";
 import { randomUUID } from "node:crypto";
+import { readPhase4ContextManifest } from "../repositories/phase3.js";
+import { readProviderState, writeProviderState } from "../repositories/phase4-provider-state.js";
+import {
+  ensureMemoryPolicy,
+  readMemoryPolicy,
+  changeMemoryPolicy,
+} from "../repositories/phase4-memory-policy.js";
 import type { SessionRecord, TraceContext } from "@bellis/contracts";
 import { PersistenceError, toSafePersistenceError } from "../errors.js";
 import type { SafePersistenceError } from "../errors.js";
@@ -64,10 +102,7 @@ export interface OperationContext {
   readonly trace: TraceContext;
   /** 检查点桥：未启用时为 null，事务顺序与性能语义不受影响。 */
   readonly notifyCheckpoint:
-    | ((
-        checkpoint: "before_scene_transaction_commit",
-        context: PersistenceCheckpointContext,
-      ) => Promise<void>)
+    | ((checkpoint: PersistenceCheckpoint, context: PersistenceCheckpointContext) => Promise<void>)
     | null;
   /** 请求 Deadline（epoch 微秒）；事务开始前检查。 */
   readonly deadlineUs: bigint | null;
@@ -108,13 +143,14 @@ export class WorkerOperationRuntime {
       throw new PersistenceError("deadline_exceeded", "request deadline passed before dispatch");
     }
     switch (operation) {
+      case "read_disk_status":
+        return { operation, result: this.databases.diskAdmission.read() };
       case "ping":
         return { operation, result: { pongMs: this.databases.nowMs() } };
       case "migrate": {
         const nowMs = this.databases.nowMs();
         runMigrations(this.databases.state, this.stateMigrations, nowMs);
         runMigrations(this.databases.telemetry, this.telemetryMigrations, nowMs);
-        this.#migrated = true;
         const requeuedInFlight = this.#bootRequeueDone
           ? 0
           : requeueInFlightRows(
@@ -122,7 +158,12 @@ export class WorkerOperationRuntime {
               nowMs,
               this.databases.leaseClock.leaseNowMs(),
             );
+        if (!this.#bootRequeueDone)
+          closeRecoveredEffects(this.databases.state, (sceneId, close) =>
+            this.databases.state.withCompletionBudget({ sceneId, kind: "close" }, close),
+          );
         this.#bootRequeueDone = true;
+        this.#migrated = true;
         return { operation, result: { requeuedInFlight } };
       }
       case "ensure_session":
@@ -223,14 +264,23 @@ export class WorkerOperationRuntime {
         const phase3Input = input as OperationInputs["phase3_append_signal"];
         return {
           operation,
-          result: appendPhase3Signal(this.databases.state, {
-            sessionId: phase3Input.sessionId,
-            signal: phase3Input.signal,
-            priorityClass: phase3Input.priorityClass,
-            receivedAtMs: phase3Input.receivedAtMs,
-            normalCapacity: phase3Input.normalCapacity,
-            urgentCapacity: phase3Input.urgentCapacity,
-          }),
+          result: appendPhase3Signal(
+            this.databases.state,
+            {
+              ...(phase3Input.policy === undefined ? {} : { policy: phase3Input.policy }),
+              ...(phase3Input.observations === undefined
+                ? {}
+                : { observations: phase3Input.observations }),
+              leaseNowMs: this.databases.leaseClock.leaseNowMs(),
+              sessionId: phase3Input.sessionId,
+              signal: phase3Input.signal,
+              priorityClass: phase3Input.priorityClass,
+              receivedAtMs: phase3Input.receivedAtMs,
+              normalCapacity: phase3Input.normalCapacity,
+              urgentCapacity: phase3Input.urgentCapacity,
+            },
+            this.databases.diskAdmission.assertNewWork,
+          ),
         };
       }
       case "phase3_restore_signals":
@@ -241,24 +291,284 @@ export class WorkerOperationRuntime {
             (input as OperationInputs["phase3_restore_signals"]).sessionId,
           ),
         };
+      case "phase4_prepare_effects":
+        prepareEffects(
+          this.databases.state,
+          input as OperationInputs["phase4_prepare_effects"],
+          this.databases.nowMs(),
+          this.databases.diskAdmission.assertNewWork,
+          this.databases.assertEffectReservation,
+        );
+        return { operation, result: undefined };
+      case "phase4_bind_audio_segment":
+        this.databases.state.withCompletionBudget(
+          {
+            sceneId: (input as OperationInputs["phase4_bind_audio_segment"]).sceneId,
+            kind: "binding",
+          },
+          () =>
+            bindAudioSegment(
+              this.databases.state,
+              input as OperationInputs["phase4_bind_audio_segment"],
+            ),
+        );
+        return { operation, result: undefined };
+      case "phase4_confirm_effect": {
+        const query = input as OperationInputs["phase4_confirm_effect"];
+        const checkpointContext = {
+          traceId: context.trace.traceId,
+          sceneId: query.receipt.sceneId,
+        };
+        const notify = context.notifyCheckpoint;
+        const result = await this.databases.state.withCompletionBudgetAsync(
+          { sceneId: query.receipt.sceneId, kind: "confirmation" },
+          () =>
+            confirmEffect(
+              this.databases.state,
+              query,
+              this.databases.nowMs(),
+              this.databases.leaseClock.leaseNowMs(),
+              notify
+                ? () => notify("before_effect_transaction_commit", checkpointContext)
+                : undefined,
+            ),
+        );
+        if (notify) await notify("after_effect_transaction_commit_before_ack", checkpointContext);
+        return { operation, result };
+      }
+      case "phase4_close_effects": {
+        const query = input as OperationInputs["phase4_close_effects"];
+        this.databases.state.withCompletionBudget({ sceneId: query.sceneId, kind: "close" }, () =>
+          closeEffects(this.databases.state, query.sessionId, query.sceneId),
+        );
+        return { operation, result: undefined };
+      }
+      case "phase4_read_confirmed_speech": {
+        const query = input as OperationInputs["phase4_read_confirmed_speech"];
+        return {
+          operation,
+          result: {
+            items: readConfirmedSpeech(
+              this.databases.state,
+              query.sessionId,
+              query.limit,
+              query.policy,
+            ),
+          },
+        };
+      }
+      case "phase4_read_context_manifest": {
+        const query = input as OperationInputs["phase4_read_context_manifest"];
+        return {
+          operation,
+          result: readPhase4ContextManifest(this.databases.state, query.sessionId, query.cycleId),
+        };
+      }
+      case "phase4_begin_memory_forget":
+        return {
+          operation,
+          result: beginMemoryForget(
+            this.databases.state,
+            input as OperationInputs["phase4_begin_memory_forget"],
+            this.databases.nowMs(),
+          ),
+        };
+      case "phase4_complete_memory_forget":
+        return {
+          operation,
+          result: completeMemoryForget(
+            this.databases.state,
+            input as OperationInputs["phase4_complete_memory_forget"],
+            this.databases.nowMs(),
+          ),
+        };
+      case "phase4_read_memory_forget":
+        return {
+          operation,
+          result: readMemoryForget(
+            this.databases.state,
+            input as OperationInputs["phase4_read_memory_forget"],
+          ),
+        };
+      case "phase4_read_history_recovery_state":
+        return {
+          operation,
+          result: readHistoryRecoveryState(
+            this.databases.state,
+            input as OperationInputs["phase4_read_history_recovery_state"],
+          ),
+        };
+      case "phase4_read_revalidation_request":
+        return {
+          operation,
+          result: readRevalidationRequest(
+            this.databases.state,
+            input as OperationInputs["phase4_read_revalidation_request"],
+          ),
+        };
+      case "phase4_record_history_verification":
+        recordHistoryVerification(
+          this.databases.state,
+          input as OperationInputs["phase4_record_history_verification"],
+          this.databases.diskAdmission.assertNewWork,
+        );
+        return { operation, result: undefined };
+      case "phase4_read_history_verification_page":
+        return {
+          operation,
+          result: readHistoryVerificationPage(
+            this.databases.state,
+            input as OperationInputs["phase4_read_history_verification_page"],
+          ),
+        };
+      case "phase4_begin_history_inventory":
+        return {
+          operation,
+          result: beginHistoryInventory(
+            this.databases.state,
+            input as OperationInputs["phase4_begin_history_inventory"],
+          ),
+        };
+      case "phase4_record_recall_request":
+        recordRecallRequest(
+          this.databases.state,
+          input as OperationInputs["phase4_record_recall_request"],
+          this.databases.diskAdmission.assertNewWork,
+        );
+        return { operation, result: undefined };
+      case "phase4_read_history_inventory_page":
+        return {
+          operation,
+          result: readHistoryInventoryPage(
+            this.databases.state,
+            input as OperationInputs["phase4_read_history_inventory_page"],
+          ),
+        };
+      case "phase4_read_history_inventory_item":
+        return {
+          operation,
+          result: readHistoryInventoryItem(
+            this.databases.state,
+            input as OperationInputs["phase4_read_history_inventory_item"],
+          ),
+        };
+      case "phase4_begin_history_gap":
+        return {
+          operation,
+          result: beginHistoryGap(
+            this.databases.state,
+            input as OperationInputs["phase4_begin_history_gap"],
+            this.databases.nowMs(),
+          ),
+        };
+      case "phase4_apply_resource_invalidation":
+        return {
+          operation,
+          result: applyResourceInvalidation(
+            this.databases.state,
+            input as OperationInputs["phase4_apply_resource_invalidation"],
+            Date.now(),
+          ),
+        };
+      case "phase4_read_local_visibility":
+        return {
+          operation,
+          result: readLocalInputVisibility(
+            this.databases.state,
+            input as OperationInputs["phase4_read_local_visibility"],
+          ),
+        };
+      case "phase4_read_prepared_tool":
+        return {
+          operation,
+          result: readPreparedTool(
+            this.databases.state,
+            input as OperationInputs["phase4_read_prepared_tool"],
+          ),
+        };
+      case "phase4_save_prepared_tool":
+        savePreparedTool(
+          this.databases.state,
+          input as OperationInputs["phase4_save_prepared_tool"],
+        );
+        return { operation, result: undefined };
+      case "phase4_read_tool_call":
+        return {
+          operation,
+          result: readToolCall(
+            this.databases.state,
+            input as OperationInputs["phase4_read_tool_call"],
+          ),
+        };
+      case "phase4_read_provider_state":
+        return {
+          operation,
+          result: readProviderState(
+            this.databases.state,
+            input as OperationInputs["phase4_read_provider_state"],
+          ),
+        };
+      case "phase4_ensure_memory_policy": {
+        const query = input as OperationInputs["phase4_ensure_memory_policy"];
+        return {
+          operation,
+          result: ensureMemoryPolicy(
+            this.databases.state,
+            query.scopeKey,
+            query.privacyRevision,
+            query.sessionId,
+          ),
+        };
+      }
+      case "phase4_read_memory_policy":
+        return {
+          operation,
+          result: readMemoryPolicy(
+            this.databases.state,
+            (input as OperationInputs["phase4_read_memory_policy"]).scopeKey,
+          ),
+        };
+      case "phase4_change_memory_policy":
+        return {
+          operation,
+          result: changeMemoryPolicy(
+            this.databases.state,
+            input as OperationInputs["phase4_change_memory_policy"],
+            this.databases.nowMs(),
+          ),
+        };
+      case "phase4_write_provider_state":
+        return {
+          operation,
+          result: writeProviderState(
+            this.databases.state,
+            input as OperationInputs["phase4_write_provider_state"],
+          ),
+        };
       case "phase3_adopt_cycle": {
         const phase3Input = input as OperationInputs["phase3_adopt_cycle"];
-        adoptPhase3Cycle(this.databases.state, {
-          sessionId: phase3Input.sessionId,
-          turnId: phase3Input.turnId,
-          cycleId: phase3Input.cycleId,
-          cycleIndex: phase3Input.cycleIndex,
-          batchId: phase3Input.batchId,
-          watermarkFrom: phase3Input.watermarkFrom,
-          watermarkTo: phase3Input.watermarkTo,
-          next: phase3Input.next,
-          degraded: phase3Input.degraded,
-          packetDigest: phase3Input.packetDigest,
-          traceId: context.trace.traceId,
-          toolRuns: phase3Input.toolRuns,
-          nowMs: this.databases.nowMs(),
-          recordId: () => this.databases.newRecordId(randomUUID),
-        });
+        adoptPhase3Cycle(
+          this.databases.state,
+          {
+            ...(phase3Input.context === undefined ? {} : { context: phase3Input.context }),
+            leaseNowMs: this.databases.leaseClock.leaseNowMs(),
+            sessionId: phase3Input.sessionId,
+            turnId: phase3Input.turnId,
+            cycleId: phase3Input.cycleId,
+            cycleIndex: phase3Input.cycleIndex,
+            batchId: phase3Input.batchId,
+            watermarkFrom: phase3Input.watermarkFrom,
+            watermarkTo: phase3Input.watermarkTo,
+            next: phase3Input.next,
+            degraded: phase3Input.degraded,
+            packetDigest: phase3Input.packetDigest,
+            traceId: context.trace.traceId,
+            toolRuns: phase3Input.toolRuns,
+            nowMs: this.databases.nowMs(),
+            recordId: () => this.databases.newRecordId(randomUUID),
+          },
+          this.databases.diskAdmission.assertNewWork,
+        );
         return { operation, result: undefined };
       }
       case "phase3_tool_run_event": {
@@ -358,6 +668,7 @@ export class WorkerOperationRuntime {
         throw new PersistenceError("scene_invalid", "plan scene id does not match the request");
       }
 
+      this.databases.diskAdmission.assertNewWork();
       const commitOrdinal = nextCommitOrdinal(state, input.sessionId);
       const aggregateId = `scene-commit:${input.sessionId}`;
       const aggregateSeq = nextAggregateSeq(state, input.sessionId, aggregateId);

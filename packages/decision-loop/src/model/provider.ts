@@ -40,6 +40,8 @@ export interface ModelRequest {
   readonly metadata: {
     readonly turnId: string;
     readonly cycleIndex: number;
+    readonly promptEpoch?: string;
+    readonly contextManifestId?: string;
   };
 }
 

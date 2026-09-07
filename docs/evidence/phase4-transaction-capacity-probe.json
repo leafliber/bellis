@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T21:28:51.720208+00:00",
+  "status": "transaction-cache-guard-and-worker-wal-bound-verified-completion-reserve-and-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1035,
+    "integrationTests": 240,
+    "persistenceIntegrationTests": 118,
+    "runtimeIntegrationTests": 111,
+    "generatedContractFiles": 160,
+    "transactionCapacityTests": 3,
+    "finalProgressAndReturningFocusedTestsExitCode": 0,
+    "finalPersistenceTypecheckExitCode": 0,
+    "irisProviderTests": 80,
+    "irisProviderTypecheckExitCode": 0,
+    "realCoreToolsSseAndStageExitCode": 0,
+    "recoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "repetitionsPerWindowAndTarget": 1,
+    "rootCheckLogSha256": "ab46a6a79fb0fe5c2572bf2210d7acce00c1550038048cc589d45c9d5b2536ec",
+    "finalFocusedLogSha256": "1e1fd6d57598a4de00efd50eff86ef990d3cd3872481d1444e9794bd52045b09",
+    "providerTestLogSha256": "0203d356feeaede7ae575bf919bf0c5971fac0573a4ee16c49b219cfd2eee0ac"
+  },
+  "verified": [
+    "Node embedded SQLite loads the fixed package-local extension and immediately disables further extension loading; no second SQLite engine is linked",
+    "Each state/telemetry connection disables and verifies cache spill and installs an independent pager-cache budget, progress check and commit hook",
+    "About 100MB of repeated same-page logical updates in one transaction do not increase WAL before COMMIT; the final frame increment stays within the configured bound",
+    "Oversized automatic commits, explicit transactions and SAVEPOINT commits roll back without changing accepted state or WAL length; ordinary writes and restart remain functional",
+    "A recursive multi-row statement provokes native SQLITE_INTERRUPT (9) and fully rolls back; oversized RETURNING run/get/all paths also reject without leaving rows or reporting success",
+    "Two simultaneous connections with 4MiB and 16MiB budgets independently reject and accept the same 6MB write",
+    "Repository SQL cannot change storage PRAGMAs, attach another database, load code or reset the guard; migration-internal read-only quick_check remains supported",
+    "Public Core tools, resource-invalidation SSE and Chromium output pass, as do all 24 already-covered process recovery smoke combinations"
+  ],
+  "limits": [
+    "The cache budget includes clean pager pages and is not a process RSS cap; checks every 32 VM instructions allow temporary overshoot and other SQLite allocations remain separate",
+    "The reported WAL bound assumes Node default pager, WAL mode, disabled spill and the current single Worker writer; pre-existing oversized WAL and external writers are not retroactively bounded",
+    "Physical completion/cancellation reservations, total directory quota, ENOSPC and the full capacity/backup/active-Stage recovery matrix remain open",
+    "The new C compiler build and SQLite >=3.51 ABI requirement pass on local macOS/arm64; Windows CI configuration is added but remote execution has not been verified",
+    "The historical 480-case recovery suite is not rerun at 20 repetitions here; this run covers 24 smoke combinations only",
+    "Core Session mapping, production tool authority, remaining Persona/SSE lifecycle, resource-growth audit and Phase4B/full demo remain incomplete"
+  ],
+  "diagnostics": [
+    "The initial broad PRAGMA restriction also blocked SQLite migration-internal quick_check. The read-only check was allowed and the complete root check passed afterward",
+    "The initial repeated-update fixture exceeded the 4MiB cache budget because SQLite kept old and new page images. Its payload was reduced to exercise many updates within budget, while separate oversized transaction tests retained rejection coverage"
+  ],
+  "observedDiskAdmission": {
+    "ready": true,
+    "reason": "ready",
+    "databaseBytes": 8192,
+    "walBytes": 865264,
+    "walHighWaterBytes": 67108864,
+    "transactionCacheMaxBytes": 8388608,
+    "auxiliaryBytes": 78344,
+    "totalBytes": 951800,
+    "availableBytes": 39329533952,
+    "highWaterBytes": 536870912,
+    "completionHeadroomBytes": 167772160,
+    "admissionWriteMarginBytes": 8388608,
+    "capacity": {
+      "stateLimitBytes": 1073741824,
+      "stateWalLimitBytes": 75616288,
+      "stateAllocatedBytes": 331776,
+      "stateUsedBytes": 331776,
+      "telemetryLimitBytes": 67108864,
+      "telemetryWalLimitBytes": 75616288,
+      "telemetryAllocatedBytes": 20480,
+      "telemetryUsedBytes": 20480
+    }
+  },
+  "nativeBuild": {
+    "signature": "54fd526fd097a30fc6027d41f0d18676c215a3646b88cd0e10c9c95459dd7048",
+    "platform": "darwin",
+    "arch": "arm64",
+    "binarySha256": "ee0071893e78105878f28c8c285f0341700453acedbd5f62d4da255a6d0c8656",
+    "compiler": "Apple clang 21.0.0 (clang-2100.1.1.101)",
+    "sqliteVersion": "3.53.4"
+  },
+  "reports": [
+    {
+      "file": "phase4-transaction-capacity-core-probe.json",
+      "exitCode": 0,
+      "sha256": "8464538d4e541a8ea508d7868e30f3bd13192ff200cef41ce93e8a33bc2eb92b"
+    },
+    {
+      "file": "phase4-transaction-capacity-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "9080e77a4dc7bf97d1cfb7cc041ba2d7d80682dfe720ad483eb7a3aa917be329"
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/native/sqlite-guard.c": "a2c283792bc5d3172dc5d1ef4c73dcc2f7dc0e8084638a3e7f90b595a7822e22",
+    "packages/persistence/native/sqlite/sqlite3.h": "919e7f2e8ed1d8f56ac17b412b8971c76aa5d1a879752cc6058f75e7d5910e1d",
+    "packages/persistence/native/sqlite/sqlite3ext.h": "ac9645e5c9ff0cf176efdd6e75cb5e98f46295d38e02db5c4d208826a39ab4be",
+    "packages/persistence/scripts/build-sqlite-guard.mjs": "184d0de0b70e574d69207d0dd8cc9251ac71a079ff9a36f7ed00d8639db0a488",
+    "packages/persistence/package.json": "26c6a44a60950464b1c6fb09cc87680259416e8d3b75e6aeff29b1b86f3cce76",
+    "packages/persistence/src/disk-admission.ts": "33db334ddc5ce66fbb58921df8362887f66479656655bd55a15e6f75e945f8f2",
+    "packages/persistence/src/worker/disk-admission.ts": "aa9746e9f23f85c58bc9e7d294123ce214f28dd605d9f1e022e3faaf7b6cb88d",
+    "packages/persistence/src/worker/database.ts": "297df65a117ace3908c5af65059864108da9f4f7bfa491a31d62c53fd73ce9cb",
+    "packages/persistence/test/integration/transaction-capacity.integration.test.ts": "dc135635f205ef32d3116b1417f2b7270274c2299dfe5596f4776fff6ffe00bf",
+    "packages/persistence/test/integration/database-capacity.integration.test.ts": "ebdccdbfc838d96ed7674878e91642c300ccc2656fb0d51f105b2ab8222ae1ea",
+    "apps/runtime/src/bootstrap/config.ts": "9f021d0d2168cf7ce658c74ae39b5072c679149c7fc14ea9c83c4f94002b114a",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "07a25075231acd5a21bd7c57da91b6bbc33ea7a7722ee118194717a59ea79d34",
+    ".github/workflows/ci.yml": "5fb4281e55ef4885ce14e742ac2341d3c0fa1cd9f8f81c35f94e0fbd7a01313e"
+  }
+}

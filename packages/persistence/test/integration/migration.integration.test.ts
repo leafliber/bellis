@@ -294,6 +294,21 @@ describe("Migration 集成", () => {
         { version: 3 },
         { version: 4 },
         { version: 5 },
+        { version: 6 },
+        { version: 7 },
+        { version: 8 },
+        { version: 9 },
+        { version: 10 },
+        { version: 11 },
+        { version: 12 },
+        { version: 13 },
+        { version: 14 },
+        { version: 15 },
+        { version: 16 },
+        { version: 17 },
+        { version: 18 },
+        { version: 19 },
+        { version: 20 },
       ]);
       // 历史生命周期事实原样保留（回填只读不改写）。
       expect(

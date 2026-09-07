@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T17:12:28.689946+00:00",
+  "status": "tool-registration-verified-phase4-incomplete",
+  "validation": {
+    "command": "pnpm check",
+    "exitCode": 0,
+    "unitAndPropertyTests": 997,
+    "integrationTests": 217,
+    "runtimeIntegrationTests": 108,
+    "irisProviderTests": 53,
+    "irisProviderTypecheckBuildLintFormat": "passed",
+    "rootCheckLogSha256": "38f83c028d49490634b9cdde08611bb229dc0d6b3929b682c906650012765d66"
+  },
+  "realCore": {
+    "command": "node scripts/iris-public-probe.mjs --tools",
+    "exitCode": 2,
+    "registeredRemember": "passed",
+    "fourToolsGate": "incomplete",
+    "searchReasons": [
+      "fts_rebuild_pending"
+    ],
+    "report": "phase4-tool-registration-core-probe.json",
+    "reportSha256": "ed0e06123e211840c9970d648e04297c4690440fb3403e29e5d194d8ca9eb22d"
+  },
+  "verified": [
+    "Four closed model schemas reject scope, evidence, revision and selector injection",
+    "Host scope, evidence, target revision and stable business keys reach all four installed SDK HTTP methods",
+    "Missing capabilities, absent grants and mismatched targets deny before dispatch",
+    "Recovered preparation retains original key and request while rechecking current authorization",
+    "Forget requires the host read barrier before HTTP; unknown outcome keeps it blocked",
+    "Successful responses require current privacy filtering; definite Core conflicts remain definite",
+    "Application lifecycle injects explicit capabilities, preparation storage and confirmation; registration failure releases storage for restart",
+    "Real Core remember uses registerIrisTools, trusted probe authority and MemoryHost policy, confirming the durable request before a single lossy write and recovering it after Worker restart"
+  ],
+  "remaining": [
+    "Production trusted-input and target-authorization implementation behind IrisToolAuthority",
+    "Durable Forget coordinator and real Legal Hold/protected-target policies",
+    "All four tools through the host and ready public FTS search generation",
+    "External invalidations, real Persona revocation, Signal/Tool Result privacy recovery and Core Session mapping",
+    "A4 stress/crash and total DB/WAL quotas, Phase4B and complete demo:phase4"
+  ],
+  "sourceSha256": {
+    "providers/memory-iris/src/tools.ts": "ba33d5f6c84957fff0e8ce2e62dc1964897ff0fcb9b3261798912ff74ed0dc9f",
+    "providers/memory-iris/src/index.ts": "e2d38b2e723762b899c5e896798a606be0f07812251bf03fbef276d9be7b308e",
+    "providers/memory-iris/test/tools.test.ts": "da307e1d09a1c86294f047a43de922b613b14700c3166e0f20ecb02c36afeba9",
+    "providers/memory-iris/package.json": "b93826951703b0670eed30c730e29e1c2c45c9e18205d20f6f36e63b91896d00",
+    "providers/memory-iris/pnpm-lock.yaml": "51c113ab625c3f4499776cf5d18b13b49cc8d24238bdd30767fa32e3e0b25a1f",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "c8e01cb168a3ede4cedae8e9c91c0ff399b9716b27794496a5014789b2ab6e64",
+    "apps/runtime/test/helpers.ts": "e9189863ef74e7c42452c8786510c9b4356d170356593f67db8218bf36ce1493",
+    "apps/runtime/test/integration/phase4-tool-registration.integration.test.ts": "5109d285cbe3bfe41469c9829e75d58b2478a6eb2933092b8f1c5213477eed6a",
+    "scripts/iris-prepared-tool-probe.mjs": "c5f752660f9b1ab4c27f1c92b01798de8ceb6ae2ac0d0db7356eebc51caf6bf8",
+    "scripts/iris-tools-probe.mjs": "94c671e12feb3f9f1a922c0a5366bd500115325f3a1b78d5b5af93e30e989c87"
+  }
+}

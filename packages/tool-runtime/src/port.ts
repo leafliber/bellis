@@ -1,4 +1,4 @@
-import type { ToolCall, ToolResult } from "@bellis/contracts";
+import type { ToolCall, ToolResult, PreparedToolCall } from "@bellis/contracts";
 import type { ToolDeclaration } from "./registry/definition.js";
 
 /**
@@ -30,12 +30,30 @@ export interface ToolExecutionContext {
 
 /** Tool 执行器：由装配层注册，与声明分离（声明可序列化，执行器不可）。 */
 export type ToolHandler = (input: {
+  readonly prepared?: PreparedToolCall;
   readonly arguments: Record<string, unknown>;
   readonly context: ToolExecutionContext;
   readonly deadlineUs: bigint;
   /** 单次调用的幂等键（声明为高风险 Tool 时存在）。 */
   readonly idempotencyKey: string | null;
 }) => Promise<{ readonly value: unknown }>;
+
+export interface ToolPreparationHook {
+  readonly providerId: string;
+  /** Read-only externally: resolve trusted scope/evidence/revision, never dispatch the write. */
+  prepare(input: {
+    readonly call: ToolCall;
+    readonly context: ToolExecutionContext;
+    readonly deadlineUs: bigint;
+  }): Promise<
+    Pick<PreparedToolCall, "idempotencyKey" | "request" | "confirmation" | "policy" | "resources">
+  >;
+}
+export interface ToolPreparationStore {
+  load(sessionId: string, toolRunId: string): Promise<PreparedToolCall | null>;
+  /** Write once; exact replay also revalidates the current persisted policy. */
+  save(value: PreparedToolCall): Promise<void>;
+}
 
 export type DagIssueCode =
   | "dependencies_unsupported"
@@ -85,7 +103,11 @@ export interface ToolDagExecution {
  * - 返回的 results 顺序确定性（按 DAG 拓扑序）。
  */
 export interface ToolRuntime {
-  registerTool(declaration: ToolDeclaration, handler: ToolHandler): void;
+  registerTool(
+    declaration: ToolDeclaration,
+    handler: ToolHandler,
+    preparation?: ToolPreparationHook,
+  ): void;
   hasTool(name: string): boolean;
   listDeclarations(): readonly ToolDeclaration[];
   /**

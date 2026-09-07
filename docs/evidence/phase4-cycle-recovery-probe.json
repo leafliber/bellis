@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T19:34:05.398221+00:00",
+  "status": "adoption-and-usage-crash-windows-verified-full-recovery-incomplete",
+  "validation": {
+    "command": "pnpm test:memory:iris:recovery",
+    "exitCode": 2,
+    "exitReason": "incomplete: remaining recovery/capacity windows",
+    "combinedCasesPassed": 300,
+    "cycleCasesPassed": 180,
+    "sseRegressionCasesPassed": 120,
+    "combinations": 15,
+    "repetitionsPerCombination": 20,
+    "smokeCombinationsPassed": 15,
+    "matrix": [
+      {
+        "window": "manifest-formed-before-adoption",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "manifest-formed-before-adoption",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "manifest-formed-before-adoption",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "adoption-committed-before-usage-ack",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "adoption-committed-before-usage-ack",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "adoption-committed-before-usage-ack",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "usage-ack-before-host-delivered",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "usage-ack-before-host-delivered",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "usage-ack-before-host-delivered",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "core-worker",
+        "passed": 20
+      }
+    ],
+    "stableOriginalManifests": 160,
+    "unadoptedCandidatesAbsent": 20,
+    "adoptedRuntimeRestartsWithoutModelRequest": 40,
+    "distinctCoreUsageReports": 180,
+    "rootAndProviderBuild": "passed",
+    "scriptSyntaxFormatDiffCheck": "passed",
+    "productionSourceChanged": false,
+    "logSha256": "b6cce3c775649eb9d314f5f2af67a2e7c960c49e1f9c96b9f47df50b4687df93"
+  },
+  "verified": [
+    "Real Signal Pipeline/Decision Loop invokes installed Iris Recall and a deterministic no-op model before the actual adoption boundary",
+    "Pre-adoption checkpoint verifies absent durable Manifest and zero Usage outbox rows; Runtime restart consumes the pending accepted input once under a new cycle ID without storing the old candidate",
+    "After-adoption Runtime restart keeps the original Manifest digest and makes zero new model requests; Core API/Worker restart allows the already prepared original cycle to continue",
+    "Usage checkpoint pauses only after actual Core ACK and before local delivered commit; restart reclaims the real 1000ms test lease and sends the original immutable report",
+    "All actual Usage lineage sets and Persona revision match the durable Manifest; original-key replay returns public Core receipt and a second test key proves natural uniqueness with created=false and identical report ID",
+    "Every successful case ends with one adopted cycle, consumed input watermark 1 and one delivered Usage; no manual delivered/lease mutation",
+    "All five window types exercise Runtime, Core API and Core Worker SIGKILL/replacement, each combination 20 times",
+    "The prior 120-case SSE matrix passes in the same run using the extracted shared child-process controller"
+  ],
+  "limits": [
+    "Model output is no-op; no active Stage or effect replay claim",
+    "Inside-transaction crashes, effect/Observation projection commit boundaries and Core Observation HTTP ACK windows remain to be tested",
+    "Both-side older snapshots, full cursor divergence, disk/WAL quotas and active-scene reserved capacity remain open",
+    "100-cycle continuous evidence remains separate; no CI or whole A4/Phase4 completion claim",
+    "Core fixed wheel public boundary is verified; prior source Console contract failures are recorded separately"
+  ],
+  "installation": {
+    "coreVersion": "0.13.0",
+    "coreWheelSha256": "74f8105d0607d44475d0d7b0c9c5afcb8bcba3e5e4067a40850f33b453f9f105",
+    "schemaVersion": 15,
+    "sdkVersion": "0.11.1",
+    "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+    "installedCoreFilesVerified": 159,
+    "surfaceMode": "off"
+  },
+  "report": {
+    "file": "phase4-cycle-recovery-core-probe.json",
+    "sha256": "f7769a532f56689d20d1003ec9dcbd978853bc17b20c60111bf2cc133a5d75ed"
+  },
+  "sourceSha256": {
+    "scripts/iris-recovery-process.mjs": "d7183cf7760901cf54571091ff8ea77a5b3dee20062788ee8f5ab31d40740ba4",
+    "scripts/iris-recovery-probe.mjs": "351b09fe510dd189058e333089ef6d3b32272f6ff6c70af6f10f6551902f8137",
+    "scripts/iris-cycle-recovery-child.mjs": "808df7004eda28e5ed642e6f4571bba35ce7591a3545943429c2fd1c3e50c3b9",
+    "scripts/iris-cycle-recovery-probe.mjs": "be56ba923d4ebe0ea155fa150b9063ec53ee7cc39a3242904dee8d3383081efa",
+    "scripts/iris-public-probe.mjs": "d4f5a7caf611c8e2fc8b892d38c1e14e63e86c1450f78669665e55b205abdb59",
+    "scripts/iris-recovery-child.mjs": "2f5fd6e6ca6412e913efc7adbe48cee2504480d5f37feedf9ff86bad7e8d1654"
+  }
+}

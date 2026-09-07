@@ -1,3 +1,7 @@
+import type { MemoryResourceInvalidation } from "./resource-invalidation.js";
+import type { MemoryHistoryGap } from "./history-gap.js";
+import type { MemoryRecallRequest } from "./recall-request.js";
+export { MemoryRecallRequestSchema, type MemoryRecallRequest } from "./recall-request.js";
 import { z } from "zod";
 
 import { DecimalStringSchema } from "../common/decimal-string.js";
@@ -118,6 +122,8 @@ export const MemoryObserveEventSchema = extensibleJsonObject({
   spaceId: z.string().min(1).max(256).optional(),
   spaceGroupId: z.string().min(1).max(256).optional(),
   sessionId: z.string().min(1).max(256).optional(),
+  /** Resolved by a trusted host identity mapping, never by a model or display name. */
+  actorExternalIdentityId: z.string().min(1).max(256).optional(),
   role: z.enum(["user", "assistant", "tool", "system", "external"]),
   kind: z.string().min(1).max(128),
   occurredAtMs: z.number().int().nonnegative(),
@@ -185,10 +191,29 @@ export interface Disposable {
 }
 
 export interface MemoryProviderContext {
+  /** Persist the actual prepared body before network publication. No model/Stage access. */
+  readonly recordRecallRequest?: (
+    request: MemoryRecallRequest,
+    signal: AbortSignal,
+  ) => Promise<void>;
+  /** ACK only after the host has durably paused history-dependent work. */
+  readonly historyUnavailable?: (gap: MemoryHistoryGap, signal: AbortSignal) => Promise<void>;
+  /** Resolve only after durable host invalidation and local effect barriers are acknowledged. */
+  readonly invalidateResources?: (
+    event: MemoryResourceInvalidation,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly appInstanceId: string;
   readonly agentId: string;
   readonly nowMs?: () => number;
   readonly diagnostic?: (event: string, fields: Readonly<Record<string, JsonValue>>) => void;
+  /** Host-owned, scope-isolated durable adapter metadata. Never expose to a model or Stage. */
+  readonly stateStore?: MemoryProviderStateStore;
+}
+
+export interface MemoryProviderStateStore {
+  load(): Promise<JsonValue | undefined>;
+  save(state: JsonValue): Promise<void>;
 }
 
 export interface PersonaSourceContext extends MemoryProviderContext {}
@@ -216,3 +241,10 @@ export interface PersonaSource {
   current(agentId: string, signal: AbortSignal): Promise<PersonaSnapshot>;
   subscribe?(onInvalidated: (event: PersonaInvalidation) => void): Disposable;
 }
+
+export {
+  MemoryRecallVerificationRequestsSchema,
+  MemoryRecallVerificationSchema,
+  type MemoryRecallVerification,
+  type MemoryRecallVerifier,
+} from "./recall-verification.js";

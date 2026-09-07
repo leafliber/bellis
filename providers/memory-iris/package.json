@@ -1,24 +1,23 @@
 {
   "name": "@iris-memory/bellis-provider",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "type": "module",
   "description": "Bellis MemoryProvider and PersonaSource adapter for Iris Memory Core",
-  "engines": {
-    "node": ">=26.5 <27"
-  },
+  "files": [
+    "dist/src",
+    "vendor",
+    "compatibility-matrix.json",
+    "README.md"
+  ],
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     }
   },
-  "files": [
-    "dist/src",
-    "compatibility-matrix.json",
-    "README.md"
-  ],
   "scripts": {
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config vitest.config.ts",
@@ -27,7 +26,8 @@
   },
   "dependencies": {
     "@bellis/contracts": "link:../../packages/contracts",
-    "@iris-memory/sdk": "^0.11.1"
+    "@bellis/tool-runtime": "link:../../packages/tool-runtime",
+    "@iris-memory/sdk": "file:vendor/iris-memory-sdk-0.11.2.tgz"
   },
   "devDependencies": {
     "@bellis/testkit": "link:../../packages/testkit",
@@ -39,5 +39,8 @@
   },
   "peerDependencies": {
     "@bellis/contracts": "^0.1.0"
+  },
+  "engines": {
+    "node": ">=26.5 <27"
   }
 }

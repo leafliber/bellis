@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T01:13:13.596943+00:00",
+  "status": "durable-per-request-verification-implemented-production-orchestration-and-history-release-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": 0,
+    "unitAndPropertyTests": 1043,
+    "integrationTests": 260,
+    "persistenceIntegrationTests": 138,
+    "runtimeIntegrationTests": 111,
+    "transportIntegrationTests": 11,
+    "newFocusedIntegrationTests": 4,
+    "generatedContracts": 164,
+    "providerTests": "not-rerun; production Provider source unchanged, prior 92-test baseline",
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newVerificationSigkillWindow": "not-claimed",
+    "fullCoreRegression": "not-rerun"
+  },
+  "verified": [
+    "Batch identity, inventory digest, original Recall attempt/request/digest bindings and checkedAt are persisted with all member links in one Worker write transaction",
+    "Current gap/policy and all inventory source digests are revalidated for writes and reads; late responses and stored results are rejected after source or policy changes",
+    "Partial member insertion rolls back the entire batch, exact replay deduplicates after restart, and changed batch bodies or reassigned covered items conflict",
+    "Batch digest and member damage are rejected; missing membership cannot become unchecked coverage even on an end page or a new batch write",
+    "valid, unavailable and unchecked are distinct; separate batches retain separate evaluation times and new inventory runs discard only prior coverage obligations",
+    "Real public Core response for the exact restored SDK request is saved, read after another DB Worker restart and replayed unchanged; three other inventory kinds stay unchecked, original Usage remains and the gap is still blocked",
+    "Final build passes installed Core correction/deletion/checkpoint/history-gap/Chromium regression and tools plus 24 existing recovery smoke combinations"
+  ],
+  "bounds": {
+    "batchItems": 16,
+    "batchBytes": 16384,
+    "inventoryItems": 4096,
+    "pageItems": 64,
+    "itemCoverage": "one immutable batch per inventory item; new run replaces previous coverage"
+  },
+  "limits": [
+    "Production Provider/Host verification scheduling and SDK batch method are not connected; real probe explicitly saves the public response through the trusted Worker API",
+    "A persisted valid verdict is historical evidence, not a fresh remote-state or credential authorization proof. Batch times do not establish a common cross-batch snapshot",
+    "Full inventory coverage, Observation/Usage reconciliation, external StateStore and unbound legacy facts, cross-batch consistency and safe atomic history-gap release remain incomplete",
+    "Actual backup/fork restore, complete Stage/Core crash matrix, ENOSPC, total directory quota, long-growth, Phase4B and complete demo remain open",
+    "Default SDK 0.11.1 and schema support window stay unchanged; isolated SDK 0.11.2 remains an unpublished candidate"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-history-verification-core-probe.json",
+      "exitCode": 0,
+      "sha256": "e4e2b0bd0896a30b69f57d5776c8f88ca2a69fca9267ecb4f42f48f5af4d1f6a"
+    },
+    {
+      "file": "phase4-history-verification-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "a8fc4a4e5f7965d7d7abe6ca9f8a7ea15a71bbd2a3100375c0aa049b89d5c782"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-verdict-check.log",
+      "sha256": "b70fb309ec146852a0bc8b0026bdc6677bb89c091254e0e53b533df6734f8819"
+    },
+    {
+      "file": "/tmp/bellis-verdict-core.log",
+      "sha256": "6e9555b09065fb2bf4644f970328833e2226c6331cf261787318af6672e1b695"
+    },
+    {
+      "file": "/tmp/bellis-verdict-recovery.log",
+      "sha256": "d4784d937bc6c7691d59cb81afbfd9d2a56973140c670eb69d26a596949f9aaa"
+    }
+  ],
+  "sourceSha256": {
+    "packages/persistence/src/repositories/phase4-history-verification.ts": "8067ba7f12895eb0a3932e4303a146b4056500b90a16a3f2c81997fcd7df3532",
+    "packages/persistence/src/repositories/phase4-history-inventory.ts": "60e0d8a577e95f1926a84907f26a3b79141f0071f4132fce9816e251cc62e4e0",
+    "packages/persistence/src/migrations/state/0020-phase4-history-verification.ts": "d715b30ec52f13e6a26a0ba3214a3fa2617a1f4a491fe0d5f781ab128fdd1ac0",
+    "packages/persistence/src/migrations/registry.ts": "0bdd1bd886aa5c2ba3777f549ed88ac30dafaf0c1b82d666a34ac9bcda071f9e",
+    "packages/persistence/src/rpc/operations.ts": "b6cc83714aad00781ee6a191d22e476492a5d35f669f64ba573f0ac2ed2387c1",
+    "packages/persistence/src/client/persistence-client.ts": "bd8345bdf554d91d9fdcbea775f0ee18241f9630c4a58569a054f261dede1bcb",
+    "packages/persistence/src/worker/operations.ts": "bc9a9693105ae5ad416ae6e44f994ea58a7b39f51eadbc093bf9e8a2d16775af",
+    "packages/persistence/src/index.ts": "38ea6e40286041f350211e07dd3e20c300bde2adfcbd741e2d78968c5cc0e3e9",
+    "packages/persistence/test/integration/phase4-history-verification.integration.test.ts": "d95ccd37b008cded04bf7bc6cd61b7c7e17e3760fb215c859ce45458063e7aca",
+    "packages/persistence/test/integration/migration.integration.test.ts": "5d31b9ffe1043f66cb8aec724401b25679b99e50d255dd3be433025e25dab53a",
+    "apps/runtime/test/unit/commit-fake-scene.test.ts": "39491bc864007e34b5c916317fb0d728fefc820adb0082cf5cec2db2247c708f",
+    "scripts/iris-history-gap-probe.mjs": "6dd64fd27ab9ca118180669bd0a6ebc152bcdc6e422450f6e457b492c85f7a32"
+  }
+}

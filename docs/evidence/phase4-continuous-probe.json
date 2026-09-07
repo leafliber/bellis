@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T19:06:28.674165+00:00",
+  "status": "continuous-100-cycle-gate-passed-phase4-incomplete",
+  "validation": {
+    "realCoreChromiumContinuousExitCode": 0,
+    "continuousCycles": 100,
+    "durableManifestAudits": 100,
+    "coreUsageAcknowledgements": 100,
+    "actualOutputObservations": 101,
+    "coreOutputSourceCursor": "101",
+    "maximumEstimatedInputTokens": 6857,
+    "configuredInputTokenLimit": 16000,
+    "personaRevisions": [
+      "1"
+    ],
+    "distinctPromptEpochs": 1,
+    "finalPrivacyGeneration": 1,
+    "auditNegativeTests": 5,
+    "stageTypecheckLintFormat": "passed",
+    "threeCycleCoreChromiumAuditRegression": "passed",
+    "rootCheck": "unchanged production source; preceding resource-invalidation root check passed 1018 unit/property and 229 integration tests; not rerun for harness-only changes"
+  },
+  "verified": [
+    "One Runtime child/DB Worker, one installed Core API/Worker pair, and one real Chromium session remain alive for 100 cycles",
+    "Every actual model request matches the durable Manifest digest, ID, epoch and Prompt hash read through DB Worker",
+    "Every cycle successfully calls real Iris Recall and compares Persona revision, selected Block revision/source refs/native Core hash and input budget",
+    "Each real Core Usage ACK matches the adopted requestId/cycleId/revision and all three candidate sets, with a unique outbox identity",
+    "Actual Worklet output is observed only after rendered confirmation; each completed scene releases before the next cycle and public Core sourceCursor ends at 101",
+    "Final-cycle privacy transition suppresses its unfinished segment, clears subtitles and releases the scene; generation 1 persists",
+    "Fixture requires graceful Runtime/DB Worker and Vite shutdown and temporary host-directory cleanup; parent stops Core services",
+    "Audit tests reject altered Prompt, mismatched opaque Core hash, changed Usage sets, invalid Manifest digest/over-budget contents and Persona revision mismatch"
+  ],
+  "limits": [
+    "This passes the continuous row of guide section 11.5, not the entire A4 recovery/capacity matrix",
+    "No claim of physical loudspeaker measurement, production model/TTS, full resource-growth leak proof, DB/WAL quota or CI execution",
+    "Each applicable dual-process crash window still requires at least 20 repetitions; test:memory:iris:recovery remains unimplemented",
+    "Production tool/intent/evidence authority, Core Session mapping, event-gap/correction recovery, Legal Hold/protected and real Persona revocation remain open",
+    "MCP, Presence/Avatar and complete demo:phase4 remain open",
+    "Core wheel is the recorded events-capable 0.13 artifact; its source regression retains four Console contract failures documented in the prior resource-invalidation evidence"
+  ],
+  "installation": {
+    "coreVersion": "0.13.0",
+    "coreWheelSha256": "74f8105d0607d44475d0d7b0c9c5afcb8bcba3e5e4067a40850f33b453f9f105",
+    "schemaVersion": 15,
+    "sdkVersion": "0.11.1",
+    "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+    "installedCoreFilesVerified": 159,
+    "surfaceMode": "off"
+  },
+  "report": {
+    "file": "phase4-continuous-core-probe.json",
+    "sha256": "65efda2755b1cb25615cd6959d17a1d678a42440724b69c1390238817a57cc03"
+  },
+  "sourceSha256": {
+    "scripts/phase4-cycle-audit.mjs": "2c542779fad7a580618ff05b49c1c6351df41a2906f0734554d0fb3bb64a48de",
+    "scripts/test/phase4-cycle-audit.test.mjs": "0f60f37f1109d40fcc0e3ad8f502b08e644bf5940f09f8aec9cb467b935c1e31",
+    "scripts/phase-4-demo-child.mjs": "9683b21e16e2f9910a823b7f0fb83ccb8219250a08e3aaeb63149c437987f58b",
+    "scripts/iris-stage-probe.mjs": "af66a90b615b9beb62fb9c69eb22812a225b9879f39f97e8bb9fdc1f41a9c892",
+    "scripts/iris-public-probe.mjs": "b44485a0038284b1b85998f09a936449a97aa09a921d2e72d7603d6525f58571",
+    "apps/stage/test/browser/phase4-effects-e2e.test.ts": "e8258436a0214429d286cdf358611dec52edfba951e41d3588793fa30ffe616e",
+    "package.json": "f89395467cc0efab1015e11ab25c27eacff14d375bfe7718c62b14b253d9fef5"
+  }
+}

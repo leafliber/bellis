@@ -1,6 +1,7 @@
 import type { ToolDeclaration } from "./definition.js";
 import { checkToolDeclaration } from "./definition.js";
-import type { ToolHandler } from "../port.js";
+import type { ToolHandler, ToolPreparationHook } from "../port.js";
+import { frozenJsonCopy } from "./frozen-json.js";
 
 /**
  * Tool Registry（phase-3-development-guide.md §8.1）。
@@ -11,12 +12,24 @@ import type { ToolHandler } from "../port.js";
 export interface RegisteredTool {
   readonly declaration: ToolDeclaration;
   readonly handler: ToolHandler;
+  readonly preparation?: ToolPreparationHook;
 }
 
 export class ToolRegistry {
   readonly #tools = new Map<string, RegisteredTool>();
 
-  register(declaration: ToolDeclaration, handler: ToolHandler): void {
+  register(
+    declaration: ToolDeclaration,
+    handler: ToolHandler,
+    preparation?: ToolPreparationHook,
+  ): void {
+    if (
+      preparation !== undefined &&
+      (declaration.cache !== null ||
+        preparation.providerId.length < 1 ||
+        preparation.providerId.length > 128)
+    )
+      throw new Error("prepared tool requires a provider identity and disabled cache");
     const check = checkToolDeclaration(declaration);
     if (!check.ok) {
       throw new Error(`tool declaration invalid (${declaration.name}): ${check.issues.join(", ")}`);
@@ -27,7 +40,21 @@ export class ToolRegistry {
         `tool name conflict: ${declaration.name} already registered (v${existing.declaration.version})`,
       );
     }
-    this.#tools.set(declaration.name, { declaration, handler });
+    this.#tools.set(
+      declaration.name,
+      Object.freeze({
+        declaration: frozenJsonCopy(declaration),
+        handler,
+        ...(preparation === undefined
+          ? {}
+          : {
+              preparation: Object.freeze({
+                providerId: preparation.providerId,
+                prepare: preparation.prepare.bind(preparation),
+              }),
+            }),
+      }),
+    );
   }
 
   get(name: string): RegisteredTool | null {

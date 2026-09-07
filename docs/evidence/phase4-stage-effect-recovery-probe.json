@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T04:17:09.155164+00:00",
+  "status": "two-real-stage-runtime-effect-windows-passed-full-phase4-incomplete",
+  "platform": {
+    "os": "Darwin",
+    "architecture": "arm64",
+    "node": "26.8.1"
+  },
+  "validation": {
+    "command": "IRIS_CORE_PYTHON=<verified installation> IRIS_PROBE_REPORT=<output> pnpm test:memory:iris:stage-recovery",
+    "exitCode": 0,
+    "build": "workspace and standalone Provider passed",
+    "windows": 2,
+    "repetitionsPerWindow": 20,
+    "casesPassed": 40,
+    "stageTypecheckLintFormat": "passed",
+    "stageUnitTests": 66,
+    "browserRegression": {
+      "command": "pnpm test:browser",
+      "exitCode": 0,
+      "passed": 3,
+      "skippedCoreOnlyCases": 2,
+      "scope": "before optional Stage resume parameter; subsequent real-Core three-cycle browser regression passed after the change"
+    },
+    "rootFullCheck": "not rerun; only Stage auth forwards an optional existing resumeSessionId; Runtime/Provider/persistence unchanged",
+    "providerTests": "prior 100-test baseline; not rerun",
+    "previous480AndSixSnapshots": "prior evidence; not rerun and not added to this case count",
+    "remoteWindowsCI": "not observed",
+    "normalCoreChromiumRegression": {
+      "exitCode": 0,
+      "cycles": 3,
+      "assistantObservations": 4,
+      "scope": "after optional resume parameter, separate from 40 crash cases"
+    }
+  },
+  "verified": {
+    "realWorkletReceiptIds": 40,
+    "originalManifestsPreserved": 40,
+    "originalSessionsResumed": 40,
+    "originalReceiptInConfirmedContext": 20,
+    "preCommitRollbackWithoutObservation": 20,
+    "postCommitOriginalPartialFactsDelivered": 20,
+    "uniqueCanonicalObservationIds": 20,
+    "duplicateCanonicalWrites": 0,
+    "oldScenesAutomaticallyReplayed": 0,
+    "completionReservationsReleased": 40,
+    "unconfirmedSuffixExcludedFromNextContext": 40
+  },
+  "installation": {
+    "coreVersion": "0.13.0",
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedCoreFilesVerified": 178,
+    "schemaVersion": 20,
+    "sdkVersion": "0.11.2",
+    "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+    "installedSdkFilesVerified": 4,
+    "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762"
+  },
+  "remaining": [
+    "Core API/Worker crashes at active Stage effect windows",
+    "Active Stage output at Observe HTTP/Core ACK and host delivered windows",
+    "Complete applicable recovery/cursor/capacity gates and history safe release",
+    "Remaining Phase 4A authorization/update gates and Phase 4B"
+  ],
+  "rawReport": {
+    "path": "docs/evidence/phase4-stage-effect-recovery-raw.json",
+    "sha256": "cb4f898cd41335422d69c05fe5d60c104aefdbb92c7051b04da7a647455ed391"
+  },
+  "normalCoreBrowserReport": {
+    "path": "docs/evidence/phase4-stage-recovery-browser-regression-raw.json",
+    "sha256": "8a385fcd71c6db54e1ec71f6dcd4b0f4a6b47970eb5a3ad0ee14b27dee53e6ed"
+  },
+  "logs": {
+    "/tmp/bellis-stage-recovery-full.log": "e1f79e438dedf201b79d7dddcbd9e9df7462b652485d3fc238ac7da04705c791",
+    "/tmp/bellis-stage-recovery-browser-regression.log": "b5e6ab6e06fe723c51cffac7e3355e83b1093c6bca834bb46eacaa6695f51aba",
+    "/tmp/bellis-stage-recovery-final-smoke.log": "eca46002289331e0e821894e31061c7e8636b6799b31134f0ff9593c39636184"
+  },
+  "fullExecutionSourceSha256": {
+    "package.json": "e62f87b343800ea942e7e3d8d13d40934692060f83faeebd9dab9667a2ea4f9d",
+    "scripts/iris-public-probe.mjs": "4dd2e32c793f98b7a2c66775591a6288f73971e5effe6e8345e412bf40df5a7f",
+    "scripts/iris-stage-probe.mjs": "19af8e2c0e1858c1887d032f2d6c68be0cb7b76e20e648a9bde4adeec054a43b",
+    "scripts/phase-4-demo-child.mjs": "3c65edc4a4eabf7255ea885da5e7d1b9d46b052da7c1c5f8c42af4bf578f1893",
+    "scripts/iris-installed-sdk.mjs": "fa949824f97804d175475b4241630b8e62e3aac0c4d5a2eaa24d3afe2607d9ea",
+    "apps/stage/test/browser/fixtures.ts": "ba1c96c4c7de026c0266308fb830afb676d6780633db6b58ebf972727d173688",
+    "apps/stage/test/browser/phase4-recovery-e2e.test.ts": "2bc6b046705837ac22315bea1826924c2475d177ed5058628021b4eaa6c5eb48",
+    "apps/stage/src/scenes/effect-tracker.ts": "d60d78d0c61a60d37dbdb4cbd6376cc119952914e9304d186e89e6524a3b8bf0",
+    "apps/runtime/src/application/phase-4/effects-host.ts": "872f7e5f0fce73798a7cace8ea6aeba8e24121579e9432bc0a25ec98b4fefb65",
+    "packages/persistence/src/repositories/phase4-effects.ts": "5186a80e84192ca86481e9a87c902c0f76a1276b0549a48127f1e3a4fd00985e",
+    "packages/persistence/src/worker/operations.ts": "0ba8360cd34f0e514a4dd6cffaeaa8015a0f770c87b634e3de6906f12f581640",
+    "apps/stage/src/StagePage.tsx": "74f10fde24f0c397ceb3d49cac3581b5c4abdb6ae932c006e06d8340eec12db3"
+  },
+  "sourceSha256": {
+    "package.json": "e62f87b343800ea942e7e3d8d13d40934692060f83faeebd9dab9667a2ea4f9d",
+    "scripts/iris-public-probe.mjs": "4dd2e32c793f98b7a2c66775591a6288f73971e5effe6e8345e412bf40df5a7f",
+    "scripts/iris-stage-probe.mjs": "19af8e2c0e1858c1887d032f2d6c68be0cb7b76e20e648a9bde4adeec054a43b",
+    "scripts/phase-4-demo-child.mjs": "3c65edc4a4eabf7255ea885da5e7d1b9d46b052da7c1c5f8c42af4bf578f1893",
+    "scripts/iris-installed-sdk.mjs": "fa949824f97804d175475b4241630b8e62e3aac0c4d5a2eaa24d3afe2607d9ea",
+    "apps/stage/test/browser/fixtures.ts": "ba1c96c4c7de026c0266308fb830afb676d6780633db6b58ebf972727d173688",
+    "apps/stage/test/browser/phase4-recovery-e2e.test.ts": "2bc6b046705837ac22315bea1826924c2475d177ed5058628021b4eaa6c5eb48",
+    "apps/stage/src/scenes/effect-tracker.ts": "d60d78d0c61a60d37dbdb4cbd6376cc119952914e9304d186e89e6524a3b8bf0",
+    "apps/runtime/src/application/phase-4/effects-host.ts": "872f7e5f0fce73798a7cace8ea6aeba8e24121579e9432bc0a25ec98b4fefb65",
+    "packages/persistence/src/repositories/phase4-effects.ts": "5186a80e84192ca86481e9a87c902c0f76a1276b0549a48127f1e3a4fd00985e",
+    "packages/persistence/src/worker/operations.ts": "0ba8360cd34f0e514a4dd6cffaeaa8015a0f770c87b634e3de6906f12f581640",
+    "apps/stage/src/StagePage.tsx": "74f10fde24f0c397ceb3d49cac3581b5c4abdb6ae932c006e06d8340eec12db3"
+  }
+}

@@ -1,0 +1,224 @@
+{
+  "hostContext": {
+    "diskAdmission": {
+      "ready": true,
+      "reason": "ready",
+      "databaseBytes": 8192,
+      "walBytes": 1038304,
+      "walHighWaterBytes": 67108864,
+      "transactionCacheMaxBytes": 8388608,
+      "auxiliaryBytes": 78344,
+      "totalBytes": 1124840,
+      "availableBytes": 37960335360,
+      "highWaterBytes": 536870912,
+      "completionHeadroomBytes": 167772160,
+      "admissionWriteMarginBytes": 8388608,
+      "capacity": {
+        "stateLimitBytes": 1073741824,
+        "stateWalLimitBytes": 433348768,
+        "stateAllocatedBytes": 413696,
+        "stateUsedBytes": 413696,
+        "stateReservedBytes": 0,
+        "stateReservedWalBytes": 0,
+        "stateReservedAuxiliaryBytes": 0,
+        "activeCompletionReservations": 0,
+        "telemetryLimitBytes": 67108864,
+        "telemetryWalLimitBytes": 75616288,
+        "telemetryAllocatedBytes": 20480,
+        "telemetryUsedBytes": 20480
+      }
+    },
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stageOutput": {
+    "schemaVersion": 1,
+    "mode": "real-core",
+    "privacyGeneration": 1,
+    "adoptedCycles": 3,
+    "usageCount": 3,
+    "observations": [
+      {
+        "eventId": "bellis:4f914a20-147c-4744-935b-3f5f440be450",
+        "outboxId": "b063bd97-f8bb-4a81-9298-3e8a58f610b2",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "1",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 4,
+            "scene_id": "b9439201-5129-478e-88af-089d8365070a",
+            "segment_id": "30e2f058-c54d-4a04-8037-e63eeb11e3da",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第一句。"
+      },
+      {
+        "eventId": "bellis:c2979956-0e61-4604-a926-86ab23698033",
+        "outboxId": "8de79033-7a9f-4a57-92b1-6e8aac7e29fe",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "2",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 4,
+            "end": 8,
+            "scene_id": "b9439201-5129-478e-88af-089d8365070a",
+            "segment_id": "5eb8abef-33c4-4026-b767-6f469757be5e",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第二句。"
+      },
+      {
+        "eventId": "bellis:ce6c9017-3fd4-4cc8-87af-bd39376e55f4",
+        "outboxId": "a584a152-4133-4b6d-a1e1-c7ba2098a165",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "3",
+        "effectState": "committed",
+        "content": "收到。"
+      },
+      {
+        "eventId": "bellis:4af1ccd2-da10-4c63-827e-3b00a7d2bf62",
+        "outboxId": "bb0a36cb-2b52-4f54-9efd-53ac4d20c0ca",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "4",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 3,
+            "scene_id": "928ffbd8-7486-47de-9781-fd6ade26f2fa",
+            "segment_id": "9cdcf76d-6f34-47db-a093-c4fdc9dc064f",
+            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
+            "lane": "audio"
+          }
+        },
+        "content": "完成。"
+      }
+    ],
+    "confirmedConversationInNextRequest": true,
+    "cycleAudit": [
+      {
+        "cycleId": "4c1ea8ff-853f-470d-9c53-b7010edca972",
+        "manifestId": "485485d1-667f-4d0f-a86e-c91ddb123b1d",
+        "manifestDigest": "3b835dde8c0bdc5bd73b1f0ba577464ec1f024f5549eef870717c60c9fcfae4d",
+        "promptEpoch": "f87908ece3345afbc2cd9f0d14855971325d0c190714d182916efbb25f624075",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "6808e4ec-b547-4cbe-9e25-50114af0d2e2",
+        "estimatedInputTokens": 2192,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:b4aeea4cd960e11b",
+          "cand:fc7533f0344695fe"
+        ],
+        "hostSelected": [
+          "cand:b4aeea4cd960e11b"
+        ],
+        "modelVisible": [
+          "cand:b4aeea4cd960e11b"
+        ],
+        "usageOutboxId": "98ce0638-45ca-4227-a70b-70d1d5f3ef27"
+      },
+      {
+        "cycleId": "8b346ff7-b5b1-432a-86a0-b2cf5fdf43aa",
+        "manifestId": "b6d18577-6550-406d-a4d3-81224de7f562",
+        "manifestDigest": "787fa5c6be3d5e30968829c0b2cba7a285555a8d17ee91ae946b1fc0f325b37e",
+        "promptEpoch": "f87908ece3345afbc2cd9f0d14855971325d0c190714d182916efbb25f624075",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "acc78484-9d29-4957-b1ef-547a19299b76",
+        "estimatedInputTokens": 2919,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:113bb8694fc59560",
+          "cand:f6ce0a002f538c8c",
+          "cand:b4aeea4cd960e11b",
+          "cand:fc7533f0344695fe"
+        ],
+        "hostSelected": [
+          "cand:113bb8694fc59560",
+          "cand:f6ce0a002f538c8c",
+          "cand:b4aeea4cd960e11b"
+        ],
+        "modelVisible": [
+          "cand:113bb8694fc59560",
+          "cand:f6ce0a002f538c8c",
+          "cand:b4aeea4cd960e11b"
+        ],
+        "usageOutboxId": "8d80cd96-fca5-469e-8a14-999f3eddaf13"
+      },
+      {
+        "cycleId": "616365e8-6621-4b4b-90fc-c20fad7967bc",
+        "manifestId": "4c21d27d-f403-441a-b9ba-f0f1bbafab96",
+        "manifestDigest": "3ae8d4efeb4a8af0196d394e332812312025a0d8847ae96aee31b1e2bcaf4c9e",
+        "promptEpoch": "f87908ece3345afbc2cd9f0d14855971325d0c190714d182916efbb25f624075",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "9f4f4eb9-b1c5-4182-a0d5-c3399cc49541",
+        "estimatedInputTokens": 3212,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:7e97b441d31f6fdc",
+          "cand:113bb8694fc59560",
+          "cand:f6ce0a002f538c8c",
+          "cand:b4aeea4cd960e11b",
+          "cand:fc7533f0344695fe"
+        ],
+        "hostSelected": [
+          "cand:7e97b441d31f6fdc",
+          "cand:113bb8694fc59560",
+          "cand:f6ce0a002f538c8c",
+          "cand:b4aeea4cd960e11b"
+        ],
+        "modelVisible": [
+          "cand:7e97b441d31f6fdc",
+          "cand:113bb8694fc59560",
+          "cand:f6ce0a002f538c8c",
+          "cand:b4aeea4cd960e11b"
+        ],
+        "usageOutboxId": "2961dfb2-8714-456a-8323-d25e45fbdd87"
+      }
+    ],
+    "coreSourceCursor": "4",
+    "chromium": "passed",
+    "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
+  },
+  "stage": "A0/A1 and A2 real Chromium output/input public boundary probe",
+  "coreVersion": "0.12.0",
+  "searchInitialization": "not-requested",
+  "coreWheelSha256": "449fa3f66f02205c1b23c9677595b6252777b5fc603e1d9a99b842d29428d0d3",
+  "installedCoreFilesVerified": 151,
+  "schemaVersion": 14,
+  "sdkVersion": "0.11.2",
+  "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+  "installedSdkFilesVerified": 4,
+  "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+}

@@ -211,3 +211,62 @@ export {
 
 export { CONTRACT_SCHEMA_ENTRIES, generateJsonSchemaFiles } from "./json-schema.js";
 export type { ContractSchemaKey, GeneratedSchemaFile } from "./json-schema.js";
+export { ContextManifestSchema, ContextAdoptionSchema } from "./memory/context-manifest.js";
+export type { ContextManifest, ContextAdoption } from "./memory/context-manifest.js";
+
+export {
+  MemoryInputObservationSchema,
+  type MemoryInputObservation,
+} from "./memory/input-observation.js";
+
+export {
+  EffectSegmentSchema,
+  SpeechEffectPlanSchema,
+  AudioSegmentBindingSchema,
+  StageEffectReceiptSchema,
+  StageEffectAckSchema,
+  StageEffectReleaseSchema,
+  StageEffectSealSchema,
+} from "./scene/effect.js";
+export type {
+  EffectSegment,
+  SpeechEffectPlan,
+  AudioSegmentBinding,
+  StageEffectReceipt,
+  StageEffectAck,
+  StageEffectRelease,
+  StageEffectSeal,
+} from "./scene/effect.js";
+
+export { MemoryOutputTargetSchema, EffectPreparationSchema } from "./memory/effect-preparation.js";
+export type { MemoryOutputTarget, EffectPreparation } from "./memory/effect-preparation.js";
+export {
+  MemoryPolicyStampSchema,
+  MemoryTombstoneSchema,
+  MemoryPolicySnapshotSchema,
+  MemoryPolicyChangeSchema,
+  isMemoryResourceBlocked,
+} from "./memory/policy.js";
+export type {
+  MemoryPolicyStamp,
+  MemoryTombstone,
+  MemoryPolicySnapshot,
+  MemoryPolicyChange,
+} from "./memory/policy.js";
+
+export { PreparedToolCallSchema, type PreparedToolCall } from "./decision/prepared-tool-call.js";
+
+export * from "./memory/forget.js";
+
+export * from "./memory/local-input-visibility.js";
+
+export * from "./memory/resource-invalidation.js";
+export * from "./memory/history-gap.js";
+export * from "./memory/recall-request.js";
+
+export {
+  MemoryRecallVerificationRequestsSchema,
+  MemoryRecallVerificationSchema,
+  type MemoryRecallVerification,
+  type MemoryRecallVerifier,
+} from "./memory/recall-verification.js";

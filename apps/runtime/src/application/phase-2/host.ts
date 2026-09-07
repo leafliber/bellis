@@ -80,6 +80,7 @@ export class Phase2RuntimeHost {
           traceId: input.trace.traceId,
         }) ?? false,
       hasStageConnection: () => this.#connection !== null && !this.#closed,
+      activeConnectionId: () => (this.#closed ? null : (this.#connection?.connectionId ?? null)),
       onDisconnected: (handler) => {
         this.#disconnectHandlers.push(handler);
       },

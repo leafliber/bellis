@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "scopeKey": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "expectedGeneration": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "changeId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "privacyRevision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "blocked": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "privacy",
+        "forget",
+        "resource-invalidated"
+      ]
+    },
+    "tombstones": {
+      "maxItems": 256,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "providerId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "resourceRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "throughRevision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:0|[1-9][0-9]{0,29})$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "providerId",
+          "resourceRef",
+          "throughRevision"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "scopeKey",
+    "expectedGeneration",
+    "changeId",
+    "privacyRevision",
+    "blocked",
+    "reason",
+    "tombstones"
+  ],
+  "additionalProperties": false
+}

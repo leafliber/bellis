@@ -2,24 +2,21 @@
   "name": "@bellis/persistence",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "SQLite DB Worker、Migration、Session Records、原子提交与 Outbox（P2 交付）",
-  "engines": {
-    "node": ">=26.5 <27"
-  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
   },
-  "types": "./dist/index.d.ts",
-  "main": "./dist/index.js",
-  "files": [
-    "dist"
-  ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "node scripts/build-sqlite-guard.mjs && tsc -b",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:integration": "vitest run -c vitest.config.integration.ts",
@@ -35,5 +32,8 @@
     "@bellis/testkit": "workspace:*",
     "fast-check": "4.9.0",
     "vitest": "4.1.11"
+  },
+  "engines": {
+    "node": ">=26.5 <27"
   }
 }

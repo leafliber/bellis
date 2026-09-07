@@ -38,7 +38,14 @@ export function runMigrations(
   migrations: readonly MigrationDefinition[],
   appliedAtMs: number,
 ): void {
-  db.exec(BOOTSTRAP_SQL);
+  // An already initialized database needs only reads to validate its registry.
+  // Even CREATE IF NOT EXISTS is classified as a write by the capacity fence.
+  if (
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
+      .get() === undefined
+  )
+    db.exec(BOOTSTRAP_SQL);
   const applied = db
     .prepare("SELECT version, checksum FROM schema_migrations ORDER BY version")
     .all()

@@ -1,0 +1,251 @@
+{
+  "eventCheckpoint": {
+    "status": "passed",
+    "sdkVersion": "0.11.2",
+    "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "anchor": {
+      "cursor": "1",
+      "eventId": "sse:01a078f3-7f7d-7207-8f40-17ff6caed6b1"
+    },
+    "checkedSuccessors": 0,
+    "acceptedCheckpointStatus": 200,
+    "rejectedCheckpointStatuses": [
+      410,
+      410
+    ],
+    "scope": "Separate installed SDK candidate -> real installed Core API/Worker; original event anchor, mismatched identity and unknown cursor. No Bellis gap revalidation or old-backup restoration claim."
+  },
+  "resourceInvalidation": {
+    "status": "passed",
+    "source": "external-public-Forget-and-real-Core-Worker-SSE",
+    "eventType": "revision.invalidated.v1",
+    "durableCursor": "1",
+    "contextCancelled": true,
+    "permanentTombstone": true,
+    "workerRestart": "policy-and-provider-cursor-preserved",
+    "generationBefore": 0,
+    "generationAfter": 1,
+    "stops": 1,
+    "scope": "Received public deletion event only; no SSE history-gap or ordinary-correction notification proof"
+  },
+  "hostContext": {
+    "diskAdmission": {
+      "ready": true,
+      "reason": "ready",
+      "databaseBytes": 8192,
+      "walBytes": 885864,
+      "walHighWaterBytes": 67108864,
+      "transactionCacheMaxBytes": 8388608,
+      "auxiliaryBytes": 78344,
+      "totalBytes": 972400,
+      "availableBytes": 39006982144,
+      "highWaterBytes": 536870912,
+      "completionHeadroomBytes": 167772160,
+      "admissionWriteMarginBytes": 8388608,
+      "capacity": {
+        "stateLimitBytes": 1073741824,
+        "stateWalLimitBytes": 433348768,
+        "stateAllocatedBytes": 339968,
+        "stateUsedBytes": 339968,
+        "stateReservedBytes": 0,
+        "stateReservedWalBytes": 0,
+        "stateReservedAuxiliaryBytes": 0,
+        "activeCompletionReservations": 0,
+        "telemetryLimitBytes": 67108864,
+        "telemetryWalLimitBytes": 75616288,
+        "telemetryAllocatedBytes": 20480,
+        "telemetryUsedBytes": 20480
+      }
+    },
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stageOutput": {
+    "schemaVersion": 1,
+    "mode": "real-core",
+    "privacyGeneration": 1,
+    "adoptedCycles": 3,
+    "usageCount": 3,
+    "observations": [
+      {
+        "eventId": "bellis:e62797f4-a416-4c06-b202-dc1856f9bb0a",
+        "outboxId": "5fe399a9-05ff-4a2f-a84a-a81ee4510669",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "1",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 4,
+            "scene_id": "f9568334-cd2e-45a3-9e40-1fb4d58d37e3",
+            "segment_id": "dee73438-94a9-466b-b497-ae2ab96d6acf",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第一句。"
+      },
+      {
+        "eventId": "bellis:f907bfaa-cd2c-4606-a42a-c0cf872a02e2",
+        "outboxId": "bb2811e1-173e-4883-a368-dd20e3803342",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "2",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 4,
+            "end": 8,
+            "scene_id": "f9568334-cd2e-45a3-9e40-1fb4d58d37e3",
+            "segment_id": "ec31c0eb-b0f1-477b-8b09-93c7464a8fa1",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第二句。"
+      },
+      {
+        "eventId": "bellis:6651e6fa-b46d-467a-8fca-085a1d4643f4",
+        "outboxId": "bed65750-2006-4bb1-9b8e-d177ec5f0ea1",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "3",
+        "effectState": "committed",
+        "content": "收到。"
+      },
+      {
+        "eventId": "bellis:9b6a6b12-3d04-4974-9371-b594f4fc55de",
+        "outboxId": "ef619a7c-c38d-4446-b678-f731c1e3207d",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "4",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 3,
+            "scene_id": "fda0a8a8-05a9-4f25-9e68-8658d9deb388",
+            "segment_id": "452c5f7f-e836-41ec-96cf-39d82addbf90",
+            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
+            "lane": "audio"
+          }
+        },
+        "content": "完成。"
+      }
+    ],
+    "confirmedConversationInNextRequest": true,
+    "cycleAudit": [
+      {
+        "cycleId": "2258f950-b975-4eae-b34f-f5f04e1b4e96",
+        "manifestId": "8ec2977a-6fb5-44af-84c2-77d66d9af48f",
+        "manifestDigest": "0f68e875754eba8076369f3c5ad87a1b37022ecb9a2be415d2c0b3d74e1afd8c",
+        "promptEpoch": "4702df2acbdedf0e9fbbc301e72ca7ccc19567afa8f39d514607ec4ac2fecb01",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "eec6fbf4-4b2f-458c-9576-2769e3b27b4c",
+        "estimatedInputTokens": 2192,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:8b6e378a7e77bfaf",
+          "cand:a1f8b5192f6153c8"
+        ],
+        "hostSelected": [
+          "cand:8b6e378a7e77bfaf"
+        ],
+        "modelVisible": [
+          "cand:8b6e378a7e77bfaf"
+        ],
+        "usageOutboxId": "701bd9a5-7dbf-4ebf-a144-5af21d758dad"
+      },
+      {
+        "cycleId": "25baa1cc-574d-4ce2-986d-7be0d043d12b",
+        "manifestId": "12deb93e-c5ca-481b-9597-b9c2274ec375",
+        "manifestDigest": "78b5f75c67494d426b2f0001f1663b996783597e231d2b79e160c839cfc48dbf",
+        "promptEpoch": "4702df2acbdedf0e9fbbc301e72ca7ccc19567afa8f39d514607ec4ac2fecb01",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "537bc848-3bcb-4391-b9b0-1d7ddd4bc9b1",
+        "estimatedInputTokens": 2919,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:f303ac72389fdbe5",
+          "cand:56f4ccb296eb68e3",
+          "cand:8b6e378a7e77bfaf",
+          "cand:a1f8b5192f6153c8"
+        ],
+        "hostSelected": [
+          "cand:f303ac72389fdbe5",
+          "cand:56f4ccb296eb68e3",
+          "cand:8b6e378a7e77bfaf"
+        ],
+        "modelVisible": [
+          "cand:f303ac72389fdbe5",
+          "cand:56f4ccb296eb68e3",
+          "cand:8b6e378a7e77bfaf"
+        ],
+        "usageOutboxId": "4f30accb-c863-4678-ac41-03ef528bc762"
+      },
+      {
+        "cycleId": "72067ce2-a030-4403-9ae1-03186ccf2fae",
+        "manifestId": "95aac4a8-97f6-49ea-adee-9450a615333e",
+        "manifestDigest": "267c16346a21b47b198a45b23cc52694448d065a94547ae6f7c9c081914bfa9f",
+        "promptEpoch": "4702df2acbdedf0e9fbbc301e72ca7ccc19567afa8f39d514607ec4ac2fecb01",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "dc1a9c21-cc05-4594-b2de-fe6ee892889b",
+        "estimatedInputTokens": 3212,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:92db86b545422923",
+          "cand:f303ac72389fdbe5",
+          "cand:56f4ccb296eb68e3",
+          "cand:8b6e378a7e77bfaf",
+          "cand:a1f8b5192f6153c8"
+        ],
+        "hostSelected": [
+          "cand:92db86b545422923",
+          "cand:f303ac72389fdbe5",
+          "cand:56f4ccb296eb68e3",
+          "cand:8b6e378a7e77bfaf"
+        ],
+        "modelVisible": [
+          "cand:92db86b545422923",
+          "cand:f303ac72389fdbe5",
+          "cand:56f4ccb296eb68e3",
+          "cand:8b6e378a7e77bfaf"
+        ],
+        "usageOutboxId": "e54201d7-6792-4a01-8e89-002be6019c3b"
+      }
+    ],
+    "coreSourceCursor": "4",
+    "chromium": "passed",
+    "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
+  },
+  "stage": "A0/A1 and A2 real Chromium output/input public boundary probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9",
+  "installedCoreFilesVerified": 168,
+  "schemaVersion": 18,
+  "sdkVersion": "0.11.1",
+  "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+}

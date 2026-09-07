@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T17:29:20.670284+00:00",
+  "status": "forget-coordination-verified-phase4-incomplete",
+  "validation": {
+    "command": "pnpm check",
+    "exitCode": 0,
+    "unitAndPropertyTests": 1004,
+    "integrationTests": 222,
+    "contractsTests": 296,
+    "generatedContractFiles": 154,
+    "persistenceIntegrationTests": 103,
+    "runtimeUnitTests": 126,
+    "irisProviderTests": 53,
+    "irisProviderTypecheckAndBuild": "passed",
+    "rootCheckLogSha256": "2cb5dfc91864ba35c1fbcaddff3987eb95a1294598fefbbcb3441dd4f07f9e9d"
+  },
+  "realCore": {
+    "command": "node scripts/iris-public-probe.mjs --tools",
+    "exitCode": 2,
+    "registeredRemember": "passed",
+    "coordinatedForget": "passed",
+    "fourToolsGate": "incomplete",
+    "searchReasons": [
+      "fts_rebuild_pending"
+    ],
+    "report": "phase4-forget-coordinator-core-probe.json",
+    "reportSha256": "a994610e3c30c5f646368a2f2652243727ce1a0eed1a2d61e4941c400385db97"
+  },
+  "verified": [
+    "Forget barrier ownership and policy invalidation commit atomically before remote dispatch",
+    "Original prepared request and blocked operation survive Worker restart without automatic execution",
+    "Completion receipt, permanent tombstone and policy update commit atomically",
+    "Exact retries preserve original receipt and do not advance generation; changed receipts reject",
+    "Held, protected or incompletely erased targets retain the read barrier with exact counts",
+    "Late successful Forget does not release a newer privacy barrier or replace its privacy revision",
+    "Bellis temporary SQLite trigger failures prove rollback of policy, operation record, receipt and tombstones",
+    "MemoryHost remains blocked after lost begin/complete ACKs and allows only the original transition retry",
+    "Real registered Iris Forget confirms once and dispatches once with an already durable barrier; receipt and permanent tombstone survive Worker restart",
+    "Public original-key replay returns the same erasure receipt and getClaim returns 404"
+  ],
+  "remaining": [
+    "Production trusted-input and target-authorization implementation",
+    "Real Core Legal Hold/protected targets and complete unknown-result reconciliation/crash matrix",
+    "Ready public FTS search generation and all four complete host paths",
+    "External invalidations, real Persona revocation, Signal/Tool Result privacy recovery and Core Session mapping",
+    "A4 stress/crash and total DB/WAL quotas, Phase4B and complete demo:phase4"
+  ],
+  "sourceSha256": {
+    "packages/contracts/src/memory/forget.ts": "5931c3efac3c75b17714247a031ebffb88e7b8d40a13837bfacaccc0fa6faa2b",
+    "packages/persistence/src/migrations/state/0013-phase4-forget.ts": "148be8b4e66b90ec43c5f144433a3f28b67060ecde8c9df426b633d35603e559",
+    "packages/persistence/src/repositories/phase4-forget.ts": "7404aa97950e4ac6c7cdf4b1bf33222bf9653524098d1d5d01c3ab135f53cded",
+    "packages/persistence/src/repositories/phase4-memory-policy.ts": "e1abc1c1494467deb1f6da7b0b40f27c565e70e8c7947b4cda5b7165c2f6ae8f",
+    "packages/persistence/src/client/persistence-client.ts": "1a3c2d5ce1e5120fb886801f14543f8f3faf109dd13b2bc4cb37799e31c0e53d",
+    "packages/persistence/src/rpc/operations.ts": "e5bd1dd15acd520da8e56b1d5a786fac7992e77667e50deacfe623f74cd4782c",
+    "packages/persistence/src/worker/operations.ts": "8d4ab10418ca67685656d50488154428d34cbee9c31b160589bb322d809d45b4",
+    "packages/persistence/test/integration/phase4-forget.integration.test.ts": "e5516d23fe5777b9ef27ad283bbd3463b26e568d8563b9ebb755fbd5a732af25",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "6812142806d23e64699d215e414ea8f2dff8764dd8310ec7478682c069213283",
+    "apps/runtime/test/unit/phase4-memory-host.test.ts": "407e2ce048a9a80d59aab47602f89b27c41d05861b97fc77b593e304afffb60c",
+    "scripts/iris-forget-probe.mjs": "5ed2cb800d2c1cc05d75a187aef83b4f7a2662367f3ebd21d1eff16c090bf43e",
+    "scripts/iris-tools-probe.mjs": "016659de52382c3e993c6882041d0f68bbd1e4a606581e7a3b7602ebd4e4e532"
+  }
+}

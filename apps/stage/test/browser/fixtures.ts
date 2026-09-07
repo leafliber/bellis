@@ -1,4 +1,5 @@
 import { fork, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,6 +36,7 @@ interface RpcMessage {
 }
 
 export interface StageEnvironment {
+  readonly dataDirectory: string;
   readonly runtimePort: number;
   readonly vitePort: number;
   readonly pageUrl: (token: string) => string;
@@ -43,44 +45,49 @@ export interface StageEnvironment {
   expectRpc(type: string, timeoutMs?: number): Promise<RpcMessage>;
   /** 签发一次性 startup token（不消费——消费发生在页面 exchange）。 */
   issueToken(): Promise<string>;
+  /** Kill only this fixture's Runtime, await SIGKILL, then reopen its database. */
+  crashAndRestartRuntime(): Promise<{ signal: string; replacedProcess: boolean }>;
 }
 
-export const test = base.extend<{ stageEnv: StageEnvironment; phase: 2 | 3 }>({
+export const test = base.extend<{ stageEnv: StageEnvironment; phase: 2 | 3 | 4 }>({
   phase: [2, { option: true }],
-  stageEnv: async ({ phase }, run) => {
+  stageEnv: async ({ phase }, run, testInfo) => {
     const runtimePort = await freePort();
     const vitePort = await freePort();
     const viteOrigin = `http://127.0.0.1:${vitePort}`;
     const dataDirectory = mkdtempSync(join(tmpdir(), "bellis-stage-e2e-"));
+    const sessionId = randomUUID();
 
-    const child = fork(
-      join(REPO_ROOT, "scripts", `phase-${phase}-demo-child.mjs`),
-      [dataDirectory],
-      {
+    const launch = () =>
+      fork(join(REPO_ROOT, "scripts", `phase-${phase}-demo-child.mjs`), [dataDirectory], {
         cwd: REPO_ROOT,
         stdio: ["ignore", "pipe", "pipe", "ipc"],
         env: {
           ...process.env,
           BELLIS_E2E_PORT: String(runtimePort),
           BELLIS_E2E_ORIGINS: viteOrigin,
+          ...(phase === 4 ? { BELLIS_E2E_SESSION_ID: sessionId } : {}),
         },
-      },
-    );
+      });
+    let child = launch();
     const childLogs: string[] = [];
-    for (const stream of [child.stdout, child.stderr]) {
-      if (stream !== null) {
-        stream.on("data", (chunk: Buffer) => {
-          childLogs.push(chunk.toString("utf8"));
-          if (childLogs.length > 400) {
-            childLogs.shift();
-          }
-        });
-      }
-    }
     const pending: RpcMessage[] = [];
-    child.on("message", (message: RpcMessage) => {
-      pending.push(message);
-    });
+    const capture = () => {
+      for (const stream of [child.stdout, child.stderr]) {
+        if (stream !== null) {
+          stream.on("data", (chunk: Buffer) => {
+            childLogs.push(chunk.toString("utf8"));
+            if (childLogs.length > 400) {
+              childLogs.shift();
+            }
+          });
+        }
+      }
+      child.on("message", (message: RpcMessage) => {
+        pending.push(message);
+      });
+    };
+    capture();
 
     const vite = spawn(
       process.execPath,
@@ -127,6 +134,7 @@ export const test = base.extend<{ stageEnv: StageEnvironment; phase: 2 | 3 }>({
       });
 
     const environment: StageEnvironment = {
+      dataDirectory,
       runtimePort,
       vitePort,
       pageUrl: (token: string) => `${viteOrigin}/stage/e2e?token=${encodeURIComponent(token)}`,
@@ -138,6 +146,26 @@ export const test = base.extend<{ stageEnv: StageEnvironment; phase: 2 | 3 }>({
         child.send({ type: "issue-token" });
         const { token } = (await expectRpc("token")) as unknown as { token: string };
         return token;
+      },
+      crashAndRestartRuntime: async () => {
+        if (phase !== 4 || child.exitCode !== null || child.signalCode !== null)
+          throw new Error("live Phase 4 test Runtime required");
+        const oldPid = child.pid;
+        await new Promise<void>((resolvePromise, reject) => {
+          const timer = setTimeout(() => reject(new Error("Runtime SIGKILL timeout")), 5000);
+          child.once("exit", (code, signal) => {
+            clearTimeout(timer);
+            if (code !== null || signal !== "SIGKILL")
+              reject(new Error("Runtime did not exit by SIGKILL"));
+            else resolvePromise();
+          });
+          child.kill("SIGKILL");
+        });
+        pending.length = 0;
+        child = launch();
+        capture();
+        await expectRpc("ready", 30_000);
+        return { signal: "SIGKILL", replacedProcess: child.pid !== oldPid };
       },
     };
 
@@ -178,21 +206,30 @@ ${viteLogs.join("").slice(-800)}`,
       runError = error;
     }
     const teardownProblems: string[] = [];
-    child.send({ type: "shutdown" });
-    await new Promise<void>((resolvePromise) => {
-      const timer = setTimeout(() => {
-        teardownProblems.push("runtime graceful shutdown timed out (SIGKILL forced)");
-        child.kill("SIGKILL");
-        resolvePromise();
-      }, 10_000);
-      child.once("exit", (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
-          teardownProblems.push(`runtime exited with code ${String(code)}`);
-        }
-        resolvePromise();
+    if (child.exitCode !== null || child.signalCode !== null) {
+      teardownProblems.push(
+        `runtime exited before shutdown: ${String(child.exitCode ?? child.signalCode)}`,
+      );
+    } else {
+      if (child.connected)
+        child.send({ type: "shutdown" }, (error) => {
+          if (error) teardownProblems.push("runtime shutdown IPC failed");
+        });
+      await new Promise<void>((resolvePromise) => {
+        const timer = setTimeout(() => {
+          teardownProblems.push("runtime graceful shutdown timed out (SIGKILL forced)");
+          child.kill("SIGKILL");
+          resolvePromise();
+        }, 10_000);
+        child.once("exit", (code) => {
+          clearTimeout(timer);
+          if (code !== 0) {
+            teardownProblems.push(`runtime exited with code ${String(code)}`);
+          }
+          resolvePromise();
+        });
       });
-    });
+    }
     vite.kill("SIGTERM");
     await new Promise<void>((resolvePromise) => {
       const timer = setTimeout(() => {
@@ -212,6 +249,8 @@ ${viteLogs.join("").slice(-800)}`,
 runtime-tail: ${childLogs.join("").slice(-600)}`,
       );
     }
+    if (testInfo.status !== "passed")
+      console.info("Runtime failure diagnostics", childLogs.join("").slice(-8000));
     if (runError !== null) {
       throw runError;
     }

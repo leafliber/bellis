@@ -1,0 +1,16 @@
+{
+  "name": "@iris-memory/sdk",
+  "version": "0.11.2",
+  "artifact": "iris-memory-sdk-0.11.2.tgz",
+  "sha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+  "license": "AGPL-3.0-only",
+  "upstream": "https://github.com/AirObject/iris_memory_core/tree/main/sdk/typescript",
+  "sourceEvidence": "../../../docs/evidence/phase4-event-checkpoint-contract-probe.json",
+  "installation": "immutable local package archive, not source alias or registry publication",
+  "files": {
+    "dist/src/index.js": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "package.json": "e78797172aa73ebb124dba083c7bd2248f51ec55efe51d6ff9a4f33e2679c451",
+    "README.md": "9246cceb35e0bb5fcf0104bea0603049b1a7ff2eb85f6682c4396a5a016b33e4",
+    "dist/src/index.d.ts": "488464b7610597563713d22d994c598650ab7252302a82b00265273d4eeb636d"
+  }
+}

@@ -11,9 +11,12 @@ importers:
       '@bellis/contracts':
         specifier: link:../../packages/contracts
         version: link:../../packages/contracts
+      '@bellis/tool-runtime':
+        specifier: link:../../packages/tool-runtime
+        version: link:../../packages/tool-runtime
       '@iris-memory/sdk':
-        specifier: ^0.11.1
-        version: 0.11.1
+        specifier: file:vendor/iris-memory-sdk-0.11.2.tgz
+        version: file:vendor/iris-memory-sdk-0.11.2.tgz
     devDependencies:
       '@bellis/testkit':
         specifier: link:../../packages/testkit
@@ -36,8 +39,9 @@ importers:
 
 packages:
 
-  '@iris-memory/sdk@0.11.1':
-    resolution: {integrity: sha512-yg00rAxOvLYM4YK8S4b8O45s2lhq0C7G6EwzMWVhU09tGwtPac25EJQB5sWNwWJ07XBt7fKDStrGLhGjiSl5bQ==}
+  '@iris-memory/sdk@file:vendor/iris-memory-sdk-0.11.2.tgz':
+    resolution: {integrity: sha512-879uCuHdbQ44/2p0eBP00xmV73C+aPhdaZxpZrujX6Vk9cEVEsrfcbdhesJN4H73UlwrVn8/kY3IM+R8K1F3cg==, tarball: file:vendor/iris-memory-sdk-0.11.2.tgz}
+    version: 0.11.2
     engines: {node: '>=22'}
 
   '@jridgewell/sourcemap-codec@1.6.0':
@@ -854,7 +858,7 @@ packages:
 
 snapshots:
 
-  '@iris-memory/sdk@0.11.1': {}
+  '@iris-memory/sdk@file:vendor/iris-memory-sdk-0.11.2.tgz': {}
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
 

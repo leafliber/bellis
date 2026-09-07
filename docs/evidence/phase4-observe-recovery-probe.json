@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T19:49:59.209368+00:00",
+  "status": "observation-http-crash-windows-verified-full-recovery-incomplete",
+  "validation": {
+    "command": "pnpm test:memory:iris:recovery",
+    "exitCode": 2,
+    "exitReason": "incomplete: remaining effect/snapshot/capacity windows",
+    "combinedCasesPassed": 480,
+    "observationCasesPassed": 180,
+    "cycleRegressionCasesPassed": 180,
+    "sseRegressionCasesPassed": 120,
+    "combinations": 24,
+    "repetitionsPerCombination": 20,
+    "smokeCombinationsPassed": 24,
+    "matrix": [
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "pending-persisted-before-host-ack",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "policy-committed-before-provider-cursor",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "manifest-formed-before-adoption",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "manifest-formed-before-adoption",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "manifest-formed-before-adoption",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "adoption-committed-before-usage-ack",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "adoption-committed-before-usage-ack",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "adoption-committed-before-usage-ack",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "usage-ack-before-host-delivered",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "usage-ack-before-host-delivered",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "usage-ack-before-host-delivered",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "observation-before-http-publish",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "observation-before-http-publish",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "observation-before-http-publish",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "core-observation-committed-before-http-ack",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "core-observation-committed-before-http-ack",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "core-observation-committed-before-http-ack",
+        "target": "core-worker",
+        "passed": 20
+      },
+      {
+        "window": "observation-sdk-ack-before-host-delivered",
+        "target": "bellis-runtime",
+        "passed": 20
+      },
+      {
+        "window": "observation-sdk-ack-before-host-delivered",
+        "target": "core-api",
+        "passed": 20
+      },
+      {
+        "window": "observation-sdk-ack-before-host-delivered",
+        "target": "core-worker",
+        "passed": 20
+      }
+    ],
+    "uniqueCanonicalObservations": 180,
+    "actualObserveWireRequests": 240,
+    "remoteCursorNullAtCrash": 60,
+    "committedButHttpAckWithheldCases": 60,
+    "batchKeyDerivationsIndependentlyVerified": 180,
+    "duplicateCanonicalWrites": 0,
+    "rootAndProviderBuild": "passed",
+    "scriptSyntaxFormatDiffCheck": "passed",
+    "productionSourceChanged": false,
+    "logSha256": "789c32f661a0ebf77e5af9730dfad2eca8740ac83e6665578f7119eeffef45d3"
+  },
+  "verified": [
+    "Real trusted input mapping and Signal admission transaction create immutable Observation/Outbox before actual Runtime publishing",
+    "Fixed-destination loopback proxy either holds the request before forwarding to Core or withholds actual successful Core HTTP response headers/body from Runtime; no fake SDK response",
+    "Public sourceCursor is null before Core request publication and 1 after Core commit; host delivered remains zero at every checkpoint",
+    "A third window allows SDK ACK and durable Provider source cursor before pausing local delivered commit",
+    "Runtime, Core API and Core Worker each receive verified SIGKILL and replacement at all three windows, 20 repetitions per combination",
+    "Runtime restart resends the same event, byte-identical HTTP body digest and original batch key; other process targets continue the original request",
+    "Public original-batch replay and fresh-batch/original-record-key replay resolve to one Canonical ID; fresh batch reports zero accepted IDs, original duplicate ID and zero enqueued jobs",
+    "Final host delivered count and Provider/Core source cursors are 1 in each case; 180 distinct test facts retain 180 Canonical Observation IDs",
+    "Proxy cleanup aborts outstanding forwarding, closes sockets and awaits handlers; child closes Runtime/DB Worker and parent cleans isolated services/directories",
+    "The prior 300 adoption/Usage/SSE cases pass in the same run"
+  ],
+  "limits": [
+    "These are trusted user input facts; no assistant observation is inferred from an unconfirmed Scene",
+    "The before-publication proxy may still forward an already accepted request after Runtime dies; disconnect is not asserted to roll back remote work",
+    "Inside-transaction effect/Observe projection crashes and active Stage effect recovery remain open",
+    "Older snapshots, all source cursor divergence cases, total DB/WAL quotas and active-scene reservation remain open",
+    "No whole A4/Phase4 completion or CI result; the recorded fixed wheel retains separately documented Core source Console contract failures"
+  ],
+  "installation": {
+    "coreVersion": "0.13.0",
+    "coreWheelSha256": "74f8105d0607d44475d0d7b0c9c5afcb8bcba3e5e4067a40850f33b453f9f105",
+    "schemaVersion": 15,
+    "sdkVersion": "0.11.1",
+    "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+    "installedCoreFilesVerified": 159,
+    "surfaceMode": "off"
+  },
+  "report": {
+    "file": "phase4-observe-recovery-core-probe.json",
+    "sha256": "76e35ae2b3f82287d1c9bde4ef03d0ddc9c3a220747bb28d65b5bb8fb2e993b7"
+  },
+  "sourceSha256": {
+    "scripts/iris-observe-fault-proxy.mjs": "9d5c91e1ab0f1002176197cf1e30ae66bd23e2efbbf6c94540e0989b6fc81e25",
+    "scripts/iris-observe-recovery-child.mjs": "d4bfae9c0aca992e5f92a01c5e23a106c818e8644b189402b6c93dc98be6ed28",
+    "scripts/iris-observe-recovery-probe.mjs": "0cd6c011129442f4830934c037abd5369cec210689a2b1d281b46fd875c6e223",
+    "scripts/iris-recovery-probe.mjs": "71c407f74ba74eb69aa9ff75fe2eff119460995d83256d158fbe98c12737fb45",
+    "scripts/iris-recovery-process.mjs": "d7183cf7760901cf54571091ff8ea77a5b3dee20062788ee8f5ab31d40740ba4",
+    "scripts/iris-public-probe.mjs": "d4f5a7caf611c8e2fc8b892d38c1e14e63e86c1450f78669665e55b205abdb59"
+  }
+}

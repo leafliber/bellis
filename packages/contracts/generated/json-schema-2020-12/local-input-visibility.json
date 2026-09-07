@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "aggregatesVisible": {
+      "type": "boolean"
+    },
+    "signals": {
+      "maxItems": 164,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "signalId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "included",
+              "unbound",
+              "stale_policy",
+              "tombstone"
+            ]
+          }
+        },
+        "required": [
+          "signalId",
+          "result"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "tools": {
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "toolRunId": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "included",
+              "unbound",
+              "stale_policy",
+              "tombstone"
+            ]
+          }
+        },
+        "required": [
+          "toolRunId",
+          "result"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "signals",
+    "tools"
+  ],
+  "additionalProperties": false
+}

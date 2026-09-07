@@ -12,7 +12,7 @@ import {
   type TurnOwnerPort,
 } from "@bellis/decision-loop";
 import { StandardToolRuntime } from "@bellis/tool-runtime";
-import type { ToolCacheStore } from "@bellis/tool-runtime";
+import type { ConfirmationPort, ToolCacheStore } from "@bellis/tool-runtime";
 import type { ControlChannel } from "../phase-2/stage-port-adapter.js";
 import type { SceneRepositoryPort } from "@bellis/scene-runtime";
 import { Phase2PerformanceService } from "../phase-2/performance-service.js";
@@ -41,6 +41,10 @@ import type { LoggerPort, MetricsPort } from "@bellis/observability";
  *   Tool Run 标记 uncertain（绝不自动重试）。
  */
 export interface Phase3HostOptions {
+  readonly inputObservations?: (
+    signal: import("@bellis/contracts").Signal,
+  ) => readonly import("@bellis/contracts").MemoryInputObservation[];
+  readonly contextBuilder?: import("@bellis/decision-loop").ModelContextPort;
   readonly sessionId: string;
   readonly clock: MonotonicClock;
   readonly wallClockMs: () => number;
@@ -53,6 +57,7 @@ export interface Phase3HostOptions {
   readonly loopConfig?: Partial<DecisionLoopConfig>;
   /** Session/Profile 授予的 Capability（Tool 权限门）。 */
   readonly grantedCapabilities?: readonly string[];
+  readonly confirmation?: ConfirmationPort;
   readonly registerTools?: (runtime: StandardToolRuntime) => void;
   /** 0 disables detailed evidence. Positive values retain only the most recent entries. */
   readonly evidenceCapacity?: number;
@@ -142,7 +147,7 @@ export class Phase3DecisionHost {
   readonly #tools: StandardToolRuntime;
   readonly #performance: Phase2PerformanceService;
   readonly #loop: DecisionLoop;
-  readonly #pipeline: SignalPipeline;
+  #pipeline: SignalPipeline;
   readonly #owner: LateBoundOwner;
   readonly #triggerSink: {
     notifyOwnerIdle(): void;
@@ -168,6 +173,9 @@ export class Phase3DecisionHost {
   };
   #sessionId: string;
   #started = false;
+  #sessionUsed = false;
+  #bindingPending = false;
+  #ready: Promise<void> = Promise.resolve();
   #closed = false;
   /** 恢复证据（P5 Demo 输出）。 */
   recoveryEvidence: { uncertainMarked: number; pendingRebuilt: number } | null = null;
@@ -183,6 +191,10 @@ export class Phase3DecisionHost {
       throw new RangeError("evidenceCapacity must be in [0, 4096]");
     this.#sessionId = options.sessionId;
     const adapterOptions = {
+      inputPolicy: () => options.contextBuilder?.policyStamp,
+      ...(options.inputObservations === undefined
+        ? {}
+        : { inputObservations: options.inputObservations }),
       persistence: options.persistence,
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       normalCapacity: 256,
@@ -202,11 +214,17 @@ export class Phase3DecisionHost {
       clock: options.clock,
       wallClockMs: options.wallClockMs,
       cacheStore,
+      preparationStore: {
+        load: (sessionId, toolRunId) =>
+          options.persistence.phase4ReadPreparedTool(sessionId, toolRunId),
+        save: (value) => options.persistence.phase4SavePreparedTool(value),
+      },
+      ...(options.confirmation === undefined ? {} : { confirmation: options.confirmation }),
       ...(options.logger === undefined ? {} : { logger: options.logger }),
       ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
       persistRunEvent: async (event) => {
         await options.persistence.phase3ToolRunEvent({
-          sessionId: this.#sessionId,
+          sessionId: event.sessionId,
           toolRunId: event.toolRunId,
           cycleId: event.cycleId,
           toolName: event.toolName,
@@ -271,6 +289,8 @@ export class Phase3DecisionHost {
       });
     this.#owner = lateBoundOwner();
     this.#loop = new DecisionLoop({
+      currentSessionId: () => this.#sessionId,
+      ...(options.contextBuilder === undefined ? {} : { contextBuilder: options.contextBuilder }),
       sessionId: this.#sessionId,
       provider: {
         name: options.provider.name,
@@ -322,7 +342,12 @@ export class Phase3DecisionHost {
       },
     };
     this.#owner.bind(this.#loop);
-    this.#pipeline = new SignalPipeline({
+    this.#pipeline = this.#createPipeline();
+  }
+
+  #createPipeline(): SignalPipeline {
+    const options = this.#options;
+    return new SignalPipeline({
       sessionId: this.#sessionId,
       clock: options.clock,
       wallClockMs: options.wallClockMs,
@@ -358,21 +383,38 @@ export class Phase3DecisionHost {
   /** 启动：恢复投影 + 管道启动。 */
   async start(): Promise<void> {
     if (this.#started || this.#closed) {
+      await this.#ready;
       return;
     }
     this.#started = true;
-    const recovery = await this.#signalStore.readDecisionState();
-    this.recoveryEvidence = {
-      uncertainMarked: recovery.uncertainMarked,
-      pendingRebuilt: 0,
-    };
-    await this.#pipeline.start();
-    const restored = await this.#signalStore.restore();
-    this.recoveryEvidence.pendingRebuilt = restored.pending.length;
+    this.#ready = this.#restoreSession();
+    await this.#ready;
+  }
+
+  async #restoreSession(): Promise<void> {
+    this.#bindingPending = true;
+    try {
+      const recovery = await this.#signalStore.readDecisionState();
+      const restored = await this.#signalStore.restore();
+      this.#sessionUsed ||=
+        recovery.cycles.length > 0 ||
+        recovery.toolRuns.length > 0 ||
+        restored.pending.length > 0 ||
+        restored.lastAssigned > 0n;
+      this.recoveryEvidence = {
+        uncertainMarked: recovery.uncertainMarked,
+        pendingRebuilt: restored.pending.length,
+      };
+      if (!this.#closed) await this.#pipeline.start();
+    } finally {
+      this.#bindingPending = false;
+    }
   }
 
   ingest(input: unknown): Promise<IngestResult> {
-    const result = this.#pipeline.ingest(input);
+    // Lock ownership before any async append can cross a Stage binding change.
+    this.#sessionUsed = true;
+    const result = this.#ready.then(() => this.#pipeline.ingest(input));
     void result
       .then((value) => {
         if (this.#evidenceCapacity === 0) return;
@@ -432,16 +474,34 @@ export class Phase3DecisionHost {
 
   /** 决策域恢复投影（Demo/验收：水位、Cycle、Tool Run 状态）。 */
   async readDecisionState() {
+    await this.#ready;
     return this.#signalStore.readDecisionState();
   }
 
   /** Stage 连接出现：绑定真实逻辑 Session（Phase 2 规则）。 */
   bindSessionId(sessionId: string): void {
+    if (this.#closed) throw new Error("decision host closed");
+    if (sessionId === this.#sessionId) {
+      this.#performance.markStageConnected(sessionId);
+      return;
+    }
+    if (this.#sessionUsed || this.#bindingPending || !this.#loop.isIdle())
+      throw new Error(
+        "decision host session already owns work; create a new host for another session",
+      );
+    // Only an unused bootstrap host can bind once; never transplant queued Signals or Tool Results.
+    this.#options.contextBuilder?.bindSessionId?.(sessionId);
+    void this.#pipeline.close();
     this.#sessionId = sessionId;
     this.#signalStore.bindSessionId(sessionId);
     this.#adoption.bindSessionId(sessionId);
     this.#audit.bindSessionId(sessionId);
     this.#performance.markStageConnected(sessionId);
+    this.#pipeline = this.#createPipeline();
+    if (this.#started) {
+      this.#ready = this.#restoreSession();
+      void this.#ready.catch(() => undefined); // ingest/start retain and propagate the failure.
+    }
   }
 
   handleStageMessage(type: string, payload: unknown, nowUs: bigint): void {

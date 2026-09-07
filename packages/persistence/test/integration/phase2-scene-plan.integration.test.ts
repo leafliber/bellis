@@ -6,6 +6,7 @@ import {
   type PersistenceClient,
 } from "../../src/index.js";
 import type { Scene, ScenePlan } from "@bellis/contracts";
+import { ScenePlanSchema } from "@bellis/contracts";
 import { DatabaseSync } from "node:sqlite";
 
 /**
@@ -118,11 +119,11 @@ describe("Phase 2 ScenePlan 持久化", () => {
 
   it("plan.sceneId 与请求不一致：scene_invalid 拒绝且不落库", async () => {
     const c = await freshClient();
-    const mismatched: ScenePlan = {
+    const mismatched: ScenePlan = ScenePlanSchema.parse({
       ...PLAN,
       softTimeoutMs: PLAN.softTimeoutMs ?? 500,
       scene: { ...SCENE, sceneId: "44444444-4444-4444-8444-4444444444ff" },
-    };
+    });
     await expect(c.commitScene(commitInput({ plan: mismatched }))).rejects.toThrow(
       /plan scene id does not match/,
     );

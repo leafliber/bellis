@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-09-06",
+  "status": "passed-host-memory-policy-slice",
+  "scope": "Trusted host privacy coordinator, durable transactional barriers, tombstone filtering and actual Stage interruption. Not complete Core deletion/event integration, A3/A4 or Phase 4B.",
+  "validation": {
+    "rootCheck": {
+      "command": "pnpm check",
+      "unitAndPropertyTests": 979,
+      "integrationTests": 206
+    },
+    "providerTests": 41,
+    "contractsGeneratedFiles": 148,
+    "realCoreStageReport": "phase4-stage-core-probe.json",
+    "realStage": {
+      "cycles": 3,
+      "observeAcknowledgments": 4,
+      "usageAcknowledgments": 3,
+      "privacyGeneration": 1,
+      "blocked": true,
+      "lateSegmentObservations": 0
+    },
+    "cases": [
+      "generation/tombstone adoption checks roll back consumption and Usage",
+      "missing stamp and cross-scope downgrade rejection",
+      "input rejection rolls back signal sequence and stream cursor",
+      "new generation uses an independent stream",
+      "late effect confirmation rejected as privacy_revoked",
+      "in-flight suppression retains unknown-outcome audit without false acknowledgment",
+      "suppressed delivery and confirmed history stay excluded after DB Worker restart",
+      "permanent tombstones cannot be weakened by a lower revision",
+      "frozen Context cancellation and old Usage rejection",
+      "lost policy-write acknowledgment retries the original expected generation",
+      "canonical candidate resource retained alongside provenance"
+    ]
+  },
+  "environmentRecovery": {
+    "interruptedBy": "ENOSPC before verification startup",
+    "action": "Removed only inactive pytest-872 temporary test data after verifying dead lock PID, no open files and reproducible Iris test ownership",
+    "rerun": "Full root check and real Core/Stage probe passed"
+  },
+  "remaining": [
+    "Iris search/remember/correct/forget tools and public external invalidation wiring",
+    "actual deletion, Legal Hold, revision conflicts and unknown remote tool outcomes",
+    "complete Signal/Tool Result/Session recovery scope isolation",
+    "real Persona revocation and old-snapshot recovery matrix",
+    "100 cycles and 20 runs per crash window",
+    "global disk quotas including retained audit history",
+    "Phase 4B Presence/Avatar, MCP and full demo:phase4"
+  ],
+  "sourceSha256": {
+    "packages/contracts/src/memory/policy.ts": "806438b48f91f998feea9e645f2b514612fdb224bf3334441e12a2fc922cc2be",
+    "packages/contracts/src/memory/context-manifest.ts": "6f4f938f74943921f81de2b4638f8f94abea4cffca58351f06b69a8c12b5ef56",
+    "packages/contracts/src/memory/input-observation.ts": "1039358a089f15ac1bb628bb7494b49484ef10288cd11b637e54ceb85bcba4b3",
+    "packages/persistence/src/migrations/state/0010-phase4-memory-policy.ts": "27ed6d44c2d6a2d9b258a1de5c2c0107b483815561874852d09cc757e8afe38a",
+    "packages/persistence/src/repositories/phase4-memory-policy.ts": "532629a5cb4993c5676ea2479b16b91228fb744bd96f51ca1c1fe1ed06abbb75",
+    "packages/persistence/src/repositories/phase3.ts": "3952709a05eff2dd9abb5147a68b1d84a0dc110e9b0e710364b3f7f2ca556788",
+    "packages/persistence/src/repositories/phase4-observe.ts": "90bdaa266fa1dab68b3a7d54c0e12367e522ed4b0087634afae6337c23250785",
+    "packages/persistence/src/repositories/phase4-effects.ts": "f49e2c7ac4c3156439663ab336436815e2eeb2c9b3c553b6bf8f948f2b661e16",
+    "packages/persistence/src/rpc/operations.ts": "df3e0b45161cdfa4c5f3d6a9ccad3ba6eceb89a89ba73e621b2b1e50c43055ba",
+    "packages/persistence/src/client/persistence-client.ts": "421dadcac04bea6bffd6f6919424f1cd538efebc904548c37351ba6ca9a0dd3e",
+    "packages/persistence/src/worker/operations.ts": "0490fa68eb795cc9315f040a4b612394c74ada34d7427d69154e6800b6cfac5c",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "f9d49c81b178912af52957937de0837ec72aa4c10e174d3220bd80c5e382429b",
+    "apps/runtime/src/bootstrap/lifecycle.ts": "4b615b236876285a19944ede0c99ecfaf0d73867b5beac8f255eaac932627b9a",
+    "apps/runtime/test/unit/phase4-memory-host.test.ts": "c80d89d45ed42ef699b1df9317d6a72bf7e887ce25be73b072c1f9cf2967e4f4",
+    "apps/runtime/test/integration/lifecycle.integration.test.ts": "883f51318ebe8c1d60ecd293bf1fb9d9f588cd7eaa2b7baa4763192878d2d467",
+    "apps/stage/test/browser/phase4-effects-e2e.test.ts": "70c4b02d7ab501b88f11373696f05d2686287357838b3c5a6a1bdedce1a5b6b9",
+    "providers/memory-iris/src/mapping.ts": "75c8d0934e1ca27fa6c15248706c3ae2aa6cb11c412e4398d4f514cfe3e95940",
+    "providers/memory-iris/test/provider.test.ts": "476b02e1f4216051aa716387cb93a5f2d4adc1d5292cdaf3037b49b4b515bb88",
+    "packages/persistence/test/integration/phase4-memory-policy.integration.test.ts": "732eed9e1c08506f739c2950ebc213979f0c5ced12e149574a6be65141f1c13b",
+    "packages/persistence/test/integration/phase4-effects.integration.test.ts": "ca817aeb32ed5899101db385156ac1dfef249f0f9f49d7e6cb1a388619220107",
+    "packages/persistence/test/integration/phase4-observe.integration.test.ts": "4f41956fac045219b22ed44a3d48866e1367a69a60dc37a326a6a4f2219e7961",
+    "scripts/phase-4-demo-child.mjs": "f648d8368292a371a88805ec2b32bd99f5f2a832d5b5a82da9a3743a2ff02756",
+    "scripts/iris-stage-probe.mjs": "0fe384c454206dc97d6fae8dacd5c36ce81d141cc24f8d397c1fcef877f5f96d"
+  }
+}

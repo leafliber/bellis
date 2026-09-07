@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T18:01:35.825981+00:00",
+  "status": "target-preview-and-revalidation-verified-phase4-incomplete",
+  "validation": {
+    "irisProviderTests": 77,
+    "typecheckBuildLintFormat": "passed",
+    "realCoreToolsExitCode": 0,
+    "rootLastVerified": {
+      "unitAndPropertyTests": 1004,
+      "integrationTests": 222,
+      "evidence": "phase4-forget-coordinator-probe.json",
+      "rerunThisSlice": false
+    }
+  },
+  "verified": [
+    "Public SDK getClaim validates selected target identity and safe numeric response fields with bounded cancellation and retained transport permits",
+    "Preparation checks trusted agent/subject, visible status, current revision, space/session and granted privacy labels before durable preview/confirmation",
+    "Confirmation binds target content and scope; approval is followed by a fresh target read and another current host authorization check",
+    "Cross-agent/subject/space/session/group, invalid revision/status/privacy and changed target responses fail before write",
+    "Real registered Forget reads the target twice, confirms once, persists barrier before its one write, and recovers receipt/tombstone after DB Worker restart"
+  ],
+  "limits": [
+    "Production trusted user intent/evidence grants and Core Session mapping remain separate work",
+    "Core Forget public contract has no expected_revision; read and write are not one Core transaction, so this is not atomic cross-writer revision authorization",
+    "Already committed correction/deletion may make saved target no longer readable at its approved revision; do not regenerate a grant/key to replay, use explicit original-request reconciliation",
+    "Search/correct full host probe, real held/protected targets, external invalidations, A4 and Phase4B remain open"
+  ],
+  "report": {
+    "file": "phase4-tool-target-core-probe.json",
+    "sha256": "00ced15fc67179fe7923cabd0252b66f0e299266e7313c055bec2034d03de1ca"
+  },
+  "sourceSha256": {
+    "providers/memory-iris/src/tools.ts": "5c6ae0c3ce961d65a0aa699f68b7a2c6890f341a5d367583a94e6f67f0b80042",
+    "providers/memory-iris/src/tool-boundary.ts": "b5715b197b130277afcb499d4debfd760c744cfa25adce47b8410de2fd0d67a9",
+    "providers/memory-iris/test/tools.test.ts": "ce5cb9b67042556ebef681d10e9b4f9d1fcbd671828f04f07191a7274076ebd6",
+    "providers/memory-iris/test/tool-boundary.test.ts": "1f434c6bfedd4d15a4a28a11151b0e54dc1bd91e0af0b42e08f364d9872d9aa6",
+    "scripts/iris-forget-probe.mjs": "d26758bdc0924cfef88a19d1b1ec44ec92df00a692d0a6b9a24e1e163430cabe"
+  }
+}

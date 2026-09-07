@@ -1,4 +1,5 @@
 import { OutboxMessageSchema } from "@bellis/contracts";
+import { historyBarrierTableExists, hasHistoryBarrier } from "./history-blocked.js";
 import type { OutboxMessage } from "@bellis/contracts";
 import { PersistenceError } from "../errors.js";
 import type { OutboxRetryPolicy } from "../outbox/retry-policy.js";
@@ -103,15 +104,29 @@ export function claimOutboxRows(db: SqliteDatabase, query: ClaimOutboxQuery): Ou
   const claimed: OutboxMessage[] = [];
   db.exec("BEGIN IMMEDIATE");
   try {
+    const historyFence = historyBarrierTableExists(db)
+      ? `AND (o.topic NOT IN ('memory.observe.v1','memory.usage.v1') OR NOT EXISTS (
+          SELECT 1 FROM phase4_history_gaps AS gap WHERE gap.scope_key = COALESCE(
+            json_extract(o.payload_json, '$.policy.scopeKey'),
+            (SELECT scope_key FROM phase4_memory_session_scopes WHERE session_id = o.session_id))
+        ))`
+      : "";
     // 可领取 = 到期的 pending，或 Lease 已到期未被完成的 in_flight
     // （Dispatcher/Publisher 卡死但 Worker 存活时也能在同一 Worker
     // 生命周期内回收，不必等待 Worker 重启——评审阻断项 2）。
     const rows = db
       .prepare(
-        `SELECT * FROM outbox
-          WHERE (status = 'pending' AND available_at_ms <= ?)
-             OR (status = 'in_flight' AND lease_until_ms <= ?)
-          ORDER BY available_at_ms, outbox_id LIMIT ?`,
+        `SELECT o.* FROM outbox AS o
+          WHERE ((o.status = 'pending' AND o.available_at_ms <= ?)
+             OR (o.status = 'in_flight' AND o.lease_until_ms <= ?))
+          AND (o.topic <> 'memory.observe.v1' OR NOT EXISTS (
+            SELECT 1 FROM outbox AS earlier
+            WHERE earlier.topic = 'memory.observe.v1'
+              AND earlier.partition_key = o.partition_key
+              AND earlier.rowid < o.rowid AND earlier.status <> 'delivered'
+          ))
+          ${historyFence}
+          ORDER BY o.available_at_ms, o.outbox_id LIMIT ?`,
       )
       .all(query.leaseNowMs, query.leaseNowMs, query.limit);
     const update = db.prepare(
@@ -144,7 +159,29 @@ export function claimOutboxRows(db: SqliteDatabase, query: ClaimOutboxQuery): Ou
   return claimed;
 }
 
+/** Remote acceptance and per-item local ACK are committed together. A crash
+ * before this transaction resends the same immutable event and idempotency key. */
 export function completeOutboxRow(
+  db: SqliteDatabase,
+  input: { outboxId: string; ownerInstanceId: string; nowMs: number },
+): void {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    markOutboxDelivered(db, input);
+    const row = db.prepare("SELECT topic FROM outbox WHERE outbox_id = ?").get(input.outboxId);
+    if (row !== undefined && readText(row, "topic") === "memory.observe.v1") {
+      db.prepare(
+        "UPDATE phase4_observations SET ack_at_ms = ? WHERE outbox_id = ? AND ack_at_ms IS NULL",
+      ).run(input.nowMs, input.outboxId);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function markOutboxDelivered(
   db: SqliteDatabase,
   input: { outboxId: string; ownerInstanceId: string; nowMs: number },
 ): void {
@@ -185,7 +222,9 @@ export function retryOutboxRow(
   policy: OutboxRetryPolicy,
 ): "retry" | "dead" {
   const row = db
-    .prepare("SELECT status, attempts, lease_owner_instance_id FROM outbox WHERE outbox_id = ?")
+    .prepare(
+      "SELECT status, attempts, lease_owner_instance_id, topic, payload_json, session_id FROM outbox WHERE outbox_id = ?",
+    )
     .get(command.outboxId);
   if (
     row === undefined ||
@@ -198,6 +237,28 @@ export function retryOutboxRow(
     );
   }
   const attempts = readInt(row, "attempts");
+  if (["memory.observe.v1", "memory.usage.v1"].includes(readText(row, "topic"))) {
+    const payload = JSON.parse(readText(row, "payload_json")) as {
+      policy?: { scopeKey?: unknown };
+    } | null;
+    const scopeKey =
+      payload?.policy?.scopeKey ??
+      (historyBarrierTableExists(db)
+        ? db
+            .prepare("SELECT scope_key FROM phase4_memory_session_scopes WHERE session_id = ?")
+            .get(readText(row, "session_id"))?.scope_key
+        : undefined);
+    if (typeof scopeKey === "string" && hasHistoryBarrier(db, scopeKey)) {
+      db.prepare(`UPDATE outbox SET status = 'pending', lease_until_ms = NULL,
+        lease_owner_instance_id = NULL, last_error_code = 'history_unavailable', updated_at_ms = ?
+        WHERE outbox_id = ? AND status = 'in_flight' AND lease_owner_instance_id = ?`).run(
+        command.nowMs,
+        command.outboxId,
+        command.ownerInstanceId,
+      );
+      return "retry";
+    }
+  }
   if (shouldDeadLetter(policy, attempts, command.retryable)) {
     db.prepare(
       `UPDATE outbox
@@ -233,6 +294,8 @@ export function retryOutboxRow(
  * 同一数据目录不存在仍存活的其它 Worker，清空不会抢走活跃 Lease。
  */
 export function requeueInFlightRows(db: SqliteDatabase, nowMs: number, leaseNowMs: number): number {
+  if (db.prepare("SELECT 1 FROM outbox WHERE status = 'in_flight' LIMIT 1").get() === undefined)
+    return 0;
   const changed = db
     .prepare(
       `UPDATE outbox

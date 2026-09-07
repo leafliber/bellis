@@ -169,7 +169,10 @@ export async function buildServer(ctx: ServerContext): Promise<FastifyInstance> 
     origins: ctx.origins,
     requestTraces: ctx.requestTraces,
   };
-  registerHealthRoutes(app, baseRoutes);
+  registerHealthRoutes(app, {
+    ...baseRoutes,
+    isDiskReady: async () => (await ctx.persistence.readDiskStatus(AbortSignal.timeout(250))).ready,
+  });
   registerVersionRoute(app, baseRoutes);
   registerOpenApiRoute(app, baseRoutes);
   registerAuthRoute(app, { ...baseRoutes, sessions: ctx.sessions });

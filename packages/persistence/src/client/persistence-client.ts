@@ -1,8 +1,51 @@
+import type {
+  HistoryRecoveryInput,
+  HistoryRecoveryState,
+} from "../repositories/phase4-history-inventory.js";
+import type { MemoryRecallRequest } from "@bellis/contracts";
+import type {
+  HistoryVerificationBatch,
+  HistoryVerificationPage,
+} from "../repositories/phase4-history-verification.js";
+import type { RecallRequestWrite } from "../repositories/phase4-recall-requests.js";
+import type {
+  HistoryInventoryBegin,
+  HistoryInventory,
+  HistoryInventoryPageInput,
+  HistoryInventoryPage,
+  HistoryInventoryItemInput,
+  HistoryInventoryItem,
+} from "../repositories/phase4-history-inventory.js";
+import type { MemoryHistoryGap } from "@bellis/contracts";
+import { diskAdmissionOptions } from "../disk-admission.js";
+import type { MemoryResourceInvalidation } from "@bellis/contracts";
+import type { LocalInputVisibilityRequest, LocalInputVisibility } from "@bellis/contracts";
+import type {
+  MemoryForgetReceipt,
+  MemoryForgetOperation,
+  MemoryForgetTransition,
+} from "@bellis/contracts";
+import type {
+  EffectPreparation,
+  AudioSegmentBinding,
+  StageEffectAck,
+  MemoryPolicyStamp,
+  MemoryPolicyChange,
+  MemoryPolicySnapshot,
+} from "@bellis/contracts";
+import type { ConfirmEffectInput, ConfirmedSpeech } from "../repositories/phase4-effects.js";
+import type {
+  ProviderStateScope,
+  ProviderStateWrite,
+  ProviderStateSnapshot,
+} from "../repositories/phase4-provider-state.js";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import type {
   IngestedSignal,
+  ContextAdoption,
+  ContextManifest,
   OutboxMessage,
   Scene,
   ScenePlan,
@@ -143,6 +186,8 @@ export interface OutboxRetryDisposition {
 }
 
 export interface Phase3AppendSignalInput {
+  readonly policy?: MemoryPolicyStamp;
+  readonly observations?: readonly import("@bellis/contracts").MemoryInputObservation[];
   readonly sessionId: string;
   readonly signal: Signal;
   readonly priorityClass: "normal" | "urgent";
@@ -162,6 +207,7 @@ export interface Phase3RestoreState {
 }
 
 export interface Phase3AdoptCycleInput {
+  readonly context?: ContextAdoption;
   readonly sessionId: string;
   readonly turnId: string;
   readonly cycleId: string;
@@ -176,6 +222,7 @@ export interface Phase3AdoptCycleInput {
     readonly toolRunId: string;
     readonly toolName: string;
     readonly idempotencyKeyHash: string | null;
+    readonly originalCall?: import("@bellis/contracts").ToolCall | undefined;
   }[];
 }
 
@@ -222,6 +269,72 @@ export interface Phase3ToolCacheSetInput {
 }
 
 export interface PersistenceClient {
+  readDiskStatus(
+    signal?: AbortSignal,
+  ): Promise<import("../disk-admission.js").PersistenceDiskStatus>;
+  phase4EnsureMemoryPolicy(
+    scopeKey: string,
+    privacyRevision: string,
+    sessionId?: string,
+  ): Promise<MemoryPolicySnapshot>;
+  phase4ReadMemoryPolicy(scopeKey: string): Promise<MemoryPolicySnapshot>;
+  phase4ChangeMemoryPolicy(input: MemoryPolicyChange): Promise<MemoryPolicySnapshot>;
+  phase4BeginMemoryForget(sessionId: string, toolRunId: string): Promise<MemoryForgetTransition>;
+  phase4CompleteMemoryForget(input: {
+    sessionId: string;
+    toolRunId: string;
+    receipt: MemoryForgetReceipt;
+  }): Promise<MemoryForgetTransition>;
+  phase4ReadMemoryForget(
+    sessionId: string,
+    toolRunId: string,
+  ): Promise<MemoryForgetOperation | null>;
+  phase4BeginHistoryGap(scopeKey: string, gap: MemoryHistoryGap): Promise<MemoryPolicySnapshot>;
+  phase4ApplyResourceInvalidation(
+    scopeKey: string,
+    event: MemoryResourceInvalidation,
+  ): Promise<MemoryPolicySnapshot>;
+  phase4ReadLocalVisibility(
+    input: LocalInputVisibilityRequest,
+    signal?: AbortSignal,
+  ): Promise<LocalInputVisibility>;
+  phase4ReadPreparedTool(
+    sessionId: string,
+    toolRunId: string,
+  ): Promise<import("@bellis/contracts").PreparedToolCall | null>;
+  phase4SavePreparedTool(input: import("@bellis/contracts").PreparedToolCall): Promise<void>;
+  phase4ReadToolCall(
+    sessionId: string,
+    toolRunId: string,
+  ): Promise<import("@bellis/contracts").ToolCall | null>;
+  phase4ReadProviderState(scope: ProviderStateScope): Promise<ProviderStateSnapshot | null>;
+  phase4WriteProviderState(input: ProviderStateWrite): Promise<number>;
+  phase4ReadHistoryRecoveryState(input: HistoryRecoveryInput): Promise<HistoryRecoveryState>;
+  phase4ReadRevalidationRequest(
+    input: HistoryInventoryItemInput,
+  ): Promise<MemoryRecallRequest | null>;
+  phase4RecordHistoryVerification(input: HistoryVerificationBatch): Promise<void>;
+  phase4ReadHistoryVerificationPage(
+    input: HistoryInventoryPageInput,
+  ): Promise<HistoryVerificationPage>;
+  phase4BeginHistoryInventory(input: HistoryInventoryBegin): Promise<HistoryInventory>;
+  phase4RecordRecallRequest(input: RecallRequestWrite): Promise<void>;
+  phase4ReadHistoryInventoryPage(input: HistoryInventoryPageInput): Promise<HistoryInventoryPage>;
+  phase4ReadHistoryInventoryItem(input: HistoryInventoryItemInput): Promise<HistoryInventoryItem>;
+
+  phase4PrepareEffects(input: EffectPreparation): Promise<void>;
+  phase4BindAudioSegment(input: AudioSegmentBinding): Promise<void>;
+  phase4ConfirmEffect(input: ConfirmEffectInput): Promise<StageEffectAck>;
+  phase4CloseEffects(sessionId: string, sceneId: string): Promise<void>;
+  phase4ReadConfirmedSpeech(
+    sessionId: string,
+    limit?: number,
+    policy?: MemoryPolicyStamp,
+  ): Promise<readonly ConfirmedSpeech[]>;
+  phase4ReadContextManifest(
+    sessionId: string,
+    cycleId: string,
+  ): Promise<{ manifest: ContextManifest; manifestDigest: string } | null>;
   migrate(signal?: AbortSignal): Promise<void>;
   ensureSession(input: EnsureSessionInput): Promise<void>;
   appendRecord(input: AppendRecordInput): Promise<SessionRecord>;
@@ -281,6 +394,7 @@ export interface PersistenceClientOptions {
   readonly dataDirectory: string;
   /** 单请求默认 Deadline（毫秒），默认 10_000。 */
   readonly defaultDeadlineMs?: number;
+  readonly diskAdmission?: import("../disk-admission.js").PersistenceDiskAdmissionOptions;
   readonly worker?: PersistenceWorkerOptions;
   /** 受控检查点观察器；生产留空（No-op）。 */
   readonly checkpointObserver?: PersistenceCheckpointObserver;
@@ -348,6 +462,7 @@ export function createPersistenceClientForTesting(
       "dataDirectory must be an absolute path; there is no repository-local default",
     );
   }
+  diskAdmissionOptions(options.diskAdmission);
   const logger = options.logger ?? createNoopLogger();
   const defaultDeadlineMs = options.defaultDeadlineMs ?? DEFAULT_DEADLINE_MS;
   const workerUrl = resolveWorkerUrl(
@@ -359,6 +474,7 @@ export function createPersistenceClientForTesting(
     execArgv: options.worker?.execArgv,
     workerData: {
       dataDirectory: options.dataDirectory,
+      diskAdmission: options.diskAdmission,
       checkpointsEnabled: observer !== undefined,
       // migrations 只来自 overrides（包内测试装配第二参数）；
       // options 上的任何未知属性都不会进入 workerData。
@@ -541,6 +657,218 @@ export function createPersistenceClientForTesting(
       requireMigrated();
       return channel.call<"phase3_restore_signals">(
         { operation: "phase3_restore_signals", input: { sessionId } },
+        internalTrace(),
+      );
+    },
+    async phase4PrepareEffects(input) {
+      requireMigrated();
+      await channel.call<"phase4_prepare_effects">(
+        { operation: "phase4_prepare_effects", input },
+        internalTrace(),
+      );
+    },
+    async phase4BeginMemoryForget(sessionId, toolRunId) {
+      requireMigrated();
+      return channel.call<"phase4_begin_memory_forget">(
+        { operation: "phase4_begin_memory_forget", input: { sessionId, toolRunId } },
+        internalTrace(),
+      );
+    },
+    async phase4CompleteMemoryForget(input) {
+      requireMigrated();
+      return channel.call<"phase4_complete_memory_forget">(
+        { operation: "phase4_complete_memory_forget", input },
+        internalTrace(),
+      );
+    },
+    async phase4ReadMemoryForget(sessionId, toolRunId) {
+      requireMigrated();
+      return channel.call<"phase4_read_memory_forget">(
+        { operation: "phase4_read_memory_forget", input: { sessionId, toolRunId } },
+        internalTrace(),
+      );
+    },
+    async phase4ReadHistoryRecoveryState(input) {
+      requireMigrated();
+      return channel.call<"phase4_read_history_recovery_state">(
+        { operation: "phase4_read_history_recovery_state", input },
+        internalTrace(),
+      );
+    },
+    async phase4ReadRevalidationRequest(input) {
+      requireMigrated();
+      return channel.call<"phase4_read_revalidation_request">(
+        { operation: "phase4_read_revalidation_request", input },
+        internalTrace(),
+      );
+    },
+    async phase4RecordHistoryVerification(input) {
+      requireMigrated();
+      return channel.call<"phase4_record_history_verification">(
+        { operation: "phase4_record_history_verification", input },
+        internalTrace(),
+      );
+    },
+    async phase4ReadHistoryVerificationPage(input) {
+      requireMigrated();
+      return channel.call<"phase4_read_history_verification_page">(
+        { operation: "phase4_read_history_verification_page", input },
+        internalTrace(),
+      );
+    },
+    async phase4BeginHistoryInventory(input) {
+      requireMigrated();
+      return channel.call<"phase4_begin_history_inventory">(
+        { operation: "phase4_begin_history_inventory", input },
+        internalTrace(),
+      );
+    },
+    async phase4RecordRecallRequest(input) {
+      requireMigrated();
+      return channel.call<"phase4_record_recall_request">(
+        { operation: "phase4_record_recall_request", input },
+        internalTrace(),
+      );
+    },
+    async phase4ReadHistoryInventoryPage(input) {
+      requireMigrated();
+      return channel.call<"phase4_read_history_inventory_page">(
+        { operation: "phase4_read_history_inventory_page", input },
+        internalTrace(),
+      );
+    },
+    async phase4ReadHistoryInventoryItem(input) {
+      requireMigrated();
+      return channel.call<"phase4_read_history_inventory_item">(
+        { operation: "phase4_read_history_inventory_item", input },
+        internalTrace(),
+      );
+    },
+    async phase4BeginHistoryGap(scopeKey, gap) {
+      requireMigrated();
+      return channel.call<"phase4_begin_history_gap">(
+        { operation: "phase4_begin_history_gap", input: { scopeKey, gap } },
+        internalTrace(),
+      );
+    },
+    async phase4ApplyResourceInvalidation(scopeKey, event) {
+      requireMigrated();
+      return channel.call<"phase4_apply_resource_invalidation">(
+        { operation: "phase4_apply_resource_invalidation", input: { scopeKey, event } },
+        internalTrace(),
+      );
+    },
+    async phase4ReadLocalVisibility(input, signal) {
+      requireMigrated();
+      return channel.call<"phase4_read_local_visibility">(
+        { operation: "phase4_read_local_visibility", input },
+        internalTrace(),
+        { signal },
+      );
+    },
+    async phase4ReadPreparedTool(sessionId, toolRunId) {
+      requireMigrated();
+      return channel.call<"phase4_read_prepared_tool">(
+        { operation: "phase4_read_prepared_tool", input: { sessionId, toolRunId } },
+        internalTrace(),
+      );
+    },
+    async phase4SavePreparedTool(input) {
+      requireMigrated();
+      await channel.call<"phase4_save_prepared_tool">(
+        { operation: "phase4_save_prepared_tool", input },
+        internalTrace(),
+      );
+    },
+    async phase4ReadToolCall(sessionId, toolRunId) {
+      requireMigrated();
+      return channel.call<"phase4_read_tool_call">(
+        { operation: "phase4_read_tool_call", input: { sessionId, toolRunId } },
+        internalTrace(),
+      );
+    },
+    async phase4ReadProviderState(input) {
+      requireMigrated();
+      return channel.call<"phase4_read_provider_state">(
+        { operation: "phase4_read_provider_state", input },
+        internalTrace(),
+      );
+    },
+    async readDiskStatus(signal) {
+      requireMigrated();
+      return channel.call<"read_disk_status">(
+        { operation: "read_disk_status", input: undefined },
+        internalTrace(),
+        { signal },
+      );
+    },
+    async phase4EnsureMemoryPolicy(scopeKey, privacyRevision, sessionId) {
+      requireMigrated();
+      return channel.call<"phase4_ensure_memory_policy">(
+        {
+          operation: "phase4_ensure_memory_policy",
+          input: { scopeKey, privacyRevision, ...(sessionId === undefined ? {} : { sessionId }) },
+        },
+        internalTrace(),
+      );
+    },
+    async phase4ReadMemoryPolicy(scopeKey) {
+      requireMigrated();
+      return channel.call<"phase4_read_memory_policy">(
+        { operation: "phase4_read_memory_policy", input: { scopeKey } },
+        internalTrace(),
+      );
+    },
+    async phase4ChangeMemoryPolicy(input) {
+      requireMigrated();
+      return channel.call<"phase4_change_memory_policy">(
+        { operation: "phase4_change_memory_policy", input },
+        internalTrace(),
+      );
+    },
+    async phase4WriteProviderState(input) {
+      requireMigrated();
+      return channel.call<"phase4_write_provider_state">(
+        { operation: "phase4_write_provider_state", input },
+        internalTrace(),
+      );
+    },
+    async phase4BindAudioSegment(input) {
+      requireMigrated();
+      await channel.call<"phase4_bind_audio_segment">(
+        { operation: "phase4_bind_audio_segment", input },
+        internalTrace(),
+      );
+    },
+    async phase4ConfirmEffect(input) {
+      requireMigrated();
+      return channel.call<"phase4_confirm_effect">(
+        { operation: "phase4_confirm_effect", input },
+        internalTrace(),
+      );
+    },
+    async phase4CloseEffects(sessionId, sceneId) {
+      requireMigrated();
+      await channel.call<"phase4_close_effects">(
+        { operation: "phase4_close_effects", input: { sessionId, sceneId } },
+        internalTrace(),
+      );
+    },
+    async phase4ReadConfirmedSpeech(sessionId, limit = 20, policy) {
+      requireMigrated();
+      const result = await channel.call<"phase4_read_confirmed_speech">(
+        {
+          operation: "phase4_read_confirmed_speech",
+          input: { sessionId, limit, ...(policy === undefined ? {} : { policy }) },
+        },
+        internalTrace(),
+      );
+      return result.items;
+    },
+    async phase4ReadContextManifest(sessionId, cycleId) {
+      requireMigrated();
+      return channel.call<"phase4_read_context_manifest">(
+        { operation: "phase4_read_context_manifest", input: { sessionId, cycleId } },
         internalTrace(),
       );
     },

@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T01:32:25.137104+00:00",
+  "status": "explicit-maintenance-coordinator-and-public-verifier-implemented-full-recovery-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": 0,
+    "unitAndPropertyTestsInRootCheck": 1049,
+    "integrationTestsInRootCheck": 263,
+    "generatedContracts": 168,
+    "providerFinalTests": 96,
+    "providerTypeLintFormatBuildExitCode": 0,
+    "runtimeFinalFocusedTests": 4,
+    "runtimeFinalTypeLintExitCode": 0,
+    "postRootChanges": "Fixed Iris nested SDK scope identity validation; final Provider checks rerun. Runtime test fixture corrected and one lost verification ACK case added; four focused integration tests rerun. Root counts do not include that added case.",
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newCoordinatorSigkillWindow": "not-claimed",
+    "fullCoreRegression": "not-rerun"
+  },
+  "verified": [
+    "Independent IrisRecallVerifier works with ordinary MemoryHost stopped, negotiates each batch through installed SDK and calls only bounded public recall revalidation HTTP with complete original bodies and a fresh batch deadline",
+    "Configured identity is matched against generic preparation metadata and actual SDK body.scope; duplicate inputs, unsupported capability/schema, oversized input, partial/duplicate/unknown/malformed responses and cancellation are rejected",
+    "DB Worker transmission admission revalidates current inventory and real privacy blocked state; preparation generation mismatches remain unchecked instead of being silently reauthorized",
+    "Phase4HistoryRevalidator fixes scope/provider/agent/space, reads persisted inventory coverage, batches at most 16 requests with distinct native ids and bounded body bytes, then persists exact original descriptor bindings",
+    "Cancellation and stopped lifecycle retain a busy slot until uncooperative work settles; late responses do not persist. Policy changes reject response writes",
+    "Twenty prepared attempts cross request-count/duplicate-id batch boundaries; restart resumes stored verdicts without repeated HTTP, and a lost Worker ACK after committed verification is recovered from durable coverage",
+    "Real installed Core probe now invokes the application maintenance coordinator and Iris verifier instead of manually saving a constructed response; request body equals captured original SDK HTTP, one remote verification occurs, three other facts remain unchecked and restart does not repeat HTTP",
+    "Final provider/runtime build passes Core/Chromium correction/deletion/checkpoint/history-gap regression and tools plus 24 existing recovery smoke cases"
+  ],
+  "bounds": {
+    "batchRequests": 16,
+    "batchOriginalBodyBytes": 900000,
+    "publicHttpRequestBytes": 1048576,
+    "inventoryPageItems": 64,
+    "runTimeoutMaxMs": 60000,
+    "irisBatchTimeoutMaxMs": 30000,
+    "concurrency": "one outstanding run per coordinator and one outstanding request per verifier, including uncooperative cancelled work"
+  },
+  "limits": [
+    "Explicit trusted maintenance assembly is implemented; automatic Runtime startup/background scheduling and privacy lifecycle integration are not yet connected",
+    "Caller must stop normal MemoryHost or cancel maintenance before live privacy changes; local pre-send admission is not a cross-process lock covering remote HTTP",
+    "Older preparation policy generations require explicit historical privacy reauthorization and remain unchecked",
+    "Observation/Usage/other inventory facts, external StateStore and unbound legacy coverage, common cross-batch snapshot and safe atomic gap release remain incomplete",
+    "Actual backup/fork restore, full Stage/Core crash matrix, ENOSPC, total directory quota, long-growth, Phase4B and complete demo remain open",
+    "Default SDK 0.11.1 and schema support window stay unchanged; new SDK batch method is not required by the public HTTP maintenance path"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-revalidation-coordinator-core-probe.json",
+      "exitCode": 0,
+      "sha256": "60bc47a5f05a15ea4dd5e3f70295b0cddd1f8901202af7bd7f858a9ab1c4327a"
+    },
+    {
+      "file": "phase4-revalidation-coordinator-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "7547287d70dd991c53851dcce439575a6d9b7503aa5ada0b0a452aae017c5d85"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-revalidation-check.log",
+      "sha256": "c12125982b071f77a69343c1dfe0f695ca3229205dd9e92795490d94b660ca22"
+    },
+    {
+      "file": "/tmp/bellis-revalidation-provider-final.log",
+      "sha256": "d2cdb0f67f80569e7079ba1af91d403526225c1e0622ae91d75b62a44ebdbcc8"
+    },
+    {
+      "file": "/tmp/bellis-revalidation-runtime-final.log",
+      "sha256": "72b649f1535b1ee1bd9573d9cdd7a1f23ac6d58b1250faabafefc01f8d283e78"
+    },
+    {
+      "file": "/tmp/bellis-revalidation-core.log",
+      "sha256": "9eddcf6d0100a1f76d14c17b19f94e3099d1bcf2cef659126920959a5de80fd7"
+    },
+    {
+      "file": "/tmp/bellis-revalidation-recovery.log",
+      "sha256": "3e5a6a2d4f62092da4b17e72013bb739fee788d20bbab13374b5c4a2588b08ce"
+    }
+  ],
+  "sourceSha256": {
+    "packages/contracts/src/memory/recall-verification.ts": "ed4238d7f66967c2955e4b917c6578e104c3cfbce8b2cffeb9dafa8e29f343b7",
+    "packages/contracts/src/index.ts": "d2776081141a3526ca96da32cb712d6c23cf785f19c909be12edd0a6d2abc3ab",
+    "packages/contracts/src/memory/index.ts": "f1505279835e8d1e4e4e443cae61e3f780c28ec4635ceaafbe2cb17544cc35f5",
+    "packages/contracts/src/json-schema.ts": "9086105ef04142864f7cad00cc38dde5ddaa631c4a31e9136f139f6057c8d70c",
+    "packages/contracts/test/fixtures.ts": "083f7355810c3635ec82099a345c1b38f973513868fcef443246ca5918b7428e",
+    "packages/contracts/generated/json-schema-2020-12/memory-recall-verification.json": "10b862e45f497f5b40c89f31af016cb925b8f2c93a7c982deec67b64a87ada2b",
+    "packages/contracts/generated/json-schema-2020-12/memory-recall-verification-requests.json": "3c1851be528ae488bb8a89c64dea83b645e7c644f29b5f0fc9bdac7c33fd4ad4",
+    "packages/contracts/generated/json-schema-draft-07/memory-recall-verification.json": "2809ef4a0015ad8a34945a86e93439a4e0be3f070dae6926d79271be8b648478",
+    "packages/contracts/generated/json-schema-draft-07/memory-recall-verification-requests.json": "e40cfd94ba111dd4f36324d6b2796c197f7dca7dafb28a72bfabd8075eec979e",
+    "providers/memory-iris/src/recall-verifier.ts": "be34d9a7ed98c16126d5b0de845d86b951c920b38c98e7a797083b57a6ea954d",
+    "providers/memory-iris/src/index.ts": "467038fba8f739c55a85815026db92b7afa0b0f3a33d176501bcd513e7d6b5d7",
+    "providers/memory-iris/test/recall-verifier.test.ts": "ed8807acd388dc79bc3a8a93ad7a004bccc1f6b230ccfb4109c8b1d31730359f",
+    "packages/persistence/src/repositories/phase4-history-verification.ts": "10917590b61c97be98802e5d587f9c84b8a559649933458f33cb1eca63a14740",
+    "packages/persistence/src/rpc/operations.ts": "c1e9bc409d7b94b2b7a399797fff804a8fe201dc2f5e77ca10691b95da34b049",
+    "packages/persistence/src/client/persistence-client.ts": "db02ed8c2a06ac73e7ead335c076fdb33159d0ca4306690074e7e6caaaa2ed00",
+    "packages/persistence/src/worker/operations.ts": "d1f8e7acee6606aa650de569907e97bdccf683a3f07d9f8ea29156c247492fcb",
+    "apps/runtime/src/application/phase-4/history-revalidator.ts": "c4539182a838375905b33ca4d8fd1a4fe06c4854ab1e02d400360d3ecd267974",
+    "apps/runtime/src/index.ts": "6200792b8928c0bda96682c9698a616552d6dc0a9249065e9d932d4cbdf747d1",
+    "apps/runtime/test/unit/commit-fake-scene.test.ts": "a27fa4b449a2c9a001e5c71442b6fc18b0e2a484fdc2f1efcd82b59654a8b53d",
+    "apps/runtime/test/integration/phase4-history-revalidation.integration.test.ts": "629b401b83e1696ae4d31b19711870273232b53c079ea7aac8132c60795593c0",
+    "scripts/iris-history-gap-probe.mjs": "223f53113ede638bd0f1e34142b02b5794b2c129689f6b3d215c31f6d7d9f2a1"
+  }
+}

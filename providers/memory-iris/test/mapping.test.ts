@@ -91,6 +91,12 @@ describe("Core candidate vocabulary", () => {
     expect(deriveContextCategory("resource_type_added_later", "anything")).toBeUndefined();
   });
 
+  it("does not let overrides admit unknown resources or manufacture viewer identity", () => {
+    expect(deriveContextCategory("future", "fact", { fact: "fact" })).toBeUndefined();
+    expect(deriveContextCategory("claim", "identity", { identity: "viewer" })).toBeUndefined();
+    expect(deriveContextCategory("__proto__", "constructor")).toBeUndefined();
+  });
+
   it("lets an operator override a single category without touching the table", () => {
     const overrides: Record<string, ContextCategory> = { follow_up: "task" };
     expect(deriveContextCategory("note", "follow_up", overrides)).toBe("task");

@@ -10,6 +10,36 @@ function samplesOf(value: number, count: number): Int16Array {
 }
 
 describe("PcmSceneBuffer", () => {
+  it("counts only rendered source samples, excluding prepare silence, underrun silence and cancel fade", () => {
+    const buffer = new PcmSceneBuffer();
+    buffer.appendFrame("speech", samplesOf(10, 960));
+    const out = new Int16Array(1280);
+    buffer.pull(out, 1280);
+    expect(buffer.renderedSamples("speech")).toBe(0);
+    buffer.switchScene("speech");
+    buffer.pull(out, 1280);
+    expect(buffer.renderedSamples("speech")).toBe(960);
+    buffer.pull(out, 1280);
+    expect(buffer.renderedSamples("speech")).toBe(960);
+    buffer.appendFrame("speech", samplesOf(20, 960));
+    buffer.cancelScene("speech", 480);
+    buffer.pull(out, 128);
+    expect(buffer.renderedSamples("speech")).toBe(960);
+    expect(buffer.hasContiguousRendering("speech")).toBe(false);
+  });
+
+  it("does not let later accepted samples repair a dropped source chunk", () => {
+    const buffer = new PcmSceneBuffer({ maxBufferedUs: 20_000n });
+    buffer.appendFrame("speech", samplesOf(10, 960));
+    expect(buffer.appendFrame("speech", samplesOf(20, 960))).toBe(false);
+    buffer.switchScene("speech");
+    const out = new Int16Array(960);
+    buffer.pull(out, 960);
+    buffer.appendFrame("speech", samplesOf(30, 960));
+    buffer.pull(out, 960);
+    expect(buffer.renderedSamples("speech")).toBe(1920);
+    expect(buffer.hasContiguousRendering("speech")).toBe(false);
+  });
   it("Commit 前数据不发声（无活动 Scene 输出静音）", () => {
     const buffer = new PcmSceneBuffer();
     buffer.appendFrame("s1", samplesOf(1000, 480));

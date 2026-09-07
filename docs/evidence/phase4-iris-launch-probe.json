@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T02:30:33.148826+00:00",
+  "status": "trusted-iris-config-and-cli-launch-implemented-full-phase4-incomplete",
+  "validation": {
+    "bellisRootCheckExitCode": 0,
+    "unitAndPropertyTests": 1054,
+    "integrationTests": 274,
+    "persistenceIntegrationTests": 138,
+    "runtimeIntegrationTests": 125,
+    "transportIntegrationTests": 11,
+    "generatedContracts": 168,
+    "configurationUnitTests": 5,
+    "realCliScenarios": 4,
+    "providerTests": "not-rerun; production Provider source unchanged, prior final 96-test baseline",
+    "realCoreCombinedExitCode": 0,
+    "toolsAndRecoverySmokeExitCode": 2,
+    "recoverySmokeCasesPassed": 24,
+    "existingLocalConfirmationCrashCasesInRootCheck": 40,
+    "newLauncherSigkillWindow": "not-claimed; CLI checks graceful SIGTERM only",
+    "fullCoreRegression": "not-rerun",
+    "resolvedValidationFailure": "Real CLI initially rejected the parsed default runtime configuration: default paceMs 0 failed the positive-only schema on reparse. The schema now accepts its existing zero default, a round-trip assertion passes, and final root/CLI/Core checks pass."
+  },
+  "verified": [
+    "Strict versioned configuration, exact allowed HTTP(S) origins, explicit identity and space-sharing acknowledgement, unchanged default schema window and off-only Surface configuration",
+    "Environment/file references keep Iris token outside RuntimeConfig; disabled configuration never resolves credentials or imports the Provider entry",
+    "Bounded descriptor reads, malformed/oversized input refusal, symlink refusal with POSIX O_NOFOLLOW and private owner-only POSIX credential-file checks; fixed errors omit raw input and nested causes",
+    "Fixed start:iris launcher assembles one Provider/Persona owner and optional independent recovery verifier without runtime-configurable module paths; shutdown follows Runtime lifecycle",
+    "Actual CLI against installed Core passes enabled startup, same-directory restart, disabled startup without credential, missing-credential exit 1, live/readiness checks and graceful SIGTERM; output does not contain the Iris credential",
+    "Reference-only example parses, final Core/Chromium/history-recovery and tools/existing 24-case recovery smoke pass"
+  ],
+  "limits": [
+    "The launcher uses a fixed local repository installation. Remote deployment, Windows ACL/reparse handling and package distribution beyond the documented local build are not verified",
+    "Fixed configured actors authorize a chosen read context; arbitrary input identity resolution, automatic input Observe, write-tool authority and credential rotation/revocation lifecycle remain open",
+    "Configured schema ranges are operator declarations, not compatibility certification. Real Schema20 evidence uses the exact verified candidate wheel; default remains 14-15 and SDK0.11.1",
+    "Old policy requests, independent Observation/Usage and other facts, common cross-batch consistency and safe atomic history release remain open",
+    "Actual backup/fork restore, full Stage/Core crash matrix, ENOSPC, total directory quota, long-growth, Phase4B and full demo remain incomplete"
+  ],
+  "installation": {
+    "core": "0.13.0",
+    "coreSchema": 20,
+    "bellisStateMigration": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false
+  },
+  "publication": {
+    "status": "awaiting-explicit-user-approval",
+    "target": "http://localhost:4873/",
+    "package": "@iris-memory/sdk",
+    "version": "0.11.2",
+    "automaticReview": "rejected-registry-publication-as-not-explicitly-authorized",
+    "tarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71"
+  },
+  "reports": [
+    {
+      "file": "phase4-iris-launch-core-probe.json",
+      "exitCode": 0,
+      "sha256": "5a20d12818890a55ba656831dbcb355e7005d096cb301c4a35163f9b8f86f5d7"
+    },
+    {
+      "file": "phase4-iris-launch-recovery-smoke.json",
+      "exitCode": 2,
+      "sha256": "0d79614142132e52fee6e59be43756aa1ea1350ef593bf32739be4c1a893c917"
+    }
+  ],
+  "logs": [
+    {
+      "file": "/tmp/bellis-launcher-check.log",
+      "sha256": "a219ec2ce2273bac7541a7beb5a9a3d2619f1042a6160f313ef2d9135144635e"
+    },
+    {
+      "file": "/tmp/bellis-launcher-tests.log",
+      "sha256": "f7698867d30c7acb864a48fed0597f1e0e72a0214fac573e747bc86d2b72e3ec"
+    },
+    {
+      "file": "/tmp/bellis-launcher-core-before-config-fix.log",
+      "sha256": "f13314e02bc9c2d12ee842e268b4a3644987fdd80ed58526400166c14a97bb38"
+    },
+    {
+      "file": "/tmp/bellis-launcher-core.log",
+      "sha256": "bf5e4dd893132a52040020cf82802cccaef9a549b443b7a0b94e74ad243aa90f"
+    },
+    {
+      "file": "/tmp/bellis-launcher-recovery.log",
+      "sha256": "463337db83fc19a77fe2941e66b0075c57ca6d7a26c40f0c7f9378a36b66f021"
+    }
+  ],
+  "sourceSha256": {
+    "apps/runtime/src/bootstrap/iris-config.ts": "500a8871ba1467a0963d498b1abd1a69e12c7ab0acb7a986c9a269fd5df2ab8f",
+    "apps/runtime/src/bootstrap/config.ts": "bc2903c426062f2385c0f416108601f773925b7720c839daaf17c8d8f0491cc7",
+    "apps/runtime/src/index.ts": "26d5549033da9845a7ed3a6c8043f339b807f150c2cac86207969646cc9ce552",
+    "apps/runtime/test/unit/iris-config.test.ts": "4d5aa59be964b49e081f83caca0525902775fa9b9f29b69cc72c1edcbd2f2957",
+    "scripts/start-iris-runtime.mjs": "8f288893f793deb439eb9fe2e056bf0fd632e4b9b8fd43c8b8e48ba1b25e8560",
+    "scripts/iris-launch-probe.mjs": "cbb6a27c816e8315298ee2828e591cdf0154ecbc9bef7f1b1289f7de211df3c2",
+    "scripts/iris-public-probe.mjs": "9cdfd77f2e37637186ed9d26d812f47e0081fc4c3d2db90580f8058827a7e4ca",
+    "package.json": "d30509e8910e2f4e28aebf72ccf444017692f1fdde26f29963e29a50b9969722",
+    "docs/examples/iris-runtime.json": "6ab50bf8f9b40f5d55f63fbac92130a07c6dbb788b16c76f5ee5ebe2069a0ec1"
+  }
+}

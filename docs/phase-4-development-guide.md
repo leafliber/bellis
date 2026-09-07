@@ -4,8 +4,8 @@
 
 > 2026-09-06 Iris 接入修订：以 [调研记录](./phase-4-iris-integration-research.md) 和 [ADR 0008](./adr/0008-iris-phase4-integration.md) 为依据，Phase 4 承接现有 Iris Provider 的兼容修复与宿主闭环；来源 hash、真实回写及验收分层以下文为准。
 
-> 文档状态：待实施（Phase 4 构建基线）
-> 阶段状态：未开始
+> 文档状态：Phase 4 构建基线（实施中）
+> 阶段状态：实施中；已运行证据与未关闭 Gate 见 [实施记录](./phase-4-implementation-status.md)。
 > 历史起始基线：`e3fc7b4`（Phase 3 已合并）
 > 本次调研基线：Bellis `dc3915e` / Iris `692de12` 的当前工作树，均有未提交收尾修改；A0 重新冻结实施与安装物基线，不将 HEAD 当成全部已验证内容。
 > 上游基线：[Phase 3 完成态参考](./phase-3-reference.md)
@@ -28,25 +28,25 @@
 
 首个生产记忆目标明确为 `iris_memory_core`，接入路径为 `providers/memory-iris` → 已安装的 `@iris-memory/sdk` → 独立 Core `/v1` 服务。Bellis 不打开 Core 的 SQLite、FAISS、队列或私有组件。Iris 的 Phase 11 当前 Deferred；本计划承担 Bellis 侧工作，不等待其恢复，也不改变 Core pip 发布范围。
 
-| 归属 | 本计划要求 | 不以何种状态代替完成 |
-| --- | --- | --- |
-| Bellis Phase 4A | Provider 兼容与映射、宿主 Context/Persona、Observe/Usage、Iris Tools、真实服务集成 | 现有原型/最小 Conformance 测试通过 |
-| Iris Core/通用 SDK 收尾 | 可安装 API/Worker、受控初始化、版本协商一致、公共方法/错误/Abort/数字范围契约 | 只修改 SDK 类型、放宽 Schema 上限或使用私有组件 |
-| Bellis Phase 4B | 多 Provider 隔离、MCP、Presence/Avatar 与原完整阶段 Gate | 4A 通过不代表 4B 或整个阶段通过 |
+| 归属                    | 本计划要求                                                                         | 不以何种状态代替完成                            |
+| ----------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Bellis Phase 4A         | Provider 兼容与映射、宿主 Context/Persona、Observe/Usage、Iris Tools、真实服务集成 | 现有原型/最小 Conformance 测试通过              |
+| Iris Core/通用 SDK 收尾 | 可安装 API/Worker、受控初始化、版本协商一致、公共方法/错误/Abort/数字范围契约      | 只修改 SDK 类型、放宽 Schema 上限或使用私有组件 |
+| Bellis Phase 4B         | 多 Provider 隔离、MCP、Presence/Avatar 与原完整阶段 Gate                           | 4A 通过不代表 4B 或整个阶段通过                 |
 
-A0 可使用固定版本的本地 registry/候选安装物，不要求公开 npm/PyPI 或完整 Console 先完成。服务端所需公共能力或凭据初始化确实缺失时，登记具体上游契约问题，继续可独立完成的宿主工作；相应真实服务 Gate 保持未通过。现有工作树已有 `init` 运维入口，其安装可用性仍需验证。
+A0 可使用固定版本的本地 registry/候选安装物，不要求公开 npm/PyPI 或完整 Console 先完成。当前 SDK 0.11.2 使用仓库内不可变候选压缩包与冻结锁文件，正式 Provider 已发送协商后的事件检查点，安装与兼容证据见 [ADR 0044](./adr/0044-phase4-installed-checkpoint-sdk.md)。服务端所需公共能力或凭据初始化确实缺失时，登记具体上游契约问题，继续可独立完成的宿主工作；相应真实服务 Gate 保持未通过。现有工作树已有 `init` 运维入口，其安装可用性仍需验证。
 
 ### 0.2 Phase 4A 执行工作包
 
 以下按顺序集成，每包结束即运行相应纵向检查，不等多个包建完才首次联调。A0 只冻结该链必需语义；MCP/Avatar 的 P0 在 Phase 4B 开工前补齐。
 
-| 工作包 | 实施内容与主要位置 | 完成证据 |
-| --- | --- | --- |
-| A0 兼容与最小契约 | `providers/memory-iris`、`contracts/memory`、Testkit；固定 Core/SDK 安装物，核对运行协商与 Migration、错误/Abort、hash、Scope/actor、效果证明、Usage 血缘和四种水位；确定 Effect/Manifest/Outbox 增量 Migration | 当前真实 Core 公共 API 的适配探针；不兼容/非法 hash/partial proof/权限等负例；支持矩阵只列实测组合；Phase 1–3 基线复验 |
-| A1 Recall + Persona + Usage | `apps/runtime/src/application/phase-4/`；启动期人格就绪与单一生命周期；给 Decision Loop 注入可取消的 Context 构建 Port；扩展 `DurableCycleAdoption` 和 DB Worker 事务保存 Manifest 与 Usage Outbox；替换 Memory topic 的录制发布器 | 同一请求的 Recall 候选、实际模型输入、Persona Slot、三集合与 Core Usage 一一对应；Recall 超时 ≤250ms；adoption 回滚无 Usage；零 actor/跨域/低预算有明确结果 |
-| A2 输入/效果 Observe 与恢复 | Stage Lane/Control 确认、Runtime effect service、persistence 事务与现有 Outbox；可信输入受理投影、增量已确认片段、每 stream 连续 cursor、ACK 分类和持久对账 | 重复输入/确认不重复；未播放=0，取消保留已确认前缀；Core ACK 前后崩溃可重投；Worker 停机时仍可持久接收；恢复不重播 Scene |
-| A3 更新与受控工具 | Iris Persona/SSE 生命周期、宿主 invalidation/tombstone；经现有 Tool Runtime 注册 search/remember/correct/forget；SDK 缺少的错误/取消能力由公共边界补齐 | Persona 刷新失败可追平、revoked 不走旧缓存兜底；Forget/隐私收紧拒绝热缓存及迟到结果；四工具真实调用、幂等/修订冲突/Legal Hold/unknown outcome；只开放通过 Gate 的 Surface 模式 |
-| A4 真实服务验收与运行交付 | Runtime bootstrap/config、可重现 SDK/Provider 安装、独立 CI Job、真实 Core API/Worker + Bellis Runtime/DB Worker + Stage、恢复 Harness、接入说明 | 连续 ≥100 Cycle；定义的双进程崩溃窗口各 ≥20 次；真实 Chromium partial/cancel/reconnect；安装/启动/停止/失效/凭据隔离/回退记录；完成清单逐项有证据 |
+| 工作包                      | 实施内容与主要位置                                                                                                                                                                                                                 | 完成证据                                                                                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A0 兼容与最小契约           | `providers/memory-iris`、`contracts/memory`、Testkit；固定 Core/SDK 安装物，核对运行协商与 Migration、错误/Abort、hash、Scope/actor、效果证明、Usage 血缘和四种水位；确定 Effect/Manifest/Outbox 增量 Migration                    | 当前真实 Core 公共 API 的适配探针；不兼容/非法 hash/partial proof/权限等负例；支持矩阵只列实测组合；Phase 1–3 基线复验                                                         |
+| A1 Recall + Persona + Usage | `apps/runtime/src/application/phase-4/`；启动期人格就绪与单一生命周期；给 Decision Loop 注入可取消的 Context 构建 Port；扩展 `DurableCycleAdoption` 和 DB Worker 事务保存 Manifest 与 Usage Outbox；替换 Memory topic 的录制发布器 | 同一请求的 Recall 候选、实际模型输入、Persona Slot、三集合与 Core Usage 一一对应；Recall 超时 ≤250ms；adoption 回滚无 Usage；零 actor/跨域/低预算有明确结果                    |
+| A2 输入/效果 Observe 与恢复 | Stage Lane/Control 确认、Runtime effect service、persistence 事务与现有 Outbox；可信输入受理投影、增量已确认片段、每 stream 连续 cursor、ACK 分类和持久对账                                                                        | 重复输入/确认不重复；未播放=0，取消保留已确认前缀；Core ACK 前后崩溃可重投；Worker 停机时仍可持久接收；恢复不重播 Scene                                                        |
+| A3 更新与受控工具           | Iris Persona/SSE 生命周期、宿主 invalidation/tombstone；经现有 Tool Runtime 注册 search/remember/correct/forget；SDK 缺少的错误/取消能力由公共边界补齐                                                                             | Persona 刷新失败可追平、revoked 不走旧缓存兜底；Forget/隐私收紧拒绝热缓存及迟到结果；四工具真实调用、幂等/修订冲突/Legal Hold/unknown outcome；只开放通过 Gate 的 Surface 模式 |
+| A4 真实服务验收与运行交付   | Runtime bootstrap/config、可重现 SDK/Provider 安装、独立 CI Job、真实 Core API/Worker + Bellis Runtime/DB Worker + Stage、恢复 Harness、接入说明                                                                                   | 连续 ≥100 Cycle；定义的双进程崩溃窗口各 ≥20 次；真实 Chromium partial/cancel/reconnect；安装/启动/停止/失效/凭据隔离/回退记录；完成清单逐项有证据                              |
 
 首个可演示切片为 A0 + A1 + A2 的单次真实往返；A3/A4 未通过时只能标记部分完成。长期记忆事实源为 Iris，确定性本地 Provider/FakeIrisClient 只作对照与故障注入。
 
@@ -374,7 +374,11 @@ Context Builder 接收声明式候选贡献，不允许贡献者写 Prompt：
 // Phase 4 P0 待实现的宿主 Port；不是当前 contracts/memory 的 ContextContribution。
 interface ContextContributionSource {
   readonly sourceId: string;
-  contribute(input: ContextQuery, budget: ContributionBudget, signal: AbortSignal): Promise<AssemblyContribution>;
+  contribute(
+    input: ContextQuery,
+    budget: ContributionBudget,
+    signal: AbortSignal,
+  ): Promise<AssemblyContribution>;
 }
 ```
 
@@ -490,6 +494,8 @@ Provider 不得：
 
 Manifest 绑定 scope 的 invalidation/privacy generation，在发起模型请求与 adoption 前分别复核。生成期间发生 Forget/授权撤销时取消尚未采用的旧工作，后续 Cycle 重新构建；不修改已经冻结的 Manifest，也不让其绕过最新 tombstone。已发送给模型的正文无法追溯撤回，审计应如实记录请求时间与失效时间。
 
+宿主侧持久 generation、资源 tombstone、采用/输入/输出事务复核与旧消息抑制见 [ADR 0013](./adr/0013-phase4-memory-policy-transactions.md)。注册 Forget 与收到的外部删除事件已接通，后者见 [ADR 0022](./adr/0022-phase4-resource-invalidations.md)。生产四工具完整授权、事件历史缺口重验与普通纠正通知仍待交付。
+
 ### 7.4 确定性测试 Provider
 
 本地 Provider 是与 Iris 共用宿主路径的离线测试实现，不建立第二套生产长期记忆系统：
@@ -501,6 +507,8 @@ Manifest 绑定 scope 的 invalidation/privacy generation，在发起模型请�
 - 每次纠正/遗忘递增 revision，遗忘写 tombstone；
 - 读取始终先应用最新 tombstone/privacy revision；
 - 大正文按 Block 预算截断，原始敏感数据不进入模型审计或普通日志。
+
+待消费 Signal/Tool Result 的策略版本核验已接通，见 [ADR 0021](./adr/0021-phase4-local-input-privacy.md)。接纳版本与来源 Manifest 决定本地输入是否可见，完整当前批次的聚合信息继续保留；这不替代可信入口和证据授权。
 
 本节 remember/correct/forget/tombstone 用于验证宿主行为；真实语义必须由 Iris 公共接口另验，不能因 Fixture 支持就宣称 Core 能力已接通。
 
@@ -528,38 +536,42 @@ Persona Source 管理、确定性 Renderer 和就绪门禁先在宿主功能模�
 
 启动期就绪门禁与降级：
 
-| 情况 | 行为 |
-| --- | --- |
-| 对端不可达，有已验证缓存且 hash 通过 | `verified-cache`，degraded，允许开播 |
-| 对端不可达，无缓存，配置了 `staticPersona` | `static-fallback`，degraded，允许开播 |
-| 对端不可达，无缓存，无静态兜底 | **not ready，拒绝开播** |
-| 运行中对端不可达 | 继续已验证发布版；Cycle 内不重拉，后台按订阅/有界轮询追平 |
-| 召回响应的人格版本/哈希与已编译不一致 | 作废缓存并后台重拉，当前 Cycle 用旧值 |
+| 情况                                         | 行为                                                                                                    |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 对端不可达，有已验证缓存且 hash 通过         | `verified-cache`，degraded，允许开播                                                                    |
+| 对端不可达，无缓存，配置了 `staticPersona`   | `static-fallback`，degraded，允许开播                                                                   |
+| 对端不可达，无缓存，无静态兜底               | **not ready，拒绝开播**                                                                                 |
+| 运行中对端不可达                             | 继续已验证发布版；Cycle 内不重拉，后台按订阅/有界轮询追平                                               |
+| 召回响应的人格版本/哈希与已编译不一致        | 封锁旧缓存、取消尚未采用的旧 Context，后台重拉后重建                                                    |
 | 发布版本 `revoked`、授权撤销或 hash/身份不符 | **立即 fail closed**；持久化封锁状态，不用旧缓存或同身份 staticPersona 绕过；只在取得合法新发布版后恢复 |
 
 `staticPersona` 是离线兜底，不是事实源。
 
 失效任务必须先持久登记或完成处理，再推进 SSE 的已处理 cursor；刷新失败保留待办，断线或历史不足时全量重验。除发布版失效外，还须覆盖瞬时 state 更新/过期，不能只依赖 Recall mismatch。一个 Iris 实例实现 MemoryProvider/PersonaSource 时 start/stop 只各执行一次；配置中的业务 appInstanceId 与进程启动随机 ID、Outbox claim owner 分开。
 
+已实现的人格持久状态端口、版本冲突与后台请求边界见 [ADR 0012](./adr/0012-phase4-provider-state-and-persona-barriers.md)。该切片不替代资源 tombstone、隐私 adoption 屏障与完整恢复 Gate。
+
 ### 7.6 Iris 公共接口映射与配置
 
 以下路径已存在于当前 Core/SDK；表中宿主装配、错误分类和适配修复为 A0–A3 待交付。Iris 接入不经过 MCP。
 
-| 宿主能力 | Core 公共路径 / SDK 方法 | 必须保留的语义 |
-| --- | --- | --- |
-| 启动协商 | `GET /v1/capabilities`、`POST /v1/negotiation` / `negotiate` | 实际 DB/发布清单/协商版本分别记录；当前 manifest=14、capability 真源=11 的差异先关闭 |
-| PersonaSource | `GET /v1/personas/{agent_id}/current` / `currentPersona` | 结构化内容、发布 revision/hash、state baseline/TTL；发布人格与 Recall 数据独立 |
-| provideContext | `POST /v1/recall` / `recall` | scope、actors、purpose、deadline_at、token_budget、allow_partial；完整候选集合、路由降级及 request 血缘 |
-| reportUsage | `POST /v1/recall/{request_id}/usage` / `reportRecallUsage` | 原始 returned 集合完整回显；两个子集；使用该 Recall 的 persona_revision，非后来换入的人格版本 |
-| observe | `POST /v1/observations:batch` / `observeBatch` | 持久接收/重复确认、不可变事件身份、每 stream cursor、partial proof；ACK 不等于后台认知完成 |
-| source 对账 | `GET /v1/observations/cursors/{source_stream}` / `sourceCursor` | 数字安全范围、null、gap_policy；禁止最大游标推定全部送达 |
-| 更新通知 | `GET /v1/events` / `events({after, signal})` | 有限 SSE 拉取，宿主重复轮询/退避；event cursor 与 agent watermark 分开 |
-| Surface 可选能力 | `/v1/active-surfaces:acquire`、`/{lease_id}:heartbeat`、`/{lease_id}:release` | off/advisory/required 与 Core 策略匹配；Proof/旧 epoch/丢租分类和显式支持范围 |
+| 宿主能力         | Core 公共路径 / SDK 方法                                                      | 必须保留的语义                                                                                          |
+| ---------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 启动协商         | `GET /v1/capabilities`、`POST /v1/negotiation` / `negotiate`                  | 实际 DB/发布清单/协商版本分别记录；当前 manifest=14、capability 真源=11 的差异先关闭                    |
+| PersonaSource    | `GET /v1/personas/{agent_id}/current` / `currentPersona`                      | 结构化内容、发布 revision/hash、state baseline/TTL；发布人格与 Recall 数据独立                          |
+| provideContext   | `POST /v1/recall` / `recall`                                                  | scope、actors、purpose、deadline_at、token_budget、allow_partial；完整候选集合、路由降级及 request 血缘 |
+| reportUsage      | `POST /v1/recall/{request_id}/usage` / `reportRecallUsage`                    | 原始 returned 集合完整回显；两个子集；使用该 Recall 的 persona_revision，非后来换入的人格版本           |
+| observe          | `POST /v1/observations:batch` / `observeBatch`                                | 持久接收/重复确认、不可变事件身份、每 stream cursor、partial proof；ACK 不等于后台认知完成              |
+| source 对账      | `GET /v1/observations/cursors/{source_stream}` / `sourceCursor`               | 数字安全范围、null、gap_policy；禁止最大游标推定全部送达                                                |
+| 更新通知         | `GET /v1/events` / `events({after, signal})`                                  | 有限 SSE 拉取，宿主重复轮询/退避；event cursor 与 agent watermark 分开                                  |
+| Surface 可选能力 | `/v1/active-surfaces:acquire`、`/{lease_id}:heartbeat`、`/{lease_id}:release` | off/advisory/required 与 Core 策略匹配；Proof/旧 epoch/丢租分类和显式支持范围                           |
 
 运行配置由 Runtime 校验后注入，至少包含：启用开关、允许的 base URL、业务 token 的环境/文件引用、稳定 appInstanceId/agentId/spaceId、可选且真实存在的 Core sessionId/spaceGroupId 映射、PersonaSource/staticPersona、Memory Deadline/Token/响应字节预算、后台刷新/交付 timeout、重试与磁盘配额、Surface 模式。名称由 A0 冻结，不能把本表当成已有配置键。
 
+可信配置文件与固定启动入口已接入，见 [ADR 0041](./adr/0041-phase4-iris-launch-configuration.md)、[运行说明](./iris-runtime-operations.md) 和 [配置样例](./examples/iris-runtime.json)。该入口只接受凭据引用，默认支持范围与 Surface off 保持；输入身份授权、写工具装配和凭据轮换仍待完成。
+
 - tenant、业务 appInstanceId 与能力由 Core 凭据派生；不能由模型、浏览器或弹幕提供。scope 只能收窄；日志/Prompt/Stage 不携带 token。
-- Bellis Session ID 与 Core Session ID 显式映射并落盘；无映射的 session scope 配置拒绝启动，不能把随机 UUID 当作已有 Core Session。只使用 space scope 必须显式配置并接受其跨 Session 语义。
+- Bellis Session ID 与 Core Session ID 显式映射并落盘；无映射的 session scope 配置拒绝启动，不能把随机 UUID 当作已有 Core Session。只使用 space scope 必须显式配置并接受其跨 Session 语义。 当前宿主只接受 `scope: { kind: "space", acknowledgeCrossSession: true }`，启动前落盘核对本地 Session 归属；Core Session 映射尚未支持，见 [ADR 0023](./adr/0023-phase4-explicit-memory-scope.md)。
 - Recall actors 由可信 Signal/Profile 映射产生，不由显示名合并。Observation 的 actor_external_identity_id 经公共身份解析/受控初始化获得，需扩展或结构化映射当前 MemoryObserveEvent；不凭用户输入生成内部 entity ID。首包必须验证“同一用户输入 → 观察归属 → 下次查询”的链路。
 - 无 actor 的 idle/world Cycle 不构造假的 viewer；可不发起 Recall并记录原因。Core 授权可读后，Builder 仍执行公开直播输出策略；空标签不自动解释为公开。
 - 先校验 resource type，再允许 categoryMap 收窄；未知类型始终拒绝，viewer 只能由宿主可信 identity 规则产生。保留 resource_ref、scope、subject_entity_id、scores/final_score 的有界 audit；不同候选的同一资源需保留 Usage 血缘。
@@ -570,15 +582,25 @@ Context 前台默认总预算 200ms、上限 250ms，包含 Gateway 排队/传�
 
 当前 SDK 的 Recall/Observe/Usage/Persona 读请求支持 signal，但 start/stop 调用链和 search/显式写工具仍需补全。响应体解析也须受字节/时间限制，未知扩展字段在有界 audit 内保留。stop 先停止轮询/Claim，取消并回收在途请求，最后释放 Lease 和状态存储，禁止 fire-and-forget 刷新在关闭后换入数据。
 
-| 错误类别 | 前台/人格行为 | 后台交付行为 |
-| --- | --- | --- |
-| 超时、断网、可重试 429/5xx、database_busy | Recall 明确降级；人格仅暂时不可达可使用已验证未撤销缓存 | 保留行，有界退避/Retry-After；不阻塞当前回复 |
-| 鉴权/授权失效、不兼容版本、非法 DTO/hash | 停用受影响能力；人格不走旧值兜底；就绪状态体现原因 | 进入需配置修复/对账状态；保留身份，不无限盲重试 |
-| idempotency_key_reused、revision_mismatch、cursor_gap | 不生成新的业务键掩盖冲突 | 对账或死信；不改写旧 payload，不跳过 stream 中缺失事实 |
-| lease_fenced/expired、required 无有效 Proof | 停止该受限能力；宿主不据此宣称全局演出互斥 | 保留 pending；恢复权限/有效 Lease 后依原业务键处理 |
-| privacy/forget/revoked 失效 | 先封锁读路径与新采用，再清缓存；取消未采用旧工作 | 已撤销内容按策略抑制并审计，不因重试/恢复重新写回 |
+| 错误类别                                              | 前台/人格行为                                           | 后台交付行为                                           |
+| ----------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
+| 超时、断网、可重试 429/5xx、database_busy             | Recall 明确降级；人格仅暂时不可达可使用已验证未撤销缓存 | 保留行，有界退避/Retry-After；不阻塞当前回复           |
+| 鉴权/授权失效、不兼容版本、非法 DTO/hash              | 停用受影响能力；人格不走旧值兜底；就绪状态体现原因      | 进入需配置修复/对账状态；保留身份，不无限盲重试        |
+| idempotency_key_reused、revision_mismatch、cursor_gap | 不生成新的业务键掩盖冲突                                | 对账或死信；不改写旧 payload，不跳过 stream 中缺失事实 |
+| lease_fenced/expired、required 无有效 Proof           | 停止该受限能力；宿主不据此宣称全局演出互斥              | 保留 pending；恢复权限/有效 Lease 后依原业务键处理     |
+| privacy/forget/revoked 失效                           | 先封锁读路径与新采用，再清缓存；取消未采用旧工作        | 已撤销内容按策略抑制并审计，不因重试/恢复重新写回      |
+
+Runtime readiness 已接入实际 Persona/隐私准入状态；明确鉴权拒绝锁定当前 Iris 实例，停止后台网络重试并持久封锁 Persona 回退。真实 Core 公开凭据撤销验证及范围见 [ADR 0042](./adr/0042-phase4-memory-readiness.md)。零重叠凭据轮换、私有引用替换及保留原事实的显式重启也已通过真实公开接口验证，见 [ADR 0043](./adr/0043-phase4-credential-rotation.md)。
 
 SDK/HTTP Adapter 必须解析状态码和 ErrorEnvelope，不能把所有 4xx/5xx 都压成 ContractValidationError 后重试。Required Surface 只有服务端 Proof 检查与宿主行为都通过真实矩阵才可声明支持；首个单宿主集成可使用明确配置的 off 模式，不能暗中降低服务端 required。
+
+SSE 历史缺口不能用过滤后游标是否连续判断。Core 新增的可协商事件身份校验及 SDK 可选参数见 [ADR 0029](./adr/0029-phase4-event-checkpoint-identity.md)；公开契约和 Bellis 成对身份持久化已实现。宿主持久缺口屏障见 [ADR 0030](./adr/0030-phase4-history-gap-barrier.md)：暂停采用及投递，保留已确认事实和原 Outbox，真实隐私撤销继续独立生效。Provider 已接入事件 410 与旧状态缺少身份的持久报告，重启继续保持屏障；正式成对校验请求、公开全量重验与解除仍待接入。重验范围的持久清单、分批读取、快照变化检测见 [ADR 0031](./adr/0031-phase4-history-revalidation-inventory.md)；遍历完成不代表远端重验通过。
+
+公开 Claim Correct 及其撤回引起的 Claim/Relation 级联现已在 Canonical 事务中产生旧修订失效事件，见 [ADR 0032](./adr/0032-phase4-claim-correction-events.md)。真实 Worker 停止期间通知仍能取消 Bellis 旧 Context，有限截止值允许后续有效修订进入新 Context；其他资源修改通知及完整公共重验仍待完成。
+
+Recall 的首次响应发布与原请求重放现已在各自事务中重验候选和 Persona，失效返回冲突并保持原 Usage 血缘，见 [ADR 0033](./adr/0033-phase4-recall-replay-revalidation.md)。此处单响应核验不能替代缺口清单的跨请求一致性与安全解除。
+
+已新增只读公开批量核验 `POST /v1/recall:revalidate`，以完整原请求指纹检查存档集合，在单个读取快照中返回逐项结论，见 [ADR 0034](./adr/0034-phase4-recall-batch-revalidation.md)。宿主已在实际发送前持久保存完整准备请求，重启后的清单正文与真实 HTTP 请求一致并通过公开核验，见 [ADR 0035](./adr/0035-phase4-original-recall-requests.md)。准备记录不证明远端收到。核验批次和逐项结论已持久绑定清单与原请求摘要，见 [ADR 0036](./adr/0036-phase4-history-verification-records.md)；清单变化使旧结论和迟到响应失效。独立维护核验通道与清单分批调度已接通，见 [ADR 0037](./adr/0037-phase4-recall-revalidation-coordinator.md)；发送前复核真实隐私屏障，旧策略请求仍待明确授权。持久恢复发现和宿主取消归属见 [ADR 0038](./adr/0038-phase4-history-recovery-discovery.md)：复用有效 runId，隐私变化或关闭先取消旧维护任务。受控后台轮询、暂时失败重试和在途容量约束已接入，见 [ADR 0039](./adr/0039-phase4-background-history-recovery.md)。可信恢复配置已接入 Runtime 启动与运行期缺口状态，维护期间关闭决策入口并保持 readiness 503，见 [ADR 0040](./adr/0040-phase4-runtime-history-recovery.md)。全部事实覆盖、跨批次一致性和安全解除继续实施。
 
 ## 8. P3：Iris Memory Tools 与后续 MCP Adapter
 
@@ -615,7 +637,9 @@ MCP Server 返回的描述、Resource 文本和 Tool 结果全部是不可信数
 
 Iris A3 的具体映射：`memory_search` → `/v1/search`（`search`），`remember` → `/v1/claims:remember`（`rememberClaim`），`correct` → `/v1/claims/{claim_id}:correct`（`correctClaim`），`forget` → `/v1/memory:forget`（`forgetMemory`）。各方法的 capability、purpose、actor/subject、reason、expected revision、幂等与 Lease Proof 从公共契约校验后注入，模型不拥有 scope/凭据。写调用的实际参数和业务键随 Tool Run planned/started 持久保存，不能只有不可恢复的 key hash。
 
-现有 SDK 的上述方法需补 Abort/稳定 ErrorEnvelope 映射后才开放。若超时后远端可能已提交，按原键/公共结果对账；不能报告“取消所以肯定未写”，也不能生成新键再写。Forget 返回的 target/erased/protected/held 计数要如实呈现；Canonical 逻辑删除、物理清除与 Legal Hold 分开。发起 Forget/收紧隐私时先立宿主读屏障，成功后持久 tombstone；确定拒绝时按冻结策略解除或保留屏障，结果未知则持续封锁至对账完成。
+原始模型调用的事务保存与 Session 所有权基础见 [ADR 0014](./adr/0014-phase4-original-tool-calls-and-session-ownership.md)；实际请求持久化/确认见 [ADR 0016](./adr/0016-phase4-prepared-tool-requests.md)，四工具注册及必需的可信授权端口见 [ADR 0017](./adr/0017-phase4-iris-tool-registration.md)，Forget 屏障与回执事务见 [ADR 0018](./adr/0018-phase4-forget-coordination.md)。目标预览及确认后公开读取核验见 [ADR 0020](./adr/0020-phase4-iris-tool-target-verification.md)；生产意图/证据授权、真实 Legal Hold/保护对象和完整公共恢复 Gate 尚未完成。
+
+现有 SDK 的上述方法需补 Abort/稳定 ErrorEnvelope 映射后才开放。公共传输及宿主未知结果的实施与未完成 Gate 见 [ADR 0015](./adr/0015-phase4-iris-tool-transport-outcomes.md)。若超时后远端可能已提交，按原键/公共结果对账；不能报告“取消所以肯定未写”，也不能生成新键再写。Forget 返回的 target/erased/protected/held 计数要如实呈现；Canonical 逻辑删除、物理清除与 Legal Hold 分开。发起 Forget/收紧隐私时先立宿主读屏障，成功后持久 tombstone；确定拒绝时按冻结策略解除或保留屏障，结果未知则持续封锁至对账完成。
 
 ### 8.3 本地协议契约测试
 
@@ -672,6 +696,8 @@ Iris 投递优先复用 `packages/persistence` 的 Outbox/Dispatcher，增加按
 Core Batch 最大 100 条，整批非法则零写入。A2 冻结有界批次清单、固定顺序、不可变 payload 与 ≤256 字符的幂等键；不能以不断拼接所有 outboxId 生成超长 key，也不能同 key 重排正文。对非法成员做显式隔离/诊断，剩余项若重组使用新的批次身份但保持原记录业务键。
 
 在已校验 accepted/duplicate ACK 后才结算对应目标；保留 Core ACK 摘要与 agent watermark，不能把 source_watermark 用作 Recall minimum_watermark。当前通用 `observe(): Promise<void>` 可保持，Iris 的 ACK/对账元数据需经受控状态 Port 保存；如需跨宿主共享再由 A0 扩契约，不依赖随时丢失的诊断回调。ACK 丢失或本地保存失败按原键重试。
+
+当前已实现实际 DB/WAL 占用驱动的新工作准入与 ready 状态，见 [ADR 0024](./adr/0024-phase4-disk-admission.md)；数据库页分配另受 [ADR 0025](./adr/0025-phase4-database-page-limits.md) 的连接级硬限制。检查点受旧快照阻塞时的后续写入拦截见 [ADR 0026](./adr/0026-phase4-wal-write-fence.md)。单次提交缓存检查与当前 Worker 写入的 WAL 边界见 [ADR 0027](./adr/0027-phase4-transaction-capacity.md)；活动 Scene 的独立持久收尾额度、最大形状测试与确认事务崩溃窗口见 [ADR 0028](./adr/0028-phase4-completion-reservations.md)；整个目录上限、操作系统实际耗尽与完整恢复矩阵仍未证明，不替代上述完整容量 Gate。
 
 ### 9.3 Migration 与恢复
 
@@ -856,27 +882,32 @@ pnpm demo:phase4
 
 ### 11.5 Phase 4A Iris 专项验收
 
-以下新命令均为 A4 待交付入口，目前不存在；从 Bellis 根目录执行。接入说明必须给出固定 Core 安装物、公开 API 配置、运维初始化步骤和依赖准备，所有临时服务绑定 loopback 并使用隔离数据目录。
+以下命令从 Bellis 根目录执行。当前 `test:memory:iris` 和 `demo:phase4:iris` 已实现；前者覆盖公共边界与可信输入，后者增加真实 Chromium 输出/取消闭环。新增 `test:memory:iris:continuous` 已通过同一组真实进程的 100 Cycle 及逐轮 Manifest/Persona/Recall/Usage 审计，见 [连续验收](./phase-4-continuous-validation.md)。`test:memory:iris:recovery` 已接入 Manifest/adoption/Usage 三个窗口、Observation HTTP 三个窗口及 SSE 两个真实进程窗口，完整恢复矩阵仍未完成，当前入口报告 incomplete/退出 2；见 [恢复验收](./phase-4-recovery-validation.md)。短闭环不代表下表 A4 完成。接入需固定 Core 安装物和公开 API，所有临时服务绑定 loopback 并使用隔离数据目录。
 
 ```bash
 pnpm test:memory:iris          # Provider 契约/真实 Core 公共消费，包含安装物身份检查
-pnpm demo:phase4:iris         # 一次 Recall/Persona/Usage/确认输出 Observe 闭环
+pnpm demo:phase4:iris         # 三轮 Recall/Persona/Usage/确认输出 Observe 闭环
+pnpm test:memory:iris:continuous # 100 Cycle 真实连续纵向及逐轮持久记录审计
 pnpm test:memory:iris:recovery # 双进程崩溃窗口、Cursor/SSE/ACK/隐私失效
 ```
 
-| 验收层 | 运行路径 | 通过条件 |
-| --- | --- | --- |
-| 安装与版本 | 已安装 SDK/Provider → 隔离安装 Core API/Worker | 不 alias Core/SDK 源码；清单、迁移与协商解释一致；没有 Console/公网 registry 隐式前置；缺必需能力拒绝 |
-| 连续纵向 | 真实 Runtime/DB Worker + Core/Worker + Stage，固定模型/TTS 测试边界 | ≥100 Cycle，逐次比对 Persona Slot 与 Recall revision、Manifest/预算、Usage 三集合、合法 assistant Observation；调用真实 memory 路径 |
-| 输入与输出事实 | 可信模拟观众 → 真实 Stage 确认 → Core 公共读取 | 输入身份隔离；零输出确认时 assistant 观察=0；partial/cancel/fail 只记已确认增量；字幕/音频不重复，proof 被 Core 接受 |
-| 浏览器 | Chromium 实际音频/字幕 Lane、重连与取消 | receipt 来自实际应用/渲染；绑定代际、内容摘要及 segment；不以协议 Stage mock 代替真实 Lane；不宣称测得物理扬声器发声 |
-| 更新与隐私 | Persona 发布/state/revoke、Forget、凭据收紧、SSE 断线 | 同快照稳定；state 不翻 Epoch；撤销失败关闭；旧 Block/缓存/迟到结果/历史重投回注=0 |
-| 工具与 Surface | 四类工具的真实 Core 调用 | 权限/确认/幂等/修订冲突/取消/未知结果/Legal Hold 正确；每种声称支持的 Surface 模式均有 Proof/Fencing 证据 |
-| 恢复与容量 | 下列边界分别终止 Bellis 或 Core API/Worker，适用进程/窗口各 ≥20 次 | 已确认 Core Canonical 不丢失；重投重复业务写=0；无虚构观察/自动重播；高水位拒绝新准入，活动 Scene 确认配额可用 |
+| 验收层         | 运行路径                                                            | 通过条件                                                                                                                            |
+| -------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 安装与版本     | 已安装 SDK/Provider → 隔离安装 Core API/Worker                      | 不 alias Core/SDK 源码；清单、迁移与协商解释一致；没有 Console/公网 registry 隐式前置；缺必需能力拒绝                               |
+| 连续纵向       | 真实 Runtime/DB Worker + Core/Worker + Stage，固定模型/TTS 测试边界 | ≥100 Cycle，逐次比对 Persona Slot 与 Recall revision、Manifest/预算、Usage 三集合、合法 assistant Observation；调用真实 memory 路径 |
+| 输入与输出事实 | 可信模拟观众 → 真实 Stage 确认 → Core 公共读取                      | 输入身份隔离；零输出确认时 assistant 观察=0；partial/cancel/fail 只记已确认增量；字幕/音频不重复，proof 被 Core 接受                |
+| 浏览器         | Chromium 实际音频/字幕 Lane、重连与取消                             | receipt 来自实际应用/渲染；绑定代际、内容摘要及 segment；不以协议 Stage mock 代替真实 Lane；不宣称测得物理扬声器发声                |
+| 更新与隐私     | Persona 发布/state/revoke、Forget、凭据收紧、SSE 断线               | 同快照稳定；state 不翻 Epoch；撤销失败关闭；旧 Block/缓存/迟到结果/历史重投回注=0                                                   |
+| 工具与 Surface | 四类工具的真实 Core 调用                                            | 权限/确认/幂等/修订冲突/取消/未知结果/Legal Hold 正确；每种声称支持的 Surface 模式均有 Proof/Fencing 证据                           |
+| 恢复与容量     | 下列边界分别终止 Bellis 或 Core API/Worker，适用进程/窗口各 ≥20 次  | 已确认 Core Canonical 不丢失；重投重复业务写=0；无虚构观察/自动重播；高水位拒绝新准入，活动 Scene 确认配额可用                      |
 
 崩溃窗口至少包括：Manifest 形成/adoption 前、adoption 后/Usage ACK 前、effect record 与 Observe 投影提交前后、Core Observation 提交后/HTTP ACK 前、ACK 返回后/宿主 delivered 前、SSE 失效登记后/刷新完成前。控制故障的可信测试操作者可终止隔离进程；普通 Bellis 客户端始终只走公开接口。
 
-对每个窗口记录“未发生 / 已持久化 / 结果未知”的不同期望，不把 ACK 之前的请求都归为未写。额外覆盖：Core Worker 单独停机、ACK 丢包、两端任一旧快照恢复、remote cursor 领先/落后/null、乱序/重复确认、删除后历史重投、请求超时后的迟到响应、shutdown 时在途刷新与 Claim。最终公开读取证据无法覆盖的行为注明证据缺口，不能改用宿主访问 Core 数据库后宣称黑盒通过。
+真实 Stage 的效果事务恢复专项入口为 `test:memory:iris:stage-recovery`，通过正常 Worklet/Control 确认链路到达事务检查点，详见 [ADR 0046](./adr/0046-phase4-stage-effect-crash-recovery.md)。此专项的 Runtime 窗口不替代 Core 进程组合、活动 Stage 的 HTTP ACK 窗口或容量验收。
+
+活动 Stage 的 HTTP/SDK ACK 窗口另用 `test:memory:iris:stage-observe-recovery`：比较已提交效果、宿主 in-flight、Provider 持久 ACK 与公共 Core sourceCursor，按原 Session/receipt/Observe 身份恢复。该命令仅验收 Runtime 进程窗口，Core 进程组合与容量 Gate 保持独立。
+
+对每个窗口记录“未发生 / 已持久化 / 结果未知”的不同期望，不把 ACK 之前的请求都归为未写。额外覆盖：Core Worker 单独停机、ACK 丢包、两端任一旧快照恢复、remote cursor 领先/落后/null、乱序/重复确认、删除后历史重投、请求超时后的迟到响应、shutdown 时在途刷新与 Claim。独立 `test:memory:iris:snapshots` 覆盖 Core 真实签名备份冷恢复的缺失锚点、复用游标，Bellis 删除前完整目录回退，以及三个 Observe 交付阶段的旧快照回退，范围见 [ADR 0045](./adr/0045-phase4-core-snapshot-restore.md)，不替代完整恢复矩阵。最终公开读取证据无法覆盖的行为注明证据缺口，不能改用宿主访问 Core 数据库后宣称黑盒通过。
 
 A4 交付接入配置样例（仅凭据引用）、兼容矩阵、运行/重启/对账/停用说明和原始验收摘要；配置关停 Iris 时停止新查询及投递，但保留 pending/删除账本供恢复。需要回退二进制时先验证 Manifest/Outbox Migration 读兼容，不回改历史 checksum，也不通过恢复旧缓存复活删除内容。
 
@@ -898,15 +929,15 @@ flowchart TD
     G1 --> G2["Gate 2 完整阶段回归 / Demo"]
 ```
 
-| 工作包 | 主要修改范围                                                                            | 禁止越界                                    |
-| ------ | --------------------------------------------------------------------------------------- | ------------------------------------------- |
-| P0     | `packages/contracts/**`、必要 ADR、Migration/Port 设计                                  | 不实现 Route、Provider 业务或 Avatar 帧循环 |
-| P1     | 首先宿主 phase-4 Context 模块与 Decision request assembly Port；后续 `packages/context-builder/**` 候选 | 纯组装逻辑不连接 MCP/DB，不拥有 Cycle |
+| 工作包 | 主要修改范围                                                                                                               | 禁止越界                                                                      |
+| ------ | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| P0     | `packages/contracts/**`、必要 ADR、Migration/Port 设计                                                                     | 不实现 Route、Provider 业务或 Avatar 帧循环                                   |
+| P1     | 首先宿主 phase-4 Context 模块与 Decision request assembly Port；后续 `packages/context-builder/**` 候选                    | 纯组装逻辑不连接 MCP/DB，不拥有 Cycle                                         |
 | P2     | 首先 `apps/runtime/src/application/phase-4/**` 与 `providers/memory-iris/**`；后续 `memory-runtime`/`persona-runtime` 候选 | Gateway 不写 Prompt；Persona Renderer 只渲染已验证 Persona Slot，不拥有 Cycle |
-| P3     | Iris 独立工具适配、宿主 Tool 注册；后续 `packages/memory-runtime/src/adapters/mcp/**` 与 `src/tools/**` | 不绕过 Tool Runtime 权限与结果预算 |
-| P4     | 宿主 effect/Observe/Usage、`packages/persistence/**`；后续 memory-runtime 候选 | 不在前台等待远端 ACK；磁盘高水位按 §9 停止新准入 |
-| P5     | `packages/avatar-runtime/**`、`apps/stage/**`                                           | 仲裁核心不依赖 React/Cubism/WS，不调用模型  |
-| P6     | `apps/runtime/**`、必要 Observability、`scripts/phase-4-*`、E2E/恢复 Harness、CI/根脚本 | 只通过包根和公开 Runtime/Stage 入口集成     |
+| P3     | Iris 独立工具适配、宿主 Tool 注册；后续 `packages/memory-runtime/src/adapters/mcp/**` 与 `src/tools/**`                    | 不绕过 Tool Runtime 权限与结果预算                                            |
+| P4     | 宿主 effect/Observe/Usage、`packages/persistence/**`；后续 memory-runtime 候选                                             | 不在前台等待远端 ACK；磁盘高水位按 §9 停止新准入                              |
+| P5     | `packages/avatar-runtime/**`、`apps/stage/**`                                                                              | 仲裁核心不依赖 React/Cubism/WS，不调用模型                                    |
+| P6     | `apps/runtime/**`、必要 Observability、`scripts/phase-4-*`、E2E/恢复 Harness、CI/根脚本                                    | 只通过包根和公开 Runtime/Stage 入口集成                                       |
 
 确有独立工作需要并行时，使用同一已通过的边界基线。跨职责变更先说明接口、兼容影响、最小变更和验证方式。
 
@@ -996,19 +1027,19 @@ sessionId / traceId
 
 ## 15. 故障与恢复矩阵
 
-| 故障点                          | Context/Cycle            | Memory/Observe                      | Avatar/Scene                         | 恢复行为                              |
-| ------------------------------- | ------------------------ | ----------------------------------- | ------------------------------------ | ------------------------------------- |
-| Provider 查询中超时             | 候选未采用，其他贡献继续 | 可使用合规短期缓存                  | 无影响                               | 晚到结果不进当前 Cycle                |
-| Manifest 生成后、模型前崩溃     | 未采用                   | 无该 Cycle Usage/assistant Observe，已受理输入独立交付 | 无 Scene              | 孤儿 Manifest 可清理，不视为模型已见  |
-| 模型后、adoption 前崩溃         | Manifest 未采用          | 无该 Cycle Tool/Usage/assistant Observe | Prepare 丢弃                      | 不推进水位；保留请求遥测，输入观察独立 |
-| adoption 后、Scene 前崩溃       | Manifest 已引用          | Usage pending，无虚构 assistant Observe | Scene 服从 Phase 2                | 不重问模型；按记录对账                |
-| Observe publish 后、mark 前崩溃 | Cycle 不回滚             | 至少一次重投，业务幂等              | 无影响                               | 不产生重复记忆                        |
-| remember 运行中崩溃             | Cycle 已采用             | idempotent 可对账；未知则 uncertain | Scene 独立                           | 非幂等绝不自动重试                    |
-| forget 后旧查询迟到             | 新 revision 生效         | tombstone 拒绝旧 revision           | 无影响                               | 缓存失效，不重新注入                  |
-| MCP stdio 子进程崩溃            | 该 Provider 降级         | 在途失败/可重试分类                 | 无影响                               | 后续 Cycle 可重连，当前 Manifest 不变 |
-| Directed Scene 取消             | Context 无变化           | Observe 记录真实取消                | 释放 Directed 租约                   | 中性过渡后 Presence 重选              |
-| Stage 断线                      | Cycle/Scene 按既有规则   | Observe 独立                        | Safety/Base，丢弃过期 Presence delta | 重连应用权威快照，不补播旧行为        |
-| Runtime 重启                    | 读取已采用 Manifest      | Lease 回收/tombstone 先加载         | 新 Presence epoch/Seed               | 不恢复旧 Timer 或过期动作             |
+| 故障点                          | Context/Cycle            | Memory/Observe                                         | Avatar/Scene                         | 恢复行为                               |
+| ------------------------------- | ------------------------ | ------------------------------------------------------ | ------------------------------------ | -------------------------------------- |
+| Provider 查询中超时             | 候选未采用，其他贡献继续 | 可使用合规短期缓存                                     | 无影响                               | 晚到结果不进当前 Cycle                 |
+| Manifest 生成后、模型前崩溃     | 未采用                   | 无该 Cycle Usage/assistant Observe，已受理输入独立交付 | 无 Scene                             | 孤儿 Manifest 可清理，不视为模型已见   |
+| 模型后、adoption 前崩溃         | Manifest 未采用          | 无该 Cycle Tool/Usage/assistant Observe                | Prepare 丢弃                         | 不推进水位；保留请求遥测，输入观察独立 |
+| adoption 后、Scene 前崩溃       | Manifest 已引用          | Usage pending，无虚构 assistant Observe                | Scene 服从 Phase 2                   | 不重问模型；按记录对账                 |
+| Observe publish 后、mark 前崩溃 | Cycle 不回滚             | 至少一次重投，业务幂等                                 | 无影响                               | 不产生重复记忆                         |
+| remember 运行中崩溃             | Cycle 已采用             | idempotent 可对账；未知则 uncertain                    | Scene 独立                           | 非幂等绝不自动重试                     |
+| forget 后旧查询迟到             | 新 revision 生效         | tombstone 拒绝旧 revision                              | 无影响                               | 缓存失效，不重新注入                   |
+| MCP stdio 子进程崩溃            | 该 Provider 降级         | 在途失败/可重试分类                                    | 无影响                               | 后续 Cycle 可重连，当前 Manifest 不变  |
+| Directed Scene 取消             | Context 无变化           | Observe 记录真实取消                                   | 释放 Directed 租约                   | 中性过渡后 Presence 重选               |
+| Stage 断线                      | Cycle/Scene 按既有规则   | Observe 独立                                           | Safety/Base，丢弃过期 Presence delta | 重连应用权威快照，不补播旧行为         |
+| Runtime 重启                    | 读取已采用 Manifest      | Lease 回收/tombstone 先加载                            | 新 Presence epoch/Seed               | 不恢复旧 Timer 或过期动作              |
 
 恢复逻辑必须基于版本化持久化事实、revision/tombstone 和权威快照，不能根据日志顺序、进程内 Map、Provider 猜测或浏览器残留 DOM 推断。
 

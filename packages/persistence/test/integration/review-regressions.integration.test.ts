@@ -136,18 +136,19 @@ describe("评审回归 2：同 Worker Lease 到期重领", () => {
     await commitWithOutbox(20);
     const claimed = await client.claimOutbox({
       limit: 5,
-      leaseMs: 10,
+      leaseMs: 1_000,
       ownerInstanceId: "stuck-dispatcher",
     });
     expect(claimed.map((m) => m.outboxId)).toEqual([outboxId(20)]);
-    // 10ms Lease；立即再领：仍在租期内，领不到。
+    // 留出真实 Worker RPC 和并发集成测试的调度时间；10ms 可在第二次
+    // RPC 到达前合法过期，不能据此判定重领逻辑失败。
     const immediate = await client.claimOutbox({
       limit: 5,
-      leaseMs: 10,
+      leaseMs: 1_000,
       ownerInstanceId: "other",
     });
     expect(immediate).toHaveLength(0);
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
     // 到期后同 Worker 内即可重领（评审实测：修复前永久停留 in_flight）。
     const reclaimed = await client.claimOutbox({
       limit: 5,

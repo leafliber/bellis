@@ -1,0 +1,300 @@
+{
+  "eventCheckpoint": {
+    "status": "passed",
+    "sdkVersion": "0.11.2",
+    "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "anchor": {
+      "cursor": "2",
+      "eventId": "claim-revision:01a0793b-909f-7f01-8275-3ab9540c8949"
+    },
+    "checkedSuccessors": 0,
+    "acceptedCheckpointStatus": 200,
+    "rejectedCheckpointStatuses": [
+      410,
+      410
+    ],
+    "scope": "Separate installed SDK candidate -> real installed Core API/Worker; original event anchor, mismatched identity and unknown cursor. No Bellis gap revalidation or old-backup restoration claim."
+  },
+  "historyGap": {
+    "status": "passed",
+    "coreResponseStatus": 410,
+    "providerCheckpoint": {
+      "eventCursor": "2",
+      "eventId": "divergent-history:79bfa01e-3b81-4c53-b81f-cc191f6ecb70"
+    },
+    "gapId": "28509d1a9a0e19d3cd5a25008e509884ea9bee14b2d18349ce4efa2d1b63cf7d",
+    "contextCancelled": true,
+    "historyInventory": {
+      "itemCount": 3,
+      "inventoryDigest": "f8b61f5761561ed359798b5f39a4f1e1a4520cf69c808cb2c626b0ee7a99d307",
+      "kinds": [
+        "manifest",
+        "provider_state",
+        "usage"
+      ],
+      "originalBodiesVerified": true,
+      "restart": "same-inventory-gap-still-blocked",
+      "remoteRevalidation": "incomplete"
+    },
+    "hostAndProviderState": "durable-across-worker-restart",
+    "retainedOriginalUsageRows": 1,
+    "newEventRequestsAfterGap": 0,
+    "restart": "original-gap-reported-before-persona-or-events",
+    "candidateSdk": "0.11.2",
+    "candidateSdkSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+    "scope": "Actual installed candidate SDK -> Core 410 -> production Provider error handler -> MemoryHost/DB Worker barrier; intentionally seeded divergent identity, not an actual old Core backup restore or full public revalidation"
+  },
+  "resourceInvalidation": {
+    "status": "passed",
+    "source": "external-public-Forget-and-real-Core-Worker-SSE",
+    "eventType": "revision.invalidated.v1",
+    "durableCursor": "1",
+    "contextCancelled": true,
+    "permanentTombstone": true,
+    "workerRestart": "policy-and-provider-cursor-preserved",
+    "generationBefore": 0,
+    "generationAfter": 1,
+    "stops": 1,
+    "scope": "Received public deletion event only; no SSE history-gap or ordinary-correction notification proof"
+  },
+  "resourceCorrection": {
+    "status": "passed",
+    "source": "external-public-correct-canonical-transaction-SSE",
+    "eventType": "revision.invalidated.v1",
+    "durableCursor": "2",
+    "contextCancelled": true,
+    "permanentTombstone": false,
+    "throughRevision": "1",
+    "newRevisionAllowed": true,
+    "correctedRevisionModelVisible": true,
+    "coreWorkerStoppedDuringCorrectionAndHostAck": true,
+    "originalKeyReplayEvents": 1,
+    "recallReplay": "unchanged-replay-stable-corrected-replay-409",
+    "originalUsage": "same-report-id-and-counts-after-rejected-recall",
+    "workerRestart": "policy-and-provider-cursor-preserved",
+    "generationBefore": 1,
+    "generationAfter": 2,
+    "stops": 2,
+    "scope": "Public Claim supersede while Core Worker is stopped -> finite old-revision tombstone and Context cancellation; not full history revalidation or other resource update notifications"
+  },
+  "hostContext": {
+    "diskAdmission": {
+      "ready": true,
+      "reason": "ready",
+      "databaseBytes": 8192,
+      "walBytes": 955904,
+      "walHighWaterBytes": 67108864,
+      "transactionCacheMaxBytes": 8388608,
+      "auxiliaryBytes": 78344,
+      "totalBytes": 1042440,
+      "availableBytes": 38557278208,
+      "highWaterBytes": 536870912,
+      "completionHeadroomBytes": 167772160,
+      "admissionWriteMarginBytes": 8388608,
+      "capacity": {
+        "stateLimitBytes": 1073741824,
+        "stateWalLimitBytes": 433348768,
+        "stateAllocatedBytes": 376832,
+        "stateUsedBytes": 376832,
+        "stateReservedBytes": 0,
+        "stateReservedWalBytes": 0,
+        "stateReservedAuxiliaryBytes": 0,
+        "activeCompletionReservations": 0,
+        "telemetryLimitBytes": 67108864,
+        "telemetryWalLimitBytes": 75616288,
+        "telemetryAllocatedBytes": 20480,
+        "telemetryUsedBytes": 20480
+      }
+    },
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stageOutput": {
+    "schemaVersion": 1,
+    "mode": "real-core",
+    "privacyGeneration": 1,
+    "adoptedCycles": 3,
+    "usageCount": 3,
+    "observations": [
+      {
+        "eventId": "bellis:342c15b9-e906-413e-b861-573efe80970c",
+        "outboxId": "9a949b50-5243-4914-b891-a4641e8dd394",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "1",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 4,
+            "scene_id": "62a0b62e-f0c8-4d7c-803a-edffeb1974e8",
+            "segment_id": "831744c8-3d19-4838-b85d-6c16bb8fe57a",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第一句。"
+      },
+      {
+        "eventId": "bellis:db9360fb-b087-4fd7-b331-efbdbe349eb7",
+        "outboxId": "70048e89-7c0b-4941-8bf7-3c1daf40200f",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "2",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 4,
+            "end": 8,
+            "scene_id": "62a0b62e-f0c8-4d7c-803a-edffeb1974e8",
+            "segment_id": "72466439-6d2f-43a4-acd2-151bec7d40b0",
+            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
+            "lane": "audio"
+          }
+        },
+        "content": "第二句。"
+      },
+      {
+        "eventId": "bellis:f6434c1d-3f98-419a-ba80-c5702a0d1ca3",
+        "outboxId": "ac8d62bf-8e84-4130-a4df-8a5d68107b8c",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "3",
+        "effectState": "committed",
+        "content": "收到。"
+      },
+      {
+        "eventId": "bellis:dc1c3568-9283-4a5b-9b5a-7f2157707500",
+        "outboxId": "06c8afd2-bf11-4535-ab38-05caaed62c77",
+        "sourceStream": "bellis:browser-effects:output",
+        "sourceCursor": "4",
+        "effectState": "partial",
+        "effectProof": {
+          "confirmed_range": {
+            "unit": "utf16",
+            "start": 0,
+            "end": 3,
+            "scene_id": "1c505e4b-a089-45fc-a977-f3daba235e01",
+            "segment_id": "4accc129-f933-4997-8e9a-1321776b84b3",
+            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
+            "lane": "audio"
+          }
+        },
+        "content": "完成。"
+      }
+    ],
+    "confirmedConversationInNextRequest": true,
+    "cycleAudit": [
+      {
+        "cycleId": "ed54ea5d-ad89-4112-a368-b8d2008eb398",
+        "manifestId": "699aae91-7026-496f-b3b6-3c4fd37eb6b1",
+        "manifestDigest": "b52f16035952d868f20aca610ea0d318d318d8e2e485dab49fb5804b23ce04b4",
+        "promptEpoch": "59b7bde1f5d677982d054be3bd2d57c1a64c3d7c6168874d8037846a6448707a",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "9a2dd929-ff0b-4e46-8ae5-9ffdea444f2c",
+        "estimatedInputTokens": 2192,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:3bd771dc2f85ad24",
+          "cand:4f00963e3f92ce45"
+        ],
+        "hostSelected": [
+          "cand:3bd771dc2f85ad24"
+        ],
+        "modelVisible": [
+          "cand:3bd771dc2f85ad24"
+        ],
+        "usageOutboxId": "4ebf15a3-e9bc-49c8-bced-7b2abb8dfc76"
+      },
+      {
+        "cycleId": "e4600b2d-8594-4cb4-aa8c-909343b26229",
+        "manifestId": "df61a803-50b3-481c-a43f-15facd0a9787",
+        "manifestDigest": "4248e2582cc0ce773dcd70461ea5d9039aeeb57bd9a3389fbdadd9e73bb8d39d",
+        "promptEpoch": "59b7bde1f5d677982d054be3bd2d57c1a64c3d7c6168874d8037846a6448707a",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "2c04850b-be99-49ff-b8cd-af82bb22751a",
+        "estimatedInputTokens": 2919,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:a51c0f87658da7b4",
+          "cand:fd5dde00e921baac",
+          "cand:3bd771dc2f85ad24",
+          "cand:4f00963e3f92ce45"
+        ],
+        "hostSelected": [
+          "cand:a51c0f87658da7b4",
+          "cand:fd5dde00e921baac",
+          "cand:3bd771dc2f85ad24"
+        ],
+        "modelVisible": [
+          "cand:a51c0f87658da7b4",
+          "cand:fd5dde00e921baac",
+          "cand:3bd771dc2f85ad24"
+        ],
+        "usageOutboxId": "9183ba66-39fd-4fcd-9ed4-e5b121d200af"
+      },
+      {
+        "cycleId": "1d0dd142-ebd8-4bb8-bd2e-207285316a04",
+        "manifestId": "7748b8f9-42e6-4c62-9732-d437b9325607",
+        "manifestDigest": "168bbc55b1c5b0814555a625259c87632730bbd8175ce0f5b7a351529bd48a1f",
+        "promptEpoch": "59b7bde1f5d677982d054be3bd2d57c1a64c3d7c6168874d8037846a6448707a",
+        "personaRevision": "1",
+        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
+        "recallPersonaRevision": "1",
+        "recallRequestId": "17192cb3-445a-4b98-aa34-86ce10a2b773",
+        "estimatedInputTokens": 3212,
+        "maxInputTokens": 16000,
+        "returned": [
+          "cand:767a2d344c4368d0",
+          "cand:a51c0f87658da7b4",
+          "cand:fd5dde00e921baac",
+          "cand:3bd771dc2f85ad24",
+          "cand:4f00963e3f92ce45"
+        ],
+        "hostSelected": [
+          "cand:767a2d344c4368d0",
+          "cand:a51c0f87658da7b4",
+          "cand:fd5dde00e921baac",
+          "cand:3bd771dc2f85ad24"
+        ],
+        "modelVisible": [
+          "cand:767a2d344c4368d0",
+          "cand:a51c0f87658da7b4",
+          "cand:fd5dde00e921baac",
+          "cand:3bd771dc2f85ad24"
+        ],
+        "usageOutboxId": "0558d845-2795-4191-9dc3-ab7da8fadc5f"
+      }
+    ],
+    "coreSourceCursor": "4",
+    "chromium": "passed",
+    "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
+  },
+  "stage": "A0/A1 and A2 real Chromium output/input public boundary probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "c3114eec8208aff4b527d261fcee285bc6f347cfb5837ac7e14dd23ef04b8beb",
+  "installedCoreFilesVerified": 170,
+  "schemaVersion": 19,
+  "sdkVersion": "0.11.1",
+  "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+}

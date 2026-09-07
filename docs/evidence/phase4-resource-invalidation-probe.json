@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T18:52:26.221259+00:00",
+  "status": "received-public-deletion-invalidation-verified-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1018,
+    "integrationTests": 229,
+    "contractsTests": 305,
+    "runtimeUnitTests": 131,
+    "persistenceIntegrationTests": 109,
+    "runtimeIntegrationTests": 109,
+    "generatedContractFiles": 160,
+    "irisProviderTests": 80,
+    "providerTypecheckBuildLintFormat": "passed",
+    "realCoreToolsStageAndInvalidationsExitCode": 0,
+    "coreBootstrapTests": 9,
+    "coreModifiedFilesRuffMypy": "passed",
+    "coreFullRegression": "failed",
+    "coreConsoleFailure": "test_state_receipt_replay_survives_retention_without_old_value: ResourceTypePage upload descriptor has additional description field and upload id not admitted by generated CommandActionSpec",
+    "rootCheckLogSha256": "b5fa32a6753e5313274152da360fe64af23a22a5cb670382726b9ccef514d7d2",
+    "providerTestLogSha256": "361ff4e3c50b612994145a4b364a28e120ee709ca8b17ee62f844cd9970181d5",
+    "coreConsoleDiagnosticSha256": "e80c690cb1785c179139e87bdc9321afccb95b898aee48a77b41e34f398cdba0",
+    "coreFullRegressionPassed": 11114,
+    "coreFullRegressionFailed": 4,
+    "coreFullRegressionErrors": 54,
+    "coreFullRegressionCoveragePercent": 83.29,
+    "coreFullRegressionLogSha256": "2ea7d590bbba70b26ee1ad5bca7fe6c74d616342849688d4858543c54afcde8e",
+    "coreFullRegressionEnvironmentErrors": "54 Mock Server cases could not bind loopback socket under sandbox; all 54 passed in a separate privileged rerun",
+    "coreConsoleFailures": [
+      "test_focus_http_descriptor_and_lifecycle",
+      "test_http_note_create_replay_and_self_contained_descriptor",
+      "test_state_receipt_replay_survives_retention_without_old_value",
+      "test_task_http_cas_replay_and_lifecycle"
+    ],
+    "coreMockServerRetry": {
+      "exitCode": 0,
+      "passed": 54,
+      "durationSeconds": 27.32,
+      "logSha256": "c7e0852acf75214135b37170a70319d85606e07117a63aa97ed297d811ffae18"
+    }
+  },
+  "verified": [
+    "Provider persists normalized pending event before host callback; cursor commits only after durable host receipt and cancellation confirmation",
+    "Migration 15 atomically deduplicates event ID/body and changes generation/tombstones; receipt insert failure rolls back policy",
+    "Host cancels old Context and deliveries before await, retains failed barrier, accepts exact event retry and preserves newer blocked privacy policy",
+    "Pending event is processed before startup Recall opens; older in-flight Recall is rejected after ACK",
+    "Legacy deliveries are retained and quarantined; cancelled rows do not increment retries or dispatch subsequent rows",
+    "Real external public Forget produces Worker SSE deletion event; host permanent tombstone and provider cursor survive DB Worker restart",
+    "Final joint public tools and registered Forget pass; Chromium verifies three cycles, four Observe receipts, three Usage ACKs and privacy interruption"
+  ],
+  "installation": {
+    "coreWheelSha256": "74f8105d0607d44475d0d7b0c9c5afcb8bcba3e5e4067a40850f33b453f9f105",
+    "coreVersion": "0.13.0",
+    "schemaVersion": 15,
+    "sdkVersion": "0.11.1",
+    "sdkInstalledSha256": "392cd96bbacafd8608c36f7d5b677e9450268aff796f4c608a8588f85b959f7f",
+    "installedFilesVerified": 159,
+    "applicationCredentialCapability": "events.sse.v1",
+    "coreChange": "bootstrap.APPLICATION_CAPABILITIES adds scoped application SSE read grant; existing credentials unchanged",
+    "previousWheelMissingCapability": "a05519411c395de34ddedca419498ec066567680e4fef6aa26b4b12717770e35",
+    "previousFailureObserved": {
+      "publicDeleteEventFound": true,
+      "negotiatedEventsCapability": false,
+      "hostGeneration": 0
+    },
+    "packagedApplicationContracts": "unchanged versus prior 0.13 wheel; packaged Console OpenAPI changed",
+    "additionalUpstreamPayloadChanges": 15
+  },
+  "limits": [
+    "Received public deletion events only; SSE history gaps/no event capability full revalidation and ordinary correction notifications remain open",
+    "Trusted event target agent comes from Provider configuration; the SSE event itself does not prove its agent",
+    "Core full regression has a reproduced Console contract failure; prior 11032 passed result belongs to the historical source snapshot",
+    "Production intent/evidence grants, Core Session mapping, real Persona revocation and Legal Hold/protected outcomes remain open",
+    "Unknown Forget and newer privacy barriers stay blocked; this slice does not prove all overlapping completion/reconciliation orders",
+    "A4 100-cycle/crash matrix and total DB/WAL quotas, Phase4B and complete demo:phase4 remain open"
+  ],
+  "report": {
+    "file": "phase4-resource-invalidation-core-probe.json",
+    "sha256": "c0e6d6a5f53cc6ff418c1034c665d9a434c1fbb5ae1fcdc187fc9aebfe721d74"
+  },
+  "sourceSha256": {
+    "packages/contracts/src/memory/resource-invalidation.ts": "000143a9fd224bc2f6aff266fc86dc17029af46f78cf3a6db9a095fc0a213085",
+    "packages/contracts/src/memory/index.ts": "a49f00dd3ca2979fca30b56b57075f41c483761e2af13310875fd2c7b264643f",
+    "packages/persistence/src/migrations/state/0015-phase4-resource-invalidations.ts": "ed3b96032085d7fc715786df2143addefe753685eec4df189e689a377fe69676",
+    "packages/persistence/src/repositories/phase4-resource-invalidations.ts": "e0bbd2c22cd37f18c5b9e31629e5237320d6253323330c25d3375b50c87b9311",
+    "packages/persistence/src/rpc/operations.ts": "eccaa7c8b4a2c6c3ecb3c513c98f01273696b04f9a2378629d7a5407fdc8fa9f",
+    "packages/persistence/src/client/persistence-client.ts": "52d72549bb5a22b30faf2108af6ca01ab9856dd24629b35e24af4f8f1e68e6ff",
+    "packages/persistence/src/worker/operations.ts": "42ac6b0df42584cb3790ce0138bc3488f8fbaa8380b773a4e56321ef1b6bf69c",
+    "packages/persistence/test/integration/phase4-resource-invalidations.integration.test.ts": "a3b113346734cb5e85ba38168963f1ce222b762f78d7f3481a212c8e389b5731",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "6a838bccc756e0a98a75414536d5feb7c713d9e0f234fc1f8aabc43348bce687",
+    "apps/runtime/test/unit/phase4-memory-host.test.ts": "b6bb8eb6f22ff063874b227c956b4356bccd8c09758fc5421c0c223952692c82",
+    "providers/memory-iris/src/index.ts": "d1e431381c63fb0307a7e937653929f72a71b383ad90f0bde918470681ed8f37",
+    "providers/memory-iris/src/state-store.ts": "d81d6a846a9325e01776df9e88c874f0dd53680f0bc06370d454cdc0299fd9cd",
+    "providers/memory-iris/test/provider.test.ts": "b1a251f38f3e764cf30294939e77931bca83392bbaef62fa29bbb3bccf781ca2",
+    "scripts/iris-resource-invalidation-probe.mjs": "1d07d11f2e0fe38e88af4c6f85053f54a9e336309e7a9a5c39a45dac15267fe7",
+    "scripts/iris-public-probe.mjs": "44a7983c767a7b6af5c879d9d102a0b642b568d3e8af03de4cb5f06af77a1cba"
+  }
+}

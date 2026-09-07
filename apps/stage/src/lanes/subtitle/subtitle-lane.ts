@@ -32,6 +32,12 @@ export interface SubtitleVisibleInterval {
 }
 
 export interface SubtitleLaneOptions {
+  readonly onApplied?: (event: {
+    sceneId: string;
+    start: number;
+    end: number;
+    appliedAtStageUs: bigint;
+  }) => void;
   readonly document: SubtitleDocument;
   /** 单调时钟（定时撤下与可见性上限兜底）。 */
   readonly clock: MonotonicClock;
@@ -61,6 +67,7 @@ const INTERVAL_HISTORY = 32;
 export class SubtitleLaneAdapter implements StageLaneAdapter {
   readonly lane: CueLane = "subtitle";
   readonly #document: SubtitleDocument;
+  readonly #onApplied: SubtitleLaneOptions["onApplied"];
   readonly #clock: MonotonicClock;
   readonly #maxVisibleUs: bigint;
   readonly #lines = new Map<string, SubtitleRecord>();
@@ -69,6 +76,7 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
 
   constructor(options: SubtitleLaneOptions) {
     this.#document = options.document;
+    this.#onApplied = options.onApplied;
     this.#clock = options.clock;
     this.#maxVisibleUs = options.maxVisibleUs ?? DEFAULT_MAX_VISIBLE_US;
   }
@@ -120,6 +128,13 @@ export class SubtitleLaneAdapter implements StageLaneAdapter {
     record.startTargetUs = atStageUs;
     record.shownAtUs = this.#clock.nowUs();
     record.line.setVisible(true);
+    if (record.text !== null)
+      this.#onApplied?.({
+        sceneId,
+        start: 0,
+        end: record.text.length,
+        appliedAtStageUs: this.#clock.nowUs(),
+      });
     onStarted?.(this.#clock.nowUs());
     // 可见性上限兜底：endOfSpeech 永不到达时也必须有界撤下。
     this.#sleep(record, this.#clock.nowUs() + this.#maxVisibleUs, () => {

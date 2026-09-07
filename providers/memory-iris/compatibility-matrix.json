@@ -1,12 +1,12 @@
 {
-  "adapterVersion": "0.1.0",
-  "mappingVersion": 1,
+  "adapterVersion": "0.2.0",
+  "mappingVersion": 2,
   "priorityDerivationVersion": 1,
   "core": {
     "packageVersion": {
-      "minimum": "0.11.0",
-      "current": "0.11.0",
-      "maximum": "0.11.x"
+      "minimum": "0.12.0",
+      "current": "0.13.0",
+      "maximum": "0.13.0"
     },
     "apiVersion": {
       "minimum": "v1",
@@ -14,19 +14,19 @@
       "maximum": "v1"
     },
     "schemaVersion": {
-      "minimum": 11,
-      "current": 11,
-      "maximum": 11
+      "minimum": 14,
+      "current": 15,
+      "maximum": 15
     },
     "contractVersion": {
-      "minimum": "1.9.0",
-      "current": "1.9.0",
-      "maximum": "1.9.x"
+      "minimum": "1.10.0",
+      "current": "1.10.0",
+      "maximum": "1.10.0"
     },
     "typescriptSdk": {
-      "minimum": "0.11.1",
-      "current": "0.11.1",
-      "maximum": "0.11.x"
+      "minimum": "0.11.2",
+      "current": "0.11.2",
+      "maximum": "0.11.2"
     }
   },
   "requiredCapabilities": [
@@ -37,13 +37,379 @@
     "recall.v1",
     "source-cursor.v1"
   ],
-  "optionalCapabilities": [
-    "active-surface.v1",
-    "events.sse.v1"
-  ],
+  "optionalCapabilities": ["active-surface.v1", "events.sse.v1", "events.checkpoint.v1"],
   "forwardCompatibility": {
     "unknownOptionalFields": "accept-and-preserve-at-audit-boundary",
-    "unknownCoreCategories": "drop-and-diagnose",
+    "unknownCoreCategories": "preserve-known-resource-type-and-audit; empty-category-audit-only",
     "unknownRequiredSchema": "fail-closed"
+  },
+  "verifiedScope": "Default Core 0.12/schema14 and Core 0.13/schema15 with repository-local frozen SDK 0.11.2: public A0/A1/input and real Chromium output; schema15 includes implemented memory tools. Earlier SDK 0.11.1 evidence is historical. Exact schema20 candidate separately verifies production checkpoint transmission, history barrier/maintenance, correction revalidation, launcher and credential rotation. Not full A4, safe history release or Phase4B.",
+  "verifiedSurfaceModes": ["off"],
+  "evidence": "../../docs/evidence/phase4-installed-checkpoint-sdk-probe.json",
+  "verifiedInstallations": [
+    {
+      "core": "0.12.0",
+      "schema": 14,
+      "contract": "1.10.0",
+      "sdk": "0.11.1",
+      "wheelSha256": "449fa3f66f02205c1b23c9677595b6252777b5fc603e1d9a99b842d29428d0d3",
+      "searchInitialization": "unavailable-in-tested-cli",
+      "publicSearchGate": "incomplete"
+    },
+    {
+      "core": "0.13.0",
+      "schema": 15,
+      "contract": "1.10.0",
+      "sdk": "0.11.1",
+      "wheelSha256": "a05519411c395de34ddedca419498ec066567680e4fef6aa26b4b12717770e35",
+      "searchInitialization": "trusted-init --initialize-search",
+      "publicSearchGate": "passed"
+    },
+    {
+      "core": "0.13.0",
+      "schema": 15,
+      "contract": "1.10.0",
+      "sdk": "0.11.1",
+      "wheelSha256": "74f8105d0607d44475d0d7b0c9c5afcb8bcba3e5e4067a40850f33b453f9f105",
+      "searchInitialization": "trusted-init --initialize-search",
+      "publicSearchGate": "passed",
+      "applicationEventsCapability": "events.sse.v1",
+      "externalDeletionInvalidation": "passed",
+      "installedFilesVerified": 159,
+      "evidence": "../../docs/evidence/phase4-resource-invalidation-core-probe.json",
+      "coreFullRegression": "not-passed-console-contract-failure-observed",
+      "continuousCycles": 100,
+      "continuousEvidence": "../../docs/evidence/phase4-continuous-probe.json",
+      "sseCrashRecovery": {
+        "windows": 2,
+        "processTargets": 3,
+        "repetitionsPerCombination": 20,
+        "casesPassed": 120,
+        "fullRecoveryGate": "incomplete",
+        "evidence": "../../docs/evidence/phase4-recovery-probe.json"
+      },
+      "adoptionUsageCrashRecovery": {
+        "windows": 3,
+        "processTargets": 3,
+        "repetitionsPerCombination": 20,
+        "casesPassed": 180,
+        "combinedWithSseCasesPassed": 300,
+        "fullRecoveryGate": "incomplete",
+        "evidence": "../../docs/evidence/phase4-cycle-recovery-probe.json"
+      },
+      "observationHttpCrashRecovery": {
+        "windows": 3,
+        "processTargets": 3,
+        "repetitionsPerCombination": 20,
+        "casesPassed": 180,
+        "combinedRecoveryCasesPassed": 480,
+        "fullRecoveryGate": "incomplete",
+        "evidence": "../../docs/evidence/phase4-observe-recovery-probe.json"
+      },
+      "explicitSpaceScopeEvidence": "../../docs/evidence/phase4-explicit-scope-probe.json",
+      "explicitSpaceScopeRecoverySmokeCases": 24,
+      "diskAdmissionEvidence": "../../docs/evidence/phase4-disk-admission-probe.json",
+      "diskAdmissionRecoverySmokeCases": 24,
+      "databasePageLimitEvidence": "../../docs/evidence/phase4-database-capacity-probe.json",
+      "databasePageLimitRecoverySmokeCases": 24,
+      "walWriteFenceEvidence": "../../docs/evidence/phase4-wal-fence-probe.json",
+      "walWriteFenceRecoverySmokeCases": 24,
+      "transactionCapacityEvidence": "../../docs/evidence/phase4-transaction-capacity-probe.json",
+      "transactionCapacityRecoverySmokeCases": 24,
+      "completionReservations": {
+        "evidence": "../../docs/evidence/phase4-completion-reserve-probe.json",
+        "localCrashCasesPassed": 40,
+        "coreRecoverySmokeCases": 24,
+        "fullCapacityGate": "incomplete"
+      },
+      "completionRestartPressure": {
+        "evidence": "../../docs/evidence/phase4-completion-restart-pressure-probe.json",
+        "externalReaderCases": 2,
+        "coreRecoverySmokeCases": 24,
+        "fullCapacityGate": "incomplete"
+      }
+    },
+    {
+      "core": "0.12.0",
+      "schema": 14,
+      "sdk": "0.11.2",
+      "wheelSha256": "449fa3f66f02205c1b23c9677595b6252777b5fc603e1d9a99b842d29428d0d3",
+      "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+      "sdkInstalledFilesVerified": 4,
+      "searchInitialization": "not-requested",
+      "publicSearchGate": "not-run; older CLI search limitation unchanged",
+      "evidence": "../../docs/evidence/phase4-installed-sdk-core14-probe.json"
+    },
+    {
+      "core": "0.13.0",
+      "schema": 15,
+      "sdk": "0.11.2",
+      "wheelSha256": "a05519411c395de34ddedca419498ec066567680e4fef6aa26b4b12717770e35",
+      "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+      "sdkInstalledFilesVerified": 4,
+      "searchInitialization": "trusted-cli-verified-generation",
+      "publicSearchGate": "passed",
+      "evidence": "../../docs/evidence/phase4-installed-sdk-core15-probe.json"
+    }
+  ],
+  "hostMemoryScope": {
+    "kind": "space",
+    "acknowledgeCrossSessionRequired": true,
+    "coreSessionMapping": "unsupported",
+    "localSessionScope": "persisted-and-checked-before-provider-startup"
+  },
+  "eventCheckpointCandidate": {
+    "evidence": "../../docs/evidence/phase4-event-identity-probe.json",
+    "coreSchema": 18,
+    "coreWheelSha256": "65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9",
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultDependencyUpdated": false,
+    "fullGapRecovery": "incomplete",
+    "providerHistoryGap": {
+      "evidence": "../../docs/evidence/phase4-provider-history-gap-probe.json",
+      "actualCore410ToDurableHostBarrier": "passed",
+      "seededCheckpointIdentityDivergence": true,
+      "actualOldBackupRestoration": "unverified",
+      "publicRevalidationAndRelease": "incomplete"
+    }
+  },
+  "claimCorrectionCandidate": {
+    "evidence": "../../docs/evidence/phase4-claim-correction-probe.json",
+    "coreSchema": 19,
+    "coreWheelSha256": "8b03aa2b65a98ddcaf3c5044d2ae2f9ad45a6094c2b5263171915c376e780646",
+    "installedFilesVerified": 170,
+    "providerSdk": "0.11.1",
+    "isolatedCheckpointSdk": "0.11.2",
+    "defaultSupportWindowChanged": false,
+    "canonicalClaimCorrectionAndRetractionCascade": "passed",
+    "workerStoppedCorrectionToHostContextCancellation": "passed",
+    "correctedRevisionModelVisible": "passed",
+    "otherResourceUpdateNotifications": "incomplete",
+    "fullHistoryRevalidation": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "recallRevalidationCandidate": {
+    "evidence": "../../docs/evidence/phase4-recall-revalidation-probe.json",
+    "coreSchema": 19,
+    "coreWheelSha256": "c3114eec8208aff4b527d261fcee285bc6f347cfb5837ac7e14dd23ef04b8beb",
+    "installedFilesVerified": 170,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "responsePublicationAndReplayCanonicalChecks": "passed",
+    "workerStoppedCorrectionRejectsOldReplay": "passed",
+    "originalUsageIdentityPreserved": "passed",
+    "fullHistoryRevalidation": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "recallBatchCandidate": {
+    "evidence": "../../docs/evidence/phase4-recall-batch-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "publicBatchReadOnlyRevalidation": "passed",
+    "hostOriginalRequestPersistence": "incomplete",
+    "crossBatchConsistencyAndHistoryRelease": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "originalRecallCandidate": {
+    "evidence": "../../docs/evidence/phase4-original-recall-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 19,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "hostOriginalRequestPersistence": "passed",
+    "restoredRequestMatchesActualWireBody": "passed",
+    "publicVerificationFromInventory": "passed-gap-remains-blocked",
+    "crossBatchConsistencyAndHistoryRelease": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "historyVerificationCandidate": {
+    "evidence": "../../docs/evidence/phase4-history-verification-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "durableOriginalRequestVerdictAndRestart": "passed",
+    "uncheckedInventoryItemsInRealProbe": 3,
+    "productionVerificationScheduling": "incomplete",
+    "crossBatchConsistencyAndHistoryRelease": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "revalidationCoordinatorCandidate": {
+    "evidence": "../../docs/evidence/phase4-revalidation-coordinator-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "explicitMaintenanceCoordinatorAndPublicVerifier": "passed",
+    "restartSkipsPersistedVerification": "passed",
+    "uncheckedInventoryItemsInRealProbe": 3,
+    "automaticRecoveryAssembly": "incomplete",
+    "crossBatchConsistencyAndHistoryRelease": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "historyRecoveryDiscoveryCandidate": {
+    "evidence": "../../docs/evidence/phase4-history-recovery-discovery-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "durableRunDiscoveryAndHostCancellation": "passed",
+    "restartSkipsPersistedVerification": "passed",
+    "automaticBackgroundRetry": "incomplete",
+    "crossBatchConsistencyAndHistoryRelease": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "backgroundHistoryRecoveryCandidate": {
+    "evidence": "../../docs/evidence/phase4-background-history-recovery-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "controlledBackgroundRetryAndRestartReuse": "passed",
+    "automaticStartupRecoveryAssembly": "incomplete",
+    "crossBatchConsistencyAndHistoryRelease": "incomplete",
+    "uncheckedInventoryItemsInRealProbe": 3,
+    "recoverySmokeCasesPassed": 24
+  },
+  "runtimeHistoryRecoveryCandidate": {
+    "evidence": "../../docs/evidence/phase4-runtime-history-recovery-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "trustedRuntimeStartupMaintenanceAndRestartReuse": "passed",
+    "runtimeLiveGapDecisionClosure": "passed-db-integration-controlled-provider",
+    "runtimeReadinessAndAuth503": "passed",
+    "generalProductionCredentialConfigLoader": "incomplete",
+    "crossBatchConsistencyAndHistoryRelease": "incomplete",
+    "uncheckedInventoryItemsInRealProbe": 3,
+    "recoverySmokeCasesPassed": 24
+  },
+  "irisLaunchCandidate": {
+    "evidence": "../../docs/evidence/phase4-iris-launch-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "trustedConfigAndActualCliStartupRestartDisabledMissingCredential": "passed",
+    "gracefulSigterm": "passed",
+    "productionInputToolAuthorityAndCredentialRotation": "incomplete",
+    "fullHistoryRelease": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "memoryReadinessCandidate": {
+    "evidence": "../../docs/evidence/phase4-memory-readiness-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "realPublicCredentialRevocationAndContextCancellation": "passed",
+    "runtimeReadiness503": "passed",
+    "providerAuthorizationLatch": "passed",
+    "credentialRotationAndAllPermissionVariants": "incomplete",
+    "fullHistoryRelease": "incomplete",
+    "recoverySmokeCasesPassed": 24
+  },
+  "credentialRotationCandidate": {
+    "evidence": "../../docs/evidence/phase4-credential-rotation-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedFilesVerified": 178,
+    "bellisStateMigration": 20,
+    "providerSdk": "0.11.1",
+    "defaultSupportWindowChanged": false,
+    "publicZeroOverlapRotation": "passed",
+    "obsoleteCredentialRestart": "rejected",
+    "privateFileSameDirectoryRestart": "passed",
+    "originalRequestManifestUsagePreservation": "passed",
+    "originalUsageReplayWithSuccessor": "passed",
+    "successorRevocation": "passed",
+    "overlapHotReloadAndRotationCrashMatrix": "not-verified",
+    "fullHistoryRelease": "incomplete"
+  },
+  "installedCheckpointSdk": {
+    "version": "0.11.2",
+    "dependency": "file:vendor/iris-memory-sdk-0.11.2.tgz",
+    "sha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+    "provenance": "vendor/iris-memory-sdk-0.11.2.json",
+    "installedFilesVerified": 4,
+    "registryPublication": "not-performed; not required for the repository-local installation",
+    "productionPairedCheckpoint": "passed",
+    "checkpointHistoryMaintenance": "passed; gap stays blocked",
+    "coreSchema20WheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "defaultCoreSchemaWindowChanged": false,
+    "ci": "configured; remote run not observed",
+    "evidence": "../../docs/evidence/phase4-installed-checkpoint-sdk-probe.json"
+  },
+  "coreSnapshotRestore": {
+    "evidence": "../../docs/evidence/phase4-core-snapshot-restore-probe.json",
+    "coreSchema": 20,
+    "wheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "sdk": "0.11.2",
+    "signedPublicCliColdRestore": "passed",
+    "cases": ["missing-anchor", "reused-cursor"],
+    "casesPassed": 2,
+    "repetitionsPerCase": 1,
+    "retainedPositiveAnchor": "passed",
+    "originalCoreUsageReplay": "same report ID and stages",
+    "hostContextCancellationAndMaintenanceRestart": "passed",
+    "defaultSchemaWindowChanged": false,
+    "fullRestoreMatrix": "incomplete"
+  },
+  "hostSnapshotRestore": {
+    "evidence": "../../docs/evidence/phase4-host-snapshot-restore-probe.json",
+    "coreSchema": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "sdk": "0.11.2",
+    "closedDirectoryDigest": "matched after backup and actual rollback",
+    "canonicalClaimCanaryBeforeDeletion": "present",
+    "canonicalClaimCanaryAfterRollback": "absent in live Context",
+    "oldRecallReplay": "409/conflict",
+    "originalRememberReplay": "404/not_found",
+    "eventCatchUp": "original saved pair to deletion pair",
+    "secondRestart": "ready, stable generation and permanent tombstone",
+    "cases": 1,
+    "fullSnapshotMatrix": "incomplete"
+  },
+  "observeColdSnapshotRestore": {
+    "evidence": "../../docs/evidence/phase4-observe-snapshot-restore-probe.json",
+    "coreSchema": 20,
+    "sdk": "0.11.2",
+    "cases": 3,
+    "snapshotRemoteCursors": [null, 1, 1],
+    "snapshotProviderCursors": [null, null, "1"],
+    "oldDirectoryRestoredAfterDelivered": true,
+    "originalBodyAndKeys": "passed",
+    "duplicateCanonicalWrites": 0
+  },
+  "currentSdkRecoveryWindows": {
+    "evidence": "../../docs/evidence/phase4-observe-snapshot-restore-probe.json",
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+    "casesPassed": 480,
+    "combinations": 24,
+    "repetitionsPerCombination": 20,
+    "status": "implemented windows passed; full matrix incomplete",
+    "exitCode": 2
   }
 }

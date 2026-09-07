@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T18:23:23.537318+00:00",
+  "status": "local-input-policy-filtering-verified-phase4-incomplete",
+  "validation": {
+    "rootCheckExitCode": 0,
+    "unitAndPropertyTests": 1014,
+    "integrationTests": 227,
+    "contractsTests": 302,
+    "runtimeUnitTests": 130,
+    "persistenceIntegrationTests": 107,
+    "runtimeIntegrationTests": 109,
+    "generatedContractFiles": 158,
+    "irisProviderTests": 77,
+    "realCoreToolsAndStageExitCode": 0,
+    "localVisibilityPersistenceTests": 4,
+    "rootCheckLogSha256": "4626d78e1bf5be2714463ff77093fc06fe7d0736f4870ec7f4fa9715469fee83"
+  },
+  "verified": [
+    "Migration 14 stamps trusted Signal admission in the same transaction and does not relabel a duplicate on replay",
+    "Old/unbound/ambiguous Signals and old or mismatched Tool Runs cannot authorize local model context; lookup uses a single SQLite snapshot and survives Worker restart",
+    "Mixed-generation batches suppress aggregates; complete current-policy batch ranges retain topics and weights, while gaps and reversed ranges cannot prove them",
+    "Local filtering precedes model Prompt, actor mapping and Recall query; excluded Tool Result content is suppressed and unknown remote write warnings survive",
+    "Manifest records bounded inclusion/exclusion identifiers without excluded text; missing durable visibility service cannot fall back to unchecked inputs",
+    "Context cancellation propagates to the DB read; late results do not start Provider queries",
+    "Injected policy metadata failure rolls back Signal admission; 16384-row limit rejects new writes without eviction",
+    "Real Decision Host restores old Signal, admits a current Signal, executes tool across privacy transition and filters its old result before the next model request",
+    "Real Core 0.13/SDK 0.11.1 public tools and registered Forget pass; Chromium verifies three cycles, four observations, three Usage ACKs and generation-1 interruption"
+  ],
+  "limits": [
+    "Generation filtering does not replace trusted ingress intent/evidence authorization or current per-tool result permission checks",
+    "Legacy Signals without policy metadata are suppressed, not assigned to a current scope; historical input records are retained",
+    "Core Session mapping, external resource invalidations, real Persona revocation and held/protected outcomes remain open",
+    "A4 stress/crash and total DB/WAL quotas, Phase4B and complete demo:phase4 remain open"
+  ],
+  "report": {
+    "file": "phase4-local-input-privacy-core-probe.json",
+    "sha256": "ec3646aba6ecf92aed6237c38ce9b9eb1de6cde8e6b6eebb66259808e5e304b8"
+  },
+  "sourceSha256": {
+    "packages/contracts/src/memory/local-input-visibility.ts": "915d7a8a08156311155056141b233cb14e4737d658b7782c06262b70d9bd2515",
+    "packages/contracts/src/memory/context-manifest.ts": "8c5a3bb4602db266b265beae6bd941f0a0b779b95a9f0da62f84a5091109277c",
+    "packages/contracts/src/json-schema.ts": "8e03828b4e60f7bc1402320e6752b4a204e75342e0cf07845fcafbe2fe6c95b2",
+    "packages/contracts/test/fixtures.ts": "a1535e25f96915f3a4e26aa241dac5db921efc32a455b55e63aecee0729ac3e3",
+    "packages/persistence/src/migrations/state/0014-phase4-local-input-policy.ts": "8629f8b8a61d735eba449e2c9abf62a3afa224a4cfd64829c2cc336b6ecd7d66",
+    "packages/persistence/src/repositories/phase3.ts": "e180a6353e448e4424d480199c1adfe145de7cc96533ca3cc89a40be0e302539",
+    "packages/persistence/src/repositories/phase4-local-inputs.ts": "b790fd0a6f7741a6da3e62308ad2cc4c592d0f11aff8eca71e7bff2e4b8184a3",
+    "packages/persistence/src/rpc/operations.ts": "fc6661562eb6ad0be591009c3592440ee272782889544c34443e016f2bcd98e7",
+    "packages/persistence/src/client/persistence-client.ts": "51d7953839e8232e31fd3c5a794f2c6be3837e4a3fcd2ce1be3ee8c5c4340fa9",
+    "packages/persistence/src/worker/operations.ts": "d1249f0bfdeec843c14606adff287f9471e3ae5b750343108f1f781b0d42fc0e",
+    "packages/persistence/test/integration/phase4-local-inputs.integration.test.ts": "7e623d2c3d916000f729fc515568daa556f9890a421748a64699c3ead4ce7e7e",
+    "packages/decision-loop/src/loop/request-assembly.ts": "bf12376136bfb98823fb58d3078c15c5db4afb92832a306b26bf4f7e506a0579",
+    "apps/runtime/src/application/phase-3/adapters.ts": "dcfe209eebc4bcedb16660755ec4b4b10ff5bf5eaeaf659aaddf3f816ddf2f8c",
+    "apps/runtime/src/application/phase-3/host.ts": "f71cd4cd9901cd1dab9928a9365b0d8de061f3c217911aac1691f90c6f1fa4e1",
+    "apps/runtime/src/application/phase-4/memory-host.ts": "9ca12a49f661cbc6f2ba63a38c4234b8f6de1f4826b6e0b34c8219c26674a378",
+    "apps/runtime/test/unit/phase4-memory-host.test.ts": "01763ac3ae1a734b8d8b413b606076c254495134cbef13d74632c990d772efeb",
+    "apps/runtime/test/integration/phase4-local-privacy.integration.test.ts": "ebb716e78c3bde2bfe5b8df87abdbfde1c95b6d864f6964f8653ed5e4fe158f5"
+  }
+}

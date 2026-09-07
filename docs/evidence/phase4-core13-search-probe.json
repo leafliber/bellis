@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-06T17:45:42.719331+00:00",
+  "status": "core13-public-search-and-stage-verified-phase4-incomplete",
+  "validation": {
+    "irisProviderTests": 57,
+    "irisProviderTypecheckBuildLintFormat": "passed",
+    "coreBootstrapTests": 9,
+    "coreBootstrapCommand": ".venv/bin/python -m pytest tests/integration/test_phase14_packaging.py --no-cov -q",
+    "coreChangedFilesTypecheck": "passed",
+    "coreContractGenerationCompatibilityPublicApi": "passed",
+    "rootLastVerified": {
+      "unitAndPropertyTests": 1004,
+      "integrationTests": 222,
+      "evidence": "phase4-forget-coordinator-probe.json"
+    },
+    "coreFullRegression": {
+      "status": "passed",
+      "command": ".venv/bin/python -m pytest",
+      "exitCode": 0,
+      "testsPassed": 11032,
+      "warnings": 2,
+      "coveragePercent": 84.49,
+      "durationSeconds": 634.45,
+      "logSha256": "640b1ec41e5e3a9b8388f7c524a1980068c078850d4bcf916499ae436c25dcaf"
+    }
+  },
+  "installations": [
+    {
+      "core": "0.13.0",
+      "schema": 15,
+      "sdk": "0.11.1",
+      "wheelSha256": "a05519411c395de34ddedca419498ec066567680e4fef6aa26b4b12717770e35",
+      "filesVerified": 156,
+      "publicToolsExitCode": 0,
+      "stageExitCode": 0
+    },
+    {
+      "core": "0.12.0",
+      "schema": 14,
+      "sdk": "0.11.1",
+      "wheelSha256": "449fa3f66f02205c1b23c9677595b6252777b5fc603e1d9a99b842d29428d0d3",
+      "filesVerified": 151,
+      "publicToolsExitCode": 2,
+      "reason": "fts_rebuild_pending"
+    }
+  ],
+  "contractComparison": {
+    "applicationSourceChangedFields": [
+      "package_version",
+      "schema_version"
+    ],
+    "applicationOpenApi": "unchanged",
+    "consoleOpenApi": "changed-not-covered-by-Bellis-application-probe"
+  },
+  "verified": [
+    "Trusted init --initialize-search creates and verifies a first FTS generation in the tenant/bootstrap transaction without granting admin capabilities",
+    "Unavailable index and verification failures roll back tenant/index state and remove the credential file",
+    "New non-editable Core installation verified against all 156 wheel files; old installation preserved",
+    "Core 0.13 public search finds remembered claim and excludes it after coordinated Forget; getClaim returns 404",
+    "Registered remember preserves unknown outcome and original request recovery; registered Forget persists barrier/receipt/tombstone",
+    "Core 0.13 actual Chromium output verifies three cycles, four observations, three Usage ACKs, confirmed history and privacy interruption",
+    "Default provider accepts schemas 14/15 and rejects 13/16; legacy Core profile still truthfully reports incomplete search"
+  ],
+  "remaining": [
+    "Production target authorization and all four host paths",
+    "Real Legal Hold/protected targets, Persona revocation and external invalidations",
+    "Unknown-outcome recovery matrix, Signal/Tool Result privacy filtering and Core Session mapping",
+    "A4 stress/crash and total DB/WAL quotas, Phase4B and complete demo:phase4"
+  ],
+  "reports": {
+    "phase4-core13-tools-probe.json": {
+      "sha256": "06731bf0e6efa4eefcf2b007bf389b690fcc2655d35335082bc855c5de0d97bc",
+      "coreVersion": "0.13.0"
+    },
+    "phase4-core13-stage-probe.json": {
+      "sha256": "f415c531db1ee6e752175ed8e43482f83d4e11ea5af36b8777b967cfc66a8d83",
+      "coreVersion": "0.13.0"
+    },
+    "phase4-core12-regression-probe.json": {
+      "sha256": "159d9ec43acd202813885d40e6c4a7c037d704b27d665f630a43045062721a0e",
+      "coreVersion": "0.12.0"
+    }
+  },
+  "sourceSha256": {
+    "providers/memory-iris/src/index.ts": "2f3a295848957fa197b38f43d107b8d1c9fc72a5063d62ecdd3389958b9749f4",
+    "providers/memory-iris/test/provider.test.ts": "e3f0d16e3c9409ae8458b03fbf41967a778eda36c31166114f211e0487508de9",
+    "providers/memory-iris/compatibility-matrix.json": "6dfedfe44c8f37a0453a945f7f4f97b5a3aca909f047872648ac76a3e6a43a81",
+    "scripts/iris-public-probe.mjs": "9ea1cc415fa1cb353e87c96ade94583944fd157c200e102a79ca79930374e5fa",
+    "scripts/iris-host-context-probe.mjs": "96e08585489ce0515fae369bb7a87b0e9861cff577f4cfacca7eef151362a3e9",
+    "scripts/iris-tools-probe.mjs": "d334f818b37575e446b2f30887d889a89b5b3c7acc8e9fc6ae5ee3c09eacf994",
+    "scripts/iris-prepared-tool-probe.mjs": "bc0732c51e8abfab829679b4e6432f93e88cae29763f087308bec73959c138a1",
+    "scripts/iris-forget-probe.mjs": "ebe8e2de76eb16ad3a33ceb3cc8bc03d3a6d9a116e1b423a94ae95808f4dc58a",
+    "scripts/iris-stage-probe.mjs": "37b6aa10cd628a69b5d99663dba74402edef62b3bae4d41e3b4fe3e3222173b9",
+    "scripts/phase-4-demo-child.mjs": "8ee23255207e8642b0cf79312ef457c5f8411d735a4c8942a21c0e42edce0916"
+  },
+  "coreSourceSha256": {
+    "src/iris_memory_core/bootstrap.py": "e07ecb12a1ed3d2a6468dc0a7fe961eeccf23fc17c38c87196388caa0407c05b",
+    "tests/integration/test_phase14_packaging.py": "3e3d69fb737459fa490a95b92087cd35e5bcd857103428f046488501c0cb22a3",
+    "docs/operations/core-installation.md": "092fe03ff46513d6a3432dd09c6e8d5257b166299351341678bb93936b826850"
+  }
+}
