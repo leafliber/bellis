@@ -57,7 +57,10 @@
     {
       "file": "phase4-both-snapshots-raw.json",
       "exitCode": 0,
-      "sha256": "2658eb0bc2e6db0faefe7f28e94d5820c9168168d6db9ad3fc1aedb7afa6225b"
+      "sha256": "2658eb0bc2e6db0faefe7f28e94d5820c9168168d6db9ad3fc1aedb7afa6225b",
+      "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+      "path": "docs/evidence/phase4-both-snapshots-raw.json",
+      "summaryPath": "docs/evidence/phase4-both-snapshots-summary.json"
     }
   ],
   "logs": [

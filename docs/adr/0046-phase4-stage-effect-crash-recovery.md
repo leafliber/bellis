@@ -25,10 +25,10 @@ pnpm test:memory:iris:stage-recovery
 
 该命令包含根工作区和独立 Provider 构建，每窗口执行 20 次，成功退出 0 仅表示这两个 Runtime 窗口通过。调试可用 `node scripts/iris-public-probe.mjs --stage-recovery --recovery-smoke`，每窗口一次，报告明确标为 smoke。默认浏览器套件没有 Core 操作者时跳过本专项，不将跳过记为已通过。
 
-本专项没有在效果事务窗口终止 Core API/Worker，没有在活动 Stage 的 Observe HTTP ACK 窗口注入故障，也没有施加磁盘/WAL 压力。因此不能与此前 480 个不同作用域用例简单相加宣称完整恢复矩阵完成；`test:memory:iris:recovery` 仍保留 incomplete/退出 2。已归档 [本轮摘要](../evidence/phase4-stage-effect-recovery-probe.json) 与 [40 次逐次原始报告](../evidence/phase4-stage-effect-recovery-raw.json)。本次使用固定 SDK 0.11.2 和候选 Schema 20 Core，默认支持范围未扩大。
+本专项没有在效果事务窗口终止 Core API/Worker，没有在活动 Stage 的 Observe HTTP ACK 窗口注入故障，也没有施加磁盘/WAL 压力。因此不能与此前 480 个不同作用域用例简单相加宣称完整恢复矩阵完成；`test:memory:iris:recovery` 仍保留 incomplete/退出 2。已归档 [本轮摘要](../evidence/phase4-stage-effect-recovery-probe.json) 与 [40 次逐次原始报告摘要](../evidence/phase4-stage-effect-recovery-summary.json)。本次使用固定 SDK 0.11.2 和候选 Schema 20 Core，默认支持范围未扩大。
 
 
-完整专项命令（含构建）退出 0：40 个不同 receipt、40 条原 Manifest 保持；提交前 20 次零观察/远端 null，提交后 20 次各保留唯一 Canonical ID。原确认的正文和摘要、Observe 身份与游标不变，剩余完成配额全部释放，没有旧 Scene 重播。Stage 类型/lint/格式与 66 项单元测试通过；既有浏览器回归 3 项通过、2 项 Core 专项按预期跳过。增加恢复参数后另行运行真实 Core/Chromium 三轮正常输出，四条 assistant Observation 和三次 Usage 均通过，见 [联合回归原始报告](../evidence/phase4-stage-recovery-browser-regression-raw.json)。Stage 页面增加原 Session 的恢复参数转发；Runtime/Provider/持久化生产源码未修改。本轮执行 Stage 单元测试与真实浏览器验收，不重复此前根完整检查、Provider 100 项、480 恢复用例和六个快照场景，也不将这些历史次数累加到本专项。
+完整专项命令（含构建）退出 0：40 个不同 receipt、40 条原 Manifest 保持；提交前 20 次零观察/远端 null，提交后 20 次各保留唯一 Canonical ID。原确认的正文和摘要、Observe 身份与游标不变，剩余完成配额全部释放，没有旧 Scene 重播。Stage 类型/lint/格式与 66 项单元测试通过；既有浏览器回归 3 项通过、2 项 Core 专项按预期跳过。增加恢复参数后另行运行真实 Core/Chromium 三轮正常输出，四条 assistant Observation 和三次 Usage 均通过，见 [联合回归原始报告摘要](../evidence/phase4-stage-recovery-browser-regression-summary.json)。Stage 页面增加原 Session 的恢复参数转发；Runtime/Provider/持久化生产源码未修改。本轮执行 Stage 单元测试与真实浏览器验收，不重复此前根完整检查、Provider 100 项、480 恢复用例和六个快照场景，也不将这些历史次数累加到本专项。
 
 ## 活动 Stage 的 Observe 交付窗口
 

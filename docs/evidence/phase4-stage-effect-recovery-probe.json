@@ -65,11 +65,15 @@
   ],
   "rawReport": {
     "path": "docs/evidence/phase4-stage-effect-recovery-raw.json",
-    "sha256": "cb4f898cd41335422d69c05fe5d60c104aefdbb92c7051b04da7a647455ed391"
+    "sha256": "cb4f898cd41335422d69c05fe5d60c104aefdbb92c7051b04da7a647455ed391",
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "summaryPath": "docs/evidence/phase4-stage-effect-recovery-summary.json"
   },
   "normalCoreBrowserReport": {
     "path": "docs/evidence/phase4-stage-recovery-browser-regression-raw.json",
-    "sha256": "8a385fcd71c6db54e1ec71f6dcd4b0f4a6b47970eb5a3ad0ee14b27dee53e6ed"
+    "sha256": "8a385fcd71c6db54e1ec71f6dcd4b0f4a6b47970eb5a3ad0ee14b27dee53e6ed",
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "summaryPath": "docs/evidence/phase4-stage-recovery-browser-regression-summary.json"
   },
   "logs": {
     "/tmp/bellis-stage-recovery-full.log": "e1f79e438dedf201b79d7dddcbd9e9df7462b652485d3fc238ac7da04705c791",

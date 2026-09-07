@@ -14,7 +14,7 @@ pnpm test:memory:iris:recovery
 
 ## 冻结后的本次验证
 
-完整 `pnpm check` 与 `pnpm test:memory:iris:recovery` 均退出 0。恢复报告为 `covered-windows-passed`，实际/预期均为 480，24 个窗口/目标组合各保留 repetition 1–20。见 [收尾摘要](./evidence/phase4a-recovery-scope-freeze.json) 和 [原始报告](./evidence/phase4a-frozen-recovery-raw.json)。本次验证后提交并停止，不启动 Phase 4B。
+完整 `pnpm check` 与 `pnpm test:memory:iris:recovery` 均退出 0。恢复报告为 `covered-windows-passed`，实际/预期均为 480，24 个窗口/目标组合各保留 repetition 1–20。见 [收尾摘要](./evidence/phase4a-recovery-scope-freeze.json) 和 [原始报告摘要](./evidence/phase4a-frozen-recovery-summary.json)。本次验证后提交并停止，不启动 Phase 4B。
 
 ## 已接入的矩阵
 
@@ -115,11 +115,11 @@ Observe 另覆盖发布前、Core 已提交/ACK 未转发、SDK ACK/host deliver
 
 SDK 0.11.2 和固定 Schema 20 wheel 的本轮回归通过 480 个既有用例：采用/Usage 180、Observation HTTP 180、SSE 120；逐组合核对 repetition 1–20，没有用冒烟次数替代。原报告内 180 个 Usage report ID、180 个 Canonical Observation ID 各自唯一；240 次 Observe HTTP 尝试保持原正文/批次键，记录级重复写入为 0。120 项删除读取均为公开 404。
 
-这替代当前安装物只有 24 次冒烟的证据缺口，冻结前入口仍写死 incomplete/退出 2；该判定已由 ADR 0047 修正。六个快照场景在独立最终命令中各一次通过，不能与这些窗口相加冒称新的完整矩阵。见 [本轮摘要](./evidence/phase4-observe-snapshot-restore-probe.json)、[480 次原始报告](./evidence/phase4-installed-sdk-full-recovery-raw.json) 和 [六场景原始报告](./evidence/phase4-observe-snapshot-restore-raw.json)。
+这替代当前安装物只有 24 次冒烟的证据缺口，冻结前入口仍写死 incomplete/退出 2；该判定已由 ADR 0047 修正。六个快照场景在独立最终命令中各一次通过，不能与这些窗口相加冒称新的完整矩阵。见 [本轮摘要](./evidence/phase4-observe-snapshot-restore-probe.json)、[480 次原始报告摘要](./evidence/phase4-installed-sdk-full-recovery-summary.json) 和 [六场景原始报告摘要](./evidence/phase4-observe-snapshot-restore-summary.json)。
 
 
 ## 真实 Stage 效果事务专项
 
-`pnpm test:memory:iris:stage-recovery` 已在固定 SDK 0.11.2/Schema 20 Core 上退出 0：实际 Chromium Worklet 回执触发确认事务，在 COMMIT 前与 COMMIT 后/Stage ACK 前各终止 Runtime 20 次，共 40 次。前者不留下确认或观察；后者保持原 receipt、Manifest、Observe/Outbox 身份，Core 只保留一个 Canonical ID。所有用例恢复后释放剩余预留、不重播旧 Scene，下一轮上下文没有未确认后半段。详见 [ADR 0046](./adr/0046-phase4-stage-effect-crash-recovery.md)、[摘要](./evidence/phase4-stage-effect-recovery-probe.json) 和 [原始结果](./evidence/phase4-stage-effect-recovery-raw.json)。
+`pnpm test:memory:iris:stage-recovery` 已在固定 SDK 0.11.2/Schema 20 Core 上退出 0：实际 Chromium Worklet 回执触发确认事务，在 COMMIT 前与 COMMIT 后/Stage ACK 前各终止 Runtime 20 次，共 40 次。前者不留下确认或观察；后者保持原 receipt、Manifest、Observe/Outbox 身份，Core 只保留一个 Canonical ID。所有用例恢复后释放剩余预留、不重播旧 Scene，下一轮上下文没有未确认后半段。详见 [ADR 0046](./adr/0046-phase4-stage-effect-crash-recovery.md)、[摘要](./evidence/phase4-stage-effect-recovery-probe.json) 和 [原始结果摘要](./evidence/phase4-stage-effect-recovery-summary.json)。
 
 该专项没有终止 Core API/Worker，也未覆盖活动 Stage 的 HTTP ACK 窗口及磁盘压力；不能把它与此前 480 个输入/Cycle/SSE 用例相加当成完整矩阵。本专项及其剩余组合归 Phase 4B，不再阻止冻结的 Phase 4A 恢复 Gate。

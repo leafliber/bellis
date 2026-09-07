@@ -26,3 +26,9 @@ logs/
 .vscode/*
 !.vscode/extensions.json
 .zcode/
+
+# generated acceptance reports and CI artifacts
+test-results/
+playwright-report/
+/artifacts/
+/docs/evidence/*-raw.json

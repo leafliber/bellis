@@ -1,4 +1,5 @@
 {
+  "reportFormat": "bellis-evidence-summary-v1",
   "hostContext": {
     "providerState": "host-db-worker-durable",
     "context": "model-visible",
@@ -16,73 +17,14 @@
     "privacyGeneration": 1,
     "adoptedCycles": 3,
     "usageCount": 3,
-    "observations": [
-      {
-        "eventId": "bellis:74f2e32e-f770-432d-b076-452ee9470de0",
-        "outboxId": "e1ad5df5-6f74-409f-a889-ff7517871902",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "1",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 4,
-            "scene_id": "28b0eacb-a9a0-4a41-82a8-37cd9ea34420",
-            "segment_id": "04511a22-c777-418a-9212-f071e37dff10",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "\u7b2c\u4e00\u53e5\u3002"
-      },
-      {
-        "eventId": "bellis:f4ae396a-9a4d-44b6-85ed-78ca7e8d62a8",
-        "outboxId": "48394548-13d4-45d9-8080-8ac5544ead55",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "2",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 4,
-            "end": 8,
-            "scene_id": "28b0eacb-a9a0-4a41-82a8-37cd9ea34420",
-            "segment_id": "84b6b984-9700-4d6c-861c-88252a919108",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "\u7b2c\u4e8c\u53e5\u3002"
-      },
-      {
-        "eventId": "bellis:78c1d7b1-48c4-4753-9946-9c2f5df663f2",
-        "outboxId": "83aed6ba-8ae2-4efc-b6c6-e88994908992",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "3",
-        "effectState": "committed",
-        "content": "\u6536\u5230\u3002"
-      },
-      {
-        "eventId": "bellis:9c1f0d8c-a380-4cff-97b0-295ad942b23f",
-        "outboxId": "f9abe0ef-14d4-4102-b8aa-5fc84e05c3e0",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "4",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 3,
-            "scene_id": "8a7f45af-8417-453b-a46f-75921e6117ff",
-            "segment_id": "d5ea8e4a-b17d-49c9-a930-a6db6f16e4ec",
-            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
-            "lane": "audio"
-          }
-        },
-        "content": "\u5b8c\u6210\u3002"
-      }
-    ],
+    "observationsSummary": {
+      "records": 4,
+      "groups": [
+        {
+          "records": 4
+        }
+      ]
+    },
     "confirmedConversationInNextRequest": true,
     "coreSourceCursor": "4",
     "chromium": "passed",
@@ -104,5 +46,11 @@
   "partialProof": "accepted",
   "duplicateObserve": "accepted",
   "workerStoppedAcceptance": "passed",
-  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-core13-stage-probe.json",
+    "bytes": 4032,
+    "sha256": "f415c531db1ee6e752175ed8e43482f83d4e11ea5af36b8777b967cfc66a8d83"
+  }
 }

@@ -1,0 +1,96 @@
+{
+  "reportFormat": "bellis-evidence-summary-v1",
+  "stageRecovery": {
+    "status": "covered-windows-passed",
+    "chromium": "passed",
+    "target": "bellis-runtime",
+    "repetitionsPerCombination": 20,
+    "casesPassed": 40,
+    "resultsSummary": {
+      "records": 40,
+      "groups": [
+        {
+          "checkpoint": "before_effect_transaction_commit",
+          "records": 20,
+          "repetitionCount": 20,
+          "uniqueRepetitions": 20,
+          "minRepetition": 1,
+          "maxRepetition": 20
+        },
+        {
+          "checkpoint": "after_effect_transaction_commit_before_ack",
+          "records": 20,
+          "repetitionCount": 20,
+          "uniqueRepetitions": 20,
+          "minRepetition": 1,
+          "maxRepetition": 20
+        }
+      ]
+    },
+    "scope": "Real Chromium Worklet receipt -> effect transaction before/after COMMIT -> Runtime SIGKILL -> same host database/Session -> installed SDK/Core; committed prefix preserved, uncommitted effects absent, no Scene replay. Does not cover Core crashes or Observe HTTP ACK windows during active Stage output."
+  },
+  "hostContext": {
+    "diskAdmission": {
+      "ready": true,
+      "reason": "ready",
+      "databaseBytes": 8192,
+      "walBytes": 1038304,
+      "walHighWaterBytes": 67108864,
+      "transactionCacheMaxBytes": 8388608,
+      "auxiliaryBytes": 78344,
+      "totalBytes": 1124840,
+      "availableBytes": 37396402176,
+      "highWaterBytes": 536870912,
+      "completionHeadroomBytes": 167772160,
+      "admissionWriteMarginBytes": 8388608,
+      "capacity": {
+        "stateLimitBytes": 1073741824,
+        "stateWalLimitBytes": 433348768,
+        "stateAllocatedBytes": 413696,
+        "stateUsedBytes": 413696,
+        "stateReservedBytes": 0,
+        "stateReservedWalBytes": 0,
+        "stateReservedAuxiliaryBytes": 0,
+        "activeCompletionReservations": 0,
+        "telemetryLimitBytes": 67108864,
+        "telemetryWalLimitBytes": 75616288,
+        "telemetryAllocatedBytes": 20480,
+        "telemetryUsedBytes": 20480
+      }
+    },
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stage": "A0/A1 and A2 real Chromium effect transaction Runtime crash probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+  "installedCoreFilesVerified": 178,
+  "schemaVersion": 20,
+  "sdkVersion": "0.11.2",
+  "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+  "installedSdkFilesVerified": 4,
+  "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Real Chromium Worklet receipt -> effect transaction before/after COMMIT -> Runtime SIGKILL -> same host database/Session -> installed SDK/Core; committed prefix preserved, uncommitted effects absent, no Scene replay. Does not cover Core crashes or Observe HTTP ACK windows during active Stage output.",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-stage-effect-recovery-raw.json",
+    "bytes": 355467,
+    "sha256": "cb4f898cd41335422d69c05fe5d60c104aefdbb92c7051b04da7a647455ed391"
+  }
+}

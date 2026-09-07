@@ -1,5 +1,19 @@
 {
   "reportFormat": "bellis-evidence-summary-v1",
+  "snapshotRestore": {
+    "status": "passed",
+    "casesPassed": 2,
+    "resultsSummary": {
+      "records": 2,
+      "groups": [
+        {
+          "status": "passed",
+          "records": 2
+        }
+      ]
+    },
+    "scope": "Real public signed backup/restore and Core process replacement; actual Provider-accepted checkpoints, missing anchor and reused cursor. No Bellis snapshot restore, deletion-ledger recovery, complete crash matrix or safe gap release claim."
+  },
   "hostContext": {
     "diskAdmission": {
       "ready": true,
@@ -10,7 +24,7 @@
       "transactionCacheMaxBytes": 8388608,
       "auxiliaryBytes": 78344,
       "totalBytes": 1124840,
-      "availableBytes": 37960335360,
+      "availableBytes": 37823692800,
       "highWaterBytes": 536870912,
       "completionHeadroomBytes": 167772160,
       "admissionWriteMarginBytes": 8388608,
@@ -39,39 +53,12 @@
     "personaRevision": "1",
     "recallPersonaRevision": "1"
   },
-  "stageOutput": {
-    "schemaVersion": 1,
-    "mode": "real-core",
-    "privacyGeneration": 1,
-    "adoptedCycles": 3,
-    "usageCount": 3,
-    "observationsSummary": {
-      "records": 4,
-      "groups": [
-        {
-          "records": 4
-        }
-      ]
-    },
-    "confirmedConversationInNextRequest": true,
-    "cycleAuditSummary": {
-      "records": 3,
-      "groups": [
-        {
-          "records": 3
-        }
-      ]
-    },
-    "coreSourceCursor": "4",
-    "chromium": "passed",
-    "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
-  },
-  "stage": "A0/A1 and A2 real Chromium output/input public boundary probe",
-  "coreVersion": "0.12.0",
-  "searchInitialization": "not-requested",
-  "coreWheelSha256": "449fa3f66f02205c1b23c9677595b6252777b5fc603e1d9a99b842d29428d0d3",
-  "installedCoreFilesVerified": 151,
-  "schemaVersion": 14,
+  "stage": "A0/A1 and A2 trusted-input public boundary probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+  "installedCoreFilesVerified": 178,
+  "schemaVersion": 20,
   "sdkVersion": "0.11.2",
   "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
   "installedSdkFilesVerified": 4,
@@ -84,11 +71,11 @@
   "partialProof": "accepted",
   "duplicateObserve": "accepted",
   "workerStoppedAcceptance": "passed",
-  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence",
+  "scope": "Core API/Worker + installed SDK + Bellis Decision Host/DB Worker; no Stage effect confirmation or A4 crash-matrix evidence",
   "rawReportSource": {
     "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
-    "path": "docs/evidence/phase4-installed-sdk-core14-probe.json",
-    "bytes": 8444,
-    "sha256": "22283d0982b7c8eb5f1d53265c176184a6d63d2a3d19876136389e136a8c437a"
+    "path": "docs/evidence/phase4-core-snapshot-restore-raw.json",
+    "bytes": 4822,
+    "sha256": "20e14fba011e5c16c138eb22bfd6e226f440ce1dd7b02aa27d47ac9e4d7cbdce"
   }
 }

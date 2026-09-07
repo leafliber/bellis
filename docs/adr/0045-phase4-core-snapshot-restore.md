@@ -19,7 +19,7 @@ Core 每个场景先用公开 Observation/Claim/correct API 创建一个正游�
 
 运行入口为 `pnpm test:memory:iris:snapshots`，需指定兼容矩阵中具备检查点能力的真实 Core 安装路径。Core 两个确定性场景分别运行一次；这不增加既有 SIGKILL 窗口的 20 次计数，不是完整恢复矩阵。冷恢复到新目录不覆盖原目录切换故障、最新删除账本合并、全部 cursor 偏差或历史安全解除。完整 A4 与 Phase 4B 保持未完成。
 
-最初 Core 专项 `pnpm test:memory:iris:snapshots` 退出 0，包含根工作区和独立 Provider 构建。两个场景各保留两条请求、一条 Manifest 和一条 Usage；原 Core Usage 报告身份与 stages 也经过公开重放核对。见 [摘要](../evidence/phase4-core-snapshot-restore-probe.json) 与 [原始结果](../evidence/phase4-core-snapshot-restore-raw.json)。生产代码未变，本轮未重复完整根测试或此前恢复矩阵。
+最初 Core 专项 `pnpm test:memory:iris:snapshots` 退出 0，包含根工作区和独立 Provider 构建。两个场景各保留两条请求、一条 Manifest 和一条 Usage；原 Core Usage 报告身份与 stages 也经过公开重放核对。见 [摘要](../evidence/phase4-core-snapshot-restore-probe.json) 与 [原始结果摘要](../evidence/phase4-core-snapshot-restore-summary.json)。生产代码未变，本轮未重复完整根测试或此前恢复矩阵。
 
 
 ## Bellis 删除前旧快照
@@ -30,7 +30,7 @@ Core 每个场景先用公开 Observation/Claim/correct API 创建一个正游�
 
 再次关闭重启后，首个事件请求携带删除后的配对检查点，策略 generation 不再增加，墓碑仍在且 Runtime ready；新 Context 继续没有 canary。整个测试只读取 Bellis 自有审计表，Core 只通过公开 API 访问。
 
-扩展后最终命令（包含构建）退出 0，三个场景各一次通过。见 [本轮摘要](../evidence/phase4-host-snapshot-restore-probe.json) 和 [联合原始结果](../evidence/phase4-both-snapshots-raw.json)。本场景不证明 Core 离线时的人格回退、全部资源类别、pending Observe 快照、两端同时回退、在线备份产品或完整 A4 恢复矩阵。根完整测试及 Provider 100 项测试沿用此前生产源码相同的基线，本轮未重复执行。
+扩展后最终命令（包含构建）退出 0，三个场景各一次通过。见 [本轮摘要](../evidence/phase4-host-snapshot-restore-probe.json) 和 [联合原始结果摘要](../evidence/phase4-both-snapshots-summary.json)。本场景不证明 Core 离线时的人格回退、全部资源类别、pending Observe 快照、两端同时回退、在线备份产品或完整 A4 恢复矩阵。根完整测试及 Provider 100 项测试沿用此前生产源码相同的基线，本轮未重复执行。
 
 ## 待交付 Observe 的旧快照
 

@@ -1,4 +1,5 @@
 {
+  "reportFormat": "bellis-evidence-summary-v1",
   "hostContext": {
     "providerState": "host-db-worker-durable",
     "context": "model-visible",
@@ -16,73 +17,14 @@
     "privacyGeneration": 1,
     "adoptedCycles": 3,
     "usageCount": 3,
-    "observations": [
-      {
-        "eventId": "bellis:0618e474-cbc5-4014-922b-80a9aee1f984",
-        "outboxId": "9deeabf4-a4d2-49d1-a5fe-ad2d645ed13f",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "1",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 4,
-            "scene_id": "73c38ae3-0116-4cc9-b75e-fd5b8d644313",
-            "segment_id": "45b2a792-a0d8-425c-bcc1-05eec911256b",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "第一句。"
-      },
-      {
-        "eventId": "bellis:97d9e3fb-4b2a-440d-85ed-2c73b63b3195",
-        "outboxId": "221ca2a0-dc33-4533-9543-d6b698e980cf",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "2",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 4,
-            "end": 8,
-            "scene_id": "73c38ae3-0116-4cc9-b75e-fd5b8d644313",
-            "segment_id": "887f5fab-727e-4c6c-8e7f-4b9c8559d9cb",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "第二句。"
-      },
-      {
-        "eventId": "bellis:3910565f-138e-4375-a577-6617f30f0e12",
-        "outboxId": "7c851105-98cc-4b39-84b6-c4bdb2c47f97",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "3",
-        "effectState": "committed",
-        "content": "收到。"
-      },
-      {
-        "eventId": "bellis:cb007701-1a8a-435e-b3dd-edb825804bba",
-        "outboxId": "f9ceb894-bf27-4c0c-a8e8-8190343e77d8",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "4",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 3,
-            "scene_id": "43584a54-745e-41bc-821b-a5656a960c40",
-            "segment_id": "9692cbc4-4ba0-4b38-9546-1288d91c6fd7",
-            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
-            "lane": "audio"
-          }
-        },
-        "content": "完成。"
-      }
-    ],
+    "observationsSummary": {
+      "records": 4,
+      "groups": [
+        {
+          "records": 4
+        }
+      ]
+    },
     "confirmedConversationInNextRequest": true,
     "coreSourceCursor": "4",
     "chromium": "passed",
@@ -103,5 +45,11 @@
   "partialProof": "accepted",
   "duplicateObserve": "accepted",
   "workerStoppedAcceptance": "passed",
-  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-tool-foundation-stage-core-probe.json",
+    "bytes": 3929,
+    "sha256": "cda8739c4cdd9500d882bbd3e635bb0c7266921927f09c2c7644a85133b26d0d"
+  }
 }

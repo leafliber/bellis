@@ -62,3 +62,15 @@ jobs:
             pnpm-debug.log
           if-no-files-found: ignore
           retention-days: 3
+
+      - name: Upload acceptance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-reports-${{ matrix.os }}
+          path: |
+            artifacts/evidence/
+            apps/stage/test-results/
+            apps/stage/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

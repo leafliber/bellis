@@ -1,0 +1,104 @@
+{
+  "reportFormat": "bellis-evidence-summary-v1",
+  "hostSnapshotRestore": {
+    "status": "passed",
+    "backupDigest": "5559704d5ad1119b1b28ee19a218e864826d2fe1901f453ea3ea940d747f987a",
+    "originalCheckpoint": {
+      "cursor": "1",
+      "eventId": "claim-revision:01a079ee-0d3f-7f9d-8ada-38636ae51099"
+    },
+    "deletionCheckpoint": {
+      "cursor": "2",
+      "eventId": "sse:01a079ee-0f6e-7de6-999b-5aa4a77a02eb"
+    },
+    "generationBeforeBackup": 1,
+    "generationAfterDeletion": 2,
+    "exactClosedDirectoryRestored": true,
+    "canaryVisibleBeforeDeletion": true,
+    "canaryVisibleAfterRestore": false,
+    "oldRecallReplay": "409-conflict",
+    "rememberReplay": "404-not-found-original-key-does-not-resurrect-canonical",
+    "restoredUsage": "privacy-revoked-after-event-catch-up",
+    "originalManifestAndOutboxPreserved": true,
+    "secondRestart": "tombstone-and-checkpoint-stable",
+    "scope": "Bellis cold backup restored after Core Claim deletion; live Recall and original-key replay, normal SSE catch-up. Not every resource type, pending Observe snapshot or Core/Bellis simultaneous restore."
+  },
+  "snapshotRestore": {
+    "status": "passed",
+    "casesPassed": 2,
+    "resultsSummary": {
+      "records": 2,
+      "groups": [
+        {
+          "status": "passed",
+          "records": 2
+        }
+      ]
+    },
+    "scope": "Real public signed backup/restore and Core process replacement; actual Provider-accepted checkpoints, missing anchor and reused cursor. No Bellis snapshot restore, deletion-ledger recovery, complete crash matrix or safe gap release claim."
+  },
+  "hostContext": {
+    "diskAdmission": {
+      "ready": true,
+      "reason": "ready",
+      "databaseBytes": 8192,
+      "walBytes": 1038304,
+      "walHighWaterBytes": 67108864,
+      "transactionCacheMaxBytes": 8388608,
+      "auxiliaryBytes": 78344,
+      "totalBytes": 1124840,
+      "availableBytes": 37803081728,
+      "highWaterBytes": 536870912,
+      "completionHeadroomBytes": 167772160,
+      "admissionWriteMarginBytes": 8388608,
+      "capacity": {
+        "stateLimitBytes": 1073741824,
+        "stateWalLimitBytes": 433348768,
+        "stateAllocatedBytes": 413696,
+        "stateUsedBytes": 413696,
+        "stateReservedBytes": 0,
+        "stateReservedWalBytes": 0,
+        "stateReservedAuxiliaryBytes": 0,
+        "activeCompletionReservations": 0,
+        "telemetryLimitBytes": 67108864,
+        "telemetryWalLimitBytes": 75616288,
+        "telemetryAllocatedBytes": 20480,
+        "telemetryUsedBytes": 20480
+      }
+    },
+    "providerState": "host-db-worker-durable",
+    "context": "model-visible",
+    "manifest": "durable",
+    "usage": "Core-acknowledged",
+    "inputObserve": "Core-acknowledged-and-replayed",
+    "inputCursor": "1",
+    "cycles": 1,
+    "personaRevision": "1",
+    "recallPersonaRevision": "1"
+  },
+  "stage": "A0/A1 and A2 trusted-input public boundary probe",
+  "coreVersion": "0.13.0",
+  "searchInitialization": "trusted-cli-verified-generation",
+  "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+  "installedCoreFilesVerified": 178,
+  "schemaVersion": 20,
+  "sdkVersion": "0.11.2",
+  "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+  "installedSdkFilesVerified": 4,
+  "sdkInstalledSha256": "81ebb851c3002ce2ae17b876178886397d0ab70b65ea7851a5fec400aff8a762",
+  "developmentSqliteOverride": true,
+  "surfaceMode": "off",
+  "persona": "verified",
+  "recallBlocks": 1,
+  "usage": "accepted",
+  "partialProof": "accepted",
+  "duplicateObserve": "accepted",
+  "workerStoppedAcceptance": "passed",
+  "scope": "Core API/Worker + installed SDK + Bellis Decision Host/DB Worker; no Stage effect confirmation or A4 crash-matrix evidence",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-both-snapshots-raw.json",
+    "bytes": 5899,
+    "sha256": "2658eb0bc2e6db0faefe7f28e94d5820c9168168d6db9ad3fc1aedb7afa6225b"
+  }
+}

@@ -1,14 +1,40 @@
 {
+  "reportFormat": "bellis-evidence-summary-v1",
+  "observeSnapshotRestore": {
+    "status": "passed",
+    "casesPassed": 3,
+    "resultsSummary": {
+      "records": 3,
+      "groups": [
+        {
+          "window": "observation-before-http-publish",
+          "status": "passed",
+          "records": 1
+        },
+        {
+          "window": "core-observation-committed-before-http-ack",
+          "status": "passed",
+          "records": 1
+        },
+        {
+          "window": "observation-sdk-ack-before-host-delivered",
+          "status": "passed",
+          "records": 1
+        }
+      ]
+    },
+    "scope": "Three actual cold host rollbacks across Observe publication/ACK stages with newer Core preserved; trusted user input, original identity/body and record dedupe. Not simultaneous Core rollback, deleted Observation replay, Stage effect snapshots or a full twenty-repetition matrix."
+  },
   "hostSnapshotRestore": {
     "status": "passed",
-    "backupDigest": "5559704d5ad1119b1b28ee19a218e864826d2fe1901f453ea3ea940d747f987a",
+    "backupDigest": "845494c9bc25a1e074e7784ed6d6c930867aef6df0ab9c19ccef093a3b495b30",
     "originalCheckpoint": {
       "cursor": "1",
-      "eventId": "claim-revision:01a079ee-0d3f-7f9d-8ada-38636ae51099"
+      "eventId": "claim-revision:01a079f9-693e-76ac-9d7d-e7e2aaaf4932"
     },
     "deletionCheckpoint": {
       "cursor": "2",
-      "eventId": "sse:01a079ee-0f6e-7de6-999b-5aa4a77a02eb"
+      "eventId": "sse:01a079f9-6b8c-7fb2-a336-792f3aae634a"
     },
     "generationBeforeBackup": 1,
     "generationAfterDeletion": 2,
@@ -25,79 +51,15 @@
   "snapshotRestore": {
     "status": "passed",
     "casesPassed": 2,
-    "results": [
-      {
-        "mode": "missing-anchor",
-        "status": "passed",
-        "publicBackupRestore": true,
-        "restoration": {
-          "stopped": [
-            {
-              "code": null,
-              "signal": "SIGTERM"
-            },
-            {
-              "code": 0,
-              "signal": null
-            }
-          ],
-          "signedBackupVerified": true,
-          "restoreCli": "passed"
-        },
-        "anchor": {
-          "cursor": "4",
-          "eventId": "claim-revision:01a079ee-14fa-7913-aa03-4b6482122845"
-        },
-        "restoredHead": "3",
-        "retainedAnchorValidated": true,
-        "restoredUsageReportId": "usage-01a079ee-13b6-7d3b-861c-25970d3e0b1f",
-        "originalUsageReplay": "same-body-key-report-id-and-stage-counts",
-        "contextCancelled": true,
-        "originalFactsPreserved": {
-          "requests": 2,
-          "manifests": 1,
-          "acknowledgedUsage": 1
-        },
-        "restart": "recovering-live-200-ready-503-no-decision-pipeline",
-        "gapId": "2790cdb71d447b0603866904cb8b909361c8be3d8a0c579629817feb9bf20013"
-      },
-      {
-        "mode": "reused-cursor",
-        "status": "passed",
-        "publicBackupRestore": true,
-        "restoration": {
-          "stopped": [
-            {
-              "code": null,
-              "signal": "SIGTERM"
-            },
-            {
-              "code": 0,
-              "signal": null
-            }
-          ],
-          "signedBackupVerified": true,
-          "restoreCli": "passed"
-        },
-        "anchor": {
-          "cursor": "5",
-          "eventId": "claim-revision:01a079ee-1c97-7ee3-af1b-c83c3344bfea"
-        },
-        "restoredHead": "4",
-        "retainedAnchorValidated": true,
-        "restoredUsageReportId": "usage-01a079ee-1b5a-7bab-9560-5941df75c957",
-        "originalUsageReplay": "same-body-key-report-id-and-stage-counts",
-        "replacementEventId": "claim-revision:01a079ee-201f-7078-8c41-2b404b2c8d5f",
-        "contextCancelled": true,
-        "originalFactsPreserved": {
-          "requests": 2,
-          "manifests": 1,
-          "acknowledgedUsage": 1
-        },
-        "restart": "recovering-live-200-ready-503-no-decision-pipeline",
-        "gapId": "ba7d76c4a110a68bf08a290ed0b0e4df2868c5af3d9c58be2a1598fc274122b3"
-      }
-    ],
+    "resultsSummary": {
+      "records": 2,
+      "groups": [
+        {
+          "status": "passed",
+          "records": 2
+        }
+      ]
+    },
     "scope": "Real public signed backup/restore and Core process replacement; actual Provider-accepted checkpoints, missing anchor and reused cursor. No Bellis snapshot restore, deletion-ledger recovery, complete crash matrix or safe gap release claim."
   },
   "hostContext": {
@@ -110,7 +72,7 @@
       "transactionCacheMaxBytes": 8388608,
       "auxiliaryBytes": 78344,
       "totalBytes": 1124840,
-      "availableBytes": 37803081728,
+      "availableBytes": 37673877504,
       "highWaterBytes": 536870912,
       "completionHeadroomBytes": 167772160,
       "admissionWriteMarginBytes": 8388608,
@@ -157,5 +119,11 @@
   "partialProof": "accepted",
   "duplicateObserve": "accepted",
   "workerStoppedAcceptance": "passed",
-  "scope": "Core API/Worker + installed SDK + Bellis Decision Host/DB Worker; no Stage effect confirmation or A4 crash-matrix evidence"
+  "scope": "Core API/Worker + installed SDK + Bellis Decision Host/DB Worker; no Stage effect confirmation or A4 crash-matrix evidence",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-observe-snapshot-restore-raw.json",
+    "bytes": 9572,
+    "sha256": "8e9f0960d15ed42ecb8368b607fbc987eb5747bda06838fd75c694766f5929fb"
+  }
 }

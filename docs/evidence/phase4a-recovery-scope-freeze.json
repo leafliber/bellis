@@ -36,7 +36,9 @@
   },
   "rawReport": {
     "path": "docs/evidence/phase4a-frozen-recovery-raw.json",
-    "sha256": "580ec14a5c0f99a824aed6c78f730c6b8a02447de5daf4c90307d70171988336"
+    "sha256": "580ec14a5c0f99a824aed6c78f730c6b8a02447de5daf4c90307d70171988336",
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "summaryPath": "docs/evidence/phase4a-frozen-recovery-summary.json"
   },
   "logs": {
     "/tmp/bellis-phase4a-freeze-check.log": "4e1a24fdee8870055c64a9a46c443905de7ea372e787f8f5319ba1678c343495",

@@ -67,12 +67,18 @@
     {
       "file": "phase4-observe-snapshot-restore-raw.json",
       "exitCode": 0,
-      "sha256": "8e9f0960d15ed42ecb8368b607fbc987eb5747bda06838fd75c694766f5929fb"
+      "sha256": "8e9f0960d15ed42ecb8368b607fbc987eb5747bda06838fd75c694766f5929fb",
+      "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+      "path": "docs/evidence/phase4-observe-snapshot-restore-raw.json",
+      "summaryPath": "docs/evidence/phase4-observe-snapshot-restore-summary.json"
     },
     {
       "file": "phase4-installed-sdk-full-recovery-raw.json",
       "exitCode": 2,
-      "sha256": "c7f3a1ff528549a6659a3b153b958c6dbb5eed34887fa22e18d8bb3950dc1eee"
+      "sha256": "c7f3a1ff528549a6659a3b153b958c6dbb5eed34887fa22e18d8bb3950dc1eee",
+      "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+      "path": "docs/evidence/phase4-installed-sdk-full-recovery-raw.json",
+      "summaryPath": "docs/evidence/phase4-installed-sdk-full-recovery-summary.json"
     }
   ],
   "logs": [

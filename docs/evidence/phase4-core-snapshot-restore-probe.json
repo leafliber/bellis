@@ -60,7 +60,10 @@
     {
       "file": "phase4-core-snapshot-restore-raw.json",
       "exitCode": 0,
-      "sha256": "20e14fba011e5c16c138eb22bfd6e226f440ce1dd7b02aa27d47ac9e4d7cbdce"
+      "sha256": "20e14fba011e5c16c138eb22bfd6e226f440ce1dd7b02aa27d47ac9e4d7cbdce",
+      "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+      "path": "docs/evidence/phase4-core-snapshot-restore-raw.json",
+      "summaryPath": "docs/evidence/phase4-core-snapshot-restore-summary.json"
     }
   ],
   "logs": [

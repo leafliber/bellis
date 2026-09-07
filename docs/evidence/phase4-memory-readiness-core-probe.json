@@ -1,4 +1,5 @@
 {
+  "reportFormat": "bellis-evidence-summary-v1",
   "credentialRevocation": {
     "status": "passed",
     "authority": "installed-Core-public-console-service-credential-revoke",
@@ -12,28 +13,15 @@
   },
   "launcher": {
     "status": "passed",
-    "results": [
-      {
-        "mode": "enabled",
-        "status": "passed",
-        "exitCode": 0
-      },
-      {
-        "mode": "restart",
-        "status": "passed",
-        "exitCode": 0
-      },
-      {
-        "mode": "disabled",
-        "status": "passed",
-        "exitCode": 0
-      },
-      {
-        "mode": "missing-credential",
-        "status": "passed",
-        "exitCode": 1
-      }
-    ],
+    "resultsSummary": {
+      "records": 4,
+      "groups": [
+        {
+          "status": "passed",
+          "records": 4
+        }
+      ]
+    },
     "credentialSource": "environment-reference",
     "schemaVersion": 20,
     "defaultSupportWindowChanged": false,
@@ -170,160 +158,23 @@
     "privacyGeneration": 1,
     "adoptedCycles": 3,
     "usageCount": 3,
-    "observations": [
-      {
-        "eventId": "bellis:d733dc20-c36e-456b-bbe4-46068affa341",
-        "outboxId": "dbdff5cb-eb40-4c99-b05e-3201ea02ef05",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "1",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 4,
-            "scene_id": "93d06216-dbbe-479f-bbc0-a72b62149b50",
-            "segment_id": "1a9165d9-9668-4824-9883-891ddb2d4d3f",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "第一句。"
-      },
-      {
-        "eventId": "bellis:fb420aa1-87a9-4fa5-bc0e-38c11ef653f9",
-        "outboxId": "68baf81d-ed76-4ca2-9061-5b4a1d938339",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "2",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 4,
-            "end": 8,
-            "scene_id": "93d06216-dbbe-479f-bbc0-a72b62149b50",
-            "segment_id": "3742ed51-671d-4a9b-960b-c4ee14a9f6d0",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "第二句。"
-      },
-      {
-        "eventId": "bellis:d26ba881-f958-4073-923b-991919349e62",
-        "outboxId": "f383b471-e419-4fa8-9b46-cbc0312508e5",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "3",
-        "effectState": "committed",
-        "content": "收到。"
-      },
-      {
-        "eventId": "bellis:dc8a1b07-4aea-4de0-ab93-ecd9335317ba",
-        "outboxId": "0710b660-2550-4b20-af02-472cf43a4833",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "4",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 3,
-            "scene_id": "d477e2ed-eb17-4067-8fd1-a775c17f3557",
-            "segment_id": "4b044980-f6d8-4053-9848-85bffb05e3bb",
-            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
-            "lane": "audio"
-          }
-        },
-        "content": "完成。"
-      }
-    ],
+    "observationsSummary": {
+      "records": 4,
+      "groups": [
+        {
+          "records": 4
+        }
+      ]
+    },
     "confirmedConversationInNextRequest": true,
-    "cycleAudit": [
-      {
-        "cycleId": "0df5fcb2-e920-4715-b003-bbbfb0ddc489",
-        "manifestId": "dee20977-4efd-48e7-8590-8304b126e5d9",
-        "manifestDigest": "99ba2c79305d2b49bc220e7f2c7e2ef4ceb0ff92e734cc81e323fe968038438c",
-        "promptEpoch": "5611e07c4acad47f79fab329bc035080387ce036b6018593b8f82fd2e04db1ea",
-        "personaRevision": "1",
-        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
-        "recallPersonaRevision": "1",
-        "recallRequestId": "b0584da6-5ec5-4553-a7b2-4d3b45453293",
-        "estimatedInputTokens": 2192,
-        "maxInputTokens": 16000,
-        "returned": [
-          "cand:10c94162d52f1f52",
-          "cand:79493f710cfe864e"
-        ],
-        "hostSelected": [
-          "cand:10c94162d52f1f52"
-        ],
-        "modelVisible": [
-          "cand:10c94162d52f1f52"
-        ],
-        "usageOutboxId": "e815fb7f-9fec-40c0-93ed-0096b8c820d4"
-      },
-      {
-        "cycleId": "5132f242-5a4e-4b7f-af03-c5cf86f5a64e",
-        "manifestId": "51d4c34d-4ddb-4c43-9851-d2b91bbabf86",
-        "manifestDigest": "44c0e0595f007bb41078078ade6787b0ce40301ef50de28c354e54eb566ba480",
-        "promptEpoch": "5611e07c4acad47f79fab329bc035080387ce036b6018593b8f82fd2e04db1ea",
-        "personaRevision": "1",
-        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
-        "recallPersonaRevision": "1",
-        "recallRequestId": "18229e1f-634d-465e-9b93-b82d5fd31260",
-        "estimatedInputTokens": 2919,
-        "maxInputTokens": 16000,
-        "returned": [
-          "cand:a1686b3dfe9747ec",
-          "cand:c0a03a4b4e50d4d3",
-          "cand:10c94162d52f1f52",
-          "cand:79493f710cfe864e"
-        ],
-        "hostSelected": [
-          "cand:a1686b3dfe9747ec",
-          "cand:c0a03a4b4e50d4d3",
-          "cand:10c94162d52f1f52"
-        ],
-        "modelVisible": [
-          "cand:a1686b3dfe9747ec",
-          "cand:c0a03a4b4e50d4d3",
-          "cand:10c94162d52f1f52"
-        ],
-        "usageOutboxId": "ad7d72dc-e6e9-41f4-b753-2d6db6997778"
-      },
-      {
-        "cycleId": "7aedab68-29b6-400d-8cb7-fa9dfb7753b6",
-        "manifestId": "1e22a993-1f63-40f2-915e-70cdf146c1a2",
-        "manifestDigest": "cd3c105c13efbcbaae257ee1d2a92f4c29d4a0b16c60ad0849b402686c4489ce",
-        "promptEpoch": "5611e07c4acad47f79fab329bc035080387ce036b6018593b8f82fd2e04db1ea",
-        "personaRevision": "1",
-        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
-        "recallPersonaRevision": "1",
-        "recallRequestId": "890a2a32-7035-4906-bce7-3bd8c219efa4",
-        "estimatedInputTokens": 3212,
-        "maxInputTokens": 16000,
-        "returned": [
-          "cand:cadbf42c85b34ac6",
-          "cand:a1686b3dfe9747ec",
-          "cand:c0a03a4b4e50d4d3",
-          "cand:10c94162d52f1f52",
-          "cand:79493f710cfe864e"
-        ],
-        "hostSelected": [
-          "cand:cadbf42c85b34ac6",
-          "cand:a1686b3dfe9747ec",
-          "cand:c0a03a4b4e50d4d3",
-          "cand:10c94162d52f1f52"
-        ],
-        "modelVisible": [
-          "cand:cadbf42c85b34ac6",
-          "cand:a1686b3dfe9747ec",
-          "cand:c0a03a4b4e50d4d3",
-          "cand:10c94162d52f1f52"
-        ],
-        "usageOutboxId": "9607b4ff-c5d0-4aa7-9d0b-c65b8c08df98"
-      }
-    ],
+    "cycleAuditSummary": {
+      "records": 3,
+      "groups": [
+        {
+          "records": 3
+        }
+      ]
+    },
     "coreSourceCursor": "4",
     "chromium": "passed",
     "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
@@ -344,5 +195,11 @@
   "partialProof": "accepted",
   "duplicateObserve": "accepted",
   "workerStoppedAcceptance": "passed",
-  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-memory-readiness-core-probe.json",
+    "bytes": 13465,
+    "sha256": "7b4749f17cf6822742ea59bd7f55662382c3a0e1ddd35a6ea2d054ba2576f538"
+  }
 }

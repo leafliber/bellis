@@ -1,4 +1,5 @@
 {
+  "reportFormat": "bellis-evidence-summary-v1",
   "resourceInvalidation": {
     "status": "passed",
     "source": "external-public-Forget-and-real-Core-Worker-SSE",
@@ -84,145 +85,23 @@
     "privacyGeneration": 1,
     "adoptedCycles": 3,
     "usageCount": 3,
-    "observations": [
-      {
-        "eventId": "bellis:f2d7ebb2-a41c-48a1-a174-11fb31901553",
-        "outboxId": "add3614c-6c51-48a7-9f8f-9ebec969acc5",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "1",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 4,
-            "scene_id": "3922caf6-f32a-46f9-aedf-34d26dfa4a90",
-            "segment_id": "83de357f-fa8c-4eb4-a646-4e60a1452d2f",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "第一句。"
-      },
-      {
-        "eventId": "bellis:39dffa88-b0a5-4839-9d7d-9e55e0584284",
-        "outboxId": "4f806f3a-7ecd-49eb-b498-534c864ff021",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "2",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 4,
-            "end": 8,
-            "scene_id": "3922caf6-f32a-46f9-aedf-34d26dfa4a90",
-            "segment_id": "386a5995-408b-45f5-bcb1-70f2dbef24b0",
-            "content_hash": "7e720b3b1fa32b80bfa23503ea7a05edc27e4e4669bc774f57439c742f38aee9",
-            "lane": "audio"
-          }
-        },
-        "content": "第二句。"
-      },
-      {
-        "eventId": "bellis:afb870af-85d1-4aae-ac08-1807cce6df9b",
-        "outboxId": "8cb46345-f0e0-44d7-9b53-26dfb79f737e",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "3",
-        "effectState": "committed",
-        "content": "收到。"
-      },
-      {
-        "eventId": "bellis:b07e2e0a-40bd-4ea0-be35-7fe7723c0eed",
-        "outboxId": "fd4eac70-2d5d-47a7-9aee-f28876bd21b7",
-        "sourceStream": "bellis:browser-effects:output",
-        "sourceCursor": "4",
-        "effectState": "partial",
-        "effectProof": {
-          "confirmed_range": {
-            "unit": "utf16",
-            "start": 0,
-            "end": 3,
-            "scene_id": "6703fd2e-877e-4c92-82e9-dd496adfe57d",
-            "segment_id": "b2f436df-c446-45cd-a443-2222e51755bc",
-            "content_hash": "559bd2b968d080698a75ef7835fffebb42d345fc39b831c91603e19a5a531cb7",
-            "lane": "audio"
-          }
-        },
-        "content": "完成。"
-      }
-    ],
+    "observationsSummary": {
+      "records": 4,
+      "groups": [
+        {
+          "records": 4
+        }
+      ]
+    },
     "confirmedConversationInNextRequest": true,
-    "cycleAudit": [
-      {
-        "cycleId": "6ae2023b-e896-4589-af07-8dba58c5dea5",
-        "manifestId": "f756e1be-d77e-4c18-9849-550c05f2d919",
-        "manifestDigest": "4f9994c12c77fce5146fab12ae56254ebe277ae564319e925acaf694aca24903",
-        "promptEpoch": "75ca9be9aca6ee9b01f94042cfc3955bf0fcffc8cf3176404c4c2f01a48ea328",
-        "personaRevision": "1",
-        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
-        "recallPersonaRevision": "1",
-        "recallRequestId": "7a3d0e0c-875b-4b68-8e24-986e1ac8bb82",
-        "estimatedInputTokens": 2192,
-        "maxInputTokens": 16000,
-        "returned": ["cand:3b8674a6f4044aaa", "cand:05f9d317d8ca92b0"],
-        "hostSelected": ["cand:3b8674a6f4044aaa"],
-        "modelVisible": ["cand:3b8674a6f4044aaa"],
-        "usageOutboxId": "62e5b03e-6d97-4cd6-afcf-4844df5576c9"
-      },
-      {
-        "cycleId": "b2d0e710-b579-40b6-bd43-c1afc2b147cd",
-        "manifestId": "8e7d322c-0c25-4dbf-b8ac-6b4fb793785d",
-        "manifestDigest": "f2c66c9f63e34b630fddb0a1164f04f12ec24cc2bc0e21a1039e9b625b04b1ce",
-        "promptEpoch": "75ca9be9aca6ee9b01f94042cfc3955bf0fcffc8cf3176404c4c2f01a48ea328",
-        "personaRevision": "1",
-        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
-        "recallPersonaRevision": "1",
-        "recallRequestId": "a0197379-21e1-4ba2-9fb0-7fee5963553f",
-        "estimatedInputTokens": 2919,
-        "maxInputTokens": 16000,
-        "returned": [
-          "cand:7a16adb4181832bc",
-          "cand:948e58a67b3c7f6f",
-          "cand:3b8674a6f4044aaa",
-          "cand:05f9d317d8ca92b0"
-        ],
-        "hostSelected": ["cand:7a16adb4181832bc", "cand:948e58a67b3c7f6f", "cand:3b8674a6f4044aaa"],
-        "modelVisible": ["cand:7a16adb4181832bc", "cand:948e58a67b3c7f6f", "cand:3b8674a6f4044aaa"],
-        "usageOutboxId": "8ddd38dd-7282-4b55-b2b8-1117c0f1832f"
-      },
-      {
-        "cycleId": "ef8cd665-cbfd-4677-933f-f9f7f745e3a2",
-        "manifestId": "738b895b-8e3d-4449-bb44-195877b2f882",
-        "manifestDigest": "9a4356809e31bd6533b513e32009800ca3d4ea55e43d52f1dd29f460e3c0c1cc",
-        "promptEpoch": "75ca9be9aca6ee9b01f94042cfc3955bf0fcffc8cf3176404c4c2f01a48ea328",
-        "personaRevision": "1",
-        "personaHash": "51215dbd432521fb35e891f7f106fac9105bab4221abbea5042b2ccee40418d9",
-        "recallPersonaRevision": "1",
-        "recallRequestId": "1372d713-62ab-4fa8-8bbe-b407b8aa7e30",
-        "estimatedInputTokens": 3212,
-        "maxInputTokens": 16000,
-        "returned": [
-          "cand:adc2702522c56c8a",
-          "cand:7a16adb4181832bc",
-          "cand:948e58a67b3c7f6f",
-          "cand:3b8674a6f4044aaa",
-          "cand:05f9d317d8ca92b0"
-        ],
-        "hostSelected": [
-          "cand:adc2702522c56c8a",
-          "cand:7a16adb4181832bc",
-          "cand:948e58a67b3c7f6f",
-          "cand:3b8674a6f4044aaa"
-        ],
-        "modelVisible": [
-          "cand:adc2702522c56c8a",
-          "cand:7a16adb4181832bc",
-          "cand:948e58a67b3c7f6f",
-          "cand:3b8674a6f4044aaa"
-        ],
-        "usageOutboxId": "d16efca8-d49e-4700-ad66-8d1b456a53f6"
-      }
-    ],
+    "cycleAuditSummary": {
+      "records": 3,
+      "groups": [
+        {
+          "records": 3
+        }
+      ]
+    },
     "coreSourceCursor": "4",
     "chromium": "passed",
     "scope": "Real Chromium Worklet -> Runtime/DB Worker -> installed SDK -> Core API/Worker; partial cancellation and next-context confirmed history. Per-cycle durable Manifest/Persona/Recall/budget/Usage audit; not the A4 crash or resource-growth matrix."
@@ -243,5 +122,11 @@
   "partialProof": "accepted",
   "duplicateObserve": "accepted",
   "workerStoppedAcceptance": "passed",
-  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence"
+  "scope": "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-disk-admission-core-probe.json",
+    "bytes": 9741,
+    "sha256": "ef1448590b7d9bdd48575a7d455bf66969b05ca8dca9da42f94ed256915760b6"
+  }
 }

@@ -13,7 +13,7 @@
     "test:integration": "pnpm -r --if-present test:integration",
     "contracts:check": "node scripts/check-generated-contracts.mjs",
     "runtime:check": "node scripts/verify-runtime-baseline.mjs",
-    "check": "pnpm runtime:check && pnpm build && pnpm typecheck && pnpm lint && pnpm format:check && pnpm contracts:check && pnpm test && pnpm test:integration",
+    "check": "pnpm evidence:check && pnpm test:scripts && pnpm runtime:check && pnpm build && pnpm typecheck && pnpm lint && pnpm format:check && pnpm contracts:check && pnpm test && pnpm test:integration",
     "demo:phase1": "node scripts/phase-1-demo.mjs",
     "demo:phase2": "node scripts/phase-2-demo.mjs",
     "demo:phase2:crash": "node scripts/phase-2-crash-windows.mjs",
@@ -29,7 +29,9 @@
     "test:memory:iris:stage-recovery": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --stage-recovery",
     "test:memory:iris:stage-observe-recovery": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --stage-observe-recovery",
     "test:memory:iris:snapshots": "pnpm build && pnpm --dir providers/memory-iris build && node scripts/iris-public-probe.mjs --observe-snapshot-restore --host-snapshot-restore --snapshot-restore",
-    "start:iris": "node scripts/start-iris-runtime.mjs"
+    "start:iris": "node scripts/start-iris-runtime.mjs",
+    "evidence:check": "node scripts/evidence/check-evidence.mjs",
+    "test:scripts": "node --test scripts/test/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "26.2.0",

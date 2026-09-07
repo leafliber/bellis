@@ -1,4 +1,5 @@
 {
+  "reportFormat": "bellis-evidence-summary-v1",
   "recovery": {
     "status": "incomplete",
     "coveredWindows": [
@@ -28,197 +29,92 @@
       "repetitionsPerCombination": 1,
       "requiredRepetitions": 20,
       "casesPassed": 9,
-      "results": [
-        {
-          "window": "observation-before-http-publish",
-          "target": "bellis-runtime",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+      "resultsSummary": {
+        "records": 9,
+        "groups": [
+          {
+            "window": "observation-before-http-publish",
+            "target": "bellis-runtime",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:e634b24e4ecc8c5987a77cc9ad658f3f5f0acb5c819c787cefe9bffc7709dfaa",
-          "eventId": "bellis:933444f3-767e-4fb2-be92-a98003239a45",
-          "outboxId": "cb58dd48-b2ee-4f42-967b-89edf1c9ccc6",
-          "wireBodyDigest": "62075060ca6398a2c53e48a628445b3a7807801163ba9b6034dfebdfd97dce1e",
-          "batchKey": "observe:3c5b3e1b266dc78a9a06df2d14e02a5aa4b4399e52d79d3e545361059ab8e031",
-          "wireRequests": 2,
-          "ackForwardedAtCrash": false,
-          "remoteCursorAtCrash": null,
-          "canonicalObservationId": "01a07907-9973-725b-b2c8-e8800b0f88ff",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "observation-before-http-publish",
-          "target": "core-api",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "observation-before-http-publish",
+            "target": "core-api",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:f29ebed8d53df65575119dc14e5814c7b7a5334bba0cc87d791e0da8dd6d3025",
-          "eventId": "bellis:32fe9221-f4ee-45b0-a21c-1c47a36b9e12",
-          "outboxId": "fc5c0ad8-f01f-4f5f-ba0f-2c0e7e83f32b",
-          "wireBodyDigest": "ca1149f907995b895fc455333d64274c984a31059e155c606d971cb3350da844",
-          "batchKey": "observe:c0a07853c1c0f6f30c1d92eaf1de2831aa5159cbd1736203649e861b9afdf69b",
-          "wireRequests": 1,
-          "ackForwardedAtCrash": false,
-          "remoteCursorAtCrash": null,
-          "canonicalObservationId": "01a07907-9ced-708a-8fc4-2e28e00831c7",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "observation-before-http-publish",
-          "target": "core-worker",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "observation-before-http-publish",
+            "target": "core-worker",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:3b67cef49bc4635cb3f2d8e4f614dcde2bbfeaf622ae0e75bf35f198725b0960",
-          "eventId": "bellis:9a557adb-8604-45cc-9b2b-077c2322ddf7",
-          "outboxId": "1bb5e335-e5ec-4192-a462-1f6513f6cfdc",
-          "wireBodyDigest": "9553fb2d0076ef51cfc42bbe4307eda438344ea68cbf23c84832536d376219e6",
-          "batchKey": "observe:77c12cd42e992d795678217a2a2af5e44ef84b548979beb5af664752b330b48f",
-          "wireRequests": 1,
-          "ackForwardedAtCrash": false,
-          "remoteCursorAtCrash": null,
-          "canonicalObservationId": "01a07907-9e59-7d0c-906f-54a1fe18e879",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "core-observation-committed-before-http-ack",
-          "target": "bellis-runtime",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "core-observation-committed-before-http-ack",
+            "target": "bellis-runtime",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:857548697f01cae2b8de6e8e048b6c8b99a7e61282890a0c52b5c238fdf5cb7b",
-          "eventId": "bellis:c6054c3c-cd91-4abe-9069-bb7cad5412fa",
-          "outboxId": "d071af8d-07b9-4e0a-b6fc-5cf7b0efd45c",
-          "wireBodyDigest": "5971384c88f2c8aa0bf968f9da2cc8a3623b8a3d2dd830d8c835331cbce64ea6",
-          "batchKey": "observe:4535ae6e4e364d13939f138cbe1348055668182e570cd588fa023f905e16a5be",
-          "wireRequests": 2,
-          "ackForwardedAtCrash": false,
-          "remoteCursorAtCrash": 1,
-          "canonicalObservationId": "01a07907-9fc1-773c-88ab-478c7d278eae",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "core-observation-committed-before-http-ack",
-          "target": "core-api",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "core-observation-committed-before-http-ack",
+            "target": "core-api",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:5d0af1d2bf516ac692eab880e09ef912833c663358fe7774eabe3669df2742b9",
-          "eventId": "bellis:f463d164-fe60-4e13-95fc-97f56bb7ba72",
-          "outboxId": "f290e0ed-0a71-4c63-a94a-a2666e5f88b7",
-          "wireBodyDigest": "1317869c7b50d1f7f702232b99447079f781b671a5af12fe92c130b50b2d0828",
-          "batchKey": "observe:f8653bb34b6b1ae03e41a4d8b2f73233aca49ed1646af5c290d49706efcf3645",
-          "wireRequests": 1,
-          "ackForwardedAtCrash": false,
-          "remoteCursorAtCrash": 1,
-          "canonicalObservationId": "01a07907-a23c-7e14-adcb-b90419ea4949",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "core-observation-committed-before-http-ack",
-          "target": "core-worker",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "core-observation-committed-before-http-ack",
+            "target": "core-worker",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:ef333baac903af1e43e13d1778ab20b9200e8110811aba43653ab0767158cac3",
-          "eventId": "bellis:86cdc818-7205-4e53-984f-c28490ec51a7",
-          "outboxId": "58d4971b-9651-4d7a-9388-64843234ebca",
-          "wireBodyDigest": "15c7f4ec27cb00afd24fac6cea7a3e8b3fcee0f06e3aad8ef4390640abe81406",
-          "batchKey": "observe:caeacef236fd531f9711096a9ae9d87d13cf64033e02b9387bd336ac1458e689",
-          "wireRequests": 1,
-          "ackForwardedAtCrash": false,
-          "remoteCursorAtCrash": 1,
-          "canonicalObservationId": "01a07907-a4cb-7911-ba21-968dc6338445",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "observation-sdk-ack-before-host-delivered",
-          "target": "bellis-runtime",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "observation-sdk-ack-before-host-delivered",
+            "target": "bellis-runtime",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:d6dee7b3d7ec8b6734dd5a368eed6727514f4a05030958790d0b002b1258abf3",
-          "eventId": "bellis:8137d91f-9a18-4f4a-abe6-cbea83deee2c",
-          "outboxId": "48ecca24-70be-48b0-b4b0-81ba60863e53",
-          "wireBodyDigest": "f9e449559de80314ecd7dd561d72ec8362a901f75965e0b6439288836c67a1a8",
-          "batchKey": "observe:45ba91d44c761d55d8c8d96b3a0f718bca761c9a8eba84d72654cdf30e404633",
-          "wireRequests": 2,
-          "ackForwardedAtCrash": true,
-          "remoteCursorAtCrash": 1,
-          "canonicalObservationId": "01a07907-a64f-755b-b1c1-006d0c34984c",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "observation-sdk-ack-before-host-delivered",
-          "target": "core-api",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "observation-sdk-ack-before-host-delivered",
+            "target": "core-api",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "sourceStream": "bellis:input:5e516ac2cab1376b1bbe426cfa07aea34652c17b7e1b41f7630736662d11ef45",
-          "eventId": "bellis:5953523f-0db4-4723-9fc6-4216810f57d3",
-          "outboxId": "8f378876-17be-48ff-84e5-a93187c51faa",
-          "wireBodyDigest": "ab1e7393155aec083aff02f9146debc698c902d3722c6f6c6d1f52fa5412ad85",
-          "batchKey": "observe:1fa36781a82744af1029a82706bcddaa7629400f4450cd793533165e16223a75",
-          "wireRequests": 1,
-          "ackForwardedAtCrash": true,
-          "remoteCursorAtCrash": 1,
-          "canonicalObservationId": "01a07907-a8e3-7d40-8a9f-27d0f682e55c",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        },
-        {
-          "window": "observation-sdk-ack-before-host-delivered",
-          "target": "core-worker",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
-          },
-          "sourceStream": "bellis:input:56242b6fbe65bef6c9c4198d147e7a525089db7e5d1cd2461ef9814bb1742da4",
-          "eventId": "bellis:02ffcb71-9720-46ec-862d-44bbd3c03ce4",
-          "outboxId": "53b1ca07-e6aa-4c42-a294-1fd810c9b022",
-          "wireBodyDigest": "71372e15845423c79e8b622058c080e5172b535169e837d7adb64318edc386df",
-          "batchKey": "observe:f152ae0e94c2b758596896165758fcf10e257c9b1f7de1cf7ad8eb4d55496622",
-          "wireRequests": 1,
-          "ackForwardedAtCrash": true,
-          "remoteCursorAtCrash": 1,
-          "canonicalObservationId": "01a07907-ab77-7f67-9e87-234e8bb6d705",
-          "duplicateCanonicalWrites": 0,
-          "finalSourceCursor": "1",
-          "hostDelivered": 1
-        }
-      ],
+          {
+            "window": "observation-sdk-ack-before-host-delivered",
+            "target": "core-worker",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
+          }
+        ]
+      },
       "scope": "Trusted input Observation through real Runtime/DB Worker and installed SDK; actual HTTP forwarding withheld across process crashes, no fabricated Stage output or effect-transaction proof"
     },
     "sseCasesPassed": 6,
@@ -237,330 +133,153 @@
       "repetitionsPerCombination": 1,
       "requiredRepetitions": 20,
       "casesPassed": 9,
-      "results": [
-        {
-          "window": "manifest-formed-before-adoption",
-          "target": "bellis-runtime",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+      "resultsSummary": {
+        "records": 9,
+        "groups": [
+          {
+            "window": "manifest-formed-before-adoption",
+            "target": "bellis-runtime",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "original": {
-            "cycleId": "f5b36f5f-3c6d-45bf-8960-8c066e6565f1",
-            "manifestId": "527516bf-56e6-4139-a22a-9e420c98333a",
-            "manifestDigest": "c35a4735790415adf2a3fe03c5f82cd4040d609f65d65edb0a08c753d71e8360"
+          {
+            "window": "manifest-formed-before-adoption",
+            "target": "core-api",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "originalManifestStable": false,
-          "unadoptedCandidateAbsent": true,
-          "newPendingInputCycle": true,
-          "modelRequestsAfterStart": 1,
-          "recoveredCycleId": "c6544ec4-4c7a-460d-bc11-ed427ba2e667",
-          "recoveredManifestDigest": "fe2dadf2ae1d2c2ec79c4dd54ee6dd1eaca6455df6b13b8f1ea55fc14c97e771",
-          "consumed": "1",
-          "usageOutboxId": "99998eb1-ffe0-4fe0-ab7b-ad00333eec9d",
-          "coreReportId": "usage-01a07907-8080-79f4-a879-c33cdfe8b870",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "manifest-formed-before-adoption",
-          "target": "core-api",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "manifest-formed-before-adoption",
+            "target": "core-worker",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "original": {
-            "cycleId": "48e84315-212a-4e41-adca-7eb800d00caf",
-            "manifestId": "205b94f8-e70b-41ae-8a62-51a388da1947",
-            "manifestDigest": "59646f8cb740c2c2aecdb20e5081d64fc20fdee64a11910079c84ae302752a7d"
+          {
+            "window": "adoption-committed-before-usage-ack",
+            "target": "bellis-runtime",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 1,
-          "recoveredCycleId": "48e84315-212a-4e41-adca-7eb800d00caf",
-          "recoveredManifestDigest": "59646f8cb740c2c2aecdb20e5081d64fc20fdee64a11910079c84ae302752a7d",
-          "consumed": "1",
-          "usageOutboxId": "12f40658-bbe2-4d51-a5e6-95ed935ec1ac",
-          "coreReportId": "usage-01a07907-83f2-7526-a068-11d0652888f8",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "manifest-formed-before-adoption",
-          "target": "core-worker",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "adoption-committed-before-usage-ack",
+            "target": "core-api",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "original": {
-            "cycleId": "3a748268-0b78-486a-bf11-625d35a5b230",
-            "manifestId": "1ba26135-a8b7-46f6-888f-fceab32603de",
-            "manifestDigest": "5be48c8837f2baa39fafb2aad62ba6587eb621a67278d6e0bdc18b779bb34a1c"
+          {
+            "window": "adoption-committed-before-usage-ack",
+            "target": "core-worker",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 1,
-          "recoveredCycleId": "3a748268-0b78-486a-bf11-625d35a5b230",
-          "recoveredManifestDigest": "5be48c8837f2baa39fafb2aad62ba6587eb621a67278d6e0bdc18b779bb34a1c",
-          "consumed": "1",
-          "usageOutboxId": "c092e30d-b949-4f0b-853e-8851babf757c",
-          "coreReportId": "usage-01a07907-8652-7feb-b845-a67893c0b640",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "adoption-committed-before-usage-ack",
-          "target": "bellis-runtime",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
+          {
+            "window": "usage-ack-before-host-delivered",
+            "target": "bellis-runtime",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "original": {
-            "cycleId": "4d8e567d-613c-46d6-bcef-175c186dbf9d",
-            "manifestId": "6850084d-b40a-45e7-a6a2-d92aa980a4fa",
-            "manifestDigest": "559caaeb2b2b94453ae6875cf4680aa8199eb6f3abad5a59de18295a91298c0b"
+          {
+            "window": "usage-ack-before-host-delivered",
+            "target": "core-api",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
           },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 0,
-          "recoveredCycleId": "4d8e567d-613c-46d6-bcef-175c186dbf9d",
-          "recoveredManifestDigest": "559caaeb2b2b94453ae6875cf4680aa8199eb6f3abad5a59de18295a91298c0b",
-          "consumed": "1",
-          "usageOutboxId": "bf621e8c-9799-4947-a18f-6033d03fe2c7",
-          "coreReportId": "usage-01a07907-8995-7df5-9c52-bb991906aad1",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "adoption-committed-before-usage-ack",
-          "target": "core-api",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
-          },
-          "original": {
-            "cycleId": "9dcb7f26-105c-4696-9db4-f95f82a72d07",
-            "manifestId": "58a05daa-9ec0-4474-80f4-0a258d5ba16f",
-            "manifestDigest": "44b6fd31a9a84325ebec0da033d40da90933f2642650d8a5aa75cc9d269cdd34"
-          },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 1,
-          "recoveredCycleId": "9dcb7f26-105c-4696-9db4-f95f82a72d07",
-          "recoveredManifestDigest": "44b6fd31a9a84325ebec0da033d40da90933f2642650d8a5aa75cc9d269cdd34",
-          "consumed": "1",
-          "usageOutboxId": "d268b2ed-6122-43b1-929b-519fb33d1a56",
-          "coreReportId": "usage-01a07907-8ceb-7a94-a02c-ae78eb2dff74",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "adoption-committed-before-usage-ack",
-          "target": "core-worker",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
-          },
-          "original": {
-            "cycleId": "091c8476-13f2-4d43-a581-96d75ddd05e5",
-            "manifestId": "087b76fe-22b3-4c65-ab2b-6b85a6937a23",
-            "manifestDigest": "fc6a881eacaa21f64cf4f5783b4b36a7ab227fd834f37779b37925f755a57f6b"
-          },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 1,
-          "recoveredCycleId": "091c8476-13f2-4d43-a581-96d75ddd05e5",
-          "recoveredManifestDigest": "fc6a881eacaa21f64cf4f5783b4b36a7ab227fd834f37779b37925f755a57f6b",
-          "consumed": "1",
-          "usageOutboxId": "ef747f2d-f773-42af-afde-691f9f26f455",
-          "coreReportId": "usage-01a07907-8f2e-7d51-94b5-63f29325363e",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "usage-ack-before-host-delivered",
-          "target": "bellis-runtime",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
-          },
-          "original": {
-            "cycleId": "0961087e-ce05-4589-b237-3464fe8f7655",
-            "manifestId": "daa8c70a-49ca-401c-8f23-532e9f8a7276",
-            "manifestDigest": "371862551797584279e8dba1053ebddf0b9bd695c7e6ed44508b3ec7b6e99cdf"
-          },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 0,
-          "recoveredCycleId": "0961087e-ce05-4589-b237-3464fe8f7655",
-          "recoveredManifestDigest": "371862551797584279e8dba1053ebddf0b9bd695c7e6ed44508b3ec7b6e99cdf",
-          "consumed": "1",
-          "usageOutboxId": "f3eae1b5-9c54-47b6-b8e5-3ab46f0e9b88",
-          "coreReportId": "usage-01a07907-917f-7be0-a05e-08115eb07ca1",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "usage-ack-before-host-delivered",
-          "target": "core-api",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
-          },
-          "original": {
-            "cycleId": "7e2841a5-5544-44cc-8f7e-4964f98a7065",
-            "manifestId": "cc099839-faf1-4138-92ae-d4f34ade178e",
-            "manifestDigest": "86f79829ff02eb948b3bd7571fcada56fe10c208d854f99fb58129c76024ee28"
-          },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 1,
-          "recoveredCycleId": "7e2841a5-5544-44cc-8f7e-4964f98a7065",
-          "recoveredManifestDigest": "86f79829ff02eb948b3bd7571fcada56fe10c208d854f99fb58129c76024ee28",
-          "consumed": "1",
-          "usageOutboxId": "195fbe9a-40ff-43fc-a44c-da67325fdb82",
-          "coreReportId": "usage-01a07907-94cb-7a2f-b1fd-a937e6923b69",
-          "uniqueCoreUsage": true
-        },
-        {
-          "window": "usage-ack-before-host-delivered",
-          "target": "core-worker",
-          "repetition": 1,
-          "crash": {
-            "signal": "SIGKILL",
-            "replacedProcess": true
-          },
-          "original": {
-            "cycleId": "bbd44faa-c3a7-4a24-af48-35d97a7e92b7",
-            "manifestId": "3984ce8e-7815-4a20-b17c-a1ffad416a21",
-            "manifestDigest": "367de68388d8b80328d0ff6c1ce3e2cb19e7cc8785326ee5259c361b14b9e154"
-          },
-          "originalManifestStable": true,
-          "unadoptedCandidateAbsent": false,
-          "newPendingInputCycle": false,
-          "modelRequestsAfterStart": 1,
-          "recoveredCycleId": "bbd44faa-c3a7-4a24-af48-35d97a7e92b7",
-          "recoveredManifestDigest": "367de68388d8b80328d0ff6c1ce3e2cb19e7cc8785326ee5259c361b14b9e154",
-          "consumed": "1",
-          "usageOutboxId": "56311444-1a7d-4a6a-86d3-71da384dbc28",
-          "coreReportId": "usage-01a07907-9813-7408-abea-f9869264da53",
-          "uniqueCoreUsage": true
-        }
-      ],
+          {
+            "window": "usage-ack-before-host-delivered",
+            "target": "core-worker",
+            "records": 1,
+            "repetitionCount": 1,
+            "uniqueRepetitions": 1,
+            "minRepetition": 1,
+            "maxRepetition": 1
+          }
+        ]
+      },
       "scope": "Real Runtime/Loop/DB Worker and Core API/Worker; before/after adoption and Usage ACK, no active Stage or inside-SQL-transaction crash evidence"
     },
-    "results": [
-      {
-        "window": "pending-persisted-before-host-ack",
-        "target": "bellis-runtime",
-        "repetition": 1,
-        "crash": {
-          "signal": "SIGKILL",
-          "replacedProcess": true
+    "resultsSummary": {
+      "records": 6,
+      "groups": [
+        {
+          "window": "pending-persisted-before-host-ack",
+          "target": "bellis-runtime",
+          "records": 1,
+          "repetitionCount": 1,
+          "uniqueRepetitions": 1,
+          "minRepetition": 1,
+          "maxRepetition": 1
         },
-        "pendingDurableAtCrash": true,
-        "tombstoneDurableAtCrash": false,
-        "eventId": "sse:01a07907-ad04-7c29-a796-d18b4020a62a",
-        "eventCursor": "1",
-        "recoveredCursor": "1",
-        "recoveredGeneration": 1,
-        "originalDeleteReceiptReplayed": true,
-        "deletedClaimRead": "404"
-      },
-      {
-        "window": "pending-persisted-before-host-ack",
-        "target": "core-api",
-        "repetition": 1,
-        "crash": {
-          "signal": "SIGKILL",
-          "replacedProcess": true
+        {
+          "window": "pending-persisted-before-host-ack",
+          "target": "core-api",
+          "records": 1,
+          "repetitionCount": 1,
+          "uniqueRepetitions": 1,
+          "minRepetition": 1,
+          "maxRepetition": 1
         },
-        "pendingDurableAtCrash": true,
-        "tombstoneDurableAtCrash": false,
-        "eventId": "sse:01a07907-b00a-7816-9e4b-74076ac1ce47",
-        "eventCursor": "2",
-        "recoveredCursor": "2",
-        "recoveredGeneration": 2,
-        "originalDeleteReceiptReplayed": true,
-        "deletedClaimRead": "404"
-      },
-      {
-        "window": "pending-persisted-before-host-ack",
-        "target": "core-worker",
-        "repetition": 1,
-        "crash": {
-          "signal": "SIGKILL",
-          "replacedProcess": true
+        {
+          "window": "pending-persisted-before-host-ack",
+          "target": "core-worker",
+          "records": 1,
+          "repetitionCount": 1,
+          "uniqueRepetitions": 1,
+          "minRepetition": 1,
+          "maxRepetition": 1
         },
-        "pendingDurableAtCrash": true,
-        "tombstoneDurableAtCrash": false,
-        "eventId": "sse:01a07907-b329-724b-bc82-245b5d5e73ed",
-        "eventCursor": "3",
-        "recoveredCursor": "3",
-        "recoveredGeneration": 3,
-        "originalDeleteReceiptReplayed": true,
-        "deletedClaimRead": "404"
-      },
-      {
-        "window": "policy-committed-before-provider-cursor",
-        "target": "bellis-runtime",
-        "repetition": 1,
-        "crash": {
-          "signal": "SIGKILL",
-          "replacedProcess": true
+        {
+          "window": "policy-committed-before-provider-cursor",
+          "target": "bellis-runtime",
+          "records": 1,
+          "repetitionCount": 1,
+          "uniqueRepetitions": 1,
+          "minRepetition": 1,
+          "maxRepetition": 1
         },
-        "pendingDurableAtCrash": true,
-        "tombstoneDurableAtCrash": true,
-        "eventId": "sse:01a07907-b51e-7ada-a552-c29fd65c58b2",
-        "eventCursor": "4",
-        "recoveredCursor": "4",
-        "recoveredGeneration": 4,
-        "originalDeleteReceiptReplayed": true,
-        "deletedClaimRead": "404"
-      },
-      {
-        "window": "policy-committed-before-provider-cursor",
-        "target": "core-api",
-        "repetition": 1,
-        "crash": {
-          "signal": "SIGKILL",
-          "replacedProcess": true
+        {
+          "window": "policy-committed-before-provider-cursor",
+          "target": "core-api",
+          "records": 1,
+          "repetitionCount": 1,
+          "uniqueRepetitions": 1,
+          "minRepetition": 1,
+          "maxRepetition": 1
         },
-        "pendingDurableAtCrash": true,
-        "tombstoneDurableAtCrash": true,
-        "eventId": "sse:01a07907-b804-788f-9c24-b0c578fd65a3",
-        "eventCursor": "5",
-        "recoveredCursor": "5",
-        "recoveredGeneration": 5,
-        "originalDeleteReceiptReplayed": true,
-        "deletedClaimRead": "404"
-      },
-      {
-        "window": "policy-committed-before-provider-cursor",
-        "target": "core-worker",
-        "repetition": 1,
-        "crash": {
-          "signal": "SIGKILL",
-          "replacedProcess": true
-        },
-        "pendingDurableAtCrash": true,
-        "tombstoneDurableAtCrash": true,
-        "eventId": "sse:01a07907-bb36-76f2-84d1-e67c76446c09",
-        "eventCursor": "6",
-        "recoveredCursor": "6",
-        "recoveredGeneration": 6,
-        "originalDeleteReceiptReplayed": true,
-        "deletedClaimRead": "404"
-      }
-    ],
+        {
+          "window": "policy-committed-before-provider-cursor",
+          "target": "core-worker",
+          "records": 1,
+          "repetitionCount": 1,
+          "uniqueRepetitions": 1,
+          "minRepetition": 1,
+          "maxRepetition": 1
+        }
+      ]
+    },
     "scope": "Real Runtime/MemoryHost/DB Worker and installed Core API/Worker SIGKILL recovery of public deletion SSE; no Stage effect crash claim",
     "remaining": [
       "Inside-adoption transaction rollback and complete Stage effect crash coupling",
@@ -625,5 +344,11 @@
   "partialProof": "accepted",
   "duplicateObserve": "accepted",
   "workerStoppedAcceptance": "passed",
-  "scope": "Core API/Worker + real Runtime/MemoryHost/DB Worker; partial SSE crash recovery matrix, remaining windows and Stage effects incomplete"
+  "scope": "Core API/Worker + real Runtime/MemoryHost/DB Worker; partial SSE crash recovery matrix, remaining windows and Stage effects incomplete",
+  "rawReportSource": {
+    "gitRevision": "89ac917daf02f40844e009a5fd7ed3d05cbbacca",
+    "path": "docs/evidence/phase4-history-barrier-recovery-smoke.json",
+    "bytes": 25709,
+    "sha256": "2bc0cf2811f0b5c56a1dc114bbd31916c7cca406d16520f8890dce3cc037092c"
+  }
 }
