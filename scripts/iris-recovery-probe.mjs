@@ -200,25 +200,33 @@ export async function runIrisRecoveryProbe(
         if ((index + 1) % 5 === 0 || repetitions === 1)
           console.info(`iris-recovery: ${window} ${target} ${index + 1}/${repetitions}`);
       }
+  const requiredRepetitions = 20;
+  const coveredWindows = [...cycleRecovery.windows, ...observeRecovery.windows, ...windows];
+  const casesPassed = results.length + cycleRecovery.casesPassed + observeRecovery.casesPassed;
+  const expectedCases = coveredWindows.length * targets.length * repetitions;
+  assert.equal(coveredWindows.length, 8, "Phase 4A recovery scope is frozen at eight windows");
+  assert.deepEqual(cycleRecovery.targets, targets);
+  assert.deepEqual(observeRecovery.targets, targets);
+  const status =
+    casesPassed !== expectedCases
+      ? "incomplete"
+      : repetitions >= requiredRepetitions
+        ? "covered-windows-passed"
+        : "smoke-passed";
   return {
-    status: "incomplete",
-    coveredWindows: windows,
+    status,
+    coveredWindows,
+    sseWindows: windows,
     targets,
     repetitionsPerWindowAndTarget: repetitions,
-    requiredRepetitions: 20,
-    casesPassed: results.length + cycleRecovery.casesPassed + observeRecovery.casesPassed,
+    requiredRepetitions,
+    expectedCases,
+    casesPassed,
     observeRecovery,
     sseCasesPassed: results.length,
     cycleRecovery,
     results,
     scope:
-      "Real Runtime/MemoryHost/DB Worker and installed Core API/Worker SIGKILL recovery of public deletion SSE; no Stage effect crash claim",
-    remaining: [
-      "Inside-adoption transaction rollback and complete Stage effect crash coupling",
-      "effect record/Observe projection transaction before and after commit",
-      "Active Stage output confirmation and effect projection crash coupling",
-      "both-side older snapshots and all cursor divergence cases",
-      "disk/WAL quotas, active-scene reserved capacity and full Runtime/Stage recovery",
-    ],
+      "Phase 4A frozen recovery scope: three Cycle/Usage, three Observation HTTP and two public deletion SSE windows across Runtime, Core API and Core Worker; 20 repetitions per combination. Extended recovery/capacity work belongs to Phase 4B (ADR 0047).",
   };
 }

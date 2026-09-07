@@ -1,6 +1,14 @@
 # Phase 4 实施记录
 
-状态：进行中。此文件记录已运行证据，不是 Phase 4 完成态参考。
+状态：用户指定的 Phase 4A 范围冻结收尾已完成验证；两项命令均退出 0，提交后停止，不自动开始新切片。
+
+## 当前有效的恢复验收范围
+
+[ADR 0047](./adr/0047-phase4a-recovery-scope-freeze.md) 显式冻结 Phase 4A 恢复 Gate 为 8 个窗口 × 3 个目标 × 20 次，冻结时已通过 480/480：Cycle/Usage 180、Observe HTTP 180、SSE 120。顶层 status 改为依据次数和实际/预期用例总数计算。原 remaining 与「仍需完成」条目整体移入 [Phase 4B 待办](./phase-4b-backlog.md)；扩展的恢复、Stage、容量、cursor 场景不再列作 Phase 4A 恢复通过条件。
+
+本次先以 `08bb567` 保存全部工作树 WIP，再修改判定与文档。收尾已运行一次完整根检查和冻结的 480 例恢复命令：`pnpm check` 退出 0（1054 项单元/性质、275 项集成、168 个生成契约），`pnpm test:memory:iris:recovery` 退出 0（24 组合各 20 次，480/480，`covered-windows-passed`）。见 [本次结果](./evidence/phase4a-recovery-scope-freeze.json) 和 [原始恢复报告](./evidence/phase4a-frozen-recovery-raw.json)。全部收尾改动提交后停止。
+
+以下保留冻结前的实施历史和原始证据。其中“完整恢复入口 incomplete/退出 2”及扩展恢复待办属于当时的判定和范围，当前均以 ADR 0047 和上面的冻结范围为准，不构成新的 Phase 4A 前置条件。
 
 实施起点：Bellis `893ab9e635186cddb97eba0f43787f08f118926e`，工作树干净。Iris 起点 HEAD `692de12b4b9a9d8d47ebfdd938ba9622d152f0d9`，已有大量上游未提交收尾修改；累计对 Iris 增量补充可信 CLI 的 actor 身份 ID 输出、原子搜索初始化选项、应用 SSE 读取能力及对应测试/安装说明，保留其他上游改动。实际安装物以 [探针摘要](./evidence/phase4-iris-probe.json) 的 SHA-256 为准。
 

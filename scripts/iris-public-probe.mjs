@@ -574,7 +574,7 @@ try {
       stageRecovery !== undefined
         ? stageRecovery.scope
         : recovery !== undefined
-          ? "Core API/Worker + real Runtime/MemoryHost/DB Worker; partial SSE crash recovery matrix, remaining windows and Stage effects incomplete"
+          ? recovery.scope
           : stageOutput === undefined
             ? "Core API/Worker + installed SDK + Bellis Decision Host/DB Worker; no Stage effect confirmation or A4 crash-matrix evidence"
             : "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence",

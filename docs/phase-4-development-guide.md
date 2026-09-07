@@ -5,7 +5,7 @@
 > 2026-09-06 Iris 接入修订：以 [调研记录](./phase-4-iris-integration-research.md) 和 [ADR 0008](./adr/0008-iris-phase4-integration.md) 为依据，Phase 4 承接现有 Iris Provider 的兼容修复与宿主闭环；来源 hash、真实回写及验收分层以下文为准。
 
 > 文档状态：Phase 4 构建基线（实施中）
-> 阶段状态：实施中；已运行证据与未关闭 Gate 见 [实施记录](./phase-4-implementation-status.md)。
+> 阶段状态：Phase 4A 恢复范围已按用户决定冻结，见 [ADR 0047](./adr/0047-phase4a-recovery-scope-freeze.md)。本次收尾只复验、提交并停止；已运行证据见 [实施记录](./phase-4-implementation-status.md)。
 > 历史起始基线：`e3fc7b4`（Phase 3 已合并）
 > 本次调研基线：Bellis `dc3915e` / Iris `692de12` 的当前工作树，均有未提交收尾修改；A0 重新冻结实施与安装物基线，不将 HEAD 当成全部已验证内容。
 > 上游基线：[Phase 3 完成态参考](./phase-3-reference.md)
@@ -888,7 +888,7 @@ pnpm demo:phase4
 pnpm test:memory:iris          # Provider 契约/真实 Core 公共消费，包含安装物身份检查
 pnpm demo:phase4:iris         # 三轮 Recall/Persona/Usage/确认输出 Observe 闭环
 pnpm test:memory:iris:continuous # 100 Cycle 真实连续纵向及逐轮持久记录审计
-pnpm test:memory:iris:recovery # 双进程崩溃窗口、Cursor/SSE/ACK/隐私失效
+pnpm test:memory:iris:recovery # Phase 4A：冻结的 8 窗口 × 3 目标 × 20 次 = 480 例
 ```
 
 | 验收层         | 运行路径                                                            | 通过条件                                                                                                                            |
@@ -899,15 +899,17 @@ pnpm test:memory:iris:recovery # 双进程崩溃窗口、Cursor/SSE/ACK/隐私�
 | 浏览器         | Chromium 实际音频/字幕 Lane、重连与取消                             | receipt 来自实际应用/渲染；绑定代际、内容摘要及 segment；不以协议 Stage mock 代替真实 Lane；不宣称测得物理扬声器发声                |
 | 更新与隐私     | Persona 发布/state/revoke、Forget、凭据收紧、SSE 断线               | 同快照稳定；state 不翻 Epoch；撤销失败关闭；旧 Block/缓存/迟到结果/历史重投回注=0                                                   |
 | 工具与 Surface | 四类工具的真实 Core 调用                                            | 权限/确认/幂等/修订冲突/取消/未知结果/Legal Hold 正确；每种声称支持的 Surface 模式均有 Proof/Fencing 证据                           |
-| 恢复与容量     | 下列边界分别终止 Bellis 或 Core API/Worker，适用进程/窗口各 ≥20 次  | 已确认 Core Canonical 不丢失；重投重复业务写=0；无虚构观察/自动重播；高水位拒绝新准入，活动 Scene 确认配额可用                      |
+| Phase 4A 恢复 | 冻结的 8 窗口分别终止 Runtime、Core API、Core Worker，每组合 20 次 | 480/480；原有 Canonical/幂等/Manifest/隐私断言全部通过，聚合返回 covered-windows-passed，命令退出 0 |
 
-崩溃窗口至少包括：Manifest 形成/adoption 前、adoption 后/Usage ACK 前、effect record 与 Observe 投影提交前后、Core Observation 提交后/HTTP ACK 前、ACK 返回后/宿主 delivered 前、SSE 失效登记后/刷新完成前。控制故障的可信测试操作者可终止隔离进程；普通 Bellis 客户端始终只走公开接口。
+根据用户明确决定及 [ADR 0047](./adr/0047-phase4a-recovery-scope-freeze.md)，Phase 4A 恢复范围在已通过 480/480 时显式冻结：
 
-真实 Stage 的效果事务恢复专项入口为 `test:memory:iris:stage-recovery`，通过正常 Worklet/Control 确认链路到达事务检查点，详见 [ADR 0046](./adr/0046-phase4-stage-effect-crash-recovery.md)。此专项的 Runtime 窗口不替代 Core 进程组合、活动 Stage 的 HTTP ACK 窗口或容量验收。
+- Cycle/Usage 三窗口：Manifest 形成/adoption 前、adoption 后/Usage ACK 前、Usage ACK 后/宿主 delivered 前，共 180 例。
+- Observe 三窗口：Observe 已持久化/HTTP 发布前、Core 已提交/ACK 未转发、SDK 已确认/宿主 delivered 前，共 180 例。
+- SSE 两窗口：pending-persisted-before-host-ack、policy-committed-before-provider-cursor，共 120 例。
 
-活动 Stage 的 HTTP/SDK ACK 窗口另用 `test:memory:iris:stage-observe-recovery`：比较已提交效果、宿主 in-flight、Provider 持久 ACK 与公共 Core sourceCursor，按原 Session/receipt/Observe 身份恢复。该命令仅验收 Runtime 进程窗口，Core 进程组合与容量 Gate 保持独立。
+每个窗口均覆盖 Runtime、Core API、Core Worker，重复次数保持 20，现有断言和组合不变。顶层按实际用例数、预期用例数和 requiredRepetitions 计算状态；断言失败仍退出 1，缺 Core 安装仍退出 2 并报告 NOT RUN。对每个窗口保留“未发生 / 已持久化 / 结果未知”的不同期望。
 
-对每个窗口记录“未发生 / 已持久化 / 结果未知”的不同期望，不把 ACK 之前的请求都归为未写。额外覆盖：Core Worker 单独停机、ACK 丢包、两端任一旧快照恢复、remote cursor 领先/落后/null、乱序/重复确认、删除后历史重投、请求超时后的迟到响应、shutdown 时在途刷新与 Claim。独立 `test:memory:iris:snapshots` 覆盖 Core 真实签名备份冷恢复的缺失锚点、复用游标，Bellis 删除前完整目录回退，以及三个 Observe 交付阶段的旧快照回退，范围见 [ADR 0045](./adr/0045-phase4-core-snapshot-restore.md)，不替代完整恢复矩阵。最终公开读取证据无法覆盖的行为注明证据缺口，不能改用宿主访问 Core 数据库后宣称黑盒通过。
+原剩余项整体归入 [Phase 4B 待办](./phase-4b-backlog.md)：采用事务内部中断、Stage 效果耦合和新增组合、效果/Observe 投影事务前后、旧快照与 cursor 扩展、磁盘/WAL 配额与活动 Scene 预留及扩展恢复。既有 Stage 与快照专项证据继续保留；这些扩展不再是 Phase 4A 恢复通过条件，也不能通过自动添加待办扩大这 480 例的验收范围。本文其他章节提及的扩展恢复/容量目标按该归属解释；Phase 4B 未完成不使已通过的 Phase 4A 恢复 Gate 失败。
 
 A4 交付接入配置样例（仅凭据引用）、兼容矩阵、运行/重启/对账/停用说明和原始验收摘要；配置关停 Iris 时停止新查询及投递，但保留 pending/删除账本供恢复。需要回退二进制时先验证 Manifest/Outbox Migration 读兼容，不回改历史 checksum，也不通过恢复旧缓存复活删除内容。
 

@@ -1,16 +1,20 @@
 # Phase 4 真实进程恢复验收
 
-恢复入口为 `pnpm test:memory:iris:recovery`。当前实现 Manifest/adoption/Usage 三个窗口、Observation HTTP 三个窗口和公共删除 SSE 两个窗口；完整开发指南 §11.5 的恢复与容量矩阵尚未完成，因此即使已覆盖用例全部通过，入口仍报告 `incomplete` 并退出 2。断言失败退出 1；缺少 Core 安装路径也退出 2，但明确报告 `NOT RUN`。
+恢复入口为 `pnpm test:memory:iris:recovery`。根据用户明确要求及 [ADR 0047](./adr/0047-phase4a-recovery-scope-freeze.md)，Phase 4A 恢复范围显式冻结为下表 8 个窗口 × 3 个目标 × 20 次，冻结时已通过 480/480。现有用例、断言和重复次数均不减少。
 
-真实 Stage 效果事务另有 `pnpm test:memory:iris:stage-recovery` 专项，使用 Chromium Worklet 发出的真实回执，在确认事务提交前及提交后尚未回复 Stage 时终止 Runtime。执行方法和与本矩阵的范围区别见 [ADR 0046](./adr/0046-phase4-stage-effect-crash-recovery.md)。
+顶层比较实际 casesPassed 与窗口数 × 目标数 × repetitions，并要求 repetitions 达到 requiredRepetitions=20，满足时返回 covered-windows-passed、命令退出 0。完整执行但次数不足仅报告 smoke-passed，不作为正式 Gate 证据；计数不符为 incomplete。断言失败仍退出 1；缺少 Core 安装路径仍退出 2 并明确报告 NOT RUN。
 
-活动 Stage 的 Observe 发送前、Core 响应交给 SDK 前、SDK ACK 后/宿主结算前三个窗口使用 `pnpm test:memory:iris:stage-observe-recovery`，每窗口 20 次。它保持第一段效果已提交，验证不同 ACK 状态下的原键恢复；与事务回滚窗口分开记录。
+Stage 事务、活动 Stage 的额外 HTTP/SDK ACK 组合、容量及 cursor 扩展归 [Phase 4B 待办](./phase-4b-backlog.md)。它们不再控制这个 Phase 4A 命令的成功状态，本次收尾不继续运行新专项。
 
 ```sh
 IRIS_CORE_PYTHON=/absolute/isolated-venv/bin/python \
 IRIS_PROBE_REPORT=/absolute/output/phase4-recovery-core-probe.json \
 pnpm test:memory:iris:recovery
 ```
+
+## 冻结后的本次验证
+
+完整 `pnpm check` 与 `pnpm test:memory:iris:recovery` 均退出 0。恢复报告为 `covered-windows-passed`，实际/预期均为 480，24 个窗口/目标组合各保留 repetition 1–20。见 [收尾摘要](./evidence/phase4a-recovery-scope-freeze.json) 和 [原始报告](./evidence/phase4a-frozen-recovery-raw.json)。本次验证后提交并停止，不启动 Phase 4B。
 
 ## 已接入的矩阵
 
@@ -64,21 +68,21 @@ Runtime 重启时必须从原 Outbox 重发完全相同的 HTTP 正文摘要和�
 
 每个用例使用新的宿主目录。Core 保持同一个数据库，因此后续宿主必须先消费之前的公共失效事件，再冻结本用例 Context；不会写入伪造游标以跳过历史。测试操作者不打开或查询 Core 数据库，只有 Core 自身 CLI/API/Worker 使用它。
 
-## 仍需完成
+## 已迁入 Phase 4B 的待办
 
-采用事务内部中断、效果记录/Observe 投影事务前后、全部旧快照组合与 cursor 偏差、磁盘/WAL 配额与活动 Scene 预留、Stage 效果恢复均未由本矩阵证明。两端旧快照与 Observe 的六个独立场景见下节，不补足整个矩阵。当前没有启动浏览器 Scene，不能把它当成演出崩溃恢复验收。
+原「仍需完成」一节与聚合返回值中的 remaining 数组已整体移到 [Phase 4B 待办](./phase-4b-backlog.md)，保留全部条目及已有专项证据。这是显式范围冻结，不是把未完成的扩展改记为通过。Phase 4A 的恢复通过条件仅为本页八窗口的 480/480。
 
 二十四组合各一次的 `node scripts/iris-public-probe.mjs --recovery --recovery-smoke` 仅用于调试；报告保留实际次数 1，不能算作 20 次要求通过。
 
-## 当前运行
+## 冻结前历史运行
 
 十五组合各 20 次、共 300 次联合矩阵已通过：新增采用/Usage 180 次，SSE 回归 120 次。160 个采用路径保留原 Manifest 摘要；20 个采用前 Runtime 崩溃用例保留原候选缺席，并从未消费输入形成新 Cycle；40 个采用后 Runtime 重启用例没有再次请求模型。180 个 Core Usage report ID 各自唯一，重复请求均得到原 report ID。
 
-恢复 Gate 仍为 incomplete，退出 2。见 [本轮摘要](./evidence/phase4-cycle-recovery-probe.json) 和 [逐次原始报告](./evidence/phase4-cycle-recovery-core-probe.json)。历史 [SSE 摘要](./evidence/phase4-recovery-probe.json) 保持原样。
+当时聚合写死 incomplete，退出 2；当前判定已由 ADR 0047 修正。见 [本轮摘要](./evidence/phase4-cycle-recovery-probe.json) 和 [逐次原始报告](./evidence/phase4-cycle-recovery-core-probe.json)。历史 [SSE 摘要](./evidence/phase4-recovery-probe.json) 保持原样。
 
 本轮二十四组合各 20 次、共 480 次联合矩阵已通过：Observation HTTP 新增 180 次，采用/Usage 180 次与 SSE 120 次回归通过。180 个独立事实保持 180 个 Canonical Observation ID；60 个 Core 已提交/HTTP ACK 未转发用例完成原键恢复。240 次实际 Observe 请求的正文摘要和批次键一致性均核验，记录级去重没有新增事实或投影任务。
 
-见 [480 次摘要](./evidence/phase4-observe-recovery-probe.json) 和 [逐次原始报告](./evidence/phase4-observe-recovery-core-probe.json)。入口仍为 incomplete/退出 2，剩余项目见上节。
+见 [480 次摘要](./evidence/phase4-observe-recovery-probe.json) 和 [逐次原始报告](./evidence/phase4-observe-recovery-core-probe.json)。该原始报告保留冻结前的 incomplete/退出 2；剩余项目现归 Phase 4B。
 
 ## 确认事务与收尾余额的新增本地窗口
 
@@ -104,18 +108,18 @@ Bellis 场景另验证一个关闭后的完整旧目录：Core 已删除 Claim�
 
 Observe 另覆盖发布前、Core 已提交/ACK 未转发、SDK ACK/host delivered 前三个冷快照。子进程退出后复制含 WAL 的完整目录，先恢复到 delivered，再关闭并回退到较旧快照；Core 保持 cursor=1。再次恢复沿用原 HTTP 正文摘要、批次键和事件身份，记录级去重仍只有一个 Canonical Observation，最终 host delivered=1、Provider/Core cursor=1。
 
-这证明六条明确路径，不代表全部旧快照组合、删除后 Observation 重投、Core 离线回退、最新删除账本合并、目录切换中断、全部游标偏差、缺口安全解除或完整 A4 恢复矩阵。
+这证明六条明确路径，不代表全部旧快照组合、删除后 Observation 重投、Core 离线回退、最新删除账本合并、目录切换中断、全部游标偏差、缺口安全解除或 Phase 4B 的扩展恢复范围。
 
 
-## 当前 SDK 的完整已实现窗口回归
+## 冻结前当前 SDK 的 480 例证据
 
 SDK 0.11.2 和固定 Schema 20 wheel 的本轮回归通过 480 个既有用例：采用/Usage 180、Observation HTTP 180、SSE 120；逐组合核对 repetition 1–20，没有用冒烟次数替代。原报告内 180 个 Usage report ID、180 个 Canonical Observation ID 各自唯一；240 次 Observe HTTP 尝试保持原正文/批次键，记录级重复写入为 0。120 项删除读取均为公开 404。
 
-这替代当前安装物只有 24 次冒烟的证据缺口，但不改变完整恢复入口 incomplete/退出 2。六个快照场景在独立最终命令中各一次通过，不能与这些窗口相加冒称新的完整矩阵。见 [本轮摘要](./evidence/phase4-observe-snapshot-restore-probe.json)、[480 次原始报告](./evidence/phase4-installed-sdk-full-recovery-raw.json) 和 [六场景原始报告](./evidence/phase4-observe-snapshot-restore-raw.json)。
+这替代当前安装物只有 24 次冒烟的证据缺口，冻结前入口仍写死 incomplete/退出 2；该判定已由 ADR 0047 修正。六个快照场景在独立最终命令中各一次通过，不能与这些窗口相加冒称新的完整矩阵。见 [本轮摘要](./evidence/phase4-observe-snapshot-restore-probe.json)、[480 次原始报告](./evidence/phase4-installed-sdk-full-recovery-raw.json) 和 [六场景原始报告](./evidence/phase4-observe-snapshot-restore-raw.json)。
 
 
 ## 真实 Stage 效果事务专项
 
 `pnpm test:memory:iris:stage-recovery` 已在固定 SDK 0.11.2/Schema 20 Core 上退出 0：实际 Chromium Worklet 回执触发确认事务，在 COMMIT 前与 COMMIT 后/Stage ACK 前各终止 Runtime 20 次，共 40 次。前者不留下确认或观察；后者保持原 receipt、Manifest、Observe/Outbox 身份，Core 只保留一个 Canonical ID。所有用例恢复后释放剩余预留、不重播旧 Scene，下一轮上下文没有未确认后半段。详见 [ADR 0046](./adr/0046-phase4-stage-effect-crash-recovery.md)、[摘要](./evidence/phase4-stage-effect-recovery-probe.json) 和 [原始结果](./evidence/phase4-stage-effect-recovery-raw.json)。
 
-该专项没有终止 Core API/Worker，也未覆盖活动 Stage 的 HTTP ACK 窗口及磁盘压力；不能把它与此前 480 个输入/Cycle/SSE 用例相加当成完整矩阵。完整恢复入口仍为 incomplete/退出 2。
+该专项没有终止 Core API/Worker，也未覆盖活动 Stage 的 HTTP ACK 窗口及磁盘压力；不能把它与此前 480 个输入/Cycle/SSE 用例相加当成完整矩阵。本专项及其剩余组合归 Phase 4B，不再阻止冻结的 Phase 4A 恢复 Gate。

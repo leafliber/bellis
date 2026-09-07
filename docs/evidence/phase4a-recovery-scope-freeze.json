@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-07T04:40:04.314201+00:00",
+  "status": "passed",
+  "decision": "ADR 0047: explicit Phase 4A recovery scope freeze; 480/480 already passed at freeze",
+  "wipCommit": "08bb567",
+  "rootCheck": {
+    "command": "pnpm check",
+    "exitCode": 0,
+    "unitAndPropertyTests": 1054,
+    "integrationTests": 275,
+    "generatedContracts": 168
+  },
+  "recovery": {
+    "command": "IRIS_CORE_PYTHON=<verified isolated installation> IRIS_PROBE_REPORT=<output> pnpm test:memory:iris:recovery",
+    "exitCode": 0,
+    "status": "covered-windows-passed",
+    "windows": 8,
+    "targets": 3,
+    "combinations": 24,
+    "repetitionsPerCombination": 20,
+    "expectedCases": 480,
+    "casesPassed": 480,
+    "cycleUsage": 180,
+    "observeHttp": 180,
+    "sse": 120
+  },
+  "installation": {
+    "coreVersion": "0.13.0",
+    "schemaVersion": 20,
+    "coreWheelSha256": "2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f",
+    "installedCoreFilesVerified": 178,
+    "sdkVersion": "0.11.2",
+    "sdkTarballSha256": "d54d3b5545956f45f9f146a40cde95cfbdbe588c0cc4b976bdd15d1e6573ea71",
+    "installedSdkFilesVerified": 4
+  },
+  "rawReport": {
+    "path": "docs/evidence/phase4a-frozen-recovery-raw.json",
+    "sha256": "580ec14a5c0f99a824aed6c78f730c6b8a02447de5daf4c90307d70171988336"
+  },
+  "logs": {
+    "/tmp/bellis-phase4a-freeze-check.log": "4e1a24fdee8870055c64a9a46c443905de7ea372e787f8f5319ba1678c343495",
+    "/tmp/bellis-phase4a-freeze-recovery.log": "2ea4af44d0f2fd6dfba427f309af95ba0ca196dd7e1cce1ca42603851924ad18"
+  },
+  "sourceSha256": {
+    "scripts/iris-recovery-probe.mjs": "55b9ed9bbccda9540540bf16c7aa7142b285139f976ac2307bad420776aeef9d",
+    "scripts/iris-public-probe.mjs": "3cc63301f06fb0cdd930a6559a5462d8b63970c9141c3a056d228f96830edf9c",
+    "scripts/iris-cycle-recovery-probe.mjs": "be56ba923d4ebe0ea155fa150b9063ec53ee7cc39a3242904dee8d3383081efa",
+    "scripts/iris-observe-recovery-probe.mjs": "0cd6c011129442f4830934c037abd5369cec210689a2b1d281b46fd875c6e223",
+    "scripts/iris-recovery-child.mjs": "01b56e68474778c9b7dafff2351a8c7e8aa1ec9e7048771ffd42c9f3da1103af",
+    "package.json": "31e95450c762e895b2867589b0cf110711958ad8cb2e626530f44012aba5a8ba"
+  },
+  "stopCondition": "Both requested commands passed; commit all closure work and stop. Phase 4B is not started."
+}
