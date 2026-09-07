@@ -22,11 +22,11 @@ SQLite 的 [commit hook](https://www.sqlite.org/c3ref/commit_hook.html) 可以�
 
 ## 构建与验证范围
 
-`pnpm build` 使用 C 编译器构建包内扩展。SQLite 官方公开头文件已随源代码固定，构建不联网；输出与源码/头文件/平台/架构摘要写入 dist。Windows CI 增加 MSVC 环境配置，macOS 使用系统 cc。原生代码、ABI 要求及头文件来源见 [native README](../../packages/persistence/native/README.md)。Windows 实际结果仍须以远端工作流为准。
+`pnpm build` 使用 C 编译器构建包内扩展。SQLite 官方公开头文件已随源代码固定，构建不联网；输出与源码/头文件/平台/架构摘要写入 dist。Windows CI 增加 MSVC 环境配置，macOS 使用系统 cc。原生代码、ABI 要求及头文件来源见 [native README](../../../../packages/persistence/native/README.md)。Windows 实际结果仍须以远端工作流为准。
 
 真实 SQLite 测试在一个事务中反复改写约 100 MB 的逻辑数据，验证提交前 WAL 文件不增长，提交增量落在预算以内。超预算自动提交、显式事务和 SAVEPOINT 提交都回滚，原行/revision 保留，后续小写入和重启仍可成功。两个数据库均覆盖，并以不同预算的并存连接验证隔离。既有页限制与旧快照拦截测试继续回归。
 
-本轮根检查 1035 项单元/性质测试、240 项集成测试通过，补充的中断/RETURNING 断言经专项复验。Provider 80 项、真实 Core/Chromium 及 24 次恢复冒烟通过；完整恢复 Gate 保持未完成。见 [本轮证据](../evidence/phase4-transaction-capacity-probe.json)。
+本轮根检查 1035 项单元/性质测试、240 项集成测试通过，补充的中断/RETURNING 断言经专项复验。Provider 80 项、真实 Core/Chromium 及 24 次恢复冒烟通过；完整恢复 Gate 保持未完成。见 [本轮证据](../../../evidence/phase4-transaction-capacity-probe.json)。
 
 ## 仍须完成
 

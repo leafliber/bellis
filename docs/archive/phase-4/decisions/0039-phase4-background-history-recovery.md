@@ -12,4 +12,4 @@ ADR 0038 已支持发现原 runId，但仍需调用者逐次执行 `resume()`。
 
 该入口提供受控后台维护服务；生产启动器仍需显式选择维护装配，普通 Runtime 的失败启动语义保持。自动进入运行期/启动期恢复模式、其他事实核验、旧策略请求再授权、跨批次一致性和原子解除仍待完成。任何 incomplete 或 lastResult 都不恢复记忆读取、投递或事件游标。
 
-九项 Runtime 专项通过；最终根检查日志记录 1049 项单元/性质测试、269 项集成测试通过，168 个生成契约无漂移。真实 Core/Chromium 验证后台轮询只核验一次，后续轮次与 Worker 重启复用持久结果；工具及既有 24 组恢复冒烟通过，完整恢复入口保持退出 2。见 [本轮证据](../evidence/phase4-background-history-recovery-probe.json)。
+九项 Runtime 专项通过；最终根检查日志记录 1049 项单元/性质测试、269 项集成测试通过，168 个生成契约无漂移。真实 Core/Chromium 验证后台轮询只核验一次，后续轮次与 Worker 重启复用持久结果；工具及既有 24 组恢复冒烟通过，完整恢复入口保持退出 2。见 [本轮证据](../../../evidence/phase4-background-history-recovery-probe.json)。

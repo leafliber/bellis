@@ -20,8 +20,8 @@ Bellis 现将 `eventId` 与 `eventCursor` 同一状态写入，并校验两者�
 
 后续仍须在协商成功后携带二者；遇到 410 时先封锁旧 Context、人格兜底和历史交付，再通过公开资源读取建立全量重验流程，不能直接跳到新游标。本 ADR 初始验收时默认 Provider 使用 SDK 0.11.1；SDK 0.11.2 的本地 registry 发布被自动审批拒绝，正在等待明确授权。隔离候选消费者已从本地 tarball 安装 0.11.2 并验证真实校验头，但未替换正式依赖。
 
-候选 Core wheel 包含当前工作树的 Migration 16–18。已审查新增 Console 删除预览、实体删除账本和 State 删除代际并通过相关 32 项测试；应用 OpenAPI 仅 `/v1/events` 不同，组件定义一致。探针为 SHA `65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9` 单独接受 Schema 18，不放宽默认 Provider 的 Schema 上限。安装文件核验和候选真实 HTTP/Chromium 结果见 [身份持久化与候选证据](../evidence/phase4-event-identity-probe.json)。
+候选 Core wheel 包含当前工作树的 Migration 16–18。已审查新增 Console 删除预览、实体删除账本和 State 删除代际并通过相关 32 项测试；应用 OpenAPI 仅 `/v1/events` 不同，组件定义一致。探针为 SHA `65169f6067debfcf676f542bfc73e2054a28c7a33350d2aa97d567caed420ab9` 单独接受 Schema 18，不放宽默认 Provider 的 Schema 上限。安装文件核验和候选真实 HTTP/Chromium 结果见 [身份持久化与候选证据](../../../evidence/phase4-event-identity-probe.json)。
 
-Core/SDK 契约测试、生成物及公开清单摘要见 [校验证据](../evidence/phase4-event-checkpoint-contract-probe.json)。完整 A3 历史缺口、旧快照恢复及 Phase 4 Gate 继续保持未完成。
+Core/SDK 契约测试、生成物及公开清单摘要见 [校验证据](../../../evidence/phase4-event-checkpoint-contract-probe.json)。完整 A3 历史缺口、旧快照恢复及 Phase 4 Gate 继续保持未完成。
 
-后续：[ADR 0044](./0044-phase4-installed-checkpoint-sdk.md) 已将同一不可变 SDK 压缩包纳入正式相对路径安装，补齐 Provider 检查点请求，并移除独立探针注入。此前 registry 发布未执行。
+后续：[ADR 0044](../../../adr/0044-phase4-installed-checkpoint-sdk.md) 已将同一不可变 SDK 压缩包纳入正式相对路径安装，补齐 Provider 检查点请求，并移除独立探针注入。此前 registry 发布未执行。

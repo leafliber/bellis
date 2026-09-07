@@ -72,7 +72,7 @@ Runtime 重启时必须从原 Outbox 重发完全相同的 HTTP 正文摘要和�
 
 原「仍需完成」一节与聚合返回值中的 remaining 数组已整体移到 [Phase 4B 待办](./phase-4b-backlog.md)，保留全部条目及已有专项证据。这是显式范围冻结，不是把未完成的扩展改记为通过。Phase 4A 的恢复通过条件仅为本页八窗口的 480/480。
 
-二十四组合各一次的 `node scripts/iris-public-probe.mjs --recovery --recovery-smoke` 仅用于调试；报告保留实际次数 1，不能算作 20 次要求通过。
+二十四组合各一次的 `node scripts/iris/iris-public-probe.mjs --recovery --recovery-smoke` 仅用于调试；报告保留实际次数 1，不能算作 20 次要求通过。
 
 ## 冻结前历史运行
 
@@ -88,7 +88,7 @@ Runtime 重启时必须从原 Outbox 重发完全相同的 HTTP 正文摘要和�
 
 Migration 16 的确认提交新增两个受控窗口：全部确认/Observe/余额写入后、COMMIT 前，以及 COMMIT 后、Client ACK 前。根检查中的 `completion-crash.integration.test.ts` 为每个窗口运行 20 次真实 SIGKILL，共 40 个不同子进程；先使旧快照阻塞 WAL 回收，确认后台写入已停止，再执行受预留保护的确认。提交前不留下回执/观察，提交后保留原身份并按 duplicate 重放，重启释放旧演出的未用额度。
 
-这些是本地 DB Worker/宿主子进程的事务案例，与历史 480 个 Core 联合恢复案例作用域和源码版本不同，不相加宣称完整矩阵通过。真实 Stage 播放、操作系统空间耗尽、旧备份及全部进程组合仍须验证。预算与证据入口见 [ADR 0028](./adr/0028-phase4-completion-reservations.md)。
+这些是本地 DB Worker/宿主子进程的事务案例，与历史 480 个 Core 联合恢复案例作用域和源码版本不同，不相加宣称完整矩阵通过。真实 Stage 播放、操作系统空间耗尽、旧备份及全部进程组合仍须验证。预算与证据入口见 [ADR 0028](./archive/phase-4/decisions/0028-phase4-completion-reservations.md)。
 
 外部快照跨重启的专项覆盖四个已接纳 Scene：快照持续持有旧视图时，用原关闭额度释放准备记录，保留四条已确认事实及原 Outbox；第二次重启没有新增 WAL 写入，新准入仍被拦截，释放快照后按分区顺序交付。另一用例保留真实 in-flight Lease，确认受阻的恢复明确失败、不开放业务操作，释放快照后可在同一 Client 重试。隐私关闭也在原事务释放额度。这两个用例是持续外部读者与 Worker 重启验证，不增加 SIGKILL 窗口计数。
 

@@ -127,12 +127,24 @@ IRIS_CORE_PYTHON=/absolute/isolated-venv/bin/python pnpm test:memory:iris:invali
 
 显式空间范围及启动期 Session 归属见 [ADR 0023](./adr/0023-phase4-explicit-memory-scope.md)。`RuntimeOptions.memory.scope` 必须明确为 `{ kind: "space", acknowledgeCrossSession: true }`；缺失配置、未核验的 Core Session/group、恢复目标不兼容都不能静默回退。Core Session 映射仍未实现，验证记录见 [本轮证据](./evidence/phase4-explicit-scope-probe.json)。
 
-磁盘高水位准入见 [ADR 0024](./adr/0024-phase4-disk-admission.md)：默认 `persistence.highWaterBytes=536870912`、`completionHeadroomBytes=167772160`；`readDiskStatus()` 读取 SQLite/WAL 实际占用，高水位时 ready 返回 503。真实 DB/WAL 压力测试验证已有确认与 Outbox 保留；硬配额及最坏预留 Gate 尚未关闭，见 [证据](./evidence/phase4-disk-admission-probe.json)。
+磁盘高水位准入见 [ADR 0024](./archive/phase-4/decisions/0024-phase4-disk-admission.md)：默认 `persistence.highWaterBytes=536870912`、`completionHeadroomBytes=167772160`；`readDiskStatus()` 读取 SQLite/WAL 实际占用，高水位时 ready 返回 503。真实 DB/WAL 压力测试验证已有确认与 Outbox 保留；硬配额及最坏预留 Gate 尚未关闭，见 [证据](./evidence/phase4-disk-admission-probe.json)。
 
-数据库页限制见 [ADR 0025](./adr/0025-phase4-database-page-limits.md)：默认 `persistence.stateMaxBytes=1073741824`、`telemetryMaxBytes=67108864`，用 SQLite max_page_count 对所有 Worker 写入生效。空间耗尽保留原事实并返回稳定容量错误；重启预算不足拒绝打开。WAL 总量与确认预留不是本限制的覆盖范围。
+数据库页限制见 [ADR 0025](./archive/phase-4/decisions/0025-phase4-database-page-limits.md)：默认 `persistence.stateMaxBytes=1073741824`、`telemetryMaxBytes=67108864`，用 SQLite max_page_count 对所有 Worker 写入生效。空间耗尽保留原事实并返回稳定容量错误；重启预算不足拒绝打开。WAL 总量与确认预留不是本限制的覆盖范围。
 
-WAL 写入拦截见 [ADR 0026](./adr/0026-phase4-wal-write-fence.md)：`persistence.walHighWaterBytes` 默认 67108864，分别作用于两个数据库。检查点受旧快照阻塞时暂停后续实际写事务，后台写入也受约束；`wal_pressure` 令 ready 返回 503。释放快照后读取状态可触发检查点并恢复。单事务超调及确认专用预留仍未完成。
+WAL 写入拦截见 [ADR 0026](./archive/phase-4/decisions/0026-phase4-wal-write-fence.md)：`persistence.walHighWaterBytes` 默认 67108864，分别作用于两个数据库。检查点受旧快照阻塞时暂停后续实际写事务，后台写入也受约束；`wal_pressure` 令 ready 返回 503。释放快照后读取状态可触发检查点并恢复。单事务超调及确认专用预留仍未完成。
 
-事务缓存约束见 [ADR 0027](./adr/0027-phase4-transaction-capacity.md)：`persistence.transactionCacheMaxBytes` 默认 8388608，范围 4–64 MiB。关闭 cache spill 后，由连接级原生 SQLite 提交检查拒绝超预算事务。`pnpm build` 新增本地 C 编译步骤；macOS/Linux 需要 cc，Windows 需要 Visual Studio Developer 环境中的 cl.exe，CI 已增加该环境配置。头文件固定在仓库内，构建不联网，包发布产物须保留 `dist/native`。
+事务缓存约束见 [ADR 0027](./archive/phase-4/decisions/0027-phase4-transaction-capacity.md)：`persistence.transactionCacheMaxBytes` 默认 8388608，范围 4–64 MiB。关闭 cache spill 后，由连接级原生 SQLite 提交检查拒绝超预算事务。`pnpm build` 新增本地 C 编译步骤；macOS/Linux 需要 cc，Windows 需要 Visual Studio Developer 环境中的 cl.exe，CI 已增加该环境配置。头文件固定在仓库内，构建不联网，包发布产物须保留 `dist/native`。
 
-收尾预留见 [ADR 0028](./adr/0028-phase4-completion-reservations.md)：Migration 16 随准备/确认/关闭持久维护余额，普通 state/telemetry 写入必须留下该额度。默认 4 KiB 页下绑定/确认/关闭分别使用 512 KiB、2 MiB、512 KiB 的原生事务预算，较大页同比放大。`pnpm check` 新增两个窗口各 20 次真实 SIGKILL 的确认事务恢复测试；这不等于全部 Core/Stage/真实磁盘耗尽矩阵完成。
+收尾预留见 [ADR 0028](./archive/phase-4/decisions/0028-phase4-completion-reservations.md)：Migration 16 随准备/确认/关闭持久维护余额，普通 state/telemetry 写入必须留下该额度。默认 4 KiB 页下绑定/确认/关闭分别使用 512 KiB、2 MiB、512 KiB 的原生事务预算，较大页同比放大。`pnpm check` 新增两个窗口各 20 次真实 SIGKILL 的确认事务恢复测试；这不等于全部 Core/Stage/真实磁盘耗尽矩阵完成。
+
+## 脚本与证据维护
+
+Iris 验收 harness 位于 `scripts/iris/`，Demo 与 Stage 测试宿主位于 `scripts/demos/`；公开 pnpm 命令不变。`pnpm check` 先运行 `evidence:check` 和 `test:scripts`，检查摘要预算、生成文件归属与 harness 单元测试。逐次报告保存在被忽略的 `artifacts/evidence/`，CI 另上传它及 Playwright 诊断，保留 14 天；这不增加默认 CI 的真实 Core 覆盖。详见 [证据规则](./evidence/README.md) 与 [脚本索引](../scripts/README.md)。
+
+## 提交粒度与远程保存
+
+一个可独立验证、可回滚的切片形成一个提交，提交信息说明行为变化；目录迁移、产物治理和文档整理尽量分别提交。验证结果写入提交说明或 PR，同主题证据按上述规则更新。不要等整阶段结束才集中提交所有工作，也不要为凑次数提交无法构建的中间状态。
+
+对于已授权提交和推送的任务，在切片验证通过及暂停长时间工作前保存提交并推送目标分支；检查上游指向同名远程分支，并核对远程 SHA。工作区改动不包含在 `git push` 中，只有本地提交也不等于已有远程备份。更新 main 前确认仅需快进；删除旧分支前核对 worktree 占用、祖先关系，squash 合并还要核对 PR 的 head SHA、合并提交及完整文件树。
+
+大型历史提交可以事后按逻辑拆解用于审阅，但不能据此重建当时不存在的逐步验证和时间顺序；未经明确要求不重写已共享历史。后续从有界、可验证的新提交开始改善粒度。

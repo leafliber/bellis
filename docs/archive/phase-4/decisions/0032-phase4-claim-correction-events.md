@@ -10,6 +10,6 @@ retract 会使引用链失去证据。该事务中产生的下游 Claim 和 Rela
 
 最终候选 Core 0.13.0 wheel SHA 为 `8b03aa2b65a98ddcaf3c5044d2ae2f9ad45a6094c2b5263171915c376e780646`，Schema 19，170 个安装文件核验。相对上一候选 Schema 18，Migration 19 只增加任务删除查询索引，应用 OpenAPI 全文一致。探针按精确 hash 单独接纳，默认 Provider 的 Schema 上限和 SDK 0.11.1 依赖保持现有配置；SDK 0.11.2 候选仅在隔离检查点探针使用。
 
-真实安装测试停止 Core Worker 后调用公开 Correct，将茶偏好从修订 1 改为修订 2。Bellis 在 Worker 重启之前收到通知、取消原 Context 并持久保存截止修订 1；原键重放只有一个事件。Worker 恢复投影后，新的 Context 实际包含修订 2 和新文本，排除旧修订。Bellis DB Worker 再启动仍保留策略和检查点。联合删除、410 缺口屏障/范围清单、检查点身份及 Chromium 三轮输出回归通过。证据见 [纠正事件验证](../evidence/phase4-claim-correction-probe.json)。
+真实安装测试停止 Core Worker 后调用公开 Correct，将茶偏好从修订 1 改为修订 2。Bellis 在 Worker 重启之前收到通知、取消原 Context 并持久保存截止修订 1；原键重放只有一个事件。Worker 恢复投影后，新的 Context 实际包含修订 2 和新文本，排除旧修订。Bellis DB Worker 再启动仍保留策略和检查点。联合删除、410 缺口屏障/范围清单、检查点身份及 Chromium 三轮输出回归通过。证据见 [纠正事件验证](../../../evidence/phase4-claim-correction-probe.json)。
 
 这证明公开 Claim Correct 及其 Canonical 撤回级联的通知闭环，不证明所有 Claim 写入路径、其他资源的普通修改、实际旧备份恢复或全量公共重验。清单逐项权威结论、远端一致性和安全解除仍按 ADR 0031 继续实施；完整 A4 恢复、容量、生产授权与 Phase4B Gate 保持开放。

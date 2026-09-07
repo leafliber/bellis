@@ -14,4 +14,4 @@ ADR 0034 的公开接口返回某一读取快照、某一时刻的 Recall 结论
 
 验证覆盖真实 DB Worker 重启、原批次重试、valid/unavailable/未核验的区分、部分插入失败、损坏摘要/成员、清单与策略变化，以及公开 Core 响应落盘和再次重启读取。完整 Phase 4 Gate 继续开放。
 
-最终根检查通过 1043 项单元/性质测试与 260 项集成测试，164 个生成契约无漂移；其中新增四项真实 Worker 集成测试。最终构建的 Core/Chromium 联合回归退出 0，工具及既有 24 组恢复冒烟通过，完整恢复入口继续退出 2。见 [本轮证据](../evidence/phase4-history-verification-probe.json)。
+最终根检查通过 1043 项单元/性质测试与 260 项集成测试，164 个生成契约无漂移；其中新增四项真实 Worker 集成测试。最终构建的 Core/Chromium 联合回归退出 0，工具及既有 24 组恢复冒烟通过，完整恢复入口继续退出 2。见 [本轮证据](../../../evidence/phase4-history-verification-probe.json)。

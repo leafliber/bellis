@@ -46,6 +46,6 @@ Migration 16 增加 `phase4_completion_reservations`，与 EffectPreparation 同
 
 本轮预算不等于向操作系统预分配独占磁盘块。其他进程抢占空闲空间、文件系统元数据与特殊分配粒度、真实 ENOSPC、旧备份及完整容量矩阵仍需验证。外部读者跨重启已覆盖四 Scene 关闭、无额外写入的重复重启，以及 in-flight 恢复受阻后重试；这不证明旧备份或所有进程组合。预算计算和最大形状测试不能替代这些 Gate；新确认事务的 40 个本地崩溃案例也不能替代真实 Core/Stage 的全部进程组合。Phase 4 保持进行中。
 
-源码摘要、完整检查和逐例恢复记录见 [本轮证据](../evidence/phase4-completion-reserve-probe.json)。
+源码摘要、完整检查和逐例恢复记录见 [本轮证据](../../../evidence/phase4-completion-reserve-probe.json)。
 
-后续外部快照跨重启及隐私关闭额度释放修复见 [恢复压力证据](../evidence/phase4-completion-restart-pressure-probe.json)。
+后续外部快照跨重启及隐私关闭额度释放修复见 [恢复压力证据](../../../evidence/phase4-completion-restart-pressure-probe.json)。

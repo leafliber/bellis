@@ -16,4 +16,4 @@ DB Worker 新增发送前专用读取端口。它复核当前清单、实际隐�
 
 本轮根检查通过 1049 项单元/性质测试和 263 项集成测试，168 个生成契约无漂移。随后按真实 SDK 的嵌套 scope 修复 Iris 身份检查，最终 Provider 96 项及类型、lint、格式、构建通过；Runtime 四项专项包含新增丢失核验 ACK 的重启用例，未将该增量伪计为根检查重跑。最终真实 Core/Chromium 已验证生产维护调度、公开通道、原正文、结论落盘和重启不重复请求。
 
-工具及既有 24 组恢复冒烟通过，完整恢复入口保持退出 2。安装物、最终源码摘要与验证范围见 [本轮证据](../evidence/phase4-revalidation-coordinator-probe.json)。
+工具及既有 24 组恢复冒烟通过，完整恢复入口保持退出 2。安装物、最终源码摘要与验证范围见 [本轮证据](../../../evidence/phase4-revalidation-coordinator-probe.json)。

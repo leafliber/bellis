@@ -2,7 +2,7 @@
 
 2026-09-07 根据用户明确指令及 [ADR 0047](./adr/0047-phase4a-recovery-scope-freeze.md)，Phase 4A 恢复验收冻结为 8 个窗口 × 3 个目标 × 20 次，冻结时已通过 480/480。下列工作从 Phase 4A 恢复 Gate 整体迁入 Phase 4B，不再决定 `test:memory:iris:recovery` 的通过状态。本次收尾不实施这些待办。
 
-原 `scripts/iris-recovery-probe.mjs` 的 `remaining` 五项保留如下：
+原 `scripts/iris/iris-recovery-probe.mjs` 的 `remaining` 五项保留如下：
 
 - Inside-adoption transaction rollback and complete Stage effect crash coupling
 - effect record/Observe projection transaction before and after commit

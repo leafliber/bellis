@@ -12,6 +12,6 @@
 
 六项专项测试覆盖原指纹/未知请求/不返回正文、原记录不变、并发纠正时同批读取一个快照、同批固定 TTL 评估时刻、能力/scope/截止时间/请求体边界及存档正文/候选超限。相关 Recall/Usage/HTTP/公开契约回归共 102 项通过，新增 Schema 20 的 Console 操作迁移及相关回归另有 33 项通过。生成契约、兼容检查、公开 API 白名单、类型和 Ruff 检查通过。公开面相对前一个候选只增加该操作及两个 Schema，SDK 方法保持原状。
 
-最终候选 Core 0.13.0 / Schema 20 wheel SHA 为 `2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f`，178 个安装文件核验。Schema 20 包含当前 Iris 工作树新增的 Console 操作/问题记录表，已单独审查和测试；探针仅按精确 hash 接纳。真实安装的公共 HTTP 验证原请求 valid、公开纠正后 unavailable、旧截止时间不阻止重验且不返回原文，原 Usage 回执仍一致，新修订实际进入后续 Context。删除、缺口屏障/清单、检查点与 Chromium 回归通过。见 [批量核验证据](../evidence/phase4-recall-batch-probe.json)。
+最终候选 Core 0.13.0 / Schema 20 wheel SHA 为 `2183f77fbcbcc00abecb27bdb4440d7eb8f6fff19aaf125bf4487dc0a253642f`，178 个安装文件核验。Schema 20 包含当前 Iris 工作树新增的 Console 操作/问题记录表，已单独审查和测试；探针仅按精确 hash 接纳。真实安装的公共 HTTP 验证原请求 valid、公开纠正后 unavailable、旧截止时间不阻止重验且不返回原文，原 Usage 回执仍一致，新修订实际进入后续 Context。删除、缺口屏障/清单、检查点与 Chromium 回归通过。见 [批量核验证据](../../../evidence/phase4-recall-batch-probe.json)。
 
 当前 Bellis Manifest 为摘要审计，不能完整重建原 Recall 请求。后续需在可信 Provider/宿主边界持久保存实际请求并绑定清单，不能填造旧请求。批量端点目前通过现有 checked HTTP 测试，尚未增加 SDK 方法或接入生产缺口恢复编排；它也没有创建解除屏障的接口。

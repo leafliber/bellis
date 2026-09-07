@@ -12,4 +12,4 @@ Iris Adapter 生成独立 attemptId，将 requestId、agent/space 及完整 SDK 
 
 恢复验证必须从 DB Worker 清单读取原正文，并同捕获的真实 SDK HTTP body 比较，再发送给 Core 批量核验；不得从测试变量重新构造“等价”原请求。即使该项返回 valid，缺口仍保持。逐项结论持久化、全部事实覆盖、跨批次一致性和原子安全解除继续实施。
 
-验证：根检查通过 1043 项单元/性质测试、256 项集成测试，164 个生成契约无漂移；独立 Provider 92 项及类型、lint、格式、构建通过。最终构建在 Core Schema 20 的精确 wheel 上通过实际 HTTP 正文比较与公开核验、Chromium、删除/纠正/检查点回归；工具及 24 组恢复冒烟通过，完整恢复入口仍退出 2。见 [本轮证据](../evidence/phase4-original-recall-probe.json)。
+验证：根检查通过 1043 项单元/性质测试、256 项集成测试，164 个生成契约无漂移；独立 Provider 92 项及类型、lint、格式、构建通过。最终构建在 Core Schema 20 的精确 wheel 上通过实际 HTTP 正文比较与公开核验、Chromium、删除/纠正/检查点回归；工具及 24 组恢复冒烟通过，完整恢复入口仍退出 2。见 [本轮证据](../../../evidence/phase4-original-recall-probe.json)。

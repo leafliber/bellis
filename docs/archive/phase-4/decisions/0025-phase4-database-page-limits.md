@@ -33,7 +33,7 @@ SQLite 在部分空间耗尽情形下会自动回滚整个事务，包括内部 
 
 Telemetry 使用包内受控 Migration 夹具分配 32 MiB，验证 16 MiB 上限下事务失败，64 MiB 下可正常迁移；再次降低预算拒绝启动，恢复预算后仍可打开。夹具不对 Core 数据库执行 SQL。
 
-完整检查和真实 Core/Chromium 回归见 [本轮证据](../evidence/phase4-database-capacity-probe.json)。无需新 Migration，既有生成契约不变。
+完整检查和真实 Core/Chromium 回归见 [本轮证据](../../../evidence/phase4-database-capacity-probe.json)。无需新 Migration，既有生成契约不变。
 
 ## 完整容量 Gate 仍开放
 

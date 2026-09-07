@@ -40,7 +40,7 @@ MemoryHost 在 Context 构建前进行可取消的磁盘预检查，耗时计入
 
 真实 DB Worker 测试通过创建 SQLite 大字段使实际 WAL 超过 16 MiB，证明新 Signal/采用/准备/提交拒绝且无新增 Manifest、水位推进；相同准备/提交和 Signal 重试仍可返回原结果。已活动场景确认写入一次，重复回执不重复投影；关闭 Worker、重开数据库后确认正文、游标与待交付 Observe 保留，磁盘仍不就绪。
 
-真实 Runtime HTTP 测试验证从 ready 200 到磁盘压力下的 ready 503，而 live 继续 200；错误不含目录。Context 测试验证等待磁盘检查时取消，不发起 Provider Recall。最终检查与真实 Core/Chromium 结果见 [本轮证据](../evidence/phase4-disk-admission-probe.json)。
+真实 Runtime HTTP 测试验证从 ready 200 到磁盘压力下的 ready 503，而 live 继续 200；错误不含目录。Context 测试验证等待磁盘检查时取消，不发起 Provider Recall。最终检查与真实 Core/Chromium 结果见 [本轮证据](../../../evidence/phase4-disk-admission-probe.json)。
 
 ## 尚未证明的容量边界
 

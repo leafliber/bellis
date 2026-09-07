@@ -12,4 +12,4 @@
 
 分页 `done` 仅表示清单已遍历，不表示远端有效、重验完成或允许交付。这里不写重验通过状态、不清除 gap、不更新策略代际、不改写原 Manifest/Outbox、不重新执行模型或工具。后续必须接通公开资源/删除/权限和原请求对账、Persona 权威刷新、远端一致性边界及逐项结论，再以仍然有效的清单完成原子解除。配置在宿主 DB 之外的 Provider StateStore 还需要独立覆盖证明；当前清单不能替它作证。
 
-验证：根检查通过 1040 项单元/性质测试、254 项集成测试，162 个生成契约无漂移。四项新增集成测试覆盖五类事实、正文摘要、跨页/重启、范围变化、ACK、策略变化、完整性、失败回滚、空清单与 4097 项超限；之后补充的其他 scope 隔离断言也通过专项测试与类型检查。真实 Core 410/MemoryHost/DB Worker 探针创建并恢复 Manifest、Provider state 和 Usage 清单，原正文摘要一致，屏障保持。独立 Provider 89 项、类型与构建通过。见 [清单证据](../evidence/phase4-history-inventory-probe.json)。
+验证：根检查通过 1040 项单元/性质测试、254 项集成测试，162 个生成契约无漂移。四项新增集成测试覆盖五类事实、正文摘要、跨页/重启、范围变化、ACK、策略变化、完整性、失败回滚、空清单与 4097 项超限；之后补充的其他 scope 隔离断言也通过专项测试与类型检查。真实 Core 410/MemoryHost/DB Worker 探针创建并恢复 Manifest、Provider state 和 Usage 清单，原正文摘要一致，屏障保持。独立 Provider 89 项、类型与构建通过。见 [清单证据](../../../evidence/phase4-history-inventory-probe.json)。
