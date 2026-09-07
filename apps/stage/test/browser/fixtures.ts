@@ -59,7 +59,7 @@ export const test = base.extend<{ stageEnv: StageEnvironment; phase: 2 | 3 | 4 }
     const sessionId = randomUUID();
 
     const launch = () =>
-      fork(join(REPO_ROOT, "scripts", `phase-${phase}-demo-child.mjs`), [dataDirectory], {
+      fork(join(REPO_ROOT, "scripts", "demos", `phase-${phase}-demo-child.mjs`), [dataDirectory], {
         cwd: REPO_ROOT,
         stdio: ["ignore", "pipe", "pipe", "ipc"],
         env: {

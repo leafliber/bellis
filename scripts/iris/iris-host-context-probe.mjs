@@ -5,10 +5,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   createPersistenceClient,
   createOutboxDispatcher,
-} from "../packages/persistence/dist/index.js";
-import { SystemMonotonicClock } from "../packages/transport/dist/index.js";
-import { Phase3DecisionHost, Phase4MemoryHost } from "../apps/runtime/dist/index.js";
-import { IrisMemoryProvider } from "../providers/memory-iris/dist/src/index.js";
+} from "../../packages/persistence/dist/index.js";
+import { SystemMonotonicClock } from "../../packages/transport/dist/index.js";
+import { Phase3DecisionHost, Phase4MemoryHost } from "../../apps/runtime/dist/index.js";
+import { IrisMemoryProvider } from "../../providers/memory-iris/dist/src/index.js";
 
 /** Real host Loop/DB Worker and Core API; the deterministic model is the only model boundary. */
 export async function runHostContextProbe(baseUrl, credential, directory, coreSchemaVersion = 14) {

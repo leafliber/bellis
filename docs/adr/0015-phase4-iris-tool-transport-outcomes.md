@@ -16,7 +16,7 @@
 
 确认专项进一步验证具体参数与持久调用一致、Session 关闭后不执行、迟到批准忽略、单调期限共享、批准期间能力撤销，以及相同缓存调用仍分别确认。Provider 测试使用真实安装 SDK 加受控 HTTP 接缝，验证四个路径、原键/Lease/revision、深冻结、非法请求拒绝、挂起请求取消及名额保留、明确冲突与未知结果、错误脱敏和安全整数。宿主/DB Worker 集成验证可变 Handler 已生效但丢响应后仅执行一次，持久 uncertain，保留原始调用，并在下一 Cycle 提示对账。
 
-`node scripts/iris-public-probe.mjs --tools` 在临时 Core API/Worker 中验证 remember 提交后丢响应及原键恢复、correct 递增 revision/原键重试/旧 revision 409、forget 实际清除/重复结果与删除后不可读。当前固定 Core 0.12.0/schema 14 的新库搜索持续未就绪，因此整个四工具专项明确为 incomplete、退出 2；不能称为四工具验收通过。脚本保留搜索错误原因，并继续验证独立的写操作，不用空结果充当搜索命中或删除证明。
+`node scripts/iris/iris-public-probe.mjs --tools` 在临时 Core API/Worker 中验证 remember 提交后丢响应及原键恢复、correct 递增 revision/原键重试/旧 revision 409、forget 实际清除/重复结果与删除后不可读。当前固定 Core 0.12.0/schema 14 的新库搜索持续未就绪，因此整个四工具专项明确为 incomplete、退出 2；不能称为四工具验收通过。脚本保留搜索错误原因，并继续验证独立的写操作，不用空结果充当搜索命中或删除证明。
 
 后续需要通过可信公共初始化/管理入口建立 FTS 已验证 generation。当前 Iris 源码已推进到 0.13.0/schema 15，而验收安装仍固定为 0.12.0/schema 14；不能直接覆盖旧安装后沿用历史 SHA 或兼容声明。还需完成宿主四工具注册、实际请求与可信权限冻结、Iris 实际请求的确认绑定、真实 Legal Hold/保护对象、隐私协调器与外部事件、公共未知结果对账矩阵、A4 和 Phase 4B。
 

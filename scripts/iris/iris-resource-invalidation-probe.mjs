@@ -1,11 +1,11 @@
-import { isMemoryResourceBlocked } from "../packages/contracts/dist/index.js";
+import { isMemoryResourceBlocked } from "../../packages/contracts/dist/index.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPersistenceClient } from "../packages/persistence/dist/index.js";
-import { Phase4MemoryHost } from "../apps/runtime/dist/index.js";
-import { IrisMemoryProvider, checkedIrisFetch } from "../providers/memory-iris/dist/src/index.js";
+import { createPersistenceClient } from "../../packages/persistence/dist/index.js";
+import { Phase4MemoryHost } from "../../apps/runtime/dist/index.js";
+import { IrisMemoryProvider, checkedIrisFetch } from "../../providers/memory-iris/dist/src/index.js";
 
 /** External public deletion -> Core Worker SSE -> Provider durable pending -> host tombstone. */
 export async function runResourceInvalidationProbe(

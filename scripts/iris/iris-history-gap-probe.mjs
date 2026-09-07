@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { loadInstalledIrisSdk } from "./iris-installed-sdk.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPersistenceClient } from "../packages/persistence/dist/index.js";
-import { Phase4MemoryHost, startRuntime } from "../apps/runtime/dist/index.js";
+import { createPersistenceClient } from "../../packages/persistence/dist/index.js";
+import { Phase4MemoryHost, startRuntime } from "../../apps/runtime/dist/index.js";
 import {
   IrisMemoryProvider,
   IrisRecallVerifier,
   checkedIrisFetch,
-} from "../providers/memory-iris/dist/src/index.js";
+} from "../../providers/memory-iris/dist/src/index.js";
 
 /** Production Provider sends an intentionally divergent persisted identity to Core. */
 export async function runHistoryGapProbe(baseUrl, credential, client, directory, schemaVersion) {

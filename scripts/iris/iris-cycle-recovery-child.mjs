@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPersistenceClient } from "../packages/persistence/dist/index.js";
-import { startRuntime } from "../apps/runtime/dist/index.js";
-import { IrisMemoryProvider } from "../providers/memory-iris/dist/src/index.js";
+import { createPersistenceClient } from "../../packages/persistence/dist/index.js";
+import { startRuntime } from "../../apps/runtime/dist/index.js";
+import { IrisMemoryProvider } from "../../providers/memory-iris/dist/src/index.js";
 
 const [configPath, mode] = process.argv.slice(2);
 const config = JSON.parse(await readFile(configPath, "utf8"));

@@ -556,7 +556,7 @@ flowchart TD
 | P2 | `packages/decision-loop/src/{model,loop}/**`、Runtime Model Adapter | 不实现 Tool 锁和 DB SQL |
 | P3 | `packages/tool-runtime/**` | 不拥有 Turn/Cycle，不提交 Scene |
 | P4 | `apps/runtime/**`、`packages/persistence/**`、必要 Observability | 不把领域逻辑写入 Route/WS Handler |
-| P5 | `scripts/phase-3-*`、E2E/恢复 Harness、CI/根脚本 | 只通过包根和公开 Runtime 入口集成 |
+| P5 | `scripts/demos/phase-3-*`、E2E/恢复 Harness、CI/根脚本 | 只通过包根和公开 Runtime 入口集成 |
 
 并行工作必须从同一 P0 Gate Commit 开始。跨所有权变更先说明接口、兼容影响、最小变更和验证方式。
 

@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPersistenceClient } from "../packages/persistence/dist/index.js";
-import { SystemMonotonicClock } from "../packages/transport/dist/index.js";
-import { Phase3DecisionHost, Phase4MemoryHost } from "../apps/runtime/dist/index.js";
-import { IrisMemoryProvider, IrisToolBoundary, registerIrisTools, freezeIrisToolRequest } from "../providers/memory-iris/dist/src/index.js";
+import { createPersistenceClient } from "../../packages/persistence/dist/index.js";
+import { SystemMonotonicClock } from "../../packages/transport/dist/index.js";
+import { Phase3DecisionHost, Phase4MemoryHost } from "../../apps/runtime/dist/index.js";
+import { IrisMemoryProvider, IrisToolBoundary, registerIrisTools, freezeIrisToolRequest } from "../../providers/memory-iris/dist/src/index.js";
 
 /** Real registered Forget with the MemoryHost/DB coordinator; authority is restricted to the probe's own claim. */
 export async function runCoordinatedForgetProbe(baseUrl, credential, directory, claim, coreSchemaVersion = 14) {

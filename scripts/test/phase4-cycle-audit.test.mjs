@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { auditAdoptedCycles } from "../phase4-cycle-audit.mjs";
+import { auditAdoptedCycles } from "../iris/phase4-cycle-audit.mjs";
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 function fixture() {

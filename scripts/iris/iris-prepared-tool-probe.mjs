@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPersistenceClient } from "../packages/persistence/dist/index.js";
-import { SystemMonotonicClock } from "../packages/transport/dist/index.js";
-import { Phase3DecisionHost, Phase4MemoryHost } from "../apps/runtime/dist/index.js";
-import { freezeIrisToolRequest, registerIrisTools, IrisMemoryProvider } from "../providers/memory-iris/dist/src/index.js";
+import { createPersistenceClient } from "../../packages/persistence/dist/index.js";
+import { SystemMonotonicClock } from "../../packages/transport/dist/index.js";
+import { Phase3DecisionHost, Phase4MemoryHost } from "../../apps/runtime/dist/index.js";
+import { freezeIrisToolRequest, registerIrisTools, IrisMemoryProvider } from "../../providers/memory-iris/dist/src/index.js";
 
 /** Trusted fixture composition, not the production target-authorization adapter. */
 export async function runPreparedIrisWriteProbe(request, boundary, directory, baseUrl, credential, coreSchemaVersion = 14) {

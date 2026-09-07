@@ -24,7 +24,7 @@ import { WebSocket } from "ws";
 
 const SCRIPT_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CHILD = join(SCRIPT_DIR, "phase-1-demo-child.mjs");
-const RUNTIME_DIST = join(SCRIPT_DIR, "..", "apps", "runtime", "dist", "index.js");
+const RUNTIME_DIST = join(SCRIPT_DIR, "../..", "apps", "runtime", "dist", "index.js");
 
 const DEMO = {
   sceneId: randomUUID(),

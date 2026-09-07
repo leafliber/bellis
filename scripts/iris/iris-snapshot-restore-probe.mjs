@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadInstalledIrisSdk } from "./iris-installed-sdk.mjs";
-import { startRuntime } from "../apps/runtime/dist/index.js";
+import { startRuntime } from "../../apps/runtime/dist/index.js";
 import {
   IrisMemoryProvider,
   IrisRecallVerifier,
   checkedIrisFetch,
-} from "../providers/memory-iris/dist/src/index.js";
+} from "../../providers/memory-iris/dist/src/index.js";
 
 export const waitFor = async (check) => {
   const deadline = Date.now() + 15000;

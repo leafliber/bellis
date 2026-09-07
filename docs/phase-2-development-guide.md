@@ -671,7 +671,7 @@ flowchart LR
 | P2 | `apps/stage/**` 的 bootstrap/control/media/timeline 骨架、根前端配置 | 不修改 Scene Runtime/Persistence |
 | P3 | Stage audio/subtitle/avatar Lane、必要的授权资源装配说明 | 不改变 P1 状态机；与 P2 顺序交接 |
 | P4 | `apps/runtime/**` Phase 2 application、必要 Persistence 扩展 | 不把领域逻辑写进 Route/WS Handler |
-| P5 | `scripts/phase-2-demo.mjs`、E2E/恢复 Harness、CI 与根脚本 | 只通过各包公开入口集成 |
+| P5 | `scripts/demos/phase-2-demo.mjs`、E2E/恢复 Harness、CI 与根脚本 | 只通过各包公开入口集成 |
 
 并行任务必须从同一 Gate Commit 开始。跨所有权变更先报告当前接口、阻塞原因、最小变更、兼容影响和验证方式。
 

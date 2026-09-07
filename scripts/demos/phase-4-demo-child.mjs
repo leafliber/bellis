@@ -10,10 +10,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
-import { createPersistenceClient } from "../packages/persistence/dist/index.js";
-import { auditAdoptedCycles } from "./phase4-cycle-audit.mjs";
-import { loadInstalledIrisSdk } from "./iris-installed-sdk.mjs";
-import { startRuntime } from "../apps/runtime/dist/index.js";
+import { createPersistenceClient } from "../../packages/persistence/dist/index.js";
+import { auditAdoptedCycles } from "../iris/phase4-cycle-audit.mjs";
+import { loadInstalledIrisSdk } from "../iris/iris-installed-sdk.mjs";
+import { startRuntime } from "../../apps/runtime/dist/index.js";
 
 function notify(message) {
   process.send?.(message);
@@ -115,8 +115,8 @@ if (coreConfigPath) {
   // through browser IPC, page state, command arguments, or ordinary logs.
   const config = JSON.parse(await readFile(coreConfigPath, "utf8"));
   stageRecovery = config.stageRecovery === true;
-  const { IrisMemoryProvider } = await import("../providers/memory-iris/dist/src/index.js");
-  const { checkedIrisFetch } = await import("../providers/memory-iris/dist/src/http.js");
+  const { IrisMemoryProvider } = await import("../../providers/memory-iris/dist/src/index.js");
+  const { checkedIrisFetch } = await import("../../providers/memory-iris/dist/src/http.js");
   const sdk = stageRecovery ? await loadInstalledIrisSdk() : undefined;
   const auditClient = stageRecovery
     ? new sdk.AsyncIrisMemoryClient(config.baseUrl, {

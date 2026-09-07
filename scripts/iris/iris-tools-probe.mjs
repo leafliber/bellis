@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { IrisToolBoundary, freezeIrisToolRequest } from "../providers/memory-iris/dist/src/index.js";
+import { IrisToolBoundary, freezeIrisToolRequest } from "../../providers/memory-iris/dist/src/index.js";
 import { runPreparedIrisWriteProbe } from "./iris-prepared-tool-probe.mjs";
 import { runCoordinatedForgetProbe } from "./iris-forget-probe.mjs";
 

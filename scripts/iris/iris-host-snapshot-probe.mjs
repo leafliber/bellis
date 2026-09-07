@@ -4,8 +4,8 @@ import { cp, readFile, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
-import { startRuntime } from "../apps/runtime/dist/index.js";
-import { IrisMemoryProvider, checkedIrisFetch } from "../providers/memory-iris/dist/src/index.js";
+import { startRuntime } from "../../apps/runtime/dist/index.js";
+import { IrisMemoryProvider, checkedIrisFetch } from "../../providers/memory-iris/dist/src/index.js";
 import { loadInstalledIrisSdk } from "./iris-installed-sdk.mjs";
 import { contextInput, waitFor } from "./iris-snapshot-restore-probe.mjs";
 

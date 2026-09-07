@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { writeFile, rename } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
-import { startConfiguredIrisRuntime } from "./start-iris-runtime.mjs";
+import { startConfiguredIrisRuntime } from "../start-iris-runtime.mjs";
 
 export async function runCredentialRevocationProbe(
   baseUrl,

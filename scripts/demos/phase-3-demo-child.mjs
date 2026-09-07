@@ -7,7 +7,7 @@
  *   （DemoScriptedProvider 注入模型流）、evidence（证据快照）、
  *   wait-idle、decision-state（恢复投影）、shutdown。
  */
-import { startRuntime } from "../apps/runtime/dist/index.js";
+import { startRuntime } from "../../apps/runtime/dist/index.js";
 
 function notify(message) {
   process.send?.(message);

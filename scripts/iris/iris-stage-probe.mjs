@@ -33,9 +33,9 @@ export async function runIrisStageProbe(
     }),
     { mode: 0o600 },
   );
-  const stageDirectory = fileURLToPath(new URL("../apps/stage", import.meta.url));
+  const stageDirectory = fileURLToPath(new URL("../../apps/stage", import.meta.url));
   const command = fileURLToPath(
-    new URL("../apps/stage/node_modules/@playwright/test/cli.js", import.meta.url),
+    new URL("../../apps/stage/node_modules/@playwright/test/cli.js", import.meta.url),
   );
   if (recoveryRepetitions !== undefined) assert.ok([1, 20].includes(recoveryRepetitions));
   const child = spawn(

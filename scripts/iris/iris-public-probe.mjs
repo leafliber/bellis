@@ -10,9 +10,10 @@ import { runResourceInvalidationProbe } from "./iris-resource-invalidation-probe
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { summarizeReport } from "../evidence/summarize-report.mjs";
 import { loadInstalledIrisSdk } from "./iris-installed-sdk.mjs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -183,7 +184,7 @@ try {
     await delay(100);
   }
   assert.ok(baseUrl, "Core did not report its loopback address");
-  const module = await import("../providers/memory-iris/dist/src/index.js");
+  const module = await import("../../providers/memory-iris/dist/src/index.js");
   provider = new module.IrisMemoryProvider({
     baseUrl,
     bearerToken: credential.token,
@@ -579,12 +580,15 @@ try {
             ? "Core API/Worker + installed SDK + Bellis Decision Host/DB Worker; no Stage effect confirmation or A4 crash-matrix evidence"
             : "Core API/Worker + installed SDK + real Chromium Stage + Bellis Decision Host/DB Worker; no A4 crash/stress-matrix evidence",
   };
-  if (process.env.IRIS_PROBE_REPORT)
-    await writeFile(process.env.IRIS_PROBE_REPORT, `${JSON.stringify(evidence, null, 2)}\n`);
+  const reportPath = process.env.IRIS_PROBE_REPORT ??
+    fileURLToPath(new URL("../../artifacts/evidence/iris-probe-raw.json", import.meta.url));
+  const rawReport = `${JSON.stringify(evidence, null, 2)}\n`;
+  await mkdir(dirname(reportPath), { recursive: true });
+  await writeFile(reportPath, rawReport);
   const incomplete = tools?.status === "incomplete" || recovery?.status === "incomplete";
   if (incomplete) process.exitCode = 2;
   console.info(
-    `iris-public-probe: ${incomplete ? "incomplete" : "ok"} ${JSON.stringify(evidence)}`,
+    `iris-public-probe: ${incomplete ? "incomplete" : "ok"} ${JSON.stringify(summarizeReport(rawReport, { path: reportPath }))}`,
   );
 } finally {
   await provider?.stop();

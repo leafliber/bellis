@@ -18,7 +18,7 @@
  *    计量取消时延
  * 9. Crash Window（完成后 SIGKILL）→ 同目录重启 → 已提交 Scene 不重复执行
  * 10. 干净关闭与清理（四个关键 Crash Window 的定向覆盖见
- *     scripts/phase-2-crash-windows.mjs）
+ *     scripts/demos/phase-2-crash-windows.mjs）
  *
  * 任一步失败非零退出；不访问公网；成功/失败都清理临时资源。
  * 依赖已构建产物：先运行 `pnpm build`。

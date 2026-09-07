@@ -64,7 +64,7 @@ export async function runIrisLaunchProbe(baseUrl, credential, directory, schemaV
       process.execPath,
       ["scripts/start-iris-runtime.mjs", "--config", configPath],
       {
-        cwd: new URL("..", import.meta.url),
+        cwd: new URL("../..", import.meta.url),
         env,
         stdio: ["ignore", "pipe", "pipe"],
       },

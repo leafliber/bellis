@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Verify the same immutable package consumed by the configured Provider. */
 export async function loadInstalledIrisSdk() {
-  const providerDirectory = fileURLToPath(new URL("../providers/memory-iris/", import.meta.url));
+  const providerDirectory = fileURLToPath(new URL("../../providers/memory-iris/", import.meta.url));
   const provenance = JSON.parse(
     await readFile(resolve(providerDirectory, "vendor/iris-memory-sdk-0.11.2.json"), "utf8"),
   );

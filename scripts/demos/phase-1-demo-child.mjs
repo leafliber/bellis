@@ -10,7 +10,7 @@
  *
  * 用法：node phase-1-demo-child.mjs <dataDirectory> <armed|production>
  */
-import { startRuntime } from "../apps/runtime/dist/index.js";
+import { startRuntime } from "../../apps/runtime/dist/index.js";
 
 function notify(message) {
   process.send?.(message);

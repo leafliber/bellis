@@ -8,7 +8,7 @@
  *   interrupt（紧急打断）、state（查询执行状态）、recovery（恢复状态）。
  */
 import { randomUUID } from "node:crypto";
-import { startRuntime } from "../apps/runtime/dist/index.js";
+import { startRuntime } from "../../apps/runtime/dist/index.js";
 
 function notify(message) {
   process.send?.(message);

@@ -939,7 +939,7 @@ flowchart TD
 | P3     | Iris 独立工具适配、宿主 Tool 注册；后续 `packages/memory-runtime/src/adapters/mcp/**` 与 `src/tools/**`                    | 不绕过 Tool Runtime 权限与结果预算                                            |
 | P4     | 宿主 effect/Observe/Usage、`packages/persistence/**`；后续 memory-runtime 候选                                             | 不在前台等待远端 ACK；磁盘高水位按 §9 停止新准入                              |
 | P5     | `packages/avatar-runtime/**`、`apps/stage/**`                                                                              | 仲裁核心不依赖 React/Cubism/WS，不调用模型                                    |
-| P6     | `apps/runtime/**`、必要 Observability、`scripts/phase-4-*`、E2E/恢复 Harness、CI/根脚本                                    | 只通过包根和公开 Runtime/Stage 入口集成                                       |
+| P6     | `apps/runtime/**`、必要 Observability、`scripts/demos/phase-4-*`、E2E/恢复 Harness、CI/根脚本                                    | 只通过包根和公开 Runtime/Stage 入口集成                                       |
 
 确有独立工作需要并行时，使用同一已通过的边界基线。跨职责变更先说明接口、兼容影响、最小变更和验证方式。
 
