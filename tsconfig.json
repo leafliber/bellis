@@ -11,7 +11,17 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["packages/**/*.ts", "tests/**/*.ts", "tools/**/*.ts", "contracts/generated/**/*.ts", "contracts/generated/**/*.mts"]
+  "include": [
+    "apps/**/*.ts",
+    "plugins/**/*.ts",
+    "packages/**/*.ts",
+    "tests/**/*.ts",
+    "tools/**/*.ts",
+    "contracts/generated/**/*.ts",
+    "contracts/generated/**/*.mts"
+  ]
 }
