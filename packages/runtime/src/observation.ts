@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { write as writeFd } from "node:fs";
 import {
   assertValid,
   type P0EndpointSnapshot,
@@ -29,7 +30,174 @@ export type ObservationSink = {
   write: (bytes: Buffer, callback: (error?: Error | null) => void) => unknown;
   on?: (event: string, listener: (error?: Error) => void) => unknown;
   off?: (event: string, listener: (error?: Error) => void) => unknown;
+  readonly inFlight?: boolean;
+  readonly backpressureObserved?: boolean;
+  abort?: () => void;
 };
+export type ObservationFinish = {
+  complete: boolean;
+  pending_records: number;
+  os_write_in_flight: boolean;
+  os_backpressure_observed: boolean;
+};
+export type AsyncWrite = (
+  fd: number,
+  bytes: Buffer,
+  offset: number,
+  length: number,
+  position: null,
+  callback: (error: NodeJS.ErrnoException | null, written: number) => void,
+) => unknown;
+
+/** Public asynchronous fs.write only. One FIFO record and one OS write in flight.
+ * The fd is inherited, never closed here. A timed-out OS request may outlive this sink.
+ */
+export class AsyncFdSink implements ObservationSink {
+  readonly fd: number;
+  readonly maxPending: number;
+  readonly maxBytes: number;
+  readonly timeoutMs: number;
+  readonly writeFn: AsyncWrite;
+  #queue: Array<{
+    bytes: Buffer;
+    offset: number;
+    until: number;
+    done: (error?: Error | null) => void;
+  }> = [];
+  #bytes = 0;
+  #inFlight = false;
+  #backpressure = false;
+  #broken: Error | undefined;
+  #deadline: ReturnType<typeof setTimeout> | undefined;
+  #retry: ReturnType<typeof setTimeout> | undefined;
+  constructor(
+    fd: number,
+    maxPending: number,
+    maxBytes: number,
+    timeoutMs = 1000,
+    writeFn: AsyncWrite = writeFd,
+  ) {
+    this.fd = fd;
+    this.maxPending = maxPending;
+    this.maxBytes = maxBytes;
+    this.timeoutMs = timeoutMs;
+    this.writeFn = writeFn;
+  }
+  get inFlight(): boolean {
+    return this.#inFlight;
+  }
+  get backpressureObserved(): boolean {
+    return this.#backpressure;
+  }
+  abort(): void {
+    this.#fail(Object.assign(new Error("ASYNC_FD_TIMEOUT"), { code: "ETIMEDOUT" }));
+  }
+  write(bytes: Buffer, done: (error?: Error | null) => void): boolean {
+    if (this.#broken) {
+      done(this.#broken);
+      return false;
+    }
+    if (
+      bytes.length > this.maxBytes ||
+      this.#queue.length >= this.maxPending ||
+      this.#bytes + bytes.length > this.maxPending * this.maxBytes
+    ) {
+      done(new Error("ASYNC_FD_CAPACITY"));
+      return false;
+    }
+    this.#queue.push({ bytes, offset: 0, until: performance.now() + this.timeoutMs, done });
+    this.#bytes += bytes.length;
+    if (this.#queue.length === 1) this.#start();
+    return true;
+  }
+  #fail(error: Error): void {
+    if (this.#broken) return;
+    this.#broken = error;
+    clearTimeout(this.#deadline);
+    clearTimeout(this.#retry);
+    const pending = this.#queue.splice(0);
+    this.#bytes = 0;
+    for (const record of pending) record.done(error);
+  }
+  #start(): void {
+    const record = this.#queue[0];
+    if (!record || this.#broken) return;
+    const remaining = record.until - performance.now();
+    if (remaining <= 0) {
+      this.abort();
+      return;
+    }
+    this.#deadline = setTimeout(() => this.abort(), remaining);
+    this.#part();
+  }
+  #part(): void {
+    const record = this.#queue[0];
+    if (!record || this.#broken) return;
+    if (performance.now() >= record.until) {
+      this.abort();
+      return;
+    }
+    this.#inFlight = true;
+    try {
+      this.writeFn(
+        this.fd,
+        record.bytes,
+        record.offset,
+        record.bytes.length - record.offset,
+        null,
+        (error, written) => {
+          this.#inFlight = false;
+          if (this.#broken || this.#queue[0] !== record) return;
+          if (performance.now() >= record.until) {
+            this.abort();
+            return;
+          }
+          if (error && error.code !== "EAGAIN" && error.code !== "EINTR") {
+            this.#fail(error);
+            return;
+          }
+          if (error?.code === "EAGAIN" || (!error && written === 0)) this.#backpressure = true;
+          if (!error) {
+            if (
+              !Number.isSafeInteger(written) ||
+              written < 0 ||
+              written > record.bytes.length - record.offset
+            ) {
+              this.#fail(new Error("ASYNC_FD_INVALID_PROGRESS"));
+              return;
+            }
+            record.offset += written;
+            if (record.offset === record.bytes.length) {
+              clearTimeout(this.#deadline);
+              this.#queue.shift();
+              this.#bytes -= record.bytes.length;
+              record.done();
+              this.#start();
+              return;
+            }
+          }
+          // Retry does not replace the original absolute deadline, including zero progress.
+          this.#retry = setTimeout(() => this.#part(), 1);
+        },
+      );
+    } catch (error) {
+      this.#inFlight = false;
+      this.#fail(error instanceof Error ? error : new Error("ASYNC_FD_WRITE_FAILED"));
+    }
+  }
+}
+
+/** CLI's one bounded stdout result. The entrypoint must exit after this finite attempt. */
+export async function writeCliResult(
+  bytes: Buffer,
+  timeoutMs = 100,
+): Promise<{ complete: boolean; writer: AsyncFdSink }> {
+  const sink = new AsyncFdSink(1, 1, 16 * 1024 * 1024 + 4096, timeoutMs);
+  const complete = await new Promise<boolean>((resolve) =>
+    sink.write(bytes, (error) => resolve(!error)),
+  );
+  return { complete, writer: sink };
+}
 export type CommandTrigger = {
   trigger_kind: "command";
   trigger_id: string;
@@ -99,7 +267,8 @@ export function observationTrigger(
 }
 
 /** One writer per actual fixed process instance, shared by every connection and direction.
- * Writes never block safety work. Normal close may wait only its explicit finite drain budget.
+ * Default OS writes are asynchronous; JSON validation/encoding still costs bounded CPU.
+ * Normal close may wait only its explicit finite drain budget.
  */
 export class ObservationWriter {
   readonly role: Role;
@@ -110,7 +279,7 @@ export class ObservationWriter {
   #sink: ObservationSink;
   #streams = new Map<Stream, { next: number; dropped: number }>();
   #pending = new Map<symbol, { stream: Stream; end: boolean }>();
-  #finishing: Promise<void> | undefined;
+  #finishing: Promise<ObservationFinish> | undefined;
   #accepting = true;
   #broken = false;
   #failed = () => {
@@ -118,22 +287,26 @@ export class ObservationWriter {
     for (const { stream, end } of this.#pending.values()) if (!end) this.#state(stream).dropped++;
     this.#pending.clear();
   };
+  get osWriteInFlight(): boolean {
+    return this.#sink.inFlight ?? false;
+  }
   constructor(
     role: Role,
     instance: string | null,
     clock: MonotonicClock,
     limits: Pick<P0SafetyLimits, "max_message_bytes" | "max_pending_requests">,
-    sink: ObservationSink = process.stderr,
+    sink?: ObservationSink,
     pid = process.pid,
   ) {
     this.role = role;
     this.instance = instance;
     this.clock = clock;
     this.limits = limits;
-    this.#sink = sink;
+    this.#sink =
+      sink ?? new AsyncFdSink(2, limits.max_pending_requests, limits.max_message_bytes + 4096);
     this.pid = pid;
-    sink.on?.("error", this.#failed);
-    sink.on?.("close", this.#failed);
+    this.#sink.on?.("error", this.#failed);
+    this.#sink.on?.("close", this.#failed);
   }
   #state(stream: Stream) {
     let state = this.#streams.get(stream);
@@ -143,7 +316,7 @@ export class ObservationWriter {
     }
     return state;
   }
-  #send(stream: Stream, record: unknown, end = false): void {
+  #send(stream: Stream, record: unknown, end = false): boolean {
     const state = this.#state(stream);
     const bytes = Buffer.from(`${JSON.stringify(record)}\n`);
     // At most 4096 bytes for fixed observation/response metadata and exact authenticator redaction.
@@ -154,7 +327,7 @@ export class ObservationWriter {
       this.#pending.size >= this.limits.max_pending_requests
     ) {
       if (!end) state.dropped++;
-      return;
+      return false;
     }
     const token = Symbol();
     this.#pending.set(token, { stream, end });
@@ -170,6 +343,7 @@ export class ObservationWriter {
     } catch {
       done(new Error("OBSERVATION_WRITE_FAILED"));
     }
+    return !this.#broken;
   }
   #base(stream: Stream) {
     const state = this.#state(stream);
@@ -247,10 +421,19 @@ export class ObservationWriter {
       ),
     };
   }
-  finish(timeoutMs = 100): Promise<void> {
+  finish(timeoutMs = 100): Promise<ObservationFinish> {
     if (this.#finishing) return this.#finishing;
     this.#accepting = false;
     this.#finishing = (async () => {
+      const result = (complete: boolean): ObservationFinish => ({
+        complete:
+          complete &&
+          !this.#broken &&
+          [...this.#streams.values()].every((state) => state.dropped === 0),
+        pending_records: this.#pending.size,
+        os_write_in_flight: this.#sink.inFlight ?? false,
+        os_backpressure_observed: this.#sink.backpressureObserved ?? false,
+      });
       const until = performance.now() + Math.max(0, Math.min(timeoutMs, 1000));
       const drain = async () => {
         while (this.#pending.size && performance.now() < until)
@@ -258,9 +441,15 @@ export class ObservationWriter {
         return this.#pending.size === 0;
       };
       // A pending/failed write may still change loss counts. Never manufacture a complete tail.
-      if (!(await drain()) || this.#broken) return;
+      if (!(await drain()) || this.#broken) {
+        this.#sink.abort?.();
+        return result(false);
+      }
       for (const [stream, state] of this.#streams) {
-        if (performance.now() >= until || this.#broken) return;
+        if (performance.now() >= until || this.#broken) {
+          this.#sink.abort?.();
+          return result(false);
+        }
         const end = {
           record_type: "p0-observation-stream-end",
           stream,
@@ -271,10 +460,14 @@ export class ObservationWriter {
           dropped_observations: state.dropped,
           observed_at: this.clock.point(),
         };
-        if (!validate("P0ObservationStreamEnd", end)) return;
-        this.#send(stream, end, true);
-        if (!(await drain())) return;
+        if (!validate("P0ObservationStreamEnd", end) || !this.#send(stream, end, true))
+          return result(false);
+        if (!(await drain())) {
+          this.#sink.abort?.();
+          return result(false);
+        }
       }
+      return result(true);
     })().finally(() => {
       if (!this.#pending.size && !this.#broken) {
         this.#sink.off?.("error", this.#failed);
@@ -317,14 +510,16 @@ export class StartupObservation {
     return this.writer;
   }
   async failed(error: unknown): Promise<void> {
-    const writer =
-      this.writer ??
-      new ObservationWriter(this.role, null, this.clock, {
-        max_message_bytes: 65536,
-        max_pending_requests: 4,
-      });
-    writer.process({ kind: "startup_rejected", stage: this.stage, error: observationError(error) });
-    await writer.finish();
+    this.writer ??= new ObservationWriter(this.role, null, this.clock, {
+      max_message_bytes: 65536,
+      max_pending_requests: 4,
+    });
+    this.writer.process({
+      kind: "startup_rejected",
+      stage: this.stage,
+      error: observationError(error),
+    });
+    await this.writer.finish();
   }
 }
 

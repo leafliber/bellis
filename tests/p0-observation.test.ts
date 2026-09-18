@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter, once } from "node:events";
-import { writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -25,6 +26,8 @@ import {
   operatorRequest,
 } from "../packages/runtime/src/identity.ts";
 import {
+  AsyncFdSink,
+  type AsyncWrite,
   ObservationWriter,
   observationError,
   observationTrigger,
@@ -716,4 +719,236 @@ test("p0.observation: authenticated Host query does not call supervisor snapshot
     await service.close();
     await fixture.cleanup();
   }
+});
+
+test("p0.observation.fd module: partial writes and EAGAIN/EINTR/zero progress preserve FIFO and offset", async () => {
+  const offsets: number[] = [],
+    seen: string[] = [];
+  let active = 0,
+    maxActive = 0,
+    calls = 0;
+  const write: AsyncWrite = (_fd, bytes, offset, length, _position, callback) => {
+    offsets.push(offset);
+    calls++;
+    active++;
+    maxActive = Math.max(maxActive, active);
+    const current = calls;
+    queueMicrotask(() => {
+      active--;
+      if (current === 2 || current === 3)
+        callback(
+          Object.assign(new Error("controlled retry"), {
+            code: current === 2 ? "EAGAIN" : "EINTR",
+          }),
+          0,
+        );
+      else if (current === 4) callback(null, 0);
+      else {
+        const n = Math.min(2, length);
+        seen.push(bytes.subarray(offset, offset + n).toString());
+        callback(null, n);
+      }
+    });
+  };
+  const sink = new AsyncFdSink(2, 2, 16, 100, write);
+  const done = (text: string) =>
+    new Promise<void>((resolve, reject) =>
+      sink.write(Buffer.from(text), (error) => (error ? reject(error) : resolve())),
+    );
+  await Promise.all([done("abcd"), done("efgh")]);
+  assert.equal(maxActive, 1);
+  assert.deepEqual(offsets, [0, 2, 2, 2, 2, 0, 2]);
+  assert.equal(seen.join(""), "abcdefgh");
+  assert.equal(sink.backpressureObserved, true);
+  assert.equal(sink.inFlight, false);
+});
+
+test("p0.observation.fd module: absolute retry deadline, EPIPE and late callbacks remain incomplete", async () => {
+  let retries = 0;
+  const retry: AsyncWrite = (_fd, _bytes, _offset, _length, _position, callback) => {
+    retries++;
+    setTimeout(
+      () => callback(Object.assign(new Error("controlled EAGAIN"), { code: "EAGAIN" }), 0),
+      1,
+    );
+  };
+  const retrySink = new AsyncFdSink(2, 2, 16, 20, retry);
+  const started = performance.now();
+  const error = await new Promise<Error | null | undefined>((resolve) =>
+    retrySink.write(Buffer.from("abc"), resolve),
+  );
+  assert.equal((error as NodeJS.ErrnoException)?.code, "ETIMEDOUT");
+  assert.ok(retries > 1);
+  assert.ok(performance.now() - started < 500, "retry cannot renew the original 20ms deadline");
+  const finishedCalls = retries;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(retries, finishedCalls);
+  let late: Parameters<AsyncWrite>[5] | undefined,
+    calls = 0;
+  const hanging: AsyncWrite = (_fd, _bytes, _offset, _length, _position, callback) => {
+    calls++;
+    late = callback;
+  };
+  const sink = new AsyncFdSink(2, 2, 65536, 20, hanging);
+  const out = new ObservationWriter(
+    "host",
+    "controlled-late-writer",
+    new MonotonicClock(),
+    limits,
+    sink,
+  );
+  out.process(failure);
+  out.process(failure);
+  const result = await out.finish(5);
+  assert.equal(result.complete, false);
+  assert.equal(result.os_write_in_flight, true);
+  assert.equal(result.pending_records, 0);
+  assert.ok(late);
+  late(null, 1);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(calls, 1, "late partial callback cannot resume a timed-out record or add a tail");
+  let pipeCalls = 0;
+  const pipe = new AsyncFdSink(
+    2,
+    2,
+    16,
+    100,
+    (_fd, _bytes, _offset, _length, _position, callback) => {
+      pipeCalls++;
+      queueMicrotask(() =>
+        callback(Object.assign(new Error("controlled EPIPE"), { code: "EPIPE" }), 0),
+      );
+    },
+  );
+  const errors = await Promise.all(
+    ["first", "queued"].map(
+      (text) =>
+        new Promise<Error | null | undefined>((resolve) => pipe.write(Buffer.from(text), resolve)),
+    ),
+  );
+  assert.deepEqual(
+    errors.map((e) => (e as NodeJS.ErrnoException).code),
+    ["EPIPE", "EPIPE"],
+  );
+  assert.equal(pipeCalls, 1);
+});
+
+test("p0.observation.fd: real default FILE output has complete records and actual startup failure tail", {
+  timeout: 10000,
+}, async () => {
+  const directory = join(repository, "reports/p0/w5of/raw");
+  await mkdir(directory, { recursive: true });
+  for (const [name, args, code] of [
+    ["default-file", [join(repository, "tests/p0-observation.fd-helper.ts"), "file"], 0],
+    ["supervisor-file-failure", [join(repository, "apps/host/supervisor.ts")], 1],
+  ] as const) {
+    const file = await open(join(directory, `${name}.stderr.ndjson`), "w", 0o600);
+    const child = spawn(process.execPath, [...args], {
+      env: safeChildEnvironment(),
+      stdio: ["ignore", "pipe", file.fd],
+    });
+    const stdout: Buffer[] = [];
+    child.stdout?.on("data", (bytes: Buffer) => stdout.push(bytes));
+    const force = setTimeout(() => child.kill("SIGKILL"), 2000);
+    try {
+      const [actual, signal] = await once(child, "close");
+      assert.equal(actual, code);
+      assert.equal(signal, null);
+    } finally {
+      clearTimeout(force);
+      await file.close();
+    }
+    await writeFile(join(directory, `${name}.stdout`), Buffer.concat(stdout));
+    completeStreams(await readFile(join(directory, `${name}.stderr.ndjson`), "utf8"));
+    if (name === "default-file")
+      assert.equal(
+        JSON.parse(Buffer.concat(stdout).toString().trim().split("\n")[1] ?? "{}").finish.complete,
+        true,
+      );
+  }
+});
+
+test("p0.observation.fd: unread real PIPE fills while timer progresses and process exits with incomplete raw stream", {
+  timeout: 10000,
+}, async () => {
+  const directory = join(repository, "reports/p0/w5of/raw");
+  await mkdir(directory, { recursive: true });
+  const child = spawn(
+    process.execPath,
+    [join(repository, "tests/p0-observation.fd-helper.ts"), "pipe"],
+    { env: safeChildEnvironment(), stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const output: Buffer[] = [],
+    raw: Buffer[] = [];
+  child.stdout.on("data", (bytes: Buffer) => output.push(bytes));
+  // No stderr data/readable handler or read/resume until actual child exit.
+  let watchdogFired = false;
+  const force = setTimeout(() => {
+    watchdogFired = true;
+    child.kill("SIGKILL");
+  }, 2000);
+  const closed = once(child, "close");
+  const [code, signal] = await once(child, "exit");
+  child.stderr.on("data", (bytes: Buffer) => raw.push(bytes));
+  child.stderr.resume();
+  await closed;
+  clearTimeout(force);
+  const bytes = Buffer.concat(raw),
+    stdout = Buffer.concat(output).toString("utf8");
+  await writeFile(join(directory, "default-pipe.stderr.raw"), bytes);
+  await writeFile(join(directory, "default-pipe.stdout"), stdout);
+  const [progress, summary, exit] = stdout
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(progress.timer_progress, true);
+  assert.equal(progress.attempted, 1024);
+  assert.equal(summary.finish.complete, false);
+  assert.ok(
+    summary.finish.os_write_in_flight || summary.finish.os_backpressure_observed,
+    "default fs.write must have an actual pending OS write or observed EAGAIN/zero progress",
+  );
+  assert.ok(bytes.length > 0);
+  assert.ok(bytes.length < 1024 * 1000, "only the filled pipe prefix can be present");
+  assert.equal(bytes.includes(Buffer.from("p0-observation-stream-end")), false);
+  // Preserve and describe any partial line; do not filter it into a complete evidence stream.
+  const text = bytes.toString("utf8"),
+    lines = text.split("\n");
+  let malformed = 0;
+  for (const line of lines.slice(0, -1)) {
+    try {
+      JSON.parse(line);
+    } catch {
+      malformed++;
+    }
+  }
+  await writeFile(
+    join(directory, "default-pipe.capture.json"),
+    JSON.stringify(
+      {
+        capture_eof: true,
+        raw_bytes: bytes.length,
+        complete_lines: lines.length - 1,
+        malformed_complete_lines: malformed,
+        trailing_partial_bytes: Buffer.byteLength(lines.at(-1) ?? ""),
+        application_stream_complete: false,
+        child_exit_code: code,
+        child_signal: signal,
+        parent_watchdog_fired: watchdogFired,
+        exit_strategy: exit.exit_strategy,
+        finish: summary.finish,
+      },
+      null,
+      2,
+    ),
+  );
+  assert.equal(code, null);
+  assert.equal(signal, "SIGKILL");
+  assert.equal(watchdogFired, false);
+  assert.equal(exit.exit_strategy, "self_sigkill");
+  assert.equal(
+    malformed,
+    0,
+    "unexpected interleaved or malformed complete lines remain a test failure",
+  );
 });

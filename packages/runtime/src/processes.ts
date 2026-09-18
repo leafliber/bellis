@@ -92,8 +92,8 @@ export async function terminateChild(child: ChildProcess, graceMs = 1000): Promi
 export async function startSupervisor(
   configPath: string,
   signal?: AbortSignal,
+  startup = new StartupObservation("supervisor"),
 ): Promise<{ close: () => Promise<void>; host: ChildProcess }> {
-  const startup = new StartupObservation("supervisor");
   try {
     return await supervisorRuntime(configPath, startup, signal);
   } catch (error) {
@@ -366,8 +366,8 @@ async function supervisorRuntime(
 export async function startHost(
   raw: unknown,
   signal?: AbortSignal,
+  startup = new StartupObservation("host"),
 ): Promise<{ close: () => Promise<void> }> {
-  const startup = new StartupObservation("host");
   try {
     return await hostRuntime(raw, startup, signal);
   } catch (error) {

@@ -8,11 +8,16 @@ import {
   readServiceIdentity,
   requireRuntimeVersion,
 } from "../../packages/runtime/src/files.ts";
-import { observationError, StartupObservation } from "../../packages/runtime/src/observation.ts";
+import {
+  observationError,
+  StartupObservation,
+  writeCliResult,
+} from "../../packages/runtime/src/observation.ts";
 
 const startup = new StartupObservation("operator");
 let connection: RpcConnection | undefined;
 let issuing = false;
+let output: Buffer | undefined;
 try {
   requireRuntimeVersion();
   startup.stage = "arguments";
@@ -61,17 +66,23 @@ try {
     method === "operator.authenticate" ? {} : { session_id: connection.announcement.session_id };
   issuing = true;
   await connection.operatorCall(method, input, credential);
-  process.stdout.write(`${JSON.stringify(connection.lastResponse)}\n`);
+  output = Buffer.from(`${JSON.stringify(connection.lastResponse)}\n`);
 } catch (error) {
   if (!issuing) await startup.failed(error);
   else {
     // Exactly one management command is issued on this connection. Preserve its real failure response.
     const response = connection?.lastResponse;
-    if (response && "error" in response) process.stdout.write(`${JSON.stringify(response)}\n`);
+    if (response && "error" in response) output = Buffer.from(`${JSON.stringify(response)}\n`);
     else connection?.observation?.failure("dispatch", observationError(error));
   }
   process.exitCode = 1;
 } finally {
   connection?.close();
-  await startup.writer?.finish();
+  const [, stdoutResult] = await Promise.all([
+    startup.writer?.finish(),
+    output ? writeCliResult(output) : Promise.resolve(undefined),
+  ]);
+  if (startup.writer?.osWriteInFlight || stdoutResult?.writer.inFlight)
+    process.kill(process.pid, "SIGKILL");
+  process.exit(stdoutResult?.complete === false ? 1 : Number(process.exitCode ?? 0));
 }

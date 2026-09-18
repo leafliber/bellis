@@ -530,14 +530,15 @@ export class EndpointProtocol {
   async close(): Promise<void> {
     if (this.#closing) return;
     this.#closing = true;
+    // Install before fence observations or asynchronous filesystem cleanup can start.
+    const force = setTimeout(() => this.onExit?.(), 100);
+    const until = performance.now() + 100;
     this.model.disconnect();
     if (this.#ticker) clearInterval(this.#ticker);
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     for (const channel of this.#channels.keys()) channel.close();
     // The hard bound also covers filesystem cleanup or stderr backpressure.
-    const force = setTimeout(() => this.onExit?.(), 100);
-    const until = performance.now() + 100;
     if (this.#server) {
       if (await this.#owned.matches(this.config.safety_socket_path)) this.#server.close();
       else this.#server.unref();

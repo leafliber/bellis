@@ -29,5 +29,6 @@ try {
   await endpoint.startEndpoint(config, observation);
 } catch (error) {
   if (!handedOff) await startup.failed(error);
-  process.exitCode = 1;
+  if (startup.writer?.osWriteInFlight) process.kill(process.pid, "SIGKILL");
+  process.exit(1);
 }

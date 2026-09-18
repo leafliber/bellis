@@ -12,6 +12,11 @@ import { EndpointProtocol } from "./protocol.ts";
 /** Called only by the trusted same-buffer launcher, never by module evaluation. */
 export async function startEndpoint(raw: unknown, inherited?: ObservationWriter): Promise<void> {
   let observation = inherited;
+  const exit = (code: number): never => {
+    // The launcher may supply a writer from a separate module instance; inspect that object.
+    if (observation?.osWriteInFlight) process.kill(process.pid, "SIGKILL");
+    process.exit(code);
+  };
   let endpoint: EndpointProtocol | undefined;
   let stage: StartupStage = "bootstrap";
   try {
@@ -41,7 +46,7 @@ export async function startEndpoint(raw: unknown, inherited?: ObservationWriter)
       observation.clock,
       observation,
     );
-    endpoint.onExit = () => process.exit(0);
+    endpoint.onExit = () => exit(0);
     let stopping = false;
     const stop = () => {
       stopping = true;
@@ -61,7 +66,7 @@ export async function startEndpoint(raw: unknown, inherited?: ObservationWriter)
       await startup.failed(error);
     }
     if (endpoint) {
-      endpoint.onExit = undefined;
+      endpoint.onExit = () => exit(1);
       await endpoint.close();
     } else await observation?.finish();
     throw error;
