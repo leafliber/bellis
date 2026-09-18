@@ -1,0 +1,425 @@
+{
+  "schema_version": "0.8.0",
+  "events": [
+    {
+      "event_name": "supervision.mode_changed",
+      "authority": "独立监督组件",
+      "phase": "P0",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "grant.activated",
+      "authority": "授权监督组件",
+      "phase": "P0",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "grant.denied",
+      "authority": "授权监督组件",
+      "phase": "P0",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "grant.revoked",
+      "authority": "授权监督组件",
+      "phase": "P0",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "grant.expired",
+      "authority": "授权监督组件",
+      "phase": "P0",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "stage.paired",
+      "authority": "Stage身份服务",
+      "phase": "P1",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "stage.connected",
+      "authority": "Stage身份服务",
+      "phase": "P1",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "stage.disconnected",
+      "authority": "Stage身份服务",
+      "phase": "P1",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "stage.pairing_revoked",
+      "authority": "Stage身份服务",
+      "phase": "P1",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "segment.output_started",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "segment.output_completed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "segment.rejected",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "segment.failed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "segment.unknown",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.output_started",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.output_completed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.ended_early",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.blocked",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.cancelled",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.expired",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.failed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "utterance.unknown",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "text_display.completed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "text_display.rejected",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "text_display.cancelled",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "text_display.failed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "text_display.unknown",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "scene.completed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "scene.ended_early",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "scene.empty",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "scene.failed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "scene.cancelled",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "scene.unknown",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "audio.eos_validated",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "audio.segment_boundary",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "media.tail_fenced",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "stop.confirmed",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P0",
+      "payload_schema": "StopPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "stop.unknown",
+      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "phase": "P0",
+      "payload_schema": "StopPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "segment.cancelled",
+      "authority": "Bellis媒体对象权威，引用Stage端点证据",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "独立生命周期结论，实际范围另由端点证据核验"
+    },
+    {
+      "event_name": "segment.expired",
+      "authority": "Bellis媒体对象权威，引用Stage端点证据",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "独立生命周期结论，实际范围另由端点证据核验"
+    },
+    {
+      "event_name": "segment.skipped",
+      "authority": "Bellis媒体对象权威，引用Stage端点证据",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "独立生命周期结论，实际范围另由端点证据核验"
+    },
+    {
+      "event_name": "text_display.expired",
+      "authority": "Bellis媒体对象权威，引用Stage端点证据",
+      "phase": "P1",
+      "payload_schema": "MediaOutputPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "独立生命周期结论，实际范围另由端点证据核验"
+    }
+  ]
+}

@@ -1,0 +1,680 @@
+{
+  "schema_version": "0.8.0",
+  "events": [
+    {
+      "event_name": "task.registered",
+      "authority": "Bellis或目标Task权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "task.attempt_changed",
+      "authority": "Bellis或目标Task权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "task.finished",
+      "authority": "Bellis或目标Task权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "attempt.dispatched",
+      "authority": "该Attempt权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "attempt.accepted",
+      "authority": "该Attempt权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "attempt.finished",
+      "authority": "该Attempt权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "activity.started",
+      "authority": "Bellis",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "activity.paused",
+      "authority": "Bellis",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "activity.resumed",
+      "authority": "Bellis",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "activity.finished",
+      "authority": "Bellis",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "settlement.settled",
+      "authority": "负责实际资源的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "settlement.quarantined",
+      "authority": "负责实际资源的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "settlement.abandoned",
+      "authority": "负责实际资源的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "effect.intent_recorded",
+      "authority": "负责效果的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "effect.submitted",
+      "authority": "负责效果的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "effect.confirmed",
+      "authority": "负责效果的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "effect.no_effect_verified",
+      "authority": "负责效果的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "effect.in_doubt",
+      "authority": "负责效果的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "effect.closed_unresolved",
+      "authority": "负责效果的Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "service.ready",
+      "authority": "服务所属Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "service.quality_changed",
+      "authority": "服务所属Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "service.stopped",
+      "authority": "服务所属Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "service.failed",
+      "authority": "服务所属Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "controller.prepared",
+      "authority": "控制器所属Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "controller.activation_finished",
+      "authority": "控制器所属Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "controller.disposed",
+      "authority": "控制器所属Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "plan.candidate_registered",
+      "authority": "Bellis",
+      "phase": "P6",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "plan.committed",
+      "authority": "Bellis",
+      "phase": "P6",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "plan.rejected",
+      "authority": "Bellis",
+      "phase": "P6",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "wait.registered",
+      "authority": "等待注册权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "wait.satisfied",
+      "authority": "等待注册权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "wait.timed_out",
+      "authority": "等待注册权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "wait.coverage_gap",
+      "authority": "等待注册权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "operator.review_requested",
+      "authority": "认证操作台/宿主",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "privacy.tombstone_recorded",
+      "authority": "PrivacyGateway",
+      "phase": "P7",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "privacy.deletion_updated",
+      "authority": "PrivacyGateway",
+      "phase": "P7",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "artifact.available",
+      "authority": "产物权威Runtime",
+      "phase": "P3",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.attempt_started",
+      "authority": "Game Runtime",
+      "phase": "C0",
+      "payload_schema": "ControlProgressPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.interaction_observed",
+      "authority": "Game Runtime",
+      "phase": "C0",
+      "payload_schema": "ControlProgressPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.target_lost",
+      "authority": "Game Runtime",
+      "phase": "C0",
+      "payload_schema": "ControlProgressPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.no_progress",
+      "authority": "Game Runtime",
+      "phase": "C0",
+      "payload_schema": "ControlProgressPayload",
+      "reliability": "coalescible",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.stage_goal_confirmed",
+      "authority": "Game Runtime",
+      "phase": "C0",
+      "payload_schema": "ControlProgressPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.degraded",
+      "authority": "Game Runtime",
+      "phase": "C0",
+      "payload_schema": "ControlProgressPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.takeover_required",
+      "authority": "Game Runtime",
+      "phase": "C0",
+      "payload_schema": "ControlProgressPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "control.policy_applied",
+      "authority": "Game Runtime",
+      "phase": "C2",
+      "payload_schema": "PolicyOutcomePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "该PolicyUpdate唯一终态事实；applied仍是唯一已应用事件",
+      "payload_refinement": {
+        "properties": {
+          "state": {
+            "const": "APPLIED"
+          }
+        }
+      }
+    },
+    {
+      "event_name": "control.policy_rejected",
+      "authority": "Game Runtime",
+      "phase": "C2",
+      "payload_schema": "PolicyOutcomePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "该PolicyUpdate唯一终态事实；applied仍是唯一已应用事件",
+      "payload_refinement": {
+        "properties": {
+          "state": {
+            "const": "REJECTED"
+          }
+        }
+      }
+    },
+    {
+      "event_name": "control.policy_expired",
+      "authority": "Game Runtime",
+      "phase": "C2",
+      "payload_schema": "PolicyOutcomePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "该PolicyUpdate唯一终态事实；applied仍是唯一已应用事件",
+      "payload_refinement": {
+        "properties": {
+          "state": {
+            "const": "EXPIRED"
+          }
+        }
+      }
+    },
+    {
+      "event_name": "control.policy_cancelled",
+      "authority": "Game Runtime",
+      "phase": "C2",
+      "payload_schema": "PolicyOutcomePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "该PolicyUpdate唯一终态事实；applied仍是唯一已应用事件",
+      "payload_refinement": {
+        "properties": {
+          "state": {
+            "const": "CANCELLED"
+          }
+        }
+      }
+    },
+    {
+      "event_name": "control.policy_unknown",
+      "authority": "Game Runtime",
+      "phase": "C2",
+      "payload_schema": "PolicyOutcomePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "该PolicyUpdate唯一终态事实；applied仍是唯一已应用事件",
+      "payload_refinement": {
+        "properties": {
+          "state": {
+            "const": "UNKNOWN"
+          }
+        }
+      }
+    },
+    {
+      "event_name": "uncertainty.detected",
+      "authority": "对应incident/资源权威Runtime",
+      "phase": "P3",
+      "payload_schema": "IncidentPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "reconciliation.completed",
+      "authority": "对应incident/资源权威Runtime",
+      "phase": "P3",
+      "payload_schema": "IncidentPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "manual_resolution.recorded",
+      "authority": "对应incident/资源权威Runtime",
+      "phase": "P3",
+      "payload_schema": "IncidentPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "resource.retired",
+      "authority": "对应incident/资源权威Runtime",
+      "phase": "P3",
+      "payload_schema": "IncidentPayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "poll.opened",
+      "authority": "Poll Engine",
+      "phase": "P4",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "poll.frozen",
+      "authority": "Poll Engine",
+      "phase": "P4",
+      "payload_schema": "PollResult",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "poll.cancelled",
+      "authority": "Poll Engine",
+      "phase": "P4",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "poll.invalid",
+      "authority": "Poll Engine",
+      "phase": "P4",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": true,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "narrative.updated",
+      "authority": "Game Runtime",
+      "phase": "P5",
+      "payload_schema": "NarrativeRecord",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "moderation.decided",
+      "authority": "ContentGuard",
+      "phase": "P2",
+      "payload_schema": "ModerationDecision",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "platform.message_received",
+      "authority": "Platform Adapter",
+      "phase": "P4",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "best_effort",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "标准化事件；原始正文属于受限输入，不作管理命令"
+    },
+    {
+      "event_name": "platform.coverage_changed",
+      "authority": "Platform Adapter",
+      "phase": "P4",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "paid_ack.recorded",
+      "authority": "付费账本",
+      "phase": "P4",
+      "payload_schema": "ObjectStatePayload",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/object occurrence/source_revision",
+      "terminal": false,
+      "meaning": "对象事实；不得把接收/准备当业务成功"
+    },
+    {
+      "event_name": "grounding.result_recorded",
+      "authority": "目标Game Runtime／相应Task权威",
+      "phase": "P5",
+      "payload_schema": "GroundingResult",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/result_id",
+      "terminal": true,
+      "meaning": "不可变计算/恢复结果已记录；不授予输入权，不等于原Goal完成。"
+    },
+    {
+      "event_name": "recovery.result_recorded",
+      "authority": "目标Game Runtime／相应Task权威",
+      "phase": "P6",
+      "payload_schema": "RecoveryResult",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority/result_id",
+      "terminal": true,
+      "meaning": "不可变计算/恢复结果已记录；不授予输入权，不等于原Goal完成。"
+    }
+  ]
+}

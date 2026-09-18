@@ -1,0 +1,570 @@
+{
+  "schema_version": "0.8.0",
+  "phase_dependencies": {
+    "P0": [],
+    "P1": [
+      "P0"
+    ]
+  },
+  "tests": [
+    {
+      "id": "sut.I01",
+      "invariant_id": "I01",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I02",
+      "invariant_id": "I02",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I05",
+      "invariant_id": "I05",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I07",
+      "invariant_id": "I07",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I08",
+      "invariant_id": "I08",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I09",
+      "invariant_id": "I09",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I11",
+      "invariant_id": "I11",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I12",
+      "invariant_id": "I12",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I13",
+      "invariant_id": "I13",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I14",
+      "invariant_id": "I14",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I15",
+      "invariant_id": "I15",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I16",
+      "invariant_id": "I16",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I18",
+      "invariant_id": "I18",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I19",
+      "invariant_id": "I19",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I20",
+      "invariant_id": "I20",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I21",
+      "invariant_id": "I21",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I24",
+      "invariant_id": "I24",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I27",
+      "invariant_id": "I27",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I28",
+      "invariant_id": "I28",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I65",
+      "invariant_id": "I65",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I66",
+      "invariant_id": "I66",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I68",
+      "invariant_id": "I68",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I75",
+      "invariant_id": "I75",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I77",
+      "invariant_id": "I77",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I79",
+      "invariant_id": "I79",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I81",
+      "invariant_id": "I81",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I82",
+      "invariant_id": "I82",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I83",
+      "invariant_id": "I83",
+      "phase": "P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I84",
+      "invariant_id": "I84",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I85",
+      "invariant_id": "I85",
+      "phase": "P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sdk.schema",
+      "invariant_id": null,
+      "phase": "P0",
+      "implementation_status": "IMPLEMENTED",
+      "runner": "tests/schema.test.ts",
+      "adapter": "contract_tools",
+      "procedure": "fixture/profile/manifest正反例，事件与错误信封的派生绑定",
+      "expected": "fixture/profile/manifest正反例，事件与错误信封的派生绑定",
+      "evidence_required": [
+        "command",
+        "exit_code",
+        "environment"
+      ]
+    },
+    {
+      "id": "sdk.rpc",
+      "invariant_id": null,
+      "phase": "P0",
+      "implementation_status": "IMPLEMENTED",
+      "runner": "tests/rpc.test.ts",
+      "adapter": "contract_tools",
+      "procedure": "握手、命令参数、错误信封、去重及未握手拒绝",
+      "expected": "握手、命令参数、错误信封、去重及未握手拒绝",
+      "evidence_required": [
+        "command",
+        "exit_code",
+        "environment"
+      ]
+    },
+    {
+      "id": "sdk.state",
+      "invariant_id": null,
+      "phase": "P0",
+      "implementation_status": "IMPLEMENTED",
+      "runner": "tests/state.test.ts",
+      "adapter": "contract_tools",
+      "procedure": "表外转换、缺守卫、异步守卫和禁用阶段拒绝",
+      "expected": "表外转换、缺守卫、异步守卫和禁用阶段拒绝",
+      "evidence_required": [
+        "command",
+        "exit_code",
+        "environment"
+      ]
+    },
+    {
+      "id": "sdk.json",
+      "invariant_id": null,
+      "phase": "P0",
+      "implementation_status": "IMPLEMENTED",
+      "runner": "tests/json.test.ts",
+      "adapter": "contract_tools",
+      "procedure": "重复键、非有限数、深度、代理字符和畸形JSON拒绝",
+      "expected": "重复键、非有限数、深度、代理字符和畸形JSON拒绝",
+      "evidence_required": [
+        "command",
+        "exit_code",
+        "environment"
+      ]
+    },
+    {
+      "id": "gate.coverage",
+      "invariant_id": null,
+      "phase": "P0",
+      "implementation_status": "IMPLEMENTED",
+      "runner": "tests/gate.test.ts",
+      "adapter": "contract_tools",
+      "procedure": "依赖闭包、缺失测试、skip与旧证据拒绝",
+      "expected": "依赖闭包、缺失测试、skip与旧证据拒绝",
+      "evidence_required": [
+        "command",
+        "exit_code",
+        "environment"
+      ]
+    }
+  ],
+  "phase_checks": [
+    {
+      "phase": "P0",
+      "id": "exit.P0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P0：基础约束与安全骨架",
+      "deliverables": "严格消息/错误/作用域/时限；契约生成/检查；SupervisionMode、ExecutionGrant、StopOperation及假端点安全撤权；基础不变量子集。",
+      "not_required": "后续阶段的状态机、游戏C0、Iris、完整DSL、模型或OBS真机。",
+      "criterion": "结构/基础安全参考轨迹通过，所有未启用效果禁用。"
+    },
+    {
+      "phase": "P1",
+      "id": "exit.P1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P1：无LLM媒体闭环",
+      "deliverables": "媒体状态机Scene/Utterance/UtteranceAdmission/Segment/AudioProduction/TextPresentation与配对状态机StagePairing，复用P0的StopOperation；局部媒体清理；固定许可fixture。",
+      "not_required": "通用Task图/Effect全套、云端模型与游戏输入。",
+      "criterion": "首段早于EOS；背压、软收尾尾部ACK、UNKNOWN、停止竞争、刷新不重播。"
+    }
+  ]
+}

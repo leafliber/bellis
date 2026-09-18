@@ -1,0 +1,110 @@
+{
+  "schema_version": "0.8.0",
+  "fields": [
+    {
+      "field": "host_epoch",
+      "writer": "目标主机启动管理器",
+      "scope": "host_id",
+      "increment": "游戏输入宿主重启或安全重置",
+      "comparison": "相同host内精确相等；新host_instance无法比较，必须重配"
+    },
+    {
+      "field": "control_authority_epoch",
+      "writer": "Game Runtime授权器",
+      "scope": "game_session_id",
+      "increment": "Bellis/本地高层采用权交接",
+      "comparison": "精确等于当前高层授权"
+    },
+    {
+      "field": "input_lease_epoch",
+      "writer": "Input Broker",
+      "scope": "host_id/interactive_desktop/lease_id",
+      "increment": "根输入owner交接或撤租",
+      "comparison": "精确相等；旧lease释放不得作用新owner"
+    },
+    {
+      "field": "input_context_epoch",
+      "writer": "Game Runtime状态归约器",
+      "scope": "game_session_id",
+      "increment": "控制含义改变的页面/模式/目标上下文切换",
+      "comparison": "动作依赖精确匹配；新普通弹幕不递增"
+    },
+    {
+      "field": "resource_generation",
+      "writer": "端点资源管理器",
+      "scope": "resource_id",
+      "increment": "已核验退役后创建安全新资源世代",
+      "comparison": "只在同resource_id内比较；换epoch不能替代实际旧资源隔离"
+    },
+    {
+      "field": "deletion_epoch",
+      "writer": "PrivacyGateway",
+      "scope": "subject_id＋purpose_scope",
+      "increment": "删除/撤回墓碑",
+      "comparison": "写入携带读时epoch，提交与最新墓碑原子比较；不允许旧结果复活"
+    },
+    {
+      "field": "policy_revision",
+      "writer": "目标Controller",
+      "scope": "controller_instance_id",
+      "increment": "兼容PolicyUpdate实际应用成功",
+      "comparison": "base CAS，成功增1；不同实例不可比较"
+    },
+    {
+      "field": "frame_seq",
+      "writer": "单根frame合成器",
+      "scope": "producer_instance＋input_lease_epoch",
+      "increment": "每个新ControlFrame",
+      "comparison": "单调递增；重传同payload不执行、不续期"
+    },
+    {
+      "field": "DirectorRecord.source_seq",
+      "writer": "事件源/模型候选源",
+      "scope": "source_instance或decision_cycle_id＋client_ref",
+      "increment": "新事实或新的候选片段",
+      "comparison": "按源比较；上游无seq显式null且coverage不可验证"
+    },
+    {
+      "field": "transform_version",
+      "writer": "Game Runtime采集/坐标管理",
+      "scope": "capture_instance＋target_window",
+      "increment": "根客户区／DPI／捕获源／输入根映射变化；同根ROI只生成新view_id。",
+      "comparison": "同根坐标作用域精确相等；DerivedView引用根版本，不自行提升。"
+    },
+    {
+      "field": "control_profile_revision",
+      "writer": "Game Pack配置管理",
+      "scope": "profile_id",
+      "increment": "键位/输入模式等配置变更",
+      "comparison": "匹配已验收版本，不随每帧改变"
+    },
+    {
+      "field": "calibration_revision",
+      "writer": "受控校准管理器",
+      "scope": "profile_id＋calibration_scope",
+      "increment": "校准结果批准",
+      "comparison": "依赖精确匹配；不回写旧样本"
+    },
+    {
+      "field": "plan_revision",
+      "writer": "Bellis PlanCommitter",
+      "scope": "plan_id",
+      "increment": "新不可变计划采用",
+      "comparison": "base CAS；仅影响实际依赖，不全局撤权"
+    },
+    {
+      "field": "goal_version",
+      "writer": "LiveDirector采用链/宿主",
+      "scope": "goal_id",
+      "increment": "显式改变语义目标",
+      "comparison": "依赖精确匹配；不是局部每步动作序号"
+    },
+    {
+      "field": "frontier_revision",
+      "writer": "Game Runtime／InputBroker执行账目归约器",
+      "scope": "broker_instance_id＋当前Attempt／lease",
+      "increment": "提交账目、未决范围或已确认输入前缀变化",
+      "comparison": "修正输出绑定当前可核验prefix；跨Broker/Attempt不比较、不自动采用。"
+    }
+  ]
+}

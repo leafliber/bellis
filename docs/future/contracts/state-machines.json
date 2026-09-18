@@ -1,0 +1,1973 @@
+{
+  "schema_version": "0.8.0",
+  "machines": [
+    {
+      "id": "Activity",
+      "index": 1,
+      "initial": "CREATED",
+      "terminal": [
+        "FINISHED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "CREATED"
+          ],
+          "event": "start",
+          "target": "RUNNING",
+          "guard": "plan_adopted",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING"
+          ],
+          "event": "pause",
+          "target": "QUIESCING",
+          "guard": "pause_supported",
+          "action": "只请求受影响Task到检查点",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "paused",
+          "target": "PAUSED",
+          "guard": "activity_paused",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PAUSED"
+          ],
+          "event": "resume",
+          "target": "RUNNING",
+          "guard": "resume_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "RUNNING"
+          ],
+          "event": "complete",
+          "target": "FINISHED",
+          "guard": "activity_complete",
+          "action": "记录目标范围内的outcome，不推导整款游戏完成",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "CREATED"
+          ],
+          "event": "cancel",
+          "target": "FINISHED",
+          "guard": "no_effect",
+          "action": "outcome=CANCELLED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING",
+            "QUIESCING",
+            "PAUSED"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "先撤权／收尾再聚合",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "checkpoint_timeout",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "撤权并记录未成功暂停",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "settled",
+          "target": "FINISHED",
+          "guard": "closure_accounted",
+          "action": "按第11.5节closure_outcome计算实际结局；不得固定为CANCELLED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING"
+          ],
+          "event": "child_effect_uncertain",
+          "target": "RUNNING",
+          "guard": "local_incident_valid",
+          "action": "fence_and_handoff仅作用于相关Effect/资源/依赖；更新blocked_scopes，不关闭常驻聊天",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "child_effect_uncertain",
+          "target": "QUIESCING",
+          "guard": "local_incident_valid",
+          "action": "fence_and_handoff仅作用于相关Effect/资源/依赖；更新blocked_scopes，不关闭常驻聊天",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PAUSED"
+          ],
+          "event": "child_effect_uncertain",
+          "target": "PAUSED",
+          "guard": "local_incident_valid",
+          "action": "fence_and_handoff仅作用于相关Effect/资源/依赖；更新blocked_scopes，不关闭常驻聊天",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "child_effect_uncertain",
+          "target": "STOPPING",
+          "guard": "local_incident_valid",
+          "action": "fence_and_handoff仅作用于相关Effect/资源/依赖；更新blocked_scopes，不关闭常驻聊天",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING",
+            "QUIESCING",
+            "PAUSED",
+            "STOPPING"
+          ],
+          "event": "activity_uncertain",
+          "target": "RECONCILING",
+          "guard": "activity_uncertainty_valid",
+          "action": "保存return_state与close_request；封锁活动级不明范围；启动独立对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "resolved_running",
+          "target": "RUNNING",
+          "guard": "activity_continue_running",
+          "action": "可信对账已恢复该阶段所需不变量；无关闭请求且业务deadline未过期",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "resolved_paused",
+          "target": "PAUSED",
+          "guard": "activity_continue_paused",
+          "action": "可信对账已恢复该阶段所需不变量；无关闭请求且业务deadline未过期",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "resolved_quiescing",
+          "target": "QUIESCING",
+          "guard": "activity_continue_quiescing",
+          "action": "可信对账已恢复该阶段所需不变量；无关闭请求且业务deadline未过期",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "resolved_closing",
+          "target": "STOPPING",
+          "guard": "activity_closing_resolved",
+          "action": "保留已提出的stop/deadline；按实际结果收尾，不自动恢复工作",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "resolved_complete",
+          "target": "FINISHED",
+          "guard": "activity_complete",
+          "action": "有限目标已满足且资源安全结算；计算实际outcome",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "stop",
+          "target": "RECONCILING",
+          "guard": "authorized_stop",
+          "action": "关闭新工作接纳，设置close_request=stop与return_state=STOPPING；立即撤相关权限",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "deadline",
+          "target": "RECONCILING",
+          "guard": "always",
+          "action": "记录deadline触发；关闭准入；return_state=STOPPING；不刷新reconcile_deadline",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "CREATED"
+          ],
+          "event": "deadline",
+          "target": "FINISHED",
+          "guard": "no_active_execution_and_accounted",
+          "action": "outcome=EXPIRED；reason=activity_deadline",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING",
+            "QUIESCING",
+            "PAUSED"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录activity_deadline，关闭接纳并有界停止；保留实际效果",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "保留最早截止与终止触发，不延长清理期限",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "reconcile_deadline",
+          "target": "FINISHED",
+          "guard": "always",
+          "action": "fence_and_handoff；outcome=UNKNOWN；独立incident继续或人工行政结案",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "manual_close",
+          "target": "FINISHED",
+          "guard": "manual_unresolved_close_valid",
+          "action": "outcome=UNKNOWN；引用ManualResolution；不释放未确认资源",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "CREATED"
+          ],
+          "event": "reject",
+          "target": "FINISHED",
+          "guard": "no_active_execution_and_accounted",
+          "action": "outcome=BLOCKED；记录采用拒绝原因",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "closure_timeout",
+          "target": "RECONCILING",
+          "guard": "always",
+          "action": "记录cleanup_timeout；fence_and_handoff；只封锁未完成关闭范围，对账期限独立有限。",
+          "phase": "P3"
+        }
+      ],
+      "phase": "P3",
+      "states": [
+        "CREATED",
+        "FINISHED",
+        "PAUSED",
+        "QUIESCING",
+        "RECONCILING",
+        "RUNNING",
+        "STOPPING"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "Task",
+      "index": 2,
+      "initial": "REGISTERED",
+      "terminal": [
+        "FINISHED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "REGISTERED"
+          ],
+          "event": "admit",
+          "target": "WAITING",
+          "guard": "budget_and_permission",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "WAITING"
+          ],
+          "event": "start_attempt",
+          "target": "ACTIVE",
+          "guard": "ready_to_attempt",
+          "action": "分配新attempt_id并登记派发",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE"
+          ],
+          "event": "attempt_success_settled",
+          "target": "FINISHED",
+          "guard": "candidate_success_settled",
+          "action": "outcome=SUCCEEDED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE"
+          ],
+          "event": "retry_scheduled",
+          "target": "RETRY_WAIT",
+          "guard": "retry_allowed",
+          "action": "沿用Task/Effect与累计恢复预算",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RETRY_WAIT"
+          ],
+          "event": "retry_due",
+          "target": "WAITING",
+          "guard": "budget_and_permission",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE"
+          ],
+          "event": "attempt_ended",
+          "target": "FINISHED",
+          "guard": "accounted_no_retry",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "WAITING",
+            "RETRY_WAIT"
+          ],
+          "event": "cancel",
+          "target": "FINISHED",
+          "guard": "no_active_execution_and_accounted",
+          "action": "outcome=CANCELLED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "WAITING"
+          ],
+          "event": "branch_skip",
+          "target": "FINISHED",
+          "guard": "no_active_execution_and_accounted",
+          "action": "outcome=SKIPPED；不伪报成功",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "WAITING"
+          ],
+          "event": "block",
+          "target": "FINISHED",
+          "guard": "no_active_execution_and_accounted",
+          "action": "outcome=BLOCKED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "WAITING",
+            "RETRY_WAIT"
+          ],
+          "event": "pause",
+          "target": "PAUSED",
+          "guard": "pause_supported",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "ACTIVE"
+          ],
+          "event": "pause",
+          "target": "QUIESCING",
+          "guard": "pause_supported",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "checkpoint_settled",
+          "target": "PAUSED",
+          "guard": "checkpoint_settled",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "PAUSED"
+          ],
+          "event": "resume",
+          "target": "WAITING",
+          "guard": "resume_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "ACTIVE",
+            "QUIESCING",
+            "PAUSED",
+            "RECONCILING"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "checkpoint_timeout",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "settled",
+          "target": "FINISHED",
+          "guard": "closure_accounted",
+          "action": "计算closure_outcome（第11.5节）：可信成功/失败、EXPIRED、CANCELLED；不覆盖timeout原因",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE",
+            "QUIESCING",
+            "STOPPING"
+          ],
+          "event": "effect_uncertain",
+          "target": "RECONCILING",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "resolved",
+          "target": "FINISHED",
+          "guard": "reconciliation_resolved",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "authorize_retry",
+          "target": "RETRY_WAIT",
+          "guard": "no_effect_retry_approved",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "WAITING",
+            "RETRY_WAIT",
+            "PAUSED"
+          ],
+          "event": "fail",
+          "target": "FINISHED",
+          "guard": "closure_accounted",
+          "action": "outcome=FAILED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "attempt_success_settled",
+          "target": "FINISHED",
+          "guard": "candidate_success_settled",
+          "action": "暂停申请期间任务已真实结案，不再伪建恢复票据",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "attempt_ended",
+          "target": "FINISHED",
+          "guard": "accounted_no_retry",
+          "action": "暂停申请期间任务已真实结案，不再伪建恢复票据",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "WAITING",
+            "RETRY_WAIT",
+            "PAUSED"
+          ],
+          "event": "deadline",
+          "target": "FINISHED",
+          "guard": "no_active_execution_and_accounted",
+          "action": "outcome按可信结果/业务截止计算；通常EXPIRED；保留既有效果与deadline原因",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE",
+            "QUIESCING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录action_deadline，撤新效果许可并有限停止；不得套用cancel原因",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录超时但不刷新停止/对账预算",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "deadline",
+          "target": "RECONCILING",
+          "guard": "always",
+          "action": "业务截止已过：禁止重试，保留对账期限与触发原因",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "reconcile_deadline",
+          "target": "FINISHED",
+          "guard": "always",
+          "action": "fence_and_handoff；outcome=UNKNOWN；清理/人工结案职责独立",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "attempt_success_settled",
+          "target": "FINISHED",
+          "guard": "candidate_success_settled",
+          "action": "真实完成在停止生效前已满足结果契约则SUCCEEDED；保留stop_requested/deadline_missed",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "attempt_ended",
+          "target": "FINISHED",
+          "guard": "accounted_no_retry",
+          "action": "依据实际结果与截止契约结案；停止确认不是取消结论",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RECONCILING"
+          ],
+          "event": "manual_close",
+          "target": "FINISHED",
+          "guard": "manual_unresolved_close_valid",
+          "action": "outcome=UNKNOWN；保留效果墓碑及资源隔离",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "closure_timeout",
+          "target": "RECONCILING",
+          "guard": "always",
+          "action": "记录cleanup_timeout；fence_and_handoff；保留停止/到期意图，禁止重试。",
+          "phase": "P3"
+        }
+      ],
+      "phase": "P3",
+      "states": [
+        "ACTIVE",
+        "FINISHED",
+        "PAUSED",
+        "QUIESCING",
+        "RECONCILING",
+        "REGISTERED",
+        "RETRY_WAIT",
+        "STOPPING",
+        "WAITING"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "Attempt",
+      "index": 3,
+      "initial": "REGISTERED",
+      "terminal": [
+        "SUCCEEDED",
+        "FAILED",
+        "CANCELLED",
+        "EXPIRED",
+        "UNKNOWN",
+        "SUSPENDED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "REGISTERED"
+          ],
+          "event": "admit",
+          "target": "QUEUED",
+          "guard": "budget_and_permission",
+          "action": "预留类别容量",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUEUED"
+          ],
+          "event": "dispatch",
+          "target": "DISPATCHED",
+          "guard": "dependencies_valid",
+          "action": "登记派发操作ID",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHED"
+          ],
+          "event": "accepted",
+          "target": "RUNNING",
+          "guard": "matching_instance",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING"
+          ],
+          "event": "wait_event",
+          "target": "WAITING_EVENT",
+          "guard": "always",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING"
+          ],
+          "event": "wait_resource",
+          "target": "WAITING_RESOURCE",
+          "guard": "always",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "WAITING_EVENT"
+          ],
+          "event": "event_ready",
+          "target": "RUNNING",
+          "guard": "dependencies_valid",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "WAITING_RESOURCE"
+          ],
+          "event": "resource_ready",
+          "target": "RUNNING",
+          "guard": "budget_and_permission",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING"
+          ],
+          "event": "succeed",
+          "target": "SUCCEEDED",
+          "guard": "effect_confirmed",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHED"
+          ],
+          "event": "dispatch_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "QUEUED"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "not_dispatched",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "QUEUED"
+          ],
+          "event": "deadline",
+          "target": "EXPIRED",
+          "guard": "no_effect",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "QUEUED",
+            "DISPATCHED",
+            "RUNNING",
+            "WAITING_EVENT",
+            "WAITING_RESOURCE"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "记录状态变化",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHED",
+            "RUNNING",
+            "WAITING_EVENT",
+            "WAITING_RESOURCE"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "先撤本地许可",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_confirmed",
+          "target": "CANCELLED",
+          "guard": "cancel_closure_valid",
+          "action": "最终回执证明效果已解释且未完成；cause非deadline；否则不走此转换",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_timeout",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING",
+            "WAITING_EVENT",
+            "WAITING_RESOURCE"
+          ],
+          "event": "quiesce",
+          "target": "QUIESCING",
+          "guard": "pause_supported",
+          "action": "停止新增效果并申请有限检查点",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "checkpoint_reached",
+          "target": "SUSPENDED",
+          "guard": "controller_quiesced",
+          "action": "记录快照；Settlement另行确认，Task尚未必PAUSED",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "本地先撤权",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "checkpoint_timeout",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "撤权，不伪报暂停成功",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "记录范围，触发必要清理",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "RUNNING",
+            "WAITING_EVENT",
+            "WAITING_RESOURCE",
+            "QUIESCING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHED",
+            "WAITING_EVENT",
+            "WAITING_RESOURCE"
+          ],
+          "event": "succeed",
+          "target": "SUCCEEDED",
+          "guard": "effect_confirmed",
+          "action": "可信结果早于接受/恢复回执；结算仍独立",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "succeed",
+          "target": "SUCCEEDED",
+          "guard": "effect_confirmed",
+          "action": "正常结果先于检查点到达，不强行改为SUSPENDED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline_closed",
+          "target": "EXPIRED",
+          "guard": "deadline_closure_valid",
+          "action": "最终回执证明效果已解释且未达成功；原因保留原deadline/timeout",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHED",
+            "RUNNING",
+            "WAITING_EVENT",
+            "WAITING_RESOURCE",
+            "QUIESCING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录attempt_deadline及触发范围，撤新效果许可并启动有限清理",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "只追加deadline证据，不覆盖已知结果或重置清理期限",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "succeed",
+          "target": "SUCCEEDED",
+          "guard": "effect_confirmed",
+          "action": "最终可信结果确认实际完成；stop请求及deadline_missed单独保留，Task再判时限契约",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "记录真实失败及已发生范围，清理仍由Settlement负责",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHED",
+            "STOPPING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "fence_and_handoff；不能因已收到stop_ack猜测效果未发生",
+          "phase": "P3"
+        }
+      ],
+      "phase": "P3",
+      "states": [
+        "CANCELLED",
+        "DISPATCHED",
+        "EXPIRED",
+        "FAILED",
+        "QUEUED",
+        "QUIESCING",
+        "REGISTERED",
+        "RUNNING",
+        "STOPPING",
+        "SUCCEEDED",
+        "SUSPENDED",
+        "UNKNOWN",
+        "WAITING_EVENT",
+        "WAITING_RESOURCE"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "Settlement",
+      "index": 4,
+      "initial": "PENDING",
+      "terminal": [
+        "SETTLED",
+        "ABANDONED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "PENDING"
+          ],
+          "event": "no_cleanup_needed",
+          "target": "SETTLED",
+          "guard": "empty_cleanup",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PENDING"
+          ],
+          "event": "begin_cleanup",
+          "target": "CLEANING",
+          "guard": "always",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "CLEANING"
+          ],
+          "event": "confirmed",
+          "target": "SETTLED",
+          "guard": "cleanup_confirmed",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PENDING",
+            "CLEANING"
+          ],
+          "event": "uncertain",
+          "target": "QUARANTINED",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUARANTINED"
+          ],
+          "event": "reconciled",
+          "target": "SETTLED",
+          "guard": "cleanup_confirmed",
+          "action": "追加确认事实，不重开旧Attempt",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUARANTINED"
+          ],
+          "event": "manual_abandon",
+          "target": "ABANDONED",
+          "guard": "manual_unresolved_close_valid",
+          "action": "停止自动重试；隔离墓碑转长期资源登记，旧资源不可复用；不等于SETTLED",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUARANTINED"
+          ],
+          "event": "retirement_verified",
+          "target": "SETTLED",
+          "guard": "resource_retirement_verified",
+          "action": "closure_basis=resource_retired；证明旧执行端已隔离且不能作用于新资源世代；不证明业务效果",
+          "phase": "P3"
+        }
+      ],
+      "phase": "P3",
+      "states": [
+        "ABANDONED",
+        "CLEANING",
+        "PENDING",
+        "QUARANTINED",
+        "SETTLED"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "Effect",
+      "index": 5,
+      "initial": "INTENT_RECORDED",
+      "terminal": [
+        "CONFIRMED",
+        "CLOSED",
+        "CLOSED_UNRESOLVED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "INTENT_RECORDED"
+          ],
+          "event": "dispatch",
+          "target": "DISPATCHING",
+          "guard": "effect_record_valid",
+          "action": "先登记本轮operation再派发",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHING"
+          ],
+          "event": "submission_ack",
+          "target": "SUBMITTED",
+          "guard": "effect_submission_recorded",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHING",
+            "SUBMITTED"
+          ],
+          "event": "observed_confirmed",
+          "target": "CONFIRMED",
+          "guard": "effect_confirmed",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHING",
+            "SUBMITTED"
+          ],
+          "event": "no_effect",
+          "target": "NO_EFFECT_VERIFIED",
+          "guard": "no_effect_proven",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DISPATCHING",
+            "SUBMITTED"
+          ],
+          "event": "uncertain",
+          "target": "IN_DOUBT",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "IN_DOUBT"
+          ],
+          "event": "reconcile_confirmed",
+          "target": "CONFIRMED",
+          "guard": "effect_confirmed",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "IN_DOUBT"
+          ],
+          "event": "reconcile_no_effect",
+          "target": "NO_EFFECT_VERIFIED",
+          "guard": "no_effect_proven",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "NO_EFFECT_VERIFIED"
+          ],
+          "event": "authorize_retry",
+          "target": "INTENT_RECORDED",
+          "guard": "effect_retry_authorized",
+          "action": "同一Effect追加新提交轮次，不抹去旧轨迹",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "INTENT_RECORDED"
+          ],
+          "event": "close",
+          "target": "CLOSED",
+          "guard": "not_dispatched",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "NO_EFFECT_VERIFIED"
+          ],
+          "event": "close",
+          "target": "CLOSED",
+          "guard": "no_effect_proven",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "IN_DOUBT"
+          ],
+          "event": "manual_close",
+          "target": "CLOSED_UNRESOLVED",
+          "guard": "manual_unresolved_close_valid",
+          "action": "行政终结：保留未知、旧semantic_key墓碑与禁止旧范围重执行；允许独立新发生范围重新授权",
+          "phase": "P3"
+        }
+      ],
+      "phase": "P3",
+      "states": [
+        "CLOSED",
+        "CLOSED_UNRESOLVED",
+        "CONFIRMED",
+        "DISPATCHING",
+        "INTENT_RECORDED",
+        "IN_DOUBT",
+        "NO_EFFECT_VERIFIED",
+        "SUBMITTED"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "SessionServiceInstance",
+      "index": 6,
+      "initial": "REGISTERED",
+      "terminal": [
+        "STOPPED",
+        "FAILED",
+        "UNKNOWN"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "REGISTERED"
+          ],
+          "event": "prepare",
+          "target": "PREPARING",
+          "guard": "budget_and_permission",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PREPARING"
+          ],
+          "event": "prepared",
+          "target": "READY",
+          "guard": "service_prepared",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "READY"
+          ],
+          "event": "activate",
+          "target": "ACTIVE",
+          "guard": "service_quality_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE"
+          ],
+          "event": "quality_lost",
+          "target": "DEGRADED",
+          "guard": "always",
+          "action": "使依赖本服务的数据/动作重新校验",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "DEGRADED"
+          ],
+          "event": "quality_restored",
+          "target": "ACTIVE",
+          "guard": "service_quality_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "PREPARING",
+            "READY",
+            "ACTIVE",
+            "DEGRADED"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stopped",
+          "target": "STOPPED",
+          "guard": "service_stopped",
+          "action": "记录状态和因果事件",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "PREPARING",
+            "READY",
+            "ACTIVE",
+            "DEGRADED"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "撤销实例贡献，必要资源单独隔离",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PREPARING"
+          ],
+          "event": "prepare_timeout",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录prepare_timeout；停止准备、有限清理；迟到prepared不复活",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "READY",
+            "ACTIVE",
+            "DEGRADED",
+            "STOPPING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "fence_and_handoff；隔离本实例影响范围",
+          "phase": "P3"
+        }
+      ],
+      "phase": "P3",
+      "states": [
+        "ACTIVE",
+        "DEGRADED",
+        "FAILED",
+        "PREPARING",
+        "READY",
+        "REGISTERED",
+        "STOPPED",
+        "STOPPING",
+        "UNKNOWN"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "ControllerInstance",
+      "index": 7,
+      "initial": "UNCONFIGURED",
+      "terminal": [
+        "FINALIZED",
+        "ERROR",
+        "UNKNOWN"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "UNCONFIGURED"
+          ],
+          "event": "prepare",
+          "target": "PREPARING",
+          "guard": "budget_and_permission",
+          "action": "固定prepare操作/配置与期限，启动旁路准备并返回句柄",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PREPARING"
+          ],
+          "event": "prepared",
+          "target": "PREPARED",
+          "guard": "controller_prepared",
+          "action": "确认准备证据；不得签发Task或输入许可",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PREPARING"
+          ],
+          "event": "prepare_timeout",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "取消准备并移交有界资源清理，不伪报准备成功",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PREPARED",
+            "INACTIVE"
+          ],
+          "event": "activate",
+          "target": "ACTIVE",
+          "guard": "controller_activation_valid",
+          "action": "必须绑定新的有效Attempt/许可",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE"
+          ],
+          "event": "quiesce",
+          "target": "QUIESCING",
+          "guard": "pause_supported",
+          "action": "停止新增效果并申请有限检查点",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "quiesced",
+          "target": "INACTIVE",
+          "guard": "controller_quiesced",
+          "action": "保存允许的语义快照，清理票据独立核验",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "UNCONFIGURED",
+            "PREPARING",
+            "PREPARED",
+            "ACTIVE",
+            "QUIESCING",
+            "INACTIVE"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "停止准备或撤销激活并执行有界清理",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "disposed",
+          "target": "FINALIZED",
+          "guard": "controller_disposed",
+          "action": "实例资源已释放或按契约隔离；保留结果原因",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "UNCONFIGURED",
+            "PREPARING",
+            "PREPARED",
+            "ACTIVE",
+            "QUIESCING",
+            "INACTIVE"
+          ],
+          "event": "fail",
+          "target": "ERROR",
+          "guard": "effect_accounted",
+          "action": "撤销激活并触发独立资源清理",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "PREPARING",
+            "PREPARED",
+            "ACTIVE",
+            "QUIESCING",
+            "INACTIVE"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ACTIVE",
+            "QUIESCING"
+          ],
+          "event": "activation_finished",
+          "target": "INACTIVE",
+          "guard": "activation_finished_valid",
+          "action": "绑定当前attempt_id/activation_id；实际终态与本次激活清理确认后可复用，不等待Task终态",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "QUIESCING"
+          ],
+          "event": "checkpoint_timeout",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录checkpoint_timeout；撤本次激活并有限处置",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "activation_finished",
+          "target": "STOPPING",
+          "guard": "activation_finished_valid",
+          "action": "只登记本次执行已完成；仍待dispose，不恢复可激活状态",
+          "phase": "P3"
+        }
+      ],
+      "phase": "P3",
+      "states": [
+        "ACTIVE",
+        "ERROR",
+        "FINALIZED",
+        "INACTIVE",
+        "PREPARED",
+        "PREPARING",
+        "QUIESCING",
+        "STOPPING",
+        "UNCONFIGURED",
+        "UNKNOWN"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "PlanCandidate",
+      "index": 8,
+      "initial": "REGISTERED",
+      "terminal": [
+        "COMMITTED",
+        "REJECTED",
+        "EXPIRED",
+        "CANCELLED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "REGISTERED"
+          ],
+          "event": "validate",
+          "target": "VALIDATED",
+          "guard": "candidate_schema_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "VALIDATED"
+          ],
+          "event": "prepare",
+          "target": "PREPARING",
+          "guard": "budget_and_permission",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "PREPARING"
+          ],
+          "event": "prepared",
+          "target": "WAITING_CHECKPOINT",
+          "guard": "candidate_prepared",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "WAITING_CHECKPOINT"
+          ],
+          "event": "checkpoint_ready",
+          "target": "READY_TO_COMMIT",
+          "guard": "local_checkpoint_ready",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "READY_TO_COMMIT"
+          ],
+          "event": "commit",
+          "target": "COMMITTED",
+          "guard": "commit_cas_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "VALIDATED",
+            "PREPARING",
+            "WAITING_CHECKPOINT",
+            "READY_TO_COMMIT"
+          ],
+          "event": "reject",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "VALIDATED",
+            "PREPARING",
+            "WAITING_CHECKPOINT",
+            "READY_TO_COMMIT"
+          ],
+          "event": "expire",
+          "target": "EXPIRED",
+          "guard": "always",
+          "action": "候选本身不产生新效果；受影响已静默任务另行恢复",
+          "phase": "P6"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "VALIDATED",
+            "PREPARING",
+            "WAITING_CHECKPOINT",
+            "READY_TO_COMMIT"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "authorized_stop",
+          "action": "记录状态和因果事件",
+          "phase": "P6"
+        }
+      ],
+      "phase": "P6",
+      "states": [
+        "CANCELLED",
+        "COMMITTED",
+        "EXPIRED",
+        "PREPARING",
+        "READY_TO_COMMIT",
+        "REGISTERED",
+        "REJECTED",
+        "VALIDATED",
+        "WAITING_CHECKPOINT"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "PolicyUpdate",
+      "index": 16,
+      "initial": "RECEIVED",
+      "terminal": [
+        "APPLIED",
+        "REJECTED",
+        "EXPIRED",
+        "CANCELLED",
+        "UNKNOWN"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "RECEIVED"
+          ],
+          "event": "validate",
+          "target": "VALIDATED",
+          "guard": "policy_candidate_valid",
+          "action": "固定候选digest、base和受限字段",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "VALIDATED"
+          ],
+          "event": "schedule",
+          "target": "SCHEDULED",
+          "guard": "policy_schedule_valid",
+          "action": "登记本地应用机会，当前有效闭环继续",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "SCHEDULED"
+          ],
+          "event": "begin_apply",
+          "target": "APPLYING",
+          "guard": "policy_boundary_valid",
+          "action": "固定生效边界，禁止旧后缀越界",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "APPLYING"
+          ],
+          "event": "applied",
+          "target": "APPLIED",
+          "guard": "policy_application_verified",
+          "action": "发布唯一`control.policy_applied`事实并固定event_id；不发Task成功（第15.13节）；可靠发布control.policy_applied，稳定event_id，仅一次业务终态事实",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "RECEIVED",
+            "VALIDATED",
+            "SCHEDULED"
+          ],
+          "event": "reject",
+          "target": "REJECTED",
+          "guard": "policy_not_applied",
+          "action": "记录原因，旧策略仅在仍有效时继续；可靠发布control.policy_rejected，稳定event_id，仅一次业务终态事实",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "RECEIVED",
+            "VALIDATED",
+            "SCHEDULED"
+          ],
+          "event": "expire",
+          "target": "EXPIRED",
+          "guard": "policy_not_applied",
+          "action": "未应用；不刷新deadline；可靠发布control.policy_expired，稳定event_id，仅一次业务终态事实",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "RECEIVED",
+            "VALIDATED",
+            "SCHEDULED"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "policy_cancel_safe",
+          "action": "只取消该候选，不取消当前控制任务；可靠发布control.policy_cancelled，稳定event_id，仅一次业务终态事实",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "APPLYING"
+          ],
+          "event": "apply_rejected",
+          "target": "REJECTED",
+          "guard": "policy_not_applied",
+          "action": "证明确未切换，不能以猜测恢复旧许可；可靠发布control.policy_rejected，稳定event_id，仅一次业务终态事实",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "APPLYING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账；可靠发布control.policy_unknown，稳定event_id，仅一次业务终态事实",
+          "phase": "C2"
+        },
+        {
+          "source": [
+            "APPLYING"
+          ],
+          "event": "apply_timeout",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "fence_and_handoff；发布control.policy_unknown，不猜测尚未应用",
+          "phase": "C2"
+        }
+      ],
+      "phase": "C2",
+      "states": [
+        "APPLIED",
+        "APPLYING",
+        "CANCELLED",
+        "EXPIRED",
+        "RECEIVED",
+        "REJECTED",
+        "SCHEDULED",
+        "UNKNOWN",
+        "VALIDATED"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "PollRound",
+      "index": 20,
+      "initial": "DRAFT",
+      "terminal": [
+        "FROZEN",
+        "CANCELLED",
+        "INVALID"
+      ],
+      "phase": "P4",
+      "transitions": [
+        {
+          "source": [
+            "DRAFT"
+          ],
+          "event": "open",
+          "target": "OPEN",
+          "guard": "poll_open_valid",
+          "action": "原说明完成；冻结rules_digest/choice_instance/轮次/接收窗口",
+          "phase": "P4"
+        },
+        {
+          "source": [
+            "OPEN"
+          ],
+          "event": "vote_received",
+          "target": "OPEN",
+          "guard": "vote_in_window_valid",
+          "action": "按稳定用户ID首个有效票计票；不延长窗口",
+          "phase": "P4"
+        },
+        {
+          "source": [
+            "OPEN"
+          ],
+          "event": "window_closed",
+          "target": "FROZEN",
+          "guard": "poll_freeze_valid",
+          "action": "事务冻结winner/tie/zero/coverage；发布poll.frozen",
+          "phase": "P4"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "OPEN"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "authorized_stop",
+          "action": "停止接票并记录原因；不更改已冻结结果",
+          "phase": "P4"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "OPEN"
+          ],
+          "event": "integrity_lost",
+          "target": "INVALID",
+          "guard": "always",
+          "action": "本地一致性失败或操作投票已知缺口；发布poll.invalid",
+          "phase": "P4"
+        },
+        {
+          "source": [
+            "DRAFT"
+          ],
+          "event": "draft_deadline",
+          "target": "CANCELLED",
+          "guard": "always",
+          "action": "草稿过期，未开放投票",
+          "phase": "P4"
+        }
+      ],
+      "states": [
+        "CANCELLED",
+        "DRAFT",
+        "FROZEN",
+        "INVALID",
+        "OPEN"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "WaitRegistration",
+      "index": 21,
+      "initial": "REGISTERED",
+      "terminal": [
+        "SATISFIED",
+        "TIMED_OUT",
+        "CANCELLED",
+        "GAP"
+      ],
+      "phase": "P3",
+      "transitions": [
+        {
+          "source": [
+            "REGISTERED"
+          ],
+          "event": "arm",
+          "target": "ARMED",
+          "guard": "wait_registration_valid",
+          "action": "权威登记过滤器与游标，再允许触发命令派发",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ARMED"
+          ],
+          "event": "matching_event",
+          "target": "SATISFIED",
+          "guard": "wait_match_valid",
+          "action": "验证源/发生范围/业务predicate；重复投递只重发已有结果",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "ARMED"
+          ],
+          "event": "deadline",
+          "target": "TIMED_OUT",
+          "guard": "always",
+          "action": "走已登记on_timeout；不取消无关Task",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "REGISTERED",
+            "ARMED"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "authorized_stop",
+          "action": "移除活跃订阅，保留结果记录",
+          "phase": "P3"
+        },
+        {
+          "source": [
+            "ARMED"
+          ],
+          "event": "coverage_gap",
+          "target": "GAP",
+          "guard": "always",
+          "action": "走on_gap查询/复核；不得当未发生或成功",
+          "phase": "P3"
+        }
+      ],
+      "states": [
+        "ARMED",
+        "CANCELLED",
+        "GAP",
+        "REGISTERED",
+        "SATISFIED",
+        "TIMED_OUT"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    }
+  ]
+}

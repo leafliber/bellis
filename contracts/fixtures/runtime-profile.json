@@ -1,0 +1,69 @@
+{
+  "profile": "bellis_local_integration_example",
+  "mode": "simulation",
+  "schema_version": "0.8.0",
+  "decision": {
+    "max_main_inference_inflight": 1,
+    "signal_coalesce_ms": 80,
+    "max_coalesce_wait_ms": 200,
+    "max_background_model_inflight": 1
+  },
+  "chat": {
+    "policy": "enqueue_only",
+    "max_pending_items": 500,
+    "max_pending_age_ms": 60000,
+    "selection_batch_limit": 20
+  },
+  "speech": {
+    "waiting_slots": {
+      "business": 2,
+      "paid_ack": 2,
+      "chat": 1
+    },
+    "waiting_output_ms": {
+      "business": 12000,
+      "paid_ack": 6000,
+      "chat": 8000
+    },
+    "max_waiting_output_ms_total": 26000,
+    "priority_at_idle": [
+      "business",
+      "paid_ack",
+      "chat"
+    ],
+    "max_consecutive_noncritical_before_chat": 3,
+    "chat_aging_ms": 30000,
+    "target_reply_output_ms": 6000,
+    "speculative_tts": false
+  },
+  "paid_ack": {
+    "pending_ttl_ms": 300000,
+    "max_pending_receipts": 500,
+    "read_message_body": false,
+    "use_generic_name": true
+  },
+  "stage": {
+    "startup_prebuffer_target_ms": 200,
+    "max_pcm_buffer_ms": 1500,
+    "optional_track_wait_ms": 80,
+    "required_prepare_timeout_ms": 1500,
+    "soft_finish_boundary_timeout_ms": 2000
+  },
+  "plan_limits": {
+    "max_nodes": 64,
+    "max_handler_depth": 2,
+    "max_active_instances_per_occurrence": 1,
+    "allow_arbitrary_code": false
+  },
+  "recovery": {
+    "max_attempts_per_task": 3,
+    "max_total_recovery_ms": 30000,
+    "retry_in_doubt_effect": false
+  },
+  "enabled_phases": [
+    "P0",
+    "P1"
+  ],
+  "enabled_capabilities": [],
+  "cost": null
+}

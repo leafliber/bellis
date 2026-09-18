@@ -1,0 +1,1520 @@
+{
+  "schema_version": "0.8.0",
+  "machines": [
+    {
+      "id": "Segment",
+      "initial": "DRAFT",
+      "terminal": [
+        "OUTPUT_COMPLETED",
+        "REJECTED",
+        "SKIPPED",
+        "CANCELLED",
+        "EXPIRED",
+        "FAILED",
+        "UNKNOWN"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "DRAFT"
+          ],
+          "event": "text_stable",
+          "target": "STABLE",
+          "guard": "framed_record_valid",
+          "action": "建立双文本与内容摘要",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STABLE"
+          ],
+          "event": "guard_start",
+          "target": "CHECKING",
+          "guard": "always",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING"
+          ],
+          "event": "guard_pass",
+          "target": "APPROVED",
+          "guard": "all_required_guards_pass",
+          "action": "签发内容绑定的审核凭据",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING"
+          ],
+          "event": "guard_deny",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING"
+          ],
+          "event": "guard_timeout",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "不放行；触发安全收尾",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "APPROVED"
+          ],
+          "event": "commit",
+          "target": "COMMITTED",
+          "guard": "commit_valid",
+          "action": "分配连续seq；可靠记录许可",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "COMMITTED"
+          ],
+          "event": "prepare",
+          "target": "PREPARING",
+          "guard": "dependencies_valid",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PREPARING"
+          ],
+          "event": "ready",
+          "target": "STARTABLE",
+          "guard": "required_tracks_ready",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STARTABLE"
+          ],
+          "event": "start",
+          "target": "PLAYING",
+          "guard": "playback_permission_valid",
+          "action": "绑定发声权；flow_state=FLOWING",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PLAYING"
+          ],
+          "event": "underflow",
+          "target": "PLAYING",
+          "guard": "always",
+          "action": "flow_state=BUFFERING；冻结内容位置",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PLAYING"
+          ],
+          "event": "buffer_ready",
+          "target": "PLAYING",
+          "guard": "playback_permission_valid",
+          "action": "flow_state=FLOWING",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PLAYING"
+          ],
+          "event": "drained",
+          "target": "OUTPUT_COMPLETED",
+          "guard": "segment_output_verified",
+          "action": "记录实际输出范围",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "COMMITTED",
+            "PREPARING",
+            "STARTABLE"
+          ],
+          "event": "discard_tail",
+          "target": "SKIPPED",
+          "guard": "tail_fence_valid",
+          "action": "撤销该片段未播媒体许可；不修改文本",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "STABLE",
+            "CHECKING",
+            "APPROVED",
+            "COMMITTED",
+            "PREPARING",
+            "STARTABLE"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "no_effect",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "STABLE",
+            "CHECKING",
+            "APPROVED"
+          ],
+          "event": "deadline",
+          "target": "EXPIRED",
+          "guard": "no_effect",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "STABLE",
+            "CHECKING",
+            "APPROVED",
+            "COMMITTED",
+            "PREPARING",
+            "STARTABLE",
+            "PLAYING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PLAYING"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "先停止本地效果",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_confirmed",
+          "target": "CANCELLED",
+          "guard": "cancel_closure_valid",
+          "action": "最终输出范围和尾部已解释且未完整完成，cause非deadline",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_timeout",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PLAYING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "COMMITTED",
+            "PREPARING",
+            "STARTABLE"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING"
+          ],
+          "event": "guard_needs_context",
+          "target": "WAITING_CONTEXT",
+          "guard": "guard_context_request_valid",
+          "action": "固定审核request/文本版本与有限上下文预算，不发播放许可",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "WAITING_CONTEXT"
+          ],
+          "event": "context_ready",
+          "target": "CHECKING",
+          "guard": "guard_context_ready",
+          "action": "补齐允许的最小上下文；新审核attempt，原文本不改",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "WAITING_CONTEXT"
+          ],
+          "event": "context_timeout",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "reason=GUARD_CONTEXT_TIMEOUT；销毁隔离音频",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING",
+            "WAITING_CONTEXT"
+          ],
+          "event": "guard_unavailable",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "reason=GUARD_UNAVAILABLE；必需审核失败关闭准入",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "WAITING_CONTEXT"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "no_effect",
+          "action": "关闭待审核请求，不产生公开效果",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "WAITING_CONTEXT"
+          ],
+          "event": "deadline",
+          "target": "EXPIRED",
+          "guard": "no_effect",
+          "action": "关闭待审核请求，不产生公开效果",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "WAITING_CONTEXT"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "关闭待审核请求，不产生公开效果",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PLAYING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录output_deadline，先撤未执行媒体；保留已输出范围",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "drained",
+          "target": "OUTPUT_COMPLETED",
+          "guard": "segment_output_verified",
+          "action": "最后范围在停止栅栏前已真实输出则正常结案；保留停止请求事实",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline_closed",
+          "target": "EXPIRED",
+          "guard": "deadline_closure_valid",
+          "action": "期限触发且实际未完整输出；记录partial_output与原因",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "fence_and_handoff",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "可信实际输出失败；保留范围",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "COMMITTED",
+            "PREPARING",
+            "STARTABLE"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录output_deadline；先撤销新输出许可并请求栅栏；未知不能凭未收到start回执当未播。",
+          "phase": "P1"
+        }
+      ],
+      "phase": "P1",
+      "states": [
+        "APPROVED",
+        "CANCELLED",
+        "CHECKING",
+        "COMMITTED",
+        "DRAFT",
+        "EXPIRED",
+        "FAILED",
+        "OUTPUT_COMPLETED",
+        "PLAYING",
+        "PREPARING",
+        "REJECTED",
+        "SKIPPED",
+        "STABLE",
+        "STARTABLE",
+        "STOPPING",
+        "UNKNOWN",
+        "WAITING_CONTEXT"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "UtteranceAdmission",
+      "initial": "OPEN",
+      "terminal": [
+        "SEALED",
+        "ABORTED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "OPEN"
+          ],
+          "event": "seal",
+          "target": "SEALED",
+          "guard": "seal_valid",
+          "action": "冻结最后已提交seq、reason、允许输出范围",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPEN"
+          ],
+          "event": "abort",
+          "target": "ABORTED",
+          "guard": "always",
+          "action": "关闭追加；记录原因",
+          "phase": "P1"
+        }
+      ],
+      "phase": "P1",
+      "states": [
+        "ABORTED",
+        "OPEN",
+        "SEALED"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "Utterance",
+      "initial": "OPENED",
+      "terminal": [
+        "COMPLETED",
+        "ENDED_EARLY",
+        "BLOCKED",
+        "CANCELLED",
+        "EXPIRED",
+        "FAILED",
+        "UNKNOWN"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "OPENED"
+          ],
+          "event": "first_commit",
+          "target": "QUEUED",
+          "guard": "commit_valid",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "QUEUED"
+          ],
+          "event": "first_output",
+          "target": "ACTIVE",
+          "guard": "playback_permission_valid",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "ACTIVE"
+          ],
+          "event": "production_closed",
+          "target": "DRAINING",
+          "guard": "admission_closed",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "QUEUED"
+          ],
+          "event": "production_closed",
+          "target": "QUEUED",
+          "guard": "admission_closed",
+          "action": "生产已收口；仍可等待播放",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "ACTIVE",
+            "DRAINING"
+          ],
+          "event": "complete",
+          "target": "COMPLETED",
+          "guard": "normal_output_complete",
+          "action": "发出utterance.output_completed",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAINING"
+          ],
+          "event": "finish_early",
+          "target": "ENDED_EARLY",
+          "guard": "early_output_accounted",
+          "action": "仅发出utterance.ended_early",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPENED",
+            "QUEUED",
+            "ACTIVE",
+            "DRAINING"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "本地停止；远端取消并行",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPENED",
+            "QUEUED",
+            "ACTIVE",
+            "DRAINING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_confirmed",
+          "target": "CANCELLED",
+          "guard": "cancel_closure_valid",
+          "action": "Admission关闭、最终输出/尾部已解释，确实被取消；非正常完成、非deadline",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_timeout",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "ACTIVE",
+            "DRAINING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPENED",
+            "QUEUED",
+            "ACTIVE",
+            "DRAINING"
+          ],
+          "event": "finish_boundary",
+          "target": "DRAINING",
+          "guard": "soft_finish_authorized",
+          "action": "同一宿主归约关闭UtteranceAdmission并提出有限cutoff；Stage确认前tail_fence未完成，不得ENDED_EARLY",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPENED",
+            "QUEUED",
+            "STOPPING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "fence_and_handoff；包括未收到first_output却有子Segment未知",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "complete",
+          "target": "COMPLETED",
+          "guard": "normal_output_complete",
+          "action": "原normal seal范围完整且停止并未截断实际输出；保留stop请求记录",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "finish_early",
+          "target": "ENDED_EARLY",
+          "guard": "early_output_accounted",
+          "action": "仅原先软收尾且已保留安全前缀/撤销尾部；不得把硬停改成软收尾",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline_closed",
+          "target": "EXPIRED",
+          "guard": "deadline_closure_valid",
+          "action": "保留输出范围；reason为真实deadline",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "ACTIVE",
+            "DRAINING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "关闭追加、记录output_deadline并有限停止",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "可信实际失败，追加原因而非覆盖停止触发",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPENED",
+            "QUEUED"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录output_deadline；关闭追加、撤销未播许可并请求本地栅栏/停止；等待实际输出结论。",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPENED",
+            "QUEUED"
+          ],
+          "event": "deny",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录policy_rejection；关闭追加并请求尾部栅栏；不能在确认前宣称未播。",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deny_closed",
+          "target": "BLOCKED",
+          "guard": "unstarted_media_closed",
+          "action": "确认无输出且所有未播尾部许可已撤；仅policy_rejection意图使用此事件。",
+          "phase": "P1"
+        }
+      ],
+      "phase": "P1",
+      "states": [
+        "ACTIVE",
+        "BLOCKED",
+        "CANCELLED",
+        "COMPLETED",
+        "DRAINING",
+        "ENDED_EARLY",
+        "EXPIRED",
+        "FAILED",
+        "OPENED",
+        "QUEUED",
+        "STOPPING",
+        "UNKNOWN"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "AudioProduction",
+      "initial": "CREATED",
+      "terminal": [
+        "EOS_VALIDATED",
+        "FAILED",
+        "CANCELLED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "CREATED"
+          ],
+          "event": "open",
+          "target": "OPEN",
+          "guard": "stream_binding_valid",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPEN"
+          ],
+          "event": "chunk",
+          "target": "OPEN",
+          "guard": "chunk_valid",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPEN"
+          ],
+          "event": "eos",
+          "target": "END_RECEIVED",
+          "guard": "eos_declared",
+          "action": "记录声明的末采样；不冒充接收完整",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "END_RECEIVED"
+          ],
+          "event": "gap_fill",
+          "target": "END_RECEIVED",
+          "guard": "chunk_valid",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "END_RECEIVED"
+          ],
+          "event": "validate_eos",
+          "target": "EOS_VALIDATED",
+          "guard": "stream_contiguous",
+          "action": "分片连续、解码排空及片段边界可核验",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CREATED",
+            "OPEN",
+            "END_RECEIVED"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "always",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CREATED",
+            "OPEN",
+            "END_RECEIVED"
+          ],
+          "event": "cancel_acceptance",
+          "target": "CANCELLED",
+          "guard": "authorized_stop",
+          "action": "关闭本地接收许可；不声称云端已停止计费",
+          "phase": "P1"
+        }
+      ],
+      "phase": "P1",
+      "states": [
+        "CANCELLED",
+        "CREATED",
+        "END_RECEIVED",
+        "EOS_VALIDATED",
+        "FAILED",
+        "OPEN"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "StopOperation",
+      "initial": "REQUESTED",
+      "terminal": [
+        "CONFIRMED",
+        "UNKNOWN"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "REQUESTED"
+          ],
+          "event": "local_ack",
+          "target": "CONFIRMED",
+          "guard": "local_effect_stopped",
+          "action": "记录状态变化",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "REQUESTED"
+          ],
+          "event": "deadline",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P0"
+        }
+      ],
+      "phase": "P0",
+      "states": [
+        "CONFIRMED",
+        "REQUESTED",
+        "UNKNOWN"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "Scene",
+      "initial": "OPEN",
+      "terminal": [
+        "COMPLETED",
+        "ENDED_EARLY",
+        "FAILED",
+        "CANCELLED",
+        "UNKNOWN",
+        "EMPTY"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "OPEN"
+          ],
+          "event": "child_started",
+          "target": "RUNNING",
+          "guard": "matching_child_instance",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPEN",
+            "RUNNING"
+          ],
+          "event": "close",
+          "target": "DRAINING",
+          "guard": "children_set_valid",
+          "action": "children_closed=true",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAINING"
+          ],
+          "event": "all_complete",
+          "target": "COMPLETED",
+          "guard": "all_children_normal",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAINING"
+          ],
+          "event": "children_early",
+          "target": "ENDED_EARLY",
+          "guard": "aggregate_is_early",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAINING"
+          ],
+          "event": "children_failed",
+          "target": "FAILED",
+          "guard": "aggregate_is_failed",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAINING"
+          ],
+          "event": "children_cancelled",
+          "target": "CANCELLED",
+          "guard": "aggregate_is_cancelled",
+          "action": "记录状态变化",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "OPEN",
+            "RUNNING",
+            "DRAINING"
+          ],
+          "event": "effects_unknown",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "RUNNING"
+          ],
+          "event": "child_started",
+          "target": "RUNNING",
+          "guard": "matching_child_instance",
+          "action": "既有合法子对象开始；不改变children_closed",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAINING"
+          ],
+          "event": "child_started",
+          "target": "DRAINING",
+          "guard": "matching_child_instance",
+          "action": "既有合法子对象开始；不改变children_closed",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAINING"
+          ],
+          "event": "empty_closed",
+          "target": "EMPTY",
+          "guard": "empty_scene_closed",
+          "action": "children_closed且无任何子对象；不发语音完成、不满足要求输出的Action",
+          "phase": "P1"
+        }
+      ],
+      "phase": "P1",
+      "states": [
+        "CANCELLED",
+        "COMPLETED",
+        "DRAINING",
+        "EMPTY",
+        "ENDED_EARLY",
+        "FAILED",
+        "OPEN",
+        "RUNNING",
+        "UNKNOWN"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "TextPresentation",
+      "initial": "DRAFT",
+      "terminal": [
+        "COMPLETED",
+        "CANCELLED",
+        "FAILED",
+        "UNKNOWN",
+        "REJECTED",
+        "EXPIRED"
+      ],
+      "transitions": [
+        {
+          "source": [
+            "APPROVED"
+          ],
+          "event": "commit",
+          "target": "QUEUED",
+          "guard": "commit_valid",
+          "action": "无TTS；绑定text_only显示许可",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "QUEUED"
+          ],
+          "event": "display",
+          "target": "DISPLAYING",
+          "guard": "dependencies_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DISPLAYING"
+          ],
+          "event": "display_complete",
+          "target": "COMPLETED",
+          "guard": "text_display_verified",
+          "action": "仅发text_display.completed",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "APPROVED",
+            "QUEUED"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "no_effect",
+          "action": "记录状态和因果事件",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DISPLAYING"
+          ],
+          "event": "stop",
+          "target": "STOPPING",
+          "guard": "authorized_stop",
+          "action": "记录状态和因果事件",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_confirmed",
+          "target": "CANCELLED",
+          "guard": "cancel_closure_valid",
+          "action": "记录状态和因果事件",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "APPROVED",
+            "QUEUED",
+            "DISPLAYING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "记录状态和因果事件",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DISPLAYING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "`fence_and_handoff`（第11.6节）；保留未知范围、阻断相关新效果并移交清理/对账",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAFT"
+          ],
+          "event": "guard_start",
+          "target": "CHECKING",
+          "guard": "always",
+          "action": "固定文本与公开用途、上下文和审核期限",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING"
+          ],
+          "event": "guard_pass",
+          "target": "APPROVED",
+          "guard": "public_text_approved",
+          "action": "签发text_only绑定审核，不使用voice字段",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING"
+          ],
+          "event": "guard_needs_context",
+          "target": "WAITING_CONTEXT",
+          "guard": "guard_context_request_valid",
+          "action": "只等待有限允许上下文",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "WAITING_CONTEXT"
+          ],
+          "event": "context_ready",
+          "target": "CHECKING",
+          "guard": "guard_context_ready",
+          "action": "新审核请求，同一不可变内容版本",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING",
+            "WAITING_CONTEXT"
+          ],
+          "event": "guard_deny",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "reason=GUARD_REJECTED；无公开许可",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING",
+            "WAITING_CONTEXT"
+          ],
+          "event": "guard_unavailable",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "reason=GUARD_UNAVAILABLE",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING",
+            "WAITING_CONTEXT"
+          ],
+          "event": "guard_timeout",
+          "target": "REJECTED",
+          "guard": "always",
+          "action": "reason=GUARD_TIMEOUT或GUARD_CONTEXT_TIMEOUT",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING",
+            "WAITING_CONTEXT"
+          ],
+          "event": "cancel",
+          "target": "CANCELLED",
+          "guard": "no_effect",
+          "action": "取消审核；无公开输出",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DRAFT",
+            "CHECKING",
+            "WAITING_CONTEXT",
+            "APPROVED"
+          ],
+          "event": "deadline",
+          "target": "EXPIRED",
+          "guard": "unstarted_media_closed",
+          "action": "本地显示许可已撤且未输出；保留deadline",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "DISPLAYING"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "撤显示许可并记录output_deadline",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "QUEUED",
+            "STOPPING"
+          ],
+          "event": "effect_uncertain",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "fence_and_handoff；发送display但首帧回执未到也可未知",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "display_complete",
+          "target": "COMPLETED",
+          "guard": "text_display_verified",
+          "action": "完整满足原显示结果契约则记录实际完成；停止请求不覆盖它",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "deadline_closed",
+          "target": "EXPIRED",
+          "guard": "deadline_closure_valid",
+          "action": "实际显示未满足契约且由deadline终止",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "STOPPING"
+          ],
+          "event": "stop_timeout",
+          "target": "UNKNOWN",
+          "guard": "always",
+          "action": "fence_and_handoff",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "CHECKING",
+            "WAITING_CONTEXT",
+            "STOPPING"
+          ],
+          "event": "fail",
+          "target": "FAILED",
+          "guard": "effect_accounted",
+          "action": "记录实际失败与已知输出范围",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "QUEUED"
+          ],
+          "event": "deadline",
+          "target": "STOPPING",
+          "guard": "always",
+          "action": "记录output_deadline；先撤销展示许可并请求显示端确认；不可先假设no_effect。",
+          "phase": "P1"
+        }
+      ],
+      "phase": "P1",
+      "states": [
+        "APPROVED",
+        "CANCELLED",
+        "CHECKING",
+        "COMPLETED",
+        "DISPLAYING",
+        "DRAFT",
+        "EXPIRED",
+        "FAILED",
+        "QUEUED",
+        "REJECTED",
+        "STOPPING",
+        "UNKNOWN",
+        "WAITING_CONTEXT"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "SupervisionMode",
+      "initial": "stopped",
+      "terminal": [],
+      "phase": "P0",
+      "transitions": [
+        {
+          "source": [
+            "stopped",
+            "restricted"
+          ],
+          "event": "operator_supervise",
+          "target": "supervised",
+          "guard": "supervised_entry_valid",
+          "action": "新监督代次与有限人工租约；逐能力重新准入，旧播放/输入许可不恢复",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "supervised",
+            "unattended_approved"
+          ],
+          "event": "supervision_lost",
+          "target": "restricted",
+          "guard": "always",
+          "action": "撤相关公开自由输出与游戏输入；固定提示/只读可继续；启动有限宽限",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "supervised",
+            "restricted",
+            "stopped"
+          ],
+          "event": "approve_unattended",
+          "target": "unattended_approved",
+          "guard": "unattended_entry_valid",
+          "action": "平台/运营批准且profile显式支持，默认拒绝",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "restricted"
+          ],
+          "event": "grace_deadline",
+          "target": "safe_stopping",
+          "guard": "always",
+          "action": "有界关闭目标输出；不能由新心跳自动回supervised",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "supervised",
+            "restricted",
+            "unattended_approved",
+            "stopped"
+          ],
+          "event": "safe_stop",
+          "target": "safe_stopping",
+          "guard": "authorized_stop",
+          "action": "先撤权限；保留独立清理",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "safe_stopping"
+          ],
+          "event": "outputs_accounted",
+          "target": "stopped",
+          "guard": "supervision_outputs_safe",
+          "action": "本地输出已停或明确隔离；存在未确认项则禁止重新授权相应能力",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "safe_stopping"
+          ],
+          "event": "stop_timeout",
+          "target": "stopped",
+          "guard": "always",
+          "action": "锁住未知范围；记录incident并保留独立监督；stopped不等于所有外端已停",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "supervised"
+          ],
+          "event": "human_renewal",
+          "target": "supervised",
+          "guard": "human_renewal_valid",
+          "action": "只延长有限人工租约；不刷新Task/Action deadline",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "restricted"
+          ],
+          "event": "heartbeat",
+          "target": "restricted",
+          "guard": "always",
+          "action": "仅更新连接健康，不复权",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "stopped"
+          ],
+          "event": "heartbeat",
+          "target": "stopped",
+          "guard": "always",
+          "action": "仅连接状态",
+          "phase": "P0"
+        }
+      ],
+      "states": [
+        "restricted",
+        "safe_stopping",
+        "stopped",
+        "supervised",
+        "unattended_approved"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；新证据用Reconciliation追加。监督模式stopped为可重新人工授权的安全静止态，不是业务终态。"
+    },
+    {
+      "id": "ExecutionGrant",
+      "initial": "REQUESTED",
+      "terminal": [
+        "DENIED",
+        "REVOKED",
+        "EXPIRED"
+      ],
+      "phase": "P0",
+      "transitions": [
+        {
+          "source": [
+            "REQUESTED"
+          ],
+          "event": "approve",
+          "target": "ACTIVE",
+          "guard": "execution_grant_valid",
+          "action": "绑定mode=test_only或public、profile/目标/动作/预算/截止/监督代次；test_only不得公开播出",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "REQUESTED"
+          ],
+          "event": "deny",
+          "target": "DENIED",
+          "guard": "always",
+          "action": "记录拒绝原因",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "REQUESTED",
+            "ACTIVE"
+          ],
+          "event": "deadline",
+          "target": "EXPIRED",
+          "guard": "always",
+          "action": "撤本grant下许可；独立停止清理，不恢复旧grant",
+          "phase": "P0"
+        },
+        {
+          "source": [
+            "REQUESTED",
+            "ACTIVE"
+          ],
+          "event": "revoke",
+          "target": "REVOKED",
+          "guard": "authorized_stop",
+          "action": "原子撤新效果准入，作用域内资源有界清理",
+          "phase": "P0"
+        }
+      ],
+      "states": [
+        "ACTIVE",
+        "DENIED",
+        "EXPIRED",
+        "REQUESTED",
+        "REVOKED"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    },
+    {
+      "id": "StagePairing",
+      "initial": "UNPAIRED",
+      "terminal": [
+        "REVOKED"
+      ],
+      "phase": "P1",
+      "transitions": [
+        {
+          "source": [
+            "UNPAIRED"
+          ],
+          "event": "request_pair",
+          "target": "PENDING",
+          "guard": "pair_request_valid",
+          "action": "生成非授权pair_request_id与短期挑战；私钥留本地",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PENDING"
+          ],
+          "event": "operator_approve",
+          "target": "PAIRED",
+          "guard": "pair_approval_valid",
+          "action": "一次性批准消费；登记设备公钥/角色/Origin；不授予当前播出权",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PENDING"
+          ],
+          "event": "pair_timeout",
+          "target": "UNPAIRED",
+          "guard": "always",
+          "action": "作废本轮挑战；可发起新的配对请求，不复用旧bootstrap",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PAIRED"
+          ],
+          "event": "connect",
+          "target": "AUTHENTICATED",
+          "guard": "pair_proof_valid",
+          "action": "验证一次性签名挑战；创建新connection_instance与短期角色token",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "AUTHENTICATED"
+          ],
+          "event": "disconnect",
+          "target": "PAIRED",
+          "guard": "always",
+          "action": "旧连接许可撤销，刷新不恢复旧PCM/媒体grant",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "AUTHENTICATED"
+          ],
+          "event": "access_expired",
+          "target": "PAIRED",
+          "guard": "always",
+          "action": "连接token过期；仅新挑战可重连",
+          "phase": "P1"
+        },
+        {
+          "source": [
+            "PAIRED",
+            "AUTHENTICATED"
+          ],
+          "event": "revoke",
+          "target": "REVOKED",
+          "guard": "authorized_stop",
+          "action": "pairing_epoch增加且设备公钥撤销；重配须新pairing_id",
+          "phase": "P1"
+        }
+      ],
+      "states": [
+        "AUTHENTICATED",
+        "PAIRED",
+        "PENDING",
+        "REVOKED",
+        "UNPAIRED"
+      ],
+      "notes": "表外转换拒绝；终态不可复活；stop请求、实际结果、清理分别记录。"
+    }
+  ]
+}

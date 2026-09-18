@@ -1,0 +1,593 @@
+{
+  "schema_version": "0.8.0",
+  "errors": [
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "COST_BUDGET_EXCEEDED",
+      "meaning": "会话/小时/任务共享费用预算耗尽。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "MEDIA_BUFFER_LIMIT_EXCEEDED",
+      "meaning": "未审/隔离/可播媒体缓存额度超限。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "PLAN_LIMIT_EXCEEDED",
+      "meaning": "节点、分支、派生任务、handler重入或深度超过profile上限。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "PROVIDER_CONCURRENCY_EXCEEDED",
+      "meaning": "对应计算Provider并发额度不足。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "QUEUE_LIMIT_EXCEEDED",
+      "meaning": "类别条数/年龄/时长额度达到上限；不取消在播内容。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "RATE_LIMIT_EXCEEDED",
+      "meaning": "主体或通道有界速率限制。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "RETRY_BUDGET_EXCEEDED",
+      "meaning": "共享恢复次数/时长/成本额度耗尽。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "ACTION_DEADLINE_MISSED",
+      "meaning": "Action预算已耗尽；已经派发时仍按实际效果/停止证据处理",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "ACTIVITY_DEADLINE_MISSED",
+      "meaning": "Activity原业务总截止已过，不因暂停/重试刷新。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "ATTEMPT_DEADLINE_MISSED",
+      "meaning": "当前Attempt截止已过，撤新效果许可并保留实际结果。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "CLEANUP_TIMEOUT",
+      "meaning": "有限清理未获证明；进入QUARANTINED。",
+      "retry_disposition": "query_only",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "CONTROL_DEADLINE_MISSED",
+      "meaning": "输入/控制期限已错过；不补发旧动作",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "GUARD_CONTEXT_TIMEOUT",
+      "meaning": "额外上下文次数或总审核时限耗尽。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "GUARD_TIMEOUT",
+      "meaning": "必要审核超过原期限，不能超时放行。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "POLICY_UPDATE_TIMEOUT",
+      "meaning": "更新在截止前不能完成/确认；依实际应用边界判EXPIRED或UNKNOWN。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "PREPARE_TIMEOUT",
+      "meaning": "服务或控制器准备超过原期限。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "RECONCILE_TIMEOUT",
+      "meaning": "只读对账期限结束；业务可UNKNOWN结案，未知墓碑保留。",
+      "retry_disposition": "query_only",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "STOP_TIMEOUT",
+      "meaning": "有限停止确认未获证明；进入UNKNOWN而非自动取消成功。",
+      "retry_disposition": "query_only",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "WAIT_EVENT_TIMEOUT",
+      "meaning": "等待未在原期限内获得满足条件的事实。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "ATTEMPT_STALE",
+      "meaning": "引用的尝试已失效；旧操作不得自动转绑新Attempt",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "EVENT_COVERAGE_GAP",
+      "meaning": "当前依赖事件覆盖存在缺口；不可将结果冒充全量确定事实",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "OBSERVATION_STALE",
+      "meaning": "所依据观察过期；新推理时间不能刷新旧帧年龄",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "POLICY_DEPENDENCY_STALE",
+      "meaning": "策略更新或动作依赖已失效。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "RESUME_CONTEXT_STALE",
+      "meaning": "恢复票据/上下文/目标版本过期；需重新观察与授权",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "STAGE_INSTANCE_STALE",
+      "meaning": "旧Stage实例结果只用于历史对账。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "STORY_SCOPE_STALE",
+      "meaning": "剧情scope/存档/选择发生实例已改变。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "EFFECT_UNKNOWN",
+      "reason_code": "CLEANUP_UNCONFIRMED",
+      "meaning": "无法证明相关端点停止/清理。",
+      "retry_disposition": "query_only",
+      "phase": "P0"
+    },
+    {
+      "category": "EFFECT_UNKNOWN",
+      "reason_code": "EFFECT_UNCONFIRMED",
+      "meaning": "跨提交边界后无法确定业务效果，禁止自动重做。",
+      "retry_disposition": "query_only",
+      "phase": "P0"
+    },
+    {
+      "category": "EFFECT_UNKNOWN",
+      "reason_code": "OUTPUT_UNCONFIRMED",
+      "meaning": "真实媒体输出范围无法核验，保留未知。",
+      "retry_disposition": "query_only",
+      "phase": "P0"
+    },
+    {
+      "category": "EFFECT_UNKNOWN",
+      "reason_code": "POLICY_APPLY_UNCONFIRMED",
+      "meaning": "无法核验实际参数切换/边界；仅对账，不重复应用",
+      "retry_disposition": "query_only",
+      "phase": "P0"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "CHECKPOINT_UNSUPPORTED",
+      "meaning": "Manifest/当前能力没有检查点实现；静态拒绝，不能靠等待/重试补出能力",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "CONTROL_MODE_UNSUPPORTED",
+      "meaning": "后端静态未实现所请求控制模式",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "PAUSE_UNSUPPORTED",
+      "meaning": "当前能力不支持暂停/quiesce契约；不以stop成功替代",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "POLICY_UPDATE_UNSUPPORTED",
+      "meaning": "后端没有兼容参数更新能力；改用已允许的结构性交接须另行采用",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "RESTORE_UNSUPPORTED",
+      "meaning": "当前能力不支持恢复；不假装恢复旧按键或媒体队列",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "INTEGRITY_FAILED",
+      "reason_code": "CONTROL_FRAME_CONFLICT",
+      "meaning": "同frame/operation身份出现不同内容，或其固定绑定被破坏",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "INTEGRITY_FAILED",
+      "reason_code": "EVENT_IDENTITY_CONFLICT",
+      "meaning": "同一事实身份或业务唯一键出现冲突载荷",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "INTEGRITY_FAILED",
+      "reason_code": "MEDIA_BINDING_MISMATCH",
+      "meaning": "内容、voice、前缀、流、实例或许可hash绑定不一致。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "INTEGRITY_FAILED",
+      "reason_code": "OPERATION_PAYLOAD_CONFLICT",
+      "meaning": "同operation_id出现不同规范载荷；拒绝并保留原事实。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "INTEGRITY_FAILED",
+      "reason_code": "SCOPED_EPOCH_CONFLICT",
+      "meaning": "同作用域/代次出现互斥owner或不可能的源版本。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "ACTIVE_OBSERVATION_REQUIRED",
+      "meaning": "仅被动证据不足；需要另行批准的主动观察动作，查询不得自行执行",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "GUARD_CONTEXT_DENIED",
+      "meaning": "请求的额外上下文超出许可/隐私范围。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "GUARD_REJECTED",
+      "meaning": "内容审核明确拒绝，保留原因不公开原文。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "MANUAL_RESOLUTION_INVALID",
+      "meaning": "人工结案证据/权限/目标版本不足，不能释放未知效果。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "POLICY_FIELD_FORBIDDEN",
+      "meaning": "候选企图修改安全机制或其他禁止字段；不可裁剪后声称完整应用",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "PUBLIC_PROFILE_NOT_APPROVED",
+      "meaning": "公开模式适用门禁未全部PASS。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "PROVIDER_UNAVAILABLE",
+      "reason_code": "PROVIDER_CONNECTION_FAILED",
+      "meaning": "LLM/TTS等计算Provider网络/服务不可用。",
+      "retry_disposition": "bounded_retry",
+      "phase": "P0"
+    },
+    {
+      "category": "PROVIDER_UNAVAILABLE",
+      "reason_code": "PROVIDER_RATE_LIMITED",
+      "meaning": "计算Provider限流；按有限预算和Retry-After处理。",
+      "retry_disposition": "bounded_retry",
+      "phase": "P0"
+    },
+    {
+      "category": "PROVIDER_UNAVAILABLE",
+      "reason_code": "PROVIDER_RESPONSE_INVALID",
+      "meaning": "Provider返回违反其协定，不能解析成公开内容/执行命令。",
+      "retry_disposition": "bounded_retry",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "ACTION_PROFILE_MISMATCH",
+      "meaning": "动作Schema、profile、坐标/输入模式或版本组合不合法；拒绝动作",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "CONTRACT_REFERENCE_INVALID",
+      "meaning": "契约引用缺失、版本未登记、digest不匹配。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "CONTROL_FRAME_INVALID",
+      "meaning": "完整帧缺字段、单位/模式/目标不合法或输入互相冲突。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "FIELD_NOT_ALLOWED",
+      "meaning": "未知字段/错误作用域字段，例如Action.completion_contract",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "INPUT_BINDING_INVALID",
+      "meaning": "结构化绑定路径不存在、越范围或解析后不满足目标inputs Schema。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "JSON_INVALID",
+      "meaning": "UTF-8/JSON语法或重复对象键非法；任何副作用之前拒绝。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "PLAN_GRAPH_INVALID",
+      "meaning": "节点引用缺失、环、重复ID、不可达或结构节点多owner等静态图错误。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "PREDICATE_INVALID",
+      "meaning": "非登记谓词、类型不匹配或缺失必要分支。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "REQUIRED_FIELD_MISSING",
+      "meaning": "缺少本对象Schema必填字段，例如Action.timeout_ms",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "TIMEOUT_INVALID",
+      "meaning": "时限非正整数、非有限、为空或超出允许配置范围",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "CHECKPOINT_NOT_REACHED",
+      "meaning": "支持检查点但目前未到安全边界；等待受现有deadline约束",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "CONTROLLER_NOT_READY",
+      "meaning": "实现支持，但当前控制器尚未完成prepare或激活依赖暂不可用；有界等待，不归模型Provider故障。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "CONTROL_MODE_UNAVAILABLE",
+      "meaning": "模式实现存在，但当前场景/组合条件不允许；与静态未实现分开",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "GUARD_UNAVAILABLE",
+      "meaning": "必需内容门禁当前不可完成；停止新自由输出；底层Provider错误另行记录。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "INVALID_STATE_TRANSITION",
+      "meaning": "表外事件或已终态对象的普通执行命令。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "PLAN_REVISION_CONFLICT",
+      "meaning": "本地Plan基准版本冲突；原候选不得强行覆盖",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "POLICY_BASE_CONFLICT",
+      "meaning": "目标策略base不再匹配；候选不得自动改base重发",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "POLICY_CANCEL_TOO_LATE",
+      "meaning": "PolicyUpdate已开始应用，不能证明尚未生效；取消拒绝并查询原状态。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "RESOURCE_NOT_SETTLED",
+      "meaning": "相关清理未确认；先结算，不放行冲突输入",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "RESOURCE_QUARANTINED",
+      "meaning": "相关资源隔离尚未解除，人工行政结案不代表清理确认。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "SEMANTIC_EFFECT_BLOCKED",
+      "meaning": "同业务范围存在CONFIRMED、IN_DOUBT或CLOSED_UNRESOLVED效果，不自动重执行。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "SERVICE_NOT_READY",
+      "meaning": "会话服务尚未就绪或数据质量不足。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "STAGE_ALREADY_CONNECTED",
+      "meaning": "同配对设备存在有效连接；新连接不得自动抢占旧连接。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "SUPERSESSION_REQUIRED",
+      "meaning": "存在待处置旧范围，需显式交接/新发生scope和授权。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "AUTHENTICATION_REQUIRED",
+      "meaning": "缺失或无效的身份凭据。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "DEMONSTRATION_PURPOSE_DENIED",
+      "meaning": "没有相应用途许可；不得降格使用直播/审计权限采集训练数据",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "EXECUTION_GRANT_REVOKED",
+      "meaning": "执行许可已撤销，不能沿旧请求复权。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "INPUT_LEASE_EXPIRED",
+      "meaning": "输入租约已过期，重包不得续命。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "PAIRING_REVOKED",
+      "meaning": "已配对设备被撤销；必须重新显式配对。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "PRIVACY_PURPOSE_DENIED",
+      "meaning": "当前主体/用途/外发范围未获隐私许可。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "ROLE_SCOPE_DENIED",
+      "meaning": "主体角色、对象owner或执行scope无权使用该能力。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "SUPERVISION_EXPIRED",
+      "meaning": "监督或人工确认租约已过期，先撤相关权限。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "TEST_ONLY_SCOPE_VIOLATION",
+      "meaning": "测试许可试图公开播出、越目标或扩大动作。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "DEADLINE_EXCEEDED",
+      "reason_code": "COMMAND_DEADLINE_MISSED",
+      "meaning": "有限RPC命令已超过目标时钟域内的接纳截止；不发出新效果，既有操作另行只读查询。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "COMMAND_CLOCK_MISMATCH",
+      "meaning": "命令未映射到当前端点明确声明的目标时钟域，不能直接比较或猜测换算。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    }
+  ]
+}

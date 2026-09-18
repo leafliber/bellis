@@ -1,0 +1,1586 @@
+{
+  "schema_version": "0.8.0",
+  "phase_dependencies": {
+    "P0": [],
+    "P1": [
+      "P0"
+    ],
+    "P2": [
+      "P1"
+    ],
+    "P3": [
+      "P0"
+    ],
+    "P4": [
+      "P2",
+      "P3"
+    ],
+    "C0": [
+      "P3"
+    ],
+    "P5": [
+      "P4",
+      "C0"
+    ],
+    "P6": [
+      "P3"
+    ],
+    "P7": [
+      "P0"
+    ],
+    "P8": [
+      "P0"
+    ],
+    "C1": [
+      "C0"
+    ],
+    "C2": [
+      "C0"
+    ],
+    "C3": [
+      "C0"
+    ],
+    "C4": [
+      "C0"
+    ],
+    "C5": [
+      "C0"
+    ]
+  },
+  "release_profiles": {
+    "chat": [
+      "P4",
+      "P8"
+    ],
+    "story": [
+      "P5",
+      "P8"
+    ],
+    "continuous": [
+      "P5",
+      "C1",
+      "P8"
+    ],
+    "continuous_policy": [
+      "P5",
+      "C1",
+      "C2",
+      "P8"
+    ]
+  },
+  "phase_requirements": {
+    "C2": {
+      "any_of": [
+        "P5",
+        "C1"
+      ]
+    },
+    "C3": {
+      "any_of": [
+        "P5",
+        "C1"
+      ]
+    },
+    "C4": {
+      "any_of": [
+        "P5",
+        "C1"
+      ]
+    },
+    "C5": {
+      "any_of": [
+        "C1"
+      ]
+    }
+  },
+  "conditional_dependencies": {
+    "C2": "还须当前控制后端：waitable_step=P5，continuous_local=C1。",
+    "C3": "还须每个新增模式实际启用的P5/C1/C2。",
+    "C4": "还须训练目标所用P5/C1/C2及用途授权。",
+    "C5": "还须目标本地闭环C1及模型有效性证据。"
+  },
+  "tests": [
+    {
+      "id": "sut.I03",
+      "invariant_id": "I03",
+      "phase": "P2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "正在播放时突发普通弹幕，当前Utterance及取消代次不变，候选进入有界队列。",
+      "expected": "普通弹幕只入流，不取消/抢占当前工作",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I04",
+      "invariant_id": "I04",
+      "phase": "P2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "执行端保持一个未完成长Task，继续接入弹幕、处理停止及Task终态事件。",
+      "expected": "主控不等待长Task；反应器、执行端和工作事件继续推进",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I06",
+      "invariant_id": "I06",
+      "phase": "P2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "分别注入未审文字、畸形DirectorRecord和推理字段，均无公开音频/字幕。",
+      "expected": "未审文本、畸形结构、模型内部推理不得播出",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I10",
+      "invariant_id": "I10",
+      "phase": "P2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "慢模型未返回时接入新普通弹幕，原调用及其合法结果不因新消息自动取消。",
+      "expected": "新弹幕不提高取消代次、不全局废弃既有结果",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I17",
+      "invariant_id": "I17",
+      "phase": "P2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "以高额付费消息请求私有记忆和未授权动作，权限不扩大且拒绝敏感输出。",
+      "expected": "付费不增加执行权、隐私权或安全豁免",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I22",
+      "invariant_id": "I22",
+      "phase": "P7",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "未授权文档命中检索候选时，在组装模型请求前移除；重复观众声称仍带原来源。",
+      "expected": "ACL在进入模型前执行；观众声称不因总结/重复升级",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I23",
+      "invariant_id": "I23",
+      "phase": "P7",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "删除与召回/提交竞争，并恢复旧备份；墓碑阻止正文、摘要、缓存和派生召回。",
+      "expected": "删除墓碑覆盖召回、待提交、缓存、派生和备份恢复",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I25",
+      "invariant_id": "I25",
+      "phase": "P4",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "注入重复投票、迟到票、断流和事务失败；冻结结果保持首票与明确覆盖口径。",
+      "expected": "收到的有效票、首票规则、截止口径不事后修改",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I26",
+      "invariant_id": "I26",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "分别传不存在、过期和与当前选择无关的截图证据，均拒绝确认选择结论。",
+      "expected": "游戏引用存在且有效并支持结论，不用无关证据包装先验",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I29",
+      "invariant_id": "I29",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "未选分支SKIPPED、必需分支失败",
+      "expected": "ActivityPlan有显式结果/分支/完成join，队列空不等于成功",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I30",
+      "invariant_id": "I30",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "A1迟到成功不得覆盖A2",
+      "expected": "同Task新尝试有新attempt_id；旧终态不可复活",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I31",
+      "invariant_id": "I31",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "响应丢失后不重复选择/消费",
+      "expected": "同一效果重试沿用稳定EffectIntent，换operation_id不豁免",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I32",
+      "invariant_id": "I32",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "成功回执早到但按键未释放",
+      "expected": "结果确认不等于资源settled，冲突后继等清理",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I33",
+      "invariant_id": "I33",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "永久观察服务下有限活动仍可结束",
+      "expected": "SessionService不参加有限join，但质量影响依赖",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I34",
+      "invariant_id": "I34",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "期望OBS场景不写成真实输出",
+      "expected": "Desired/Estimated/Observed/Journal分开",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I35",
+      "invariant_id": "I35",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "慢VLM返回旧画面被拒",
+      "expected": "刚推断完不能刷新旧证据年龄",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I36",
+      "invariant_id": "I36",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "插件在线但页面不允许动作",
+      "expected": "supported/ready/authorized/available_now分别核验",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I37",
+      "invariant_id": "I37",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "打开菜单不能藏在只读查询",
+      "expected": "主动观察必须是受控副作用Task",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I38",
+      "invariant_id": "I38",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "保留观察服务与已完成效果，候选CAS冲突",
+      "expected": "Plan更新只影响相关任务与本地引用，非世界回滚",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I39",
+      "invariant_id": "I39",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "旧按键/PCM不重放，旧Goal拒恢复",
+      "expected": "暂停恢复保留语义快照，恢复新Attempt并重新核验",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I40",
+      "invariant_id": "I40",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "父持speech再等子speech被静态/动态拒绝",
+      "expected": "父子资源采用受限委托或释放交接，禁止等待自己",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I41",
+      "invariant_id": "I41",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "同选择界面十次事件只开一轮；完成早于订阅",
+      "expected": "业务发生实例防重入，等待登记不会漏已发生事件",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I42",
+      "invariant_id": "I42",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "打字机文本修订不重复读，真实重现不误去重",
+      "expected": "NarrativeRecord与主播Segment不同，采集/理解/播出/推进分开",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I43",
+      "invariant_id": "I43",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "原声/朗读/选项/自动对白缺口分别测试",
+      "expected": "阅读推进满足组合条件，评论不无限卡剧情",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I44",
+      "invariant_id": "I44",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "PREPARED控制器无lease不得输入",
+      "expected": "插件实例、控制器激活、Task进度和资源授权不同",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I45",
+      "invariant_id": "I45",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "Provider/插件/活动重试不乘法扩张",
+      "expected": "恢复预算跨层累计，未知效果不自动重试",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I46",
+      "invariant_id": "I46",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "仿真通过但未覆盖真机必须PENDING",
+      "expected": "Shadow/回放不能证明真实新动作结果，覆盖和接管单独报告",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I47",
+      "invariant_id": "I47",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "一个Attempt执行多个frame，宿主无逐帧握手",
+      "expected": "目标/闭环Skill/细动作/物理输入分层；局部frame不逐帧创建Bellis Task",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I48",
+      "invariant_id": "I48",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "可等待菜单后端不得自动进入高速连续模式",
+      "expected": "控制模式需覆盖、时限、状态和授权准入，识别能力不等于执行能力",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I49",
+      "invariant_id": "I49",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "目标移动可纠偏；感知冻结则及时降级",
+      "expected": "高层慢时是旧有效策略读新观察，不是重放旧输入",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I50",
+      "invariant_id": "I50",
+      "phase": "C2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "参数应用时同Task和Attempt持续，聊天正常",
+      "expected": "兼容PolicyUpdate不默认暂停/换Attempt/换owner",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I51",
+      "invariant_id": "I51",
+      "phase": "C2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "同base冲突、应用确认丢失、旧revision帧拒绝",
+      "expected": "策略应用基于版本条件和本地边界，迟到不能覆盖、未知不重复应用",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I52",
+      "invariant_id": "I52",
+      "phase": "C2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "试图关闭看门狗、延长禁用输入、改变弹幕抢占被拒",
+      "expected": "参数检查单位/范围/变化/组合约束；不能改安全机制",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I53",
+      "invariant_id": "I53",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "镜头坐标切换、键位变化、旧训练标签不误用",
+      "expected": "动作语义/输入模式/profile/校准/模型版本一致",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I54",
+      "invariant_id": "I54",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "长目标不生成无检查长宏，后缀能被撤销",
+      "expected": "规划视野、策略有效域、执行承诺、租约分别限额",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I55",
+      "invariant_id": "I55",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "漏held_controls不沿用，hold与同键pulse冲突拒绝",
+      "expected": "单根控制者合成完整持续状态，缺字段/冲突输入拒绝",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I56",
+      "invariant_id": "I56",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "重包不重复转向/点击，未知确认不补点",
+      "expected": "相对位移/脉冲不因重传复现，业务Effect不能被换frame/pulse ID绕过",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I57",
+      "invariant_id": "I57",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "活线程旧帧不续租；静态新帧不误冻结",
+      "expected": "续租依据本地有效观察和控制健康，非云端/连接心跳",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I58",
+      "invariant_id": "I58",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "延迟KEY_UP、过期hold、部分提交与接管",
+      "expected": "策略/owner切换隔离旧后缀，旧清理不破坏新输入",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I59",
+      "invariant_id": "I59",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "背景GPU负载/主控长调用不伪装资源保证",
+      "expected": "控制关键模型有独立准入，全负载不达标就降级",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I60",
+      "invariant_id": "I60",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "r13应用不能宣布“已拉开距离”",
+      "expected": "提议、策略已应用、输入已提交、可见进展、目标完成分别表达",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I61",
+      "invariant_id": "I61",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "旧帧新推理不刷新TTL，频率不掩盖违约",
+      "expected": "控制指标按原始依据到效果分层且包含失败/不确定样本",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I62",
+      "invariant_id": "I62",
+      "phase": "C4",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "仅开直播不采集训练，Recorder无输入凭证",
+      "expected": "示范/训练用途独立许可、默认关闭，与Iris/审计分权",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I63",
+      "invariant_id": "I63",
+      "phase": "C4",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "被拒动作不标已执行，管理输入被排除",
+      "expected": "示范区分提出/放行/实际/人工/结果，不伪造专家标签",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I64",
+      "invariant_id": "I64",
+      "phase": "C4",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "未验证模型/PENDING场景不能扩大自主范围",
+      "expected": "新后端离线/真机/完整负载批准后才能启用，不默认MPC或自动上线",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I67",
+      "invariant_id": "I67",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "慢prepare不阻塞主控；服务就绪不能替代控制器证据；准备超时先于prepared，迟到回执不复活",
+      "expected": "Controller准备异步且守卫专用，PREPARED不授予执行权",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I69",
+      "invariant_id": "I69",
+      "phase": "C2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "正常应用、消息重复、Outbox重放、通知丢失后查询、目标UNKNOWN后对账；保留发生/接收时间差",
+      "expected": "策略应用只有control.policy_applied一个事实身份，查询/重放不增加应用次数",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I70",
+      "invariant_id": "I70",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "节点包含completion_contract或漏result_contract、timeout_ms、能力版本时静态拒绝；不静默转换",
+      "expected": "Action只用result_contract，计划根只用completion_contract；显式版本/时限/权限与效果类别匹配",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I71",
+      "invariant_id": "I71",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "资源排队耗尽节点预算；暂停重试不刷新截止；unknown→人工请求，未选后继SKIPPED，Goal不伪成功",
+      "expected": "Action截止覆盖启用后等待且不被恢复重置；Guard未知分支不能进入选择",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I72",
+      "invariant_id": "I72",
+      "phase": "C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "C0=PENDING时只读可用但自动输入拒绝；C0通过而C1关闭时已验收剧情profile可进入对应P8",
+      "expected": "C0是P5自动输入的前置，不是C1–C5可选扩展的一部分",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I73",
+      "invariant_id": "I73",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "常驻Activity内一Task未知，只阻断冲突范围；活动对账分别恢复原状态或响应stop。",
+      "expected": "Activity局部未知不升级成整个常驻活动结束；活动级对账可回原RUNNING/PAUSED/QUIESCING或继续STOPPING。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I74",
+      "invariant_id": "I74",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "在ACTIVE/WAITING/PAUSED/RECONCILING注入原deadline，分别保留触发、结果与结算。",
+      "expected": "所有业务状态均响应原deadline；timeout触发、实际outcome和Settlement分别记录。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I76",
+      "invariant_id": "I76",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "人工结案未知效果后尝试相同semantic_key及冲突owner，未清理/退役证明均拒绝。",
+      "expected": "人工未知结案保留事实和旧范围墓碑；资源仅凭真实清理或核验退役解除相应隔离。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I78",
+      "invariant_id": "I78",
+      "phase": "P2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "对语音和文字各注入审核四结果，限制补上下文次数及原deadline，无无限等待。",
+      "expected": "Guard四种结果都有合法有界路径；文字拒绝、缺上下文与不可用不能卡住DRAFT/CHECKING。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I80",
+      "invariant_id": "I80",
+      "phase": "P4",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "首轮平票只在预先冻结规则下开第二轮，二次平票按规则结束且Effect身份不变。",
+      "expected": "投票首轮平票最多重开一次；两轮规则预先冻结，Effect身份仍绑定同一choice_instance。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I86",
+      "invariant_id": "I86",
+      "phase": "C2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "分别丢失/重放策略五种终态通知，查询与Outbox保持身份；等待结束并按原结果分流。",
+      "expected": "策略更新APPLIED/REJECTED/EXPIRED/CANCELLED/UNKNOWN均可靠通知；失败等待立即结束但不影响无关工作。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I87",
+      "invariant_id": "I87",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "根时间伪造、view越界、DPI变化、静态相同像素的新捕获。",
+      "expected": "根观察的时间／实例／变换贯穿派生视图和定位，裁剪不刷新证据年龄。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I88",
+      "invariant_id": "I88",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "目标缺失、相似选项、最高排名但无目标、定位后尚未点击。",
+      "expected": "定位只解决指定目标位置；非FOUND没有可执行坐标，也不独自制造Effect未知。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I89",
+      "invariant_id": "I89",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "两轮投票后换ROI／重新捕获仍只允许一个业务选择。",
+      "expected": "投票winner／choice_instance与语义Effect不因重新定位、crop或模型变化而改变。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I90",
+      "invariant_id": "I90",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "局部点回映错误、外部目标替换、推断新而根已过期。",
+      "expected": "GroundingResult的请求／目标／根证据／坐标回映及执行时新鲜度都需核验。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I91",
+      "invariant_id": "I91",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "目标／编码器／profile变更miss；缓存命中但grant过期。",
+      "expected": "语义／视觉缓存按完整精确依赖复用，不作为当前状态或执行授权。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I92",
+      "invariant_id": "I92",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "旧缓存恢复、跨分支复用、并发删除与延迟结果。",
+      "expected": "缓存与反思受用途、剧情scope、删除代次和有限保留约束，重启不复活已撤销数据。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I93",
+      "invariant_id": "I93",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "修改已提交step、增加pulse、换目标或改duration拒绝。",
+      "expected": "候选编辑只生成新的未提交连续后缀，不改已提交载荷或增加离散效果。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I94",
+      "invariant_id": "I94",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "prefix变化、未知命令、迟到frame和候选生成竞争。",
+      "expected": "编辑前缀来自Broker实际账目；未决／部分提交与前缀竞争不能靠预测补齐。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I95",
+      "invariant_id": "I95",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "高分越权动作仍被拒；无输入结果不能宣称业务成功。",
+      "expected": "Q／排名／反思评分不签发权限或确认效果；合格候选为空则拒绝／降级。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I96",
+      "invariant_id": "I96",
+      "phase": "C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "所有可选模型慢／不可用时，stop与lease到期仍可运行。",
+      "expected": "控制计算路径按后端选择，分频和缓存不停止当前安全监督或扩张开环窗口。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I97",
+      "invariant_id": "I97",
+      "phase": "P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "错误诊断与重复总结不升级evidence_backed。",
+      "expected": "失败反思保存事实／假设、证据和适用条件，不复制当前世界状态权威。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I98",
+      "invariant_id": "I98",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "未复核条目拒绝、陈旧分支状态不覆盖新观察、上下文上限。",
+      "expected": "RecoveryContextView是有界筛选视图，Goal和Journal复用原权威，当前状态来自新观察。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I99",
+      "invariant_id": "I99",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "不支持读档／快照不得假成功；恢复请求没有直接输入权。",
+      "expected": "恢复方法和范围来自真实Capability；提议不直接改变世界，恢复副作用仍走Action。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I100",
+      "invariant_id": "I100",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "世界快照试图含保护范围拒绝；累计预算仍单调。",
+      "expected": "恢复不回滚Journal、Effect／Settlement、公开历史、权限、墓碑、预算和Outbox。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I101",
+      "invariant_id": "I101",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "终态任务恢复另建Task；原semantic_key未决仍阻断。",
+      "expected": "恢复不复活终态Task／Attempt，不重放旧按键或旧PCM；新范围须真实变化与授权。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I102",
+      "invariant_id": "I102",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "旧分支未来答案、operator_only资料和删除条目不得注入。",
+      "expected": "跨分支反思先过滤再入模型，操作经验转移须复核，剧情知识不通过摘要脱敏成通用经验。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I103",
+      "invariant_id": "I103",
+      "phase": "P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "多层审查预算耗尽、review超时与监督撤权并发。",
+      "expected": "审查／补证据／恢复共用有限预算，安全停止不等反思或模型返回。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    },
+    {
+      "id": "sut.I104",
+      "invariant_id": "I104",
+      "phase": "P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "adapter": "production_sut_with_fault_injection",
+      "procedure": "未启用C1/C4可正常剧情首播；论文前向数值不充当本机验收。",
+      "expected": "新增模型不扩大P0／首播前置；实验按同预算／全负载报告失败拒绝和真实覆盖。",
+      "evidence_required": [
+        "sut_build_digest",
+        "environment",
+        "seed_or_trace",
+        "expected_and_observed",
+        "effect_and_cleanup_evidence"
+      ]
+    }
+  ],
+  "phase_checks": [
+    {
+      "phase": "P2",
+      "id": "exit.P2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P2：真实表达",
+      "deliverables": "主控NDJSON、完整Action拒绝/句柄出口、真实Guard四结果、至少一套音频增量TTS与同音色降级。",
+      "not_required": "游戏输入、Iris、复杂恢复。",
+      "criterion": "实际非抢占/审核/首段延迟报告；公开前仍需P8适用门禁。"
+    },
+    {
+      "phase": "P3",
+      "id": "exit.P3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P3：通用执行",
+      "deliverables": "Activity/Task/Attempt/Effect/Settlement/SessionService/Controller/WaitRegistration；静态Plan最小Action/Guard/Switch/WaitEvent，按需再启用Sequence/ParallelAll/BoundedRetry/Fallback；人工结案。",
+      "not_required": "P6暂停/恢复/在线Plan修订、C2热策略更新。",
+      "criterion": "真实SUT可解释成功、失败、时限、未知、清理和后继；保存结构化失败依据，不要求LLM反思；无限等待/重试不存在。"
+    },
+    {
+      "phase": "P4",
+      "id": "exit.P4",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P4：真实互动",
+      "deliverables": "一个平台、PollRound、两轮规则投票、付费账本、公平队列，依赖P2/P3。",
+      "not_required": "自动游戏输入。",
+      "criterion": "已收票一致性、缺口、平票两轮、normal语音依赖与非抢占通过。"
+    },
+    {
+      "phase": "C0",
+      "id": "exit.C0",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ]
+    },
+    {
+      "phase": "P5",
+      "id": "exit.P5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P5：剧情游戏",
+      "deliverables": "只读Bridge/Narrative、根证据／指定目标定位先行；自动输入必须C0＋适用P3/P4出口、test_only许可；固定waitable_step真机profile。",
+      "not_required": "continuous_local、C2、Iris、模型训练。",
+      "criterion": "一次受控选择效果/清理、阅读节奏、目标/剧情范围与接管真机通过。"
+    },
+    {
+      "phase": "P6",
+      "id": "exit.P6",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P6：有限恢复与修订",
+      "deliverables": "Manifest支持时启用quiesce/restore、新Attempt、局部PlanCandidate、结构化反思／恢复上下文、真实恢复范围与保护平面；累计预算。",
+      "not_required": "给不支持的能力造空恢复。",
+      "criterion": "暂停deadline／自然完成竞争、旧队列不恢复；反思来源、剧情范围、保护平面与恢复实际结果核验通过。"
+    },
+    {
+      "phase": "P7",
+      "id": "exit.P7",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P7：可选Iris与扩展",
+      "deliverables": "检索前ACL、来源、墓碑、派生删除与外发；更多已验收Planner/Provider。",
+      "not_required": "作为首播前提。",
+      "criterion": "隐私专项与失联本地阻断通过。"
+    },
+    {
+      "phase": "P8",
+      "id": "exit.P8",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ],
+      "label": "P8：按profile发布",
+      "deliverables": "Shadow、受监督试播、完整直播负载、内容与许可、OBS全部输出/独立应急、失败/接管报告。",
+      "not_required": "无条件等待P6/P7/C1–C5。",
+      "criterion": "拟启用能力的全部依赖门禁PASS，未覆盖功能禁用。"
+    },
+    {
+      "phase": "C1",
+      "id": "exit.C1",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ]
+    },
+    {
+      "phase": "C2",
+      "id": "exit.C2",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ]
+    },
+    {
+      "phase": "C3",
+      "id": "exit.C3",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ]
+    },
+    {
+      "phase": "C4",
+      "id": "exit.C4",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ]
+    },
+    {
+      "phase": "C5",
+      "id": "exit.C5",
+      "implementation_status": "NOT_IMPLEMENTED",
+      "runner": null,
+      "required_evidence": [
+        "enabled_profile_digest",
+        "dependency_gates",
+        "fault_trace",
+        "acceptance_report"
+      ]
+    }
+  ],
+  "experiments": [
+    {
+      "id": "X-G",
+      "title": "指定目标定位",
+      "comparison": "简单Game Pack适配、整图、区域选择后定位；相同目标与截图",
+      "scenarios": "中文相似选项、目标缺失、重复面板、大小/DPI变化、动画；按页面/episode分离评测集",
+      "required_metrics": "正确目标／拒绝／缺失误报、可执行覆盖、错误点击、完整延迟和费用。",
+      "status": "PENDING_EXPERIMENT",
+      "evidence_refs": []
+    },
+    {
+      "id": "X-R",
+      "title": "保留经验的恢复",
+      "comparison": "相同恢复能力与预算下：不带反思、结构化反思；再比较支持时的有限恢复边界选择",
+      "scenarios": "重复失败、错误诊断、有效/无效检查点、已发生或未知效果、读档后的剧情范围",
+      "required_metrics": "同类错误重复率、任务进展、恢复次数/时间/费用、剧透/越权和接管。",
+      "status": "PENDING_EXPERIMENT",
+      "evidence_refs": []
+    },
+    {
+      "id": "X-D",
+      "title": "计算解耦／复用",
+      "comparison": "现有简单后端、稳定语义缓存；数据许可完备后才比较专用解耦策略",
+      "scenarios": "固定已训练技能、未见场景另报告；冷启动/命中/失效，完整直播共载",
+      "required_metrics": "质量、每阶段时间、观察年龄、P95/P99、内存/显存与费用；不以calls/s代替控制Hz。",
+      "status": "PENDING_EXPERIMENT",
+      "evidence_refs": []
+    },
+    {
+      "id": "X-E",
+      "title": "执行前修正",
+      "comparison": "同一个慢策略／相同延迟下：无修正、受限修正；训练critic单独消融",
+      "scenarios": "正常延迟、长尾/抖动、目标改变、部分提交、前缀竞争、同一次性输入重传",
+      "required_metrics": "实际进展、过时动作拒绝、编辑成功/失败、安全事件、总延迟和资源开销。",
+      "status": "PENDING_EXPERIMENT",
+      "evidence_refs": []
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bellis 浏览器能力探针</title>
+<style>body{font:16px system-ui;max-width:800px;margin:40px auto;padding:16px}button{margin:8px;padding:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#eee;padding:16px}</style>
+<h1>浏览器能力探针</h1>
+<p>只在此测试 Origin 保存不可导出的测试密钥。音频探针输出静音。普通浏览器结果不能代替 OBS/CEF、实际音画或设备停止验收。</p>
+<button id="key">生成或读取密钥并签名</button><button id="audio">检查 AudioWorklet 与时间戳</button>
+<p>依次记录首次、刷新、隐藏卸载、关闭重开与系统重启后的公钥指纹。原指纹相同且签名可验证才证明本环境的相应持久化路径。</p>
+<pre id="result">尚未运行</pre>
+<script type="module" src="probe.mjs"></script>
+</html>

@@ -1,0 +1,618 @@
+{
+  "schema_version": "0.8.0",
+  "contracts": [
+    {
+      "ref": "game.current_choice_input@1",
+      "kind": "input_schema",
+      "schema": "EmptyInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "poll.create_draft_input@1",
+      "kind": "input_schema",
+      "schema": "PollCreateInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "poll.run_prepared_round_input@1",
+      "kind": "input_schema",
+      "schema": "PollRunInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "speech.play_template_input@1",
+      "kind": "input_schema",
+      "schema": "TemplateInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "game.validate_choice_context_input@1",
+      "kind": "input_schema",
+      "schema": "ValidateChoiceInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "game.choose_option_input@1",
+      "kind": "input_schema",
+      "schema": "ChooseInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "operator.request_review_input@1",
+      "kind": "input_schema",
+      "schema": "ReviewInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "planner.game.analyze_input@1",
+      "kind": "input_schema",
+      "schema": "AnalyzeInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "control.policy_patch_input@1",
+      "kind": "input_schema",
+      "schema": "PolicyPatchInput",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "解析所有input_ref后按完整输入Schema二次验证。"
+    },
+    {
+      "ref": "current_choice_with_evidence@1",
+      "kind": "result_contract",
+      "schema": "ChoiceSnapshot",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "选择发生实例和选项证据足够新鲜，无输入效果。"
+    },
+    {
+      "ref": "persisted_poll_draft@1",
+      "kind": "result_contract",
+      "schema": "PollDraftResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "草稿与全部规则已持久登记；尚未开放投票。"
+    },
+    {
+      "ref": "original_utterance_normal_output_and_settled@1",
+      "kind": "result_contract",
+      "schema": "SpeechResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "仅原Utterance COMPLETED，原seal/EOS/实际排空及Settlement成立；不接受过渡或文字完成。"
+    },
+    {
+      "ref": "frozen_result_with_coverage@1",
+      "kind": "result_contract",
+      "schema": "PollResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "结果完整冻结；winner/tie/zero都是成功计算出的业务结果；操作可用性单独核验。"
+    },
+    {
+      "ref": "valid_current_choice@1",
+      "kind": "result_contract",
+      "schema": "ValidChoiceResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "同一选择发生实例与winner仍合法；输出choice_ref，禁止执行。指针profile的choice_ref绑定新鲜GroundingResult及根证据；键盘菜单可用已验证语义证据。"
+    },
+    {
+      "ref": "remote_effect_confirmed_and_input_settled@1",
+      "kind": "result_contract",
+      "schema": "ChooseResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "原Effect确认且输入SETTLED；业务成功必须在Node截止内发生。"
+    },
+    {
+      "ref": "review_request_recorded@1",
+      "kind": "result_contract",
+      "schema": "ReviewResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "人工请求已可靠登记，不等待人类答复，不等于目标达成。"
+    },
+    {
+      "ref": "analysis_with_evidence@1",
+      "kind": "result_contract",
+      "schema": "AnalysisResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "只读分析产物与证据范围合法，未造成公开/游戏效果。"
+    },
+    {
+      "ref": "policy_update_registered@1",
+      "kind": "result_contract",
+      "schema": "PolicyRegisteredResult",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "返回目标侧更新引用；只说明受理，不说明应用。"
+    },
+    {
+      "ref": "game.read.current_choice@1",
+      "kind": "permission_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "必须解析到该Activity已获ExecutionGrant的子范围，字符串不是授权。"
+    },
+    {
+      "ref": "poll.manage.current_round@1",
+      "kind": "permission_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "必须解析到该Activity已获ExecutionGrant的子范围，字符串不是授权。"
+    },
+    {
+      "ref": "speech.public.scene@1",
+      "kind": "permission_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "必须解析到该Activity已获ExecutionGrant的子范围，字符串不是授权。"
+    },
+    {
+      "ref": "game.input.current_choice@1",
+      "kind": "permission_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "必须解析到该Activity已获ExecutionGrant的子范围，字符串不是授权。"
+    },
+    {
+      "ref": "operator.review.request@1",
+      "kind": "permission_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "必须解析到该Activity已获ExecutionGrant的子范围，字符串不是授权。"
+    },
+    {
+      "ref": "planner.game.read@1",
+      "kind": "permission_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "必须解析到该Activity已获ExecutionGrant的子范围，字符串不是授权。"
+    },
+    {
+      "ref": "control.policy.patch@1",
+      "kind": "permission_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "必须解析到该Activity已获ExecutionGrant的子范围，字符串不是授权。"
+    },
+    {
+      "ref": "game.state.observe@1",
+      "kind": "service",
+      "schema": "ObjectStatePayload",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "持续服务，不参加有限完成join。"
+    },
+    {
+      "ref": "current_choice_evidence@1",
+      "kind": "quality",
+      "schema": "ObjectStatePayload",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "观察新鲜度/发生实例/源覆盖满足当前选择；unknown阻止输入。"
+    },
+    {
+      "ref": "current_choice_once@1",
+      "kind": "semantic_scope",
+      "schema": "ObjectRef",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "由authority/game_session/story_scope/choice_instance/operation_family确定；不含poll_id/attempt_id。"
+    },
+    {
+      "ref": "audience_choice_completion@1",
+      "kind": "completion",
+      "schema": "ObjectStatePayload",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "仅在选中路径已闭合时计算：必需未知→UNKNOWN；可信证据证明choose_1/choose_2按时完成且Effect/Settlement满足→SUCCEEDED（后来的stop不推翻）；未完成且明确失败→FAILED；业务时限未满足→EXPIRED；未完成取消→CANCELLED；人工请求/其余未达目标闭合→BLOCKED。"
+    },
+    {
+      "ref": "choice_failure_policy@1",
+      "kind": "failure_policy",
+      "schema": "ObjectStatePayload",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "内容/依赖/时限失败先关闭相关后继并有界结算；效果未知只读对账；必要时登记人工复核，不创造新的选择效果。"
+    },
+    {
+      "ref": "poll_rules@1",
+      "kind": "template",
+      "schema": "TemplateInput",
+      "phase": "P4",
+      "owner": "Bellis contracts",
+      "semantic_rules": "锁定模板；动态内容经实例审核；每次返回本对象真实语音完成。"
+    },
+    {
+      "ref": "poll_reopen_rules@1",
+      "kind": "template",
+      "schema": "TemplateInput",
+      "phase": "P4",
+      "owner": "Bellis contracts",
+      "semantic_rules": "锁定模板；动态内容经实例审核；每次返回本对象真实语音完成。"
+    },
+    {
+      "ref": "frozen_poll_result@1",
+      "kind": "template",
+      "schema": "TemplateInput",
+      "phase": "P4",
+      "owner": "Bellis contracts",
+      "semantic_rules": "锁定模板；动态内容经实例审核；每次返回本对象真实语音完成。"
+    },
+    {
+      "ref": "audience_choice_fixture@1",
+      "kind": "bundle",
+      "schema": "PlanDraft",
+      "phase": "P3",
+      "owner": "Bellis contracts",
+      "semantic_rules": "仅离线fixture引用集合，不表示端点已发布。"
+    },
+    {
+      "ref": "fixture-actions@1",
+      "kind": "action_schema",
+      "schema": "ControlFrame",
+      "phase": "C0",
+      "owner": "Game Runtime fixture",
+      "semantic_rules": "仅用于无输入结构测试；不表示真实游戏覆盖或执行授权。"
+    },
+    {
+      "ref": "fixture-camera-profile@3",
+      "kind": "control_profile",
+      "schema": "ControlFrame",
+      "phase": "C0",
+      "owner": "Game Runtime fixture",
+      "semantic_rules": "仅用于无输入结构测试；不表示真实游戏覆盖或执行授权。"
+    },
+    {
+      "ref": "fixture-policy@1",
+      "kind": "policy_schema",
+      "schema": "PolicyPatchInput",
+      "phase": "C0",
+      "owner": "Game Runtime fixture",
+      "semantic_rules": "仅用于无输入结构测试；不表示真实游戏覆盖或执行授权。"
+    },
+    {
+      "ref": "wait_timeout@1",
+      "kind": "failure_handler",
+      "schema": "ObjectStatePayload",
+      "phase": "P3",
+      "owner": "Bellis WaitRegistry",
+      "semantic_rules": "等待有限结束；timeout映EXPIRED，gap映UNKNOWN/阻断依赖；不重复执行触发操作。"
+    },
+    {
+      "ref": "wait_gap@1",
+      "kind": "failure_handler",
+      "schema": "ObjectStatePayload",
+      "phase": "P3",
+      "owner": "Bellis WaitRegistry",
+      "semantic_rules": "等待有限结束；timeout映EXPIRED，gap映UNKNOWN/阻断依赖；不重复执行触发操作。"
+    },
+    {
+      "ref": "bellis.VisualObservationRef@1",
+      "kind": "artifact_schema",
+      "schema": "VisualObservationRef",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P5",
+      "exposure": "game_local",
+      "admission_guards": [
+        "visual_lineage_valid"
+      ],
+      "semantic_rules": "受信采集实例/序号/时间、root/view来源、根几何与crop-resize回映一致；同根裁剪不刷新证据年龄。"
+    },
+    {
+      "ref": "bellis.DerivedView@1",
+      "kind": "artifact_schema",
+      "schema": "DerivedView",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P5",
+      "exposure": "game_local",
+      "admission_guards": [
+        "visual_lineage_valid"
+      ],
+      "semantic_rules": "受信采集实例/序号/时间、root/view来源、根几何与crop-resize回映一致；同根裁剪不刷新证据年龄。"
+    },
+    {
+      "ref": "bellis.GroundingProfile@1",
+      "kind": "configuration_schema",
+      "schema": "GroundingProfile",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P5",
+      "exposure": "trusted_config",
+      "admission_guards": [
+        "visual_lineage_valid"
+      ],
+      "semantic_rules": "受信采集实例/序号/时间、root/view来源、根几何与crop-resize回映一致；同根裁剪不刷新证据年龄。"
+    },
+    {
+      "ref": "bellis.GroundingRequest@1",
+      "kind": "artifact_schema",
+      "schema": "GroundingRequest",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P5",
+      "exposure": "game_local",
+      "admission_guards": [
+        "visual_lineage_valid"
+      ],
+      "semantic_rules": "受信采集实例/序号/时间、root/view来源、根几何与crop-resize回映一致；同根裁剪不刷新证据年龄。"
+    },
+    {
+      "ref": "bellis.GroundingResult@1",
+      "kind": "artifact_schema",
+      "schema": "GroundingResult",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P5",
+      "exposure": "bridge_readonly",
+      "admission_guards": [
+        "visual_lineage_valid",
+        "grounding_actionable"
+      ],
+      "semantic_rules": "受信采集实例/序号/时间、root/view来源、根几何与crop-resize回映一致；同根裁剪不刷新证据年龄。；请求、目标、choice_instance与根证据匹配；FOUND经真实核验且执行时仍新鲜，页面/affordance与当前权限另核验；非FOUND不输入。"
+    },
+    {
+      "ref": "bellis.ComputeReusePolicy@1",
+      "kind": "configuration_schema",
+      "schema": "ComputeReusePolicy",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P3",
+      "exposure": "trusted_config",
+      "admission_guards": [
+        "compute_reuse_valid"
+      ],
+      "semantic_rules": "由后端声明的实际依赖全部精确匹配；用途/scope/story可见性、墓碑、有限保留与容量有效；缓存不续期现场、grant或lease。"
+    },
+    {
+      "ref": "bellis.ComputeArtifact@1",
+      "kind": "artifact_schema",
+      "schema": "ComputeArtifact",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P3",
+      "exposure": "task_local",
+      "admission_guards": [
+        "compute_reuse_valid"
+      ],
+      "semantic_rules": "由后端声明的实际依赖全部精确匹配；用途/scope/story可见性、墓碑、有限保留与容量有效；缓存不续期现场、grant或lease。"
+    },
+    {
+      "ref": "bellis.ControlCandidate@1",
+      "kind": "artifact_schema",
+      "schema": "ControlCandidate",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "C1",
+      "exposure": "game_local",
+      "admission_guards": [
+        "candidate_suffix_repairable"
+      ],
+      "semantic_rules": "来源为当前Broker真实无未决前缀；只生成未登记提交连续后缀的新候选，目标/profile/policy不变，不改duration或新增离散效果，输出时重验前缀、幅度与最早截止。"
+    },
+    {
+      "ref": "bellis.ExecutionPrefix@1",
+      "kind": "artifact_schema",
+      "schema": "ExecutionPrefix",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "C1",
+      "exposure": "game_local",
+      "admission_guards": [
+        "candidate_suffix_repairable"
+      ],
+      "semantic_rules": "来源为当前Broker真实无未决前缀；只生成未登记提交连续后缀的新候选，目标/profile/policy不变，不改duration或新增离散效果，输出时重验前缀、幅度与最早截止。"
+    },
+    {
+      "ref": "bellis.CandidateRepairPolicy@1",
+      "kind": "configuration_schema",
+      "schema": "CandidateRepairPolicy",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "C1",
+      "exposure": "trusted_config",
+      "admission_guards": [
+        "candidate_suffix_repairable"
+      ],
+      "semantic_rules": "来源为当前Broker真实无未决前缀；只生成未登记提交连续后缀的新候选，目标/profile/policy不变，不改duration或新增离散效果，输出时重验前缀、幅度与最早截止。"
+    },
+    {
+      "ref": "bellis.CandidateRepairRecord@1",
+      "kind": "artifact_schema",
+      "schema": "CandidateRepairRecord",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "C1",
+      "exposure": "game_local",
+      "admission_guards": [
+        "candidate_suffix_repairable"
+      ],
+      "semantic_rules": "来源为当前Broker真实无未决前缀；只生成未登记提交连续后缀的新候选，目标/profile/policy不变，不改duration或新增离散效果，输出时重验前缀、幅度与最早截止。"
+    },
+    {
+      "ref": "bellis.ReflectionRecord@1",
+      "kind": "artifact_schema",
+      "schema": "ReflectionRecord",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P3",
+      "exposure": "task_local",
+      "admission_guards": [
+        "reflection_context_readable"
+      ],
+      "semantic_rules": "来源事实与假设保留区别；受信复核、条目级用途/剧情/删除/依赖过滤先于模型读取，operator_only不进入规划；当前状态另取新证据。"
+    },
+    {
+      "ref": "bellis.RecoveryContextView@1",
+      "kind": "artifact_schema",
+      "schema": "RecoveryContextView",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P6",
+      "exposure": "task_local",
+      "admission_guards": [
+        "reflection_context_readable"
+      ],
+      "semantic_rules": "来源事实与假设保留区别；受信复核、条目级用途/剧情/删除/依赖过滤先于模型读取，operator_only不进入规划；当前状态另取新证据。"
+    },
+    {
+      "ref": "bellis.RecoveryReviewPolicy@1",
+      "kind": "configuration_schema",
+      "schema": "RecoveryReviewPolicy",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P6",
+      "exposure": "trusted_config",
+      "admission_guards": [
+        "recovery_scope_valid"
+      ],
+      "semantic_rules": "能力真实支持、白名单与检查点适用，保护账本/权限/公开历史/墓碑/预算不回滚；旧效果与资源先解释/隔离，恢复仍走已授权Action，新Task沿用累计预算。"
+    },
+    {
+      "ref": "bellis.RecoveryCapability@1",
+      "kind": "configuration_schema",
+      "schema": "RecoveryCapability",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P6",
+      "exposure": "trusted_config",
+      "admission_guards": [
+        "recovery_scope_valid"
+      ],
+      "semantic_rules": "能力真实支持、白名单与检查点适用，保护账本/权限/公开历史/墓碑/预算不回滚；旧效果与资源先解释/隔离，恢复仍走已授权Action，新Task沿用累计预算。"
+    },
+    {
+      "ref": "bellis.RecoveryProposal@1",
+      "kind": "artifact_schema",
+      "schema": "RecoveryProposal",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P6",
+      "exposure": "task_local",
+      "admission_guards": [
+        "recovery_scope_valid"
+      ],
+      "semantic_rules": "能力真实支持、白名单与检查点适用，保护账本/权限/公开历史/墓碑/预算不回滚；旧效果与资源先解释/隔离，恢复仍走已授权Action，新Task沿用累计预算。"
+    },
+    {
+      "ref": "bellis.RecoveryResult@1",
+      "kind": "artifact_schema",
+      "schema": "RecoveryResult",
+      "owner": "目标Runtime／受信配置；Bellis只存所需投影",
+      "phase": "P6",
+      "exposure": "bridge_readonly",
+      "admission_guards": [
+        "recovery_scope_valid"
+      ],
+      "semantic_rules": "能力真实支持、白名单与检查点适用，保护账本/权限/公开历史/墓碑/预算不回滚；旧效果与资源先解释/隔离，恢复仍走已授权Action，新Task沿用累计预算。"
+    }
+  ],
+  "capabilities": [
+    {
+      "capability": "game.get_current_choice",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.current_choice_input@1",
+      "result_contract": "current_choice_with_evidence@1",
+      "permission_scope_ref": "game.read.current_choice@1",
+      "effect_type": "none"
+    },
+    {
+      "capability": "poll.create_draft",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "poll.create_draft_input@1",
+      "result_contract": "persisted_poll_draft@1",
+      "permission_scope_ref": "poll.manage.current_round@1",
+      "effect_type": "internal_state"
+    },
+    {
+      "capability": "speech.play_template",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "speech.play_template_input@1",
+      "result_contract": "original_utterance_normal_output_and_settled@1",
+      "permission_scope_ref": "speech.public.scene@1",
+      "effect_type": "public_output"
+    },
+    {
+      "capability": "poll.run_prepared_round",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "poll.run_prepared_round_input@1",
+      "result_contract": "frozen_result_with_coverage@1",
+      "permission_scope_ref": "poll.manage.current_round@1",
+      "effect_type": "internal_state"
+    },
+    {
+      "capability": "game.validate_choice_context",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.validate_choice_context_input@1",
+      "result_contract": "valid_current_choice@1",
+      "permission_scope_ref": "game.read.current_choice@1",
+      "effect_type": "none"
+    },
+    {
+      "capability": "game.choose_option",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.choose_option_input@1",
+      "result_contract": "remote_effect_confirmed_and_input_settled@1",
+      "permission_scope_ref": "game.input.current_choice@1",
+      "effect_type": "external_effect"
+    },
+    {
+      "capability": "operator.request_review",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "operator.request_review_input@1",
+      "result_contract": "review_request_recorded@1",
+      "permission_scope_ref": "operator.review.request@1",
+      "effect_type": "internal_state"
+    },
+    {
+      "capability": "planner.game.analyze",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "planner.game.analyze_input@1",
+      "result_contract": "analysis_with_evidence@1",
+      "permission_scope_ref": "planner.game.read@1",
+      "effect_type": "none"
+    },
+    {
+      "capability": "control.propose_policy_patch",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "control.policy_patch_input@1",
+      "result_contract": "policy_update_registered@1",
+      "permission_scope_ref": "control.policy.patch@1",
+      "effect_type": "internal_state"
+    }
+  ],
+  "predicates": [
+    "all",
+    "any",
+    "not",
+    "eq",
+    "exists"
+  ],
+  "completion_outcomes": [
+    "SUCCEEDED",
+    "FAILED",
+    "EXPIRED",
+    "CANCELLED",
+    "BLOCKED",
+    "UNKNOWN",
+    "SKIPPED"
+  ],
+  "failure_handlers": [
+    "close_dependents",
+    "settle_affected",
+    "request_review",
+    "reconcile_effect"
+  ]
+}

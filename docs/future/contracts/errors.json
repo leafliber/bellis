@@ -1,0 +1,138 @@
+{
+  "schema_version": "0.8.0",
+  "errors": [
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "LOCAL_MODEL_BUDGET_EXCEEDED",
+      "meaning": "可选本地模型资源或计算预算不足。",
+      "retry_disposition": "after_state_change",
+      "phase": "C1"
+    },
+    {
+      "category": "CAPACITY_EXCEEDED",
+      "reason_code": "RECOVERY_REVIEW_BUDGET_EXCEEDED",
+      "meaning": "当前共享恢复审查次数／时间／费用预算耗尽。",
+      "retry_disposition": "after_state_change",
+      "phase": "P6"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "CACHE_DEPENDENCY_STALE",
+      "meaning": "缓存依赖已变化；丢弃并按当前条件重新计算。",
+      "retry_disposition": "after_state_change",
+      "phase": "P3"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "EXECUTION_PREFIX_STALE",
+      "meaning": "实际提交前缀已变化，旧编辑结果不得续接。",
+      "retry_disposition": "after_state_change",
+      "phase": "C1"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "GROUNDING_RESULT_STALE",
+      "meaning": "定位目标／根观察／变换或范围已失效。",
+      "retry_disposition": "after_state_change",
+      "phase": "P5"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "GROUNDING_METHOD_UNSUPPORTED",
+      "meaning": "目标profile未实现所请求的定位方法。",
+      "retry_disposition": "never",
+      "phase": "P5"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "RECOVERY_METHOD_UNSUPPORTED",
+      "meaning": "目标后端未实现声明的真实恢复方法。",
+      "retry_disposition": "never",
+      "phase": "P6"
+    },
+    {
+      "category": "INTEGRITY_FAILED",
+      "reason_code": "COMMITTED_CANDIDATE_MUTATION",
+      "meaning": "试图修改已经提交的步骤或既有命令身份载荷。",
+      "retry_disposition": "never",
+      "phase": "C1"
+    },
+    {
+      "category": "INTEGRITY_FAILED",
+      "reason_code": "EVIDENCE_LINEAGE_CONFLICT",
+      "meaning": "派生物的根观察／时间／身份或回映链互相冲突。",
+      "retry_disposition": "never",
+      "phase": "P5"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "CANDIDATE_EDIT_FORBIDDEN",
+      "meaning": "修正企图改变离散效果、时长、目标或禁止参数。",
+      "retry_disposition": "never",
+      "phase": "C1"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "RECOVERY_PROTECTED_SCOPE",
+      "meaning": "恢复企图覆写权限／账本／墓碑／预算或公开历史。",
+      "retry_disposition": "never",
+      "phase": "P6"
+    },
+    {
+      "category": "POLICY_REJECTED",
+      "reason_code": "REFLECTION_NOT_REVIEWED",
+      "meaning": "未经受信复核的诊断不能采用为恢复上下文。",
+      "retry_disposition": "after_state_change",
+      "phase": "P6"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "CACHE_DEPENDENCY_MISSING",
+      "meaning": "后端要求的缓存依赖未完整登记。",
+      "retry_disposition": "never",
+      "phase": "P3"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "CANDIDATE_EDIT_INVALID",
+      "meaning": "修正候选结构、范围或单位不合法。",
+      "retry_disposition": "never",
+      "phase": "C1"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "DERIVED_VIEW_INVALID",
+      "meaning": "裁剪／缩放／根几何不符合已登记映射契约。",
+      "retry_disposition": "never",
+      "phase": "P5"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "RECOVERY_SCOPE_INVALID",
+      "meaning": "恢复方法与请求范围不符合能力声明。",
+      "retry_disposition": "never",
+      "phase": "P6"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "GROUNDING_NOT_ACTIONABLE",
+      "meaning": "试图从非FOUND或未经核验的定位结果执行输入。",
+      "retry_disposition": "after_state_change",
+      "phase": "P5"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "RECOVERY_EVIDENCE_INCOMPLETE",
+      "meaning": "当前恢复方法缺少必要现场／检查点／清理证据。",
+      "retry_disposition": "after_state_change",
+      "phase": "P6"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "REFLECTION_SCOPE_DENIED",
+      "meaning": "反思用途、隐私、剧情范围或删除条件不允许当前读取。",
+      "retry_disposition": "never",
+      "phase": "P6"
+    }
+  ]
+}

@@ -1,0 +1,249 @@
+{
+  "schema_version": "0.8.0",
+  "guards": [
+    {
+      "id": "budget_and_permission",
+      "meaning": "类别容量、时限、监督模式、能力权限与恢复预算有效。"
+    },
+    {
+      "id": "matching_instance",
+      "meaning": "源是预登记的当前Attempt/端点实例与授权owner。"
+    },
+    {
+      "id": "effect_confirmed",
+      "meaning": "结果契约由可信证据确认；不是接口接受或主控期望。"
+    },
+    {
+      "id": "not_dispatched",
+      "meaning": "能证明该操作尚未跨越派发边界。"
+    },
+    {
+      "id": "plan_adopted",
+      "meaning": "Goal、静态Plan、owner、权限和预算已通过采用。"
+    },
+    {
+      "id": "activity_complete",
+      "meaning": "有限完成契约成立，必要Task结果/效果/清理已结算；服务不参加join。"
+    },
+    {
+      "id": "activity_paused",
+      "meaning": "所有受影响可暂停工作已到检查点、清理确认并生成票据。"
+    },
+    {
+      "id": "resume_valid",
+      "meaning": "票据、目标、实际状态、版本、监督与资源重新验证；创建新Attempt。"
+    },
+    {
+      "id": "closure_accounted",
+      "meaning": "所有相关执行终态且效果已解释，资源SETTLED或已验证退役；closure_outcome由可信结果及业务时限/停止触发确定，不能写死取消。"
+    },
+    {
+      "id": "ready_to_attempt",
+      "meaning": "依赖、上下文、服务、预算和阶段资源都满足且无冲突在途Attempt。"
+    },
+    {
+      "id": "candidate_success_settled",
+      "meaning": "当前Attempt或受信Reconciliation确认结果契约（包括业务时限）满足，必要Effect确认、Settlement=SETTLED；晚到通知可采用，晚发生成功按时限契约处理。"
+    },
+    {
+      "id": "retry_allowed",
+      "meaning": "旧Attempt已SETTLED，无IN_DOUBT/CLOSED_UNRESOLVED、旧派发不再可能生效、Node/Activity截止与共享次数费用均有余量；只读技术重传另计。"
+    },
+    {
+      "id": "accounted_no_retry",
+      "meaning": "当前尝试和必要清理已解释，非SUSPENDED且无允许重试，按结果契约计算Task结局。"
+    },
+    {
+      "id": "pause_supported",
+      "meaning": "受信Manifest允许当前任务暂停并有有限检查点策略。"
+    },
+    {
+      "id": "checkpoint_settled",
+      "meaning": "旧Attempt=SUSPENDED、清理SETTLED、恢复票据与快照有效。"
+    },
+    {
+      "id": "reconciliation_resolved",
+      "meaning": "追加的可信证据足以解释业务结果和清理，不能来自主控自报。"
+    },
+    {
+      "id": "no_effect_retry_approved",
+      "meaning": "对账证实无效果、旧操作已隔离且清理SETTLED，Node/Activity截止仍有效并有显式同Effect重试授权。人工仅行政结案不构成本守卫。"
+    },
+    {
+      "id": "cleanup_confirmed",
+      "meaning": "所需停发/释放/隔离/交接全部得到负责执行端确认。"
+    },
+    {
+      "id": "empty_cleanup",
+      "meaning": "Manifest和实际记录证明没有需清理资源，可立即settle。"
+    },
+    {
+      "id": "effect_record_valid",
+      "meaning": "效果目标/语义键/摘要/权限/次数预算/必要意图日志均有效。"
+    },
+    {
+      "id": "effect_submission_recorded",
+      "meaning": "负责效果的执行端确认提交跨越声明边界；不是任意RPC成功。"
+    },
+    {
+      "id": "no_effect_proven",
+      "meaning": "可信观测或操作登记证明本效果未发生且旧派发不再可能生效。"
+    },
+    {
+      "id": "effect_retry_authorized",
+      "meaning": "同意图、旧轮已无效果并settled、无未决操作、有剩余重试授权。"
+    },
+    {
+      "id": "service_prepared",
+      "meaning": "仅服务：服务依赖/配置/准备资源/来源已验证，不只是进程在线。"
+    },
+    {
+      "id": "controller_prepared",
+      "meaning": "仅控制器：当前实例和prepare操作、Manifest/接口/能力版本、配置摘要、准备依赖/资源及回执完整且期限有效；不授予执行权，按第9.3节核验。"
+    },
+    {
+      "id": "service_quality_valid",
+      "meaning": "服务当前质量和关键数据新鲜度满足要求。"
+    },
+    {
+      "id": "service_stopped",
+      "meaning": "服务停止已确认，剩余资源完成清理或安全隔离。"
+    },
+    {
+      "id": "controller_activation_valid",
+      "meaning": "准备结果仍有效；当前Attempt、目标/上下文、声明能力/模式、监督、阶段资源和执行端lease/许可有效；需要连续控制时另查第15.3节健康。"
+    },
+    {
+      "id": "controller_quiesced",
+      "meaning": "已停止新增效果并取得允许检查点；清理票据依契约完成。"
+    },
+    {
+      "id": "controller_disposed",
+      "meaning": "实例已停、资源释放/隔离、旧回报无法恢复权限。"
+    },
+    {
+      "id": "candidate_schema_valid",
+      "meaning": "候选不可变、图有界无环、能力/分支/输入/资源静态合法。"
+    },
+    {
+      "id": "candidate_prepared",
+      "meaning": "候选所需准备已完成且仍不持有正式效果许可。"
+    },
+    {
+      "id": "local_checkpoint_ready",
+      "meaning": "受影响工作到检查点，旧资源清理且无未决Effect；无关服务不参屏障。"
+    },
+    {
+      "id": "commit_cas_valid",
+      "meaning": "base_revision和相关依赖再验证通过，本地PlanRef事务提交；不声明远端已应用。"
+    },
+    {
+      "id": "policy_candidate_valid",
+      "meaning": "已认证的主控/受限授权候选；目标、实例、base、字段单位/范围/组合与期限有效，只有行为参数。"
+    },
+    {
+      "id": "policy_schedule_valid",
+      "meaning": "当前后端支持所选兼容更新边界，准备就绪且不改变Task/owner，必要预算和适用条件仍有效。"
+    },
+    {
+      "id": "policy_boundary_valid",
+      "meaning": "目标侧到达声明边界；base仍匹配，新参数合法，旧输入后缀可被隔离且更新未超时。"
+    },
+    {
+      "id": "policy_application_verified",
+      "meaning": "当前PolicySnapshot已切换，生效控制边界/许可栅栏可核验；不是网络请求已收。"
+    },
+    {
+      "id": "policy_cancel_safe",
+      "meaning": "请求者有相应权限且可证明尚未开始应用；取消不能撤销已发生输入。"
+    },
+    {
+      "id": "policy_not_applied",
+      "meaning": "可信本地记录证明参数指针/许可未生效，无待执行应用；未收到回执不构成证明。"
+    },
+    {
+      "id": "local_incident_valid",
+      "meaning": "已认证子对象incident且可明确界定相关Effect/资源/依赖；活动owner/ActivePlanRef与无关工作准入仍可判定。"
+    },
+    {
+      "id": "activity_uncertainty_valid",
+      "meaning": "活动owner/ActivePlanRef不可确认，或有限目标必需完成证据整体不可解释；不得仅因任一可隔离子任务未知而升级。"
+    },
+    {
+      "id": "activity_continue_running",
+      "meaning": "对账已解活动级歧义、return_state=RUNNING、无close_request、deadline有效；残余子incident继续局部隔离。"
+    },
+    {
+      "id": "activity_continue_paused",
+      "meaning": "对账已解活动级歧义、return_state=PAUSED、票据/清理可解释、无close_request、deadline有效；不自动resume。"
+    },
+    {
+      "id": "activity_continue_quiescing",
+      "meaning": "对账已解活动级歧义、return_state=QUIESCING、暂停仍被授权且checkpoint_deadline未过期；保持原暂停请求。"
+    },
+    {
+      "id": "activity_closing_resolved",
+      "meaning": "活动级歧义已解且close_request存在或deadline已过；继续收尾而非回RUNNING。"
+    },
+    {
+      "id": "no_active_execution_and_accounted",
+      "meaning": "无有效或可能迟到生效的执行；所有既有Attempt与效果已解释、需清理者SETTLED，含从PAUSED到期的既有部分效果。"
+    },
+    {
+      "id": "manual_unresolved_close_valid",
+      "meaning": "认证操作员有人工结案权限；ManualResolution匹配incident/object revision及证据范围、必填理由；不声称成功/无效果，不自动释放旧资源或旧semantic_key。"
+    },
+    {
+      "id": "resource_retirement_verified",
+      "meaning": "负责主机证明旧端点不可能继续产生效果，相关合成输入/音频已处置或物理隔离；新resource_generation不同且安全独立，不能仅以游戏重启或操作员勾选证明。"
+    },
+    {
+      "id": "activation_finished_valid",
+      "meaning": "当前activation_id/attempt_id的可信终态及本次激活清理已确认；准备资源可按Manifest保留；Task可能将重试。"
+    },
+    {
+      "id": "poll_open_valid",
+      "meaning": "PollRules完整且已冻结、原规则说明完成、当前choice_instance仍有效、有限窗口与round_index获准。"
+    },
+    {
+      "id": "vote_in_window_valid",
+      "meaning": "真实接收时间在[opened_at,closes_at)，稳定platform_user_id且该用户本轮未有有效票，选项属于本轮。"
+    },
+    {
+      "id": "poll_freeze_valid",
+      "meaning": "截止时冻结本地收到的有效票与coverage；winner/tie/zero均是合法业务结果，不按模型修辞改票。"
+    },
+    {
+      "id": "wait_registration_valid",
+      "meaning": "过滤事件/源/业务关联与游标先登记；predicate/timeout/on_gap均为已登记受限结构。"
+    },
+    {
+      "id": "wait_match_valid",
+      "meaning": "匹配登记的event_name、expected_source、correlation与三值predicate=true；unknown不满足。"
+    },
+    {
+      "id": "visual_lineage_valid",
+      "meaning": "受信采集实例/序号/时间、root/view来源、根几何与crop-resize回映一致；同根裁剪不刷新证据年龄。"
+    },
+    {
+      "id": "grounding_actionable",
+      "meaning": "请求、目标、choice_instance与根证据匹配；FOUND经真实核验且执行时仍新鲜，页面/affordance与当前权限另核验；非FOUND不输入。"
+    },
+    {
+      "id": "compute_reuse_valid",
+      "meaning": "由后端声明的实际依赖全部精确匹配；用途/scope/story可见性、墓碑、有限保留与容量有效；缓存不续期现场、grant或lease。"
+    },
+    {
+      "id": "candidate_suffix_repairable",
+      "meaning": "来源为当前Broker真实无未决前缀；只生成未登记提交连续后缀的新候选，目标/profile/policy不变，不改duration或新增离散效果，输出时重验前缀、幅度与最早截止。"
+    },
+    {
+      "id": "reflection_context_readable",
+      "meaning": "来源事实与假设保留区别；受信复核、条目级用途/剧情/删除/依赖过滤先于模型读取，operator_only不进入规划；当前状态另取新证据。"
+    },
+    {
+      "id": "recovery_scope_valid",
+      "meaning": "能力真实支持、白名单与检查点适用，保护账本/权限/公开历史/墓碑/预算不回滚；旧效果与资源先解释/隔离，恢复仍走已授权Action，新Task沿用累计预算。"
+    }
+  ]
+}

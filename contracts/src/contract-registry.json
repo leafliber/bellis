@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.8.0",
+  "canonicalization": "RFC8785; digest excludes top-level digest; adopted object requires verified digest",
+  "contracts": [
+    {
+      "ref": "simulation-success@1",
+      "kind": "simulation_fixture",
+      "schema": "EmptyInput",
+      "owner": "Bellis simulation",
+      "phase": "P0",
+      "semantic_rules": "仅协议联调；不提供真实效果、审核或设备清理证明。"
+    },
+    {
+      "ref": "simulation-cleanup@1",
+      "kind": "simulation_fixture",
+      "schema": "EmptyInput",
+      "owner": "Bellis simulation",
+      "phase": "P0",
+      "semantic_rules": "仅协议联调；不提供真实效果、审核或设备清理证明。"
+    },
+    {
+      "ref": "simulation-configuration@1",
+      "kind": "simulation_fixture",
+      "schema": "EmptyInput",
+      "owner": "Bellis simulation",
+      "phase": "P0",
+      "semantic_rules": "仅协议联调；不提供真实效果、审核或设备清理证明。"
+    }
+  ],
+  "capabilities": []
+}

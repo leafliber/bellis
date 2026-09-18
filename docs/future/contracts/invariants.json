@@ -1,0 +1,745 @@
+{
+  "schema_version": "0.8.0",
+  "invariants": [
+    {
+      "id": "I03",
+      "requirement": "普通弹幕只入流，不取消/抢占当前工作",
+      "scenario": "正在播放时突发普通弹幕，当前Utterance及取消代次不变，候选进入有界队列。",
+      "first_required_phase": "P2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I03"
+      ]
+    },
+    {
+      "id": "I04",
+      "requirement": "主控不等待长Task；反应器、执行端和工作事件继续推进",
+      "scenario": "执行端保持一个未完成长Task，继续接入弹幕、处理停止及Task终态事件。",
+      "first_required_phase": "P2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I04"
+      ]
+    },
+    {
+      "id": "I06",
+      "requirement": "未审文本、畸形结构、模型内部推理不得播出",
+      "scenario": "分别注入未审文字、畸形DirectorRecord和推理字段，均无公开音频/字幕。",
+      "first_required_phase": "P2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I06"
+      ]
+    },
+    {
+      "id": "I10",
+      "requirement": "新弹幕不提高取消代次、不全局废弃既有结果",
+      "scenario": "慢模型未返回时接入新普通弹幕，原调用及其合法结果不因新消息自动取消。",
+      "first_required_phase": "P2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I10"
+      ]
+    },
+    {
+      "id": "I17",
+      "requirement": "付费不增加执行权、隐私权或安全豁免",
+      "scenario": "以高额付费消息请求私有记忆和未授权动作，权限不扩大且拒绝敏感输出。",
+      "first_required_phase": "P2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I17"
+      ]
+    },
+    {
+      "id": "I22",
+      "requirement": "ACL在进入模型前执行；观众声称不因总结/重复升级",
+      "scenario": "未授权文档命中检索候选时，在组装模型请求前移除；重复观众声称仍带原来源。",
+      "first_required_phase": "P7",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I22"
+      ]
+    },
+    {
+      "id": "I23",
+      "requirement": "删除墓碑覆盖召回、待提交、缓存、派生和备份恢复",
+      "scenario": "删除与召回/提交竞争，并恢复旧备份；墓碑阻止正文、摘要、缓存和派生召回。",
+      "first_required_phase": "P7",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I23"
+      ]
+    },
+    {
+      "id": "I25",
+      "requirement": "收到的有效票、首票规则、截止口径不事后修改",
+      "scenario": "注入重复投票、迟到票、断流和事务失败；冻结结果保持首票与明确覆盖口径。",
+      "first_required_phase": "P4",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I25"
+      ]
+    },
+    {
+      "id": "I26",
+      "requirement": "游戏引用存在且有效并支持结论，不用无关证据包装先验",
+      "scenario": "分别传不存在、过期和与当前选择无关的截图证据，均拒绝确认选择结论。",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I26"
+      ]
+    },
+    {
+      "id": "I29",
+      "requirement": "ActivityPlan有显式结果/分支/完成join，队列空不等于成功",
+      "scenario": "未选分支SKIPPED、必需分支失败",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I29"
+      ]
+    },
+    {
+      "id": "I30",
+      "requirement": "同Task新尝试有新attempt_id；旧终态不可复活",
+      "scenario": "A1迟到成功不得覆盖A2",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I30"
+      ]
+    },
+    {
+      "id": "I31",
+      "requirement": "同一效果重试沿用稳定EffectIntent，换operation_id不豁免",
+      "scenario": "响应丢失后不重复选择/消费",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I31"
+      ]
+    },
+    {
+      "id": "I32",
+      "requirement": "结果确认不等于资源settled，冲突后继等清理",
+      "scenario": "成功回执早到但按键未释放",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I32"
+      ]
+    },
+    {
+      "id": "I33",
+      "requirement": "SessionService不参加有限join，但质量影响依赖",
+      "scenario": "永久观察服务下有限活动仍可结束",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I33"
+      ]
+    },
+    {
+      "id": "I34",
+      "requirement": "Desired/Estimated/Observed/Journal分开",
+      "scenario": "期望OBS场景不写成真实输出",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I34"
+      ]
+    },
+    {
+      "id": "I35",
+      "requirement": "刚推断完不能刷新旧证据年龄",
+      "scenario": "慢VLM返回旧画面被拒",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I35"
+      ]
+    },
+    {
+      "id": "I36",
+      "requirement": "supported/ready/authorized/available_now分别核验",
+      "scenario": "插件在线但页面不允许动作",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I36"
+      ]
+    },
+    {
+      "id": "I37",
+      "requirement": "主动观察必须是受控副作用Task",
+      "scenario": "打开菜单不能藏在只读查询",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I37"
+      ]
+    },
+    {
+      "id": "I38",
+      "requirement": "Plan更新只影响相关任务与本地引用，非世界回滚",
+      "scenario": "保留观察服务与已完成效果，候选CAS冲突",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I38"
+      ]
+    },
+    {
+      "id": "I39",
+      "requirement": "暂停恢复保留语义快照，恢复新Attempt并重新核验",
+      "scenario": "旧按键/PCM不重放，旧Goal拒恢复",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I39"
+      ]
+    },
+    {
+      "id": "I40",
+      "requirement": "父子资源采用受限委托或释放交接，禁止等待自己",
+      "scenario": "父持speech再等子speech被静态/动态拒绝",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I40"
+      ]
+    },
+    {
+      "id": "I41",
+      "requirement": "业务发生实例防重入，等待登记不会漏已发生事件",
+      "scenario": "同选择界面十次事件只开一轮；完成早于订阅",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I41"
+      ]
+    },
+    {
+      "id": "I42",
+      "requirement": "NarrativeRecord与主播Segment不同，采集/理解/播出/推进分开",
+      "scenario": "打字机文本修订不重复读，真实重现不误去重",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I42"
+      ]
+    },
+    {
+      "id": "I43",
+      "requirement": "阅读推进满足组合条件，评论不无限卡剧情",
+      "scenario": "原声/朗读/选项/自动对白缺口分别测试",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I43"
+      ]
+    },
+    {
+      "id": "I44",
+      "requirement": "插件实例、控制器激活、Task进度和资源授权不同",
+      "scenario": "PREPARED控制器无lease不得输入",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I44"
+      ]
+    },
+    {
+      "id": "I45",
+      "requirement": "恢复预算跨层累计，未知效果不自动重试",
+      "scenario": "Provider/插件/活动重试不乘法扩张",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I45"
+      ]
+    },
+    {
+      "id": "I46",
+      "requirement": "Shadow/回放不能证明真实新动作结果，覆盖和接管单独报告",
+      "scenario": "仿真通过但未覆盖真机必须PENDING",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I46"
+      ]
+    },
+    {
+      "id": "I47",
+      "requirement": "目标/闭环Skill/细动作/物理输入分层；局部frame不逐帧创建Bellis Task",
+      "scenario": "一个Attempt执行多个frame，宿主无逐帧握手",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I47"
+      ]
+    },
+    {
+      "id": "I48",
+      "requirement": "控制模式需覆盖、时限、状态和授权准入，识别能力不等于执行能力",
+      "scenario": "可等待菜单后端不得自动进入高速连续模式",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I48"
+      ]
+    },
+    {
+      "id": "I49",
+      "requirement": "高层慢时是旧有效策略读新观察，不是重放旧输入",
+      "scenario": "目标移动可纠偏；感知冻结则及时降级",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I49"
+      ]
+    },
+    {
+      "id": "I50",
+      "requirement": "兼容PolicyUpdate不默认暂停/换Attempt/换owner",
+      "scenario": "参数应用时同Task和Attempt持续，聊天正常",
+      "first_required_phase": "C2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I50"
+      ]
+    },
+    {
+      "id": "I51",
+      "requirement": "策略应用基于版本条件和本地边界，迟到不能覆盖、未知不重复应用",
+      "scenario": "同base冲突、应用确认丢失、旧revision帧拒绝",
+      "first_required_phase": "C2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I51"
+      ]
+    },
+    {
+      "id": "I52",
+      "requirement": "参数检查单位/范围/变化/组合约束；不能改安全机制",
+      "scenario": "试图关闭看门狗、延长禁用输入、改变弹幕抢占被拒",
+      "first_required_phase": "C2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I52"
+      ]
+    },
+    {
+      "id": "I53",
+      "requirement": "动作语义/输入模式/profile/校准/模型版本一致",
+      "scenario": "镜头坐标切换、键位变化、旧训练标签不误用",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I53"
+      ]
+    },
+    {
+      "id": "I54",
+      "requirement": "规划视野、策略有效域、执行承诺、租约分别限额",
+      "scenario": "长目标不生成无检查长宏，后缀能被撤销",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I54"
+      ]
+    },
+    {
+      "id": "I55",
+      "requirement": "单根控制者合成完整持续状态，缺字段/冲突输入拒绝",
+      "scenario": "漏held_controls不沿用，hold与同键pulse冲突拒绝",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I55"
+      ]
+    },
+    {
+      "id": "I56",
+      "requirement": "相对位移/脉冲不因重传复现，业务Effect不能被换frame/pulse ID绕过",
+      "scenario": "重包不重复转向/点击，未知确认不补点",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I56"
+      ]
+    },
+    {
+      "id": "I57",
+      "requirement": "续租依据本地有效观察和控制健康，非云端/连接心跳",
+      "scenario": "活线程旧帧不续租；静态新帧不误冻结",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I57"
+      ]
+    },
+    {
+      "id": "I58",
+      "requirement": "策略/owner切换隔离旧后缀，旧清理不破坏新输入",
+      "scenario": "延迟KEY_UP、过期hold、部分提交与接管",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I58"
+      ]
+    },
+    {
+      "id": "I59",
+      "requirement": "控制关键模型有独立准入，全负载不达标就降级",
+      "scenario": "背景GPU负载/主控长调用不伪装资源保证",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I59"
+      ]
+    },
+    {
+      "id": "I60",
+      "requirement": "提议、策略已应用、输入已提交、可见进展、目标完成分别表达",
+      "scenario": "r13应用不能宣布“已拉开距离”",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I60"
+      ]
+    },
+    {
+      "id": "I61",
+      "requirement": "控制指标按原始依据到效果分层且包含失败/不确定样本",
+      "scenario": "旧帧新推理不刷新TTL，频率不掩盖违约",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I61"
+      ]
+    },
+    {
+      "id": "I62",
+      "requirement": "示范/训练用途独立许可、默认关闭，与Iris/审计分权",
+      "scenario": "仅开直播不采集训练，Recorder无输入凭证",
+      "first_required_phase": "C4",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I62"
+      ]
+    },
+    {
+      "id": "I63",
+      "requirement": "示范区分提出/放行/实际/人工/结果，不伪造专家标签",
+      "scenario": "被拒动作不标已执行，管理输入被排除",
+      "first_required_phase": "C4",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I63"
+      ]
+    },
+    {
+      "id": "I64",
+      "requirement": "新后端离线/真机/完整负载批准后才能启用，不默认MPC或自动上线",
+      "scenario": "未验证模型/PENDING场景不能扩大自主范围",
+      "first_required_phase": "C4",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I64"
+      ]
+    },
+    {
+      "id": "I67",
+      "requirement": "Controller准备异步且守卫专用，PREPARED不授予执行权",
+      "scenario": "慢prepare不阻塞主控；服务就绪不能替代控制器证据；准备超时先于prepared，迟到回执不复活",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I67"
+      ]
+    },
+    {
+      "id": "I69",
+      "requirement": "策略应用只有control.policy_applied一个事实身份，查询/重放不增加应用次数",
+      "scenario": "正常应用、消息重复、Outbox重放、通知丢失后查询、目标UNKNOWN后对账；保留发生/接收时间差",
+      "first_required_phase": "C2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I69"
+      ]
+    },
+    {
+      "id": "I70",
+      "requirement": "Action只用result_contract，计划根只用completion_contract；显式版本/时限/权限与效果类别匹配",
+      "scenario": "节点包含completion_contract或漏result_contract、timeout_ms、能力版本时静态拒绝；不静默转换",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I70"
+      ]
+    },
+    {
+      "id": "I71",
+      "requirement": "Action截止覆盖启用后等待且不被恢复重置；Guard未知分支不能进入选择",
+      "scenario": "资源排队耗尽节点预算；暂停重试不刷新截止；unknown→人工请求，未选后继SKIPPED，Goal不伪成功",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I71"
+      ]
+    },
+    {
+      "id": "I72",
+      "requirement": "C0是P5自动输入的前置，不是C1–C5可选扩展的一部分",
+      "scenario": "C0=PENDING时只读可用但自动输入拒绝；C0通过而C1关闭时已验收剧情profile可进入对应P8",
+      "first_required_phase": "C0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I72"
+      ]
+    },
+    {
+      "id": "I73",
+      "requirement": "Activity局部未知不升级成整个常驻活动结束；活动级对账可回原RUNNING/PAUSED/QUIESCING或继续STOPPING。",
+      "scenario": "常驻Activity内一Task未知，只阻断冲突范围；活动对账分别恢复原状态或响应stop。",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I73"
+      ]
+    },
+    {
+      "id": "I74",
+      "requirement": "所有业务状态均响应原deadline；timeout触发、实际outcome和Settlement分别记录。",
+      "scenario": "在ACTIVE/WAITING/PAUSED/RECONCILING注入原deadline，分别保留触发、结果与结算。",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I74"
+      ]
+    },
+    {
+      "id": "I76",
+      "requirement": "人工未知结案保留事实和旧范围墓碑；资源仅凭真实清理或核验退役解除相应隔离。",
+      "scenario": "人工结案未知效果后尝试相同semantic_key及冲突owner，未清理/退役证明均拒绝。",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I76"
+      ]
+    },
+    {
+      "id": "I78",
+      "requirement": "Guard四种结果都有合法有界路径；文字拒绝、缺上下文与不可用不能卡住DRAFT/CHECKING。",
+      "scenario": "对语音和文字各注入审核四结果，限制补上下文次数及原deadline，无无限等待。",
+      "first_required_phase": "P2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I78"
+      ]
+    },
+    {
+      "id": "I80",
+      "requirement": "投票首轮平票最多重开一次；两轮规则预先冻结，Effect身份仍绑定同一choice_instance。",
+      "scenario": "首轮平票只在预先冻结规则下开第二轮，二次平票按规则结束且Effect身份不变。",
+      "first_required_phase": "P4",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I80"
+      ]
+    },
+    {
+      "id": "I86",
+      "requirement": "策略更新APPLIED/REJECTED/EXPIRED/CANCELLED/UNKNOWN均可靠通知；失败等待立即结束但不影响无关工作。",
+      "scenario": "分别丢失/重放策略五种终态通知，查询与Outbox保持身份；等待结束并按原结果分流。",
+      "first_required_phase": "C2",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I86"
+      ]
+    },
+    {
+      "id": "I87",
+      "requirement": "根观察的时间／实例／变换贯穿派生视图和定位，裁剪不刷新证据年龄。",
+      "scenario": "根时间伪造、view越界、DPI变化、静态相同像素的新捕获。",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I87"
+      ]
+    },
+    {
+      "id": "I88",
+      "requirement": "定位只解决指定目标位置；非FOUND没有可执行坐标，也不独自制造Effect未知。",
+      "scenario": "目标缺失、相似选项、最高排名但无目标、定位后尚未点击。",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I88"
+      ]
+    },
+    {
+      "id": "I89",
+      "requirement": "投票winner／choice_instance与语义Effect不因重新定位、crop或模型变化而改变。",
+      "scenario": "两轮投票后换ROI／重新捕获仍只允许一个业务选择。",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I89"
+      ]
+    },
+    {
+      "id": "I90",
+      "requirement": "GroundingResult的请求／目标／根证据／坐标回映及执行时新鲜度都需核验。",
+      "scenario": "局部点回映错误、外部目标替换、推断新而根已过期。",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I90"
+      ]
+    },
+    {
+      "id": "I91",
+      "requirement": "语义／视觉缓存按完整精确依赖复用，不作为当前状态或执行授权。",
+      "scenario": "目标／编码器／profile变更miss；缓存命中但grant过期。",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I91"
+      ]
+    },
+    {
+      "id": "I92",
+      "requirement": "缓存与反思受用途、剧情scope、删除代次和有限保留约束，重启不复活已撤销数据。",
+      "scenario": "旧缓存恢复、跨分支复用、并发删除与延迟结果。",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I92"
+      ]
+    },
+    {
+      "id": "I93",
+      "requirement": "候选编辑只生成新的未提交连续后缀，不改已提交载荷或增加离散效果。",
+      "scenario": "修改已提交step、增加pulse、换目标或改duration拒绝。",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I93"
+      ]
+    },
+    {
+      "id": "I94",
+      "requirement": "编辑前缀来自Broker实际账目；未决／部分提交与前缀竞争不能靠预测补齐。",
+      "scenario": "prefix变化、未知命令、迟到frame和候选生成竞争。",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I94"
+      ]
+    },
+    {
+      "id": "I95",
+      "requirement": "Q／排名／反思评分不签发权限或确认效果；合格候选为空则拒绝／降级。",
+      "scenario": "高分越权动作仍被拒；无输入结果不能宣称业务成功。",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I95"
+      ]
+    },
+    {
+      "id": "I96",
+      "requirement": "控制计算路径按后端选择，分频和缓存不停止当前安全监督或扩张开环窗口。",
+      "scenario": "所有可选模型慢／不可用时，stop与lease到期仍可运行。",
+      "first_required_phase": "C1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I96"
+      ]
+    },
+    {
+      "id": "I97",
+      "requirement": "失败反思保存事实／假设、证据和适用条件，不复制当前世界状态权威。",
+      "scenario": "错误诊断与重复总结不升级evidence_backed。",
+      "first_required_phase": "P3",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I97"
+      ]
+    },
+    {
+      "id": "I98",
+      "requirement": "RecoveryContextView是有界筛选视图，Goal和Journal复用原权威，当前状态来自新观察。",
+      "scenario": "未复核条目拒绝、陈旧分支状态不覆盖新观察、上下文上限。",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I98"
+      ]
+    },
+    {
+      "id": "I99",
+      "requirement": "恢复方法和范围来自真实Capability；提议不直接改变世界，恢复副作用仍走Action。",
+      "scenario": "不支持读档／快照不得假成功；恢复请求没有直接输入权。",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I99"
+      ]
+    },
+    {
+      "id": "I100",
+      "requirement": "恢复不回滚Journal、Effect／Settlement、公开历史、权限、墓碑、预算和Outbox。",
+      "scenario": "世界快照试图含保护范围拒绝；累计预算仍单调。",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I100"
+      ]
+    },
+    {
+      "id": "I101",
+      "requirement": "恢复不复活终态Task／Attempt，不重放旧按键或旧PCM；新范围须真实变化与授权。",
+      "scenario": "终态任务恢复另建Task；原semantic_key未决仍阻断。",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I101"
+      ]
+    },
+    {
+      "id": "I102",
+      "requirement": "跨分支反思先过滤再入模型，操作经验转移须复核，剧情知识不通过摘要脱敏成通用经验。",
+      "scenario": "旧分支未来答案、operator_only资料和删除条目不得注入。",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I102"
+      ]
+    },
+    {
+      "id": "I103",
+      "requirement": "审查／补证据／恢复共用有限预算，安全停止不等反思或模型返回。",
+      "scenario": "多层审查预算耗尽、review超时与监督撤权并发。",
+      "first_required_phase": "P6",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I103"
+      ]
+    },
+    {
+      "id": "I104",
+      "requirement": "新增模型不扩大P0／首播前置；实验按同预算／全负载报告失败拒绝和真实覆盖。",
+      "scenario": "未启用C1/C4可正常剧情首播；论文前向数值不充当本机验收。",
+      "first_required_phase": "P5",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I104"
+      ]
+    }
+  ]
+}

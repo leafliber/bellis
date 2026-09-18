@@ -1,0 +1,56 @@
+{
+  "task_id": "fixture-direct-task",
+  "activity_id": "fixture-activity",
+  "node_id": null,
+  "goal_ref": {
+    "goal_id": "fixture-goal",
+    "goal_version": 1
+  },
+  "capability": "fixture.read",
+  "capability_version": "1.0.0",
+  "input_schema_ref": "fixture-input@1",
+  "permission_scope_ref": "fixture-read@1",
+  "result_contract": "fixture-result@1",
+  "effect_type": "none",
+  "owner_scope": "fixture-owner",
+  "current_attempt_id": null,
+  "attempt_count": 0,
+  "state": "REGISTERED",
+  "outcome": null,
+  "wait_reason": null,
+  "enabled_at": null,
+  "node_deadline": null,
+  "recovery_budget_id": "fixture-recovery",
+  "effect_intent_ids": [],
+  "external_work_ref": null,
+  "termination": null,
+  "input_snapshot": {
+    "schema_ref": "fixture-input@1",
+    "value": {
+      "query": "fixture"
+    },
+    "digest": "3cbc73ebd178bcccd4eda9a93bdd47288bcee31fe170f89eb44d20551c5315bd",
+    "plan_ref": null,
+    "bound_output_refs": []
+  },
+  "budget": {
+    "task_class": "auxiliary_analysis",
+    "not_before": {
+      "clock_domain": "fixture",
+      "monotonic_ms": 0
+    },
+    "must_start_by": {
+      "clock_domain": "fixture",
+      "monotonic_ms": 1000
+    },
+    "execution_budget_ms": 1000,
+    "max_queue_age_ms": 1000,
+    "estimated_output_ms": 0,
+    "output_budget_ms": 0,
+    "dependency_versions": {},
+    "on_deadline": "expire_before_dispatch",
+    "preemption_policy": "safety_only",
+    "recovery_budget_id": "fixture-recovery"
+  },
+  "supersedes_task_id": null
+}

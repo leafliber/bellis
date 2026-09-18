@@ -1,0 +1,83 @@
+{
+  "result_id": "ground-result-1",
+  "request_id": "ground-request-1",
+  "target_ref": {
+    "kind": "game_choice",
+    "id": "winner_B"
+  },
+  "root": {
+    "root_observation_id": "obs-current",
+    "game_session_id": "fixture-session",
+    "capture_instance_id": "capture-1",
+    "capture_seq": 203,
+    "captured_at": {
+      "clock_domain": "fixture-host-boot2",
+      "monotonic_ms": 1000
+    },
+    "valid_until": {
+      "clock_domain": "fixture-host-boot2",
+      "monotonic_ms": 1500
+    },
+    "root_width_px": 1920,
+    "root_height_px": 1080,
+    "input_context_epoch": 9,
+    "transform_version": 4,
+    "story_scope": "story-current"
+  },
+  "status": "FOUND",
+  "selected_view": {
+    "view_id": "view-1",
+    "root": {
+      "root_observation_id": "obs-current",
+      "game_session_id": "fixture-session",
+      "capture_instance_id": "capture-1",
+      "capture_seq": 203,
+      "captured_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1000
+      },
+      "valid_until": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1500
+      },
+      "root_width_px": 1920,
+      "root_height_px": 1080,
+      "input_context_epoch": 9,
+      "transform_version": 4,
+      "story_scope": "story-current"
+    },
+    "mapping_kind": "crop_resize_no_padding",
+    "crop_root_px": {
+      "x": 960,
+      "y": 540,
+      "width": 960,
+      "height": 540
+    },
+    "view_width_px": 480,
+    "view_height_px": 270,
+    "produced_at": {
+      "clock_domain": "fixture-host-boot2",
+      "monotonic_ms": 1040
+    }
+  },
+  "location": {
+    "view_point_px": {
+      "x": 100.0,
+      "y": 50.0
+    },
+    "root_point_px": {
+      "x": 1160.0,
+      "y": 640.0
+    }
+  },
+  "evidence_refs": [
+    "obs-current",
+    "target-check-1"
+  ],
+  "verification_ref": "target-check-1",
+  "ranking_score": null,
+  "completed_at": {
+    "clock_domain": "fixture-host-boot2",
+    "monotonic_ms": 1100
+  }
+}

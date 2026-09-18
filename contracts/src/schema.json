@@ -1,0 +1,3175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bellis.invalid/contracts/0.8.0/bundle.schema.json",
+  "title": "Bellis 0.8.0 protocol structure definitions",
+  "$comment": "Source of hand-written object shapes. Enums and bindings derived from the registries (Phase, EventName, EventPayloadBinding, ErrorCategory, ReasonCode, RetryDisposition, ErrorReasonBinding, TerminationReason, <Machine>State, ResourceKind, TaskClass, RpcRequest) are added by tools/generate.ts; see contracts/generated/bundle.schema.json.",
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "ContractRef": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9_.:/-]+@[0-9]+$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "Version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "maxLength": 16384
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "minItems": 0,
+          "maxItems": 256
+        },
+        {
+          "type": "object",
+          "maxProperties": 128,
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          }
+        }
+      ]
+    },
+    "DataObject": {
+      "type": "object",
+      "maxProperties": 128,
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      }
+    },
+    "ObjectRef": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "ClockPoint": {
+      "type": "object",
+      "properties": {
+        "clock_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "monotonic_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clock_domain",
+        "monotonic_ms"
+      ],
+      "additionalProperties": false
+    },
+    "Deadline": {
+      "type": "object",
+      "properties": {
+        "clock_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "issued_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expires_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clock_domain",
+        "issued_at_ms",
+        "expires_at_ms"
+      ],
+      "additionalProperties": false
+    },
+    "Correlation": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "CancelFence": {
+      "type": "object",
+      "properties": {
+        "scope_type": {
+          "enum": [
+            "session",
+            "activity",
+            "task",
+            "attempt",
+            "utterance",
+            "segment",
+            "input_lease"
+          ]
+        },
+        "scope_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "cancel_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "scope_type",
+        "scope_id",
+        "cancel_epoch"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/ErrorCategory"
+        },
+        "reason_code": {
+          "$ref": "#/$defs/ReasonCode"
+        },
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "operation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_disposition": {
+          "$ref": "#/$defs/RetryDisposition"
+        },
+        "safe_message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "category",
+        "reason_code",
+        "object_ref",
+        "phase",
+        "operation_id",
+        "retry_disposition",
+        "safe_message",
+        "evidence_refs"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/ErrorReasonBinding"
+        }
+      ]
+    },
+    "ExecutionGrant": {
+      "type": "object",
+      "properties": {
+        "grant_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mode": {
+          "enum": [
+            "simulation",
+            "test_only",
+            "public"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ExecutionGrantState"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervision_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "profile_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "target_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "allowed_capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "effect_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cost_limit_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "operator_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "gate_evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        },
+        "public_broadcast_allowed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "grant_id",
+        "mode",
+        "state",
+        "session_id",
+        "supervision_epoch",
+        "profile_ref",
+        "target_refs",
+        "allowed_capabilities",
+        "effect_limit",
+        "cost_limit_units",
+        "deadline",
+        "operator_id",
+        "gate_evidence_refs",
+        "public_broadcast_allowed"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "simulation",
+                  "test_only"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "public_broadcast_allowed": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    },
+    "TerminationRecord": {
+      "type": "object",
+      "properties": {
+        "trigger": {
+          "enum": [
+            "stop_request",
+            "deadline",
+            "timeout",
+            "failure",
+            "safety_revoke",
+            "natural_completion"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/TerminationReason"
+        },
+        "scope_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "requested_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "effective_fence_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deadline_missed": {
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "trigger",
+        "reason",
+        "scope_ref",
+        "requested_at",
+        "effective_fence_at",
+        "deadline_missed",
+        "evidence_refs"
+      ],
+      "additionalProperties": false
+    },
+    "EmptyInput": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "ObjectStatePayload": {
+      "type": "object",
+      "properties": {
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason_code": {
+          "enum": [
+            null,
+            "COST_BUDGET_EXCEEDED",
+            "MEDIA_BUFFER_LIMIT_EXCEEDED",
+            "PLAN_LIMIT_EXCEEDED",
+            "PROVIDER_CONCURRENCY_EXCEEDED",
+            "QUEUE_LIMIT_EXCEEDED",
+            "RATE_LIMIT_EXCEEDED",
+            "RETRY_BUDGET_EXCEEDED",
+            "ACTION_DEADLINE_MISSED",
+            "ACTIVITY_DEADLINE_MISSED",
+            "ATTEMPT_DEADLINE_MISSED",
+            "CLEANUP_TIMEOUT",
+            "CONTROL_DEADLINE_MISSED",
+            "GUARD_CONTEXT_TIMEOUT",
+            "GUARD_TIMEOUT",
+            "POLICY_UPDATE_TIMEOUT",
+            "PREPARE_TIMEOUT",
+            "RECONCILE_TIMEOUT",
+            "STOP_TIMEOUT",
+            "WAIT_EVENT_TIMEOUT",
+            "ATTEMPT_STALE",
+            "EVENT_COVERAGE_GAP",
+            "OBSERVATION_STALE",
+            "POLICY_DEPENDENCY_STALE",
+            "RESUME_CONTEXT_STALE",
+            "STAGE_INSTANCE_STALE",
+            "STORY_SCOPE_STALE",
+            "CLEANUP_UNCONFIRMED",
+            "EFFECT_UNCONFIRMED",
+            "OUTPUT_UNCONFIRMED",
+            "POLICY_APPLY_UNCONFIRMED",
+            "CHECKPOINT_UNSUPPORTED",
+            "CONTROL_MODE_UNSUPPORTED",
+            "PAUSE_UNSUPPORTED",
+            "POLICY_UPDATE_UNSUPPORTED",
+            "RESTORE_UNSUPPORTED",
+            "CONTROL_FRAME_CONFLICT",
+            "EVENT_IDENTITY_CONFLICT",
+            "MEDIA_BINDING_MISMATCH",
+            "OPERATION_PAYLOAD_CONFLICT",
+            "SCOPED_EPOCH_CONFLICT",
+            "ACTIVE_OBSERVATION_REQUIRED",
+            "GUARD_CONTEXT_DENIED",
+            "GUARD_REJECTED",
+            "MANUAL_RESOLUTION_INVALID",
+            "POLICY_FIELD_FORBIDDEN",
+            "PUBLIC_PROFILE_NOT_APPROVED",
+            "PROVIDER_CONNECTION_FAILED",
+            "PROVIDER_RATE_LIMITED",
+            "PROVIDER_RESPONSE_INVALID",
+            "ACTION_PROFILE_MISMATCH",
+            "CONTRACT_REFERENCE_INVALID",
+            "CONTROL_FRAME_INVALID",
+            "FIELD_NOT_ALLOWED",
+            "INPUT_BINDING_INVALID",
+            "JSON_INVALID",
+            "PLAN_GRAPH_INVALID",
+            "PREDICATE_INVALID",
+            "REQUIRED_FIELD_MISSING",
+            "TIMEOUT_INVALID",
+            "CHECKPOINT_NOT_REACHED",
+            "CONTROLLER_NOT_READY",
+            "CONTROL_MODE_UNAVAILABLE",
+            "GUARD_UNAVAILABLE",
+            "INVALID_STATE_TRANSITION",
+            "PLAN_REVISION_CONFLICT",
+            "POLICY_BASE_CONFLICT",
+            "POLICY_CANCEL_TOO_LATE",
+            "RESOURCE_NOT_SETTLED",
+            "RESOURCE_QUARANTINED",
+            "SEMANTIC_EFFECT_BLOCKED",
+            "SERVICE_NOT_READY",
+            "STAGE_ALREADY_CONNECTED",
+            "SUPERSESSION_REQUIRED",
+            "AUTHENTICATION_REQUIRED",
+            "DEMONSTRATION_PURPOSE_DENIED",
+            "EXECUTION_GRANT_REVOKED",
+            "INPUT_LEASE_EXPIRED",
+            "PAIRING_REVOKED",
+            "PRIVACY_PURPOSE_DENIED",
+            "ROLE_SCOPE_DENIED",
+            "SUPERVISION_EXPIRED",
+            "TEST_ONLY_SCOPE_VIOLATION"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "settlement_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "object_ref",
+        "source_revision",
+        "state",
+        "outcome",
+        "reason_code",
+        "evidence_refs",
+        "settlement_ref"
+      ],
+      "additionalProperties": false
+    },
+    "MediaOutputPayload": {
+      "type": "object",
+      "properties": {
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "endpoint_instance": {
+          "$ref": "#/$defs/Id"
+        },
+        "output_range": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "end_exclusive": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "unit": {
+              "enum": [
+                "sample",
+                "segment",
+                "frame",
+                "millisecond"
+              ]
+            }
+          },
+          "required": [
+            "start",
+            "end_exclusive",
+            "unit"
+          ],
+          "additionalProperties": false
+        },
+        "partial_output": {
+          "type": "boolean"
+        },
+        "uncertainty": {
+          "enum": [
+            "none",
+            "bounded",
+            "unknown"
+          ]
+        },
+        "reason_code": {
+          "enum": [
+            null,
+            "COST_BUDGET_EXCEEDED",
+            "MEDIA_BUFFER_LIMIT_EXCEEDED",
+            "PLAN_LIMIT_EXCEEDED",
+            "PROVIDER_CONCURRENCY_EXCEEDED",
+            "QUEUE_LIMIT_EXCEEDED",
+            "RATE_LIMIT_EXCEEDED",
+            "RETRY_BUDGET_EXCEEDED",
+            "ACTION_DEADLINE_MISSED",
+            "ACTIVITY_DEADLINE_MISSED",
+            "ATTEMPT_DEADLINE_MISSED",
+            "CLEANUP_TIMEOUT",
+            "CONTROL_DEADLINE_MISSED",
+            "GUARD_CONTEXT_TIMEOUT",
+            "GUARD_TIMEOUT",
+            "POLICY_UPDATE_TIMEOUT",
+            "PREPARE_TIMEOUT",
+            "RECONCILE_TIMEOUT",
+            "STOP_TIMEOUT",
+            "WAIT_EVENT_TIMEOUT",
+            "ATTEMPT_STALE",
+            "EVENT_COVERAGE_GAP",
+            "OBSERVATION_STALE",
+            "POLICY_DEPENDENCY_STALE",
+            "RESUME_CONTEXT_STALE",
+            "STAGE_INSTANCE_STALE",
+            "STORY_SCOPE_STALE",
+            "CLEANUP_UNCONFIRMED",
+            "EFFECT_UNCONFIRMED",
+            "OUTPUT_UNCONFIRMED",
+            "POLICY_APPLY_UNCONFIRMED",
+            "CHECKPOINT_UNSUPPORTED",
+            "CONTROL_MODE_UNSUPPORTED",
+            "PAUSE_UNSUPPORTED",
+            "POLICY_UPDATE_UNSUPPORTED",
+            "RESTORE_UNSUPPORTED",
+            "CONTROL_FRAME_CONFLICT",
+            "EVENT_IDENTITY_CONFLICT",
+            "MEDIA_BINDING_MISMATCH",
+            "OPERATION_PAYLOAD_CONFLICT",
+            "SCOPED_EPOCH_CONFLICT",
+            "ACTIVE_OBSERVATION_REQUIRED",
+            "GUARD_CONTEXT_DENIED",
+            "GUARD_REJECTED",
+            "MANUAL_RESOLUTION_INVALID",
+            "POLICY_FIELD_FORBIDDEN",
+            "PUBLIC_PROFILE_NOT_APPROVED",
+            "PROVIDER_CONNECTION_FAILED",
+            "PROVIDER_RATE_LIMITED",
+            "PROVIDER_RESPONSE_INVALID",
+            "ACTION_PROFILE_MISMATCH",
+            "CONTRACT_REFERENCE_INVALID",
+            "CONTROL_FRAME_INVALID",
+            "FIELD_NOT_ALLOWED",
+            "INPUT_BINDING_INVALID",
+            "JSON_INVALID",
+            "PLAN_GRAPH_INVALID",
+            "PREDICATE_INVALID",
+            "REQUIRED_FIELD_MISSING",
+            "TIMEOUT_INVALID",
+            "CHECKPOINT_NOT_REACHED",
+            "CONTROLLER_NOT_READY",
+            "CONTROL_MODE_UNAVAILABLE",
+            "GUARD_UNAVAILABLE",
+            "INVALID_STATE_TRANSITION",
+            "PLAN_REVISION_CONFLICT",
+            "POLICY_BASE_CONFLICT",
+            "POLICY_CANCEL_TOO_LATE",
+            "RESOURCE_NOT_SETTLED",
+            "RESOURCE_QUARANTINED",
+            "SEMANTIC_EFFECT_BLOCKED",
+            "SERVICE_NOT_READY",
+            "STAGE_ALREADY_CONNECTED",
+            "SUPERSESSION_REQUIRED",
+            "AUTHENTICATION_REQUIRED",
+            "DEMONSTRATION_PURPOSE_DENIED",
+            "EXECUTION_GRANT_REVOKED",
+            "INPUT_LEASE_EXPIRED",
+            "PAIRING_REVOKED",
+            "PRIVACY_PURPOSE_DENIED",
+            "ROLE_SCOPE_DENIED",
+            "SUPERVISION_EXPIRED",
+            "TEST_ONLY_SCOPE_VIOLATION"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "object_ref",
+        "source_revision",
+        "endpoint_instance",
+        "output_range",
+        "partial_output",
+        "uncertainty",
+        "reason_code",
+        "evidence_refs"
+      ],
+      "additionalProperties": false
+    },
+    "EventEnvelope": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "0.8.0"
+        },
+        "event_name": {
+          "$ref": "#/$defs/EventName"
+        },
+        "event_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "authority_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_instance": {
+          "$ref": "#/$defs/Id"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "source_seq": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "scope_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "correlation": {
+          "$ref": "#/$defs/Correlation"
+        },
+        "occurred_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trace_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "$ref": "#/$defs/DataObject"
+        }
+      },
+      "required": [
+        "schema_version",
+        "event_name",
+        "event_id",
+        "authority_id",
+        "source_instance",
+        "authority_epoch",
+        "source_seq",
+        "session_id",
+        "scope_ref",
+        "correlation",
+        "occurred_at",
+        "trace_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "#/$defs/EventPayloadBinding"
+        }
+      ]
+    },
+    "StopPayload": {
+      "type": "object",
+      "properties": {
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "endpoint_instance": {
+          "$ref": "#/$defs/Id"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "known_effect_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "unknown_scope_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        },
+        "cleanup_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "object_ref",
+        "source_revision",
+        "endpoint_instance",
+        "confirmed",
+        "known_effect_refs",
+        "unknown_scope_refs",
+        "cleanup_ref",
+        "evidence_refs"
+      ],
+      "additionalProperties": false
+    },
+    "SceneRecord": {
+      "type": "object",
+      "properties": {
+        "scene_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "activity_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "owner_scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "children_closed": {
+          "type": "boolean"
+        },
+        "required_children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "maxItems": 64
+        },
+        "optional_children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "maxItems": 64
+        },
+        "state": {
+          "$ref": "#/$defs/SceneState"
+        },
+        "termination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminationRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "scene_id",
+        "activity_id",
+        "owner_scope",
+        "children_closed",
+        "required_children",
+        "optional_children",
+        "state",
+        "termination"
+      ],
+      "additionalProperties": false
+    },
+    "UtterancePredecessor": {
+      "type": "object",
+      "properties": {
+        "predecessor_utterance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "requires_outcome": {
+          "enum": [
+            "COMPLETED",
+            "any_accounted"
+          ]
+        },
+        "output_prefix_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "predecessor_utterance_id",
+        "requires_outcome",
+        "output_prefix_ref"
+      ],
+      "additionalProperties": false
+    },
+    "UtteranceRecord": {
+      "type": "object",
+      "properties": {
+        "utterance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "scene_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "voice_profile_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "audio_scope": {
+          "enum": [
+            "segment",
+            "utterance"
+          ]
+        },
+        "admission_state": {
+          "$ref": "#/$defs/UtteranceAdmissionState"
+        },
+        "last_seq": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 9007199254740991
+        },
+        "close_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminationReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cutoff_seq": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dispatch_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "predecessor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtterancePredecessor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/UtteranceState"
+        },
+        "termination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminationRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "utterance_id",
+        "scene_id",
+        "voice_profile_ref",
+        "audio_scope",
+        "admission_state",
+        "last_seq",
+        "close_reason",
+        "cutoff_seq",
+        "dispatch_revision",
+        "predecessor",
+        "state",
+        "termination"
+      ],
+      "additionalProperties": false
+    },
+    "OutputRange": {
+      "type": "object",
+      "properties": {
+        "start_sample": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "end_sample_exclusive": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "start_sample",
+        "end_sample_exclusive"
+      ],
+      "additionalProperties": false
+    },
+    "SegmentRecord": {
+      "type": "object",
+      "properties": {
+        "segment_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "utterance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "segment_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "display_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "spoken_text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "approval_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "audio_stream_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SegmentState"
+        },
+        "flow_state": {
+          "anyOf": [
+            {
+              "enum": [
+                "FLOWING",
+                "BUFFERING"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "termination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminationRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "segment_id",
+        "utterance_id",
+        "segment_seq",
+        "display_text",
+        "spoken_text",
+        "content_digest",
+        "approval_ref",
+        "audio_stream_id",
+        "state",
+        "flow_state",
+        "output_range",
+        "termination"
+      ],
+      "additionalProperties": false
+    },
+    "ResourceClaim": {
+      "type": "object",
+      "properties": {
+        "resource_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "kind": {
+          "$ref": "#/$defs/ResourceKind"
+        },
+        "stage": {
+          "enum": [
+            "prepare",
+            "active",
+            "cleanup"
+          ]
+        },
+        "units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "delegation": {
+          "enum": [
+            "none",
+            "bounded_child",
+            "release_before_join"
+          ]
+        }
+      },
+      "required": [
+        "resource_ref",
+        "kind",
+        "stage",
+        "units",
+        "delegation"
+      ],
+      "additionalProperties": false
+    },
+    "UpdateSupport": {
+      "type": "object",
+      "properties": {
+        "checkpoint": {
+          "type": "boolean"
+        },
+        "quiesce": {
+          "type": "boolean"
+        },
+        "snapshot": {
+          "type": "boolean"
+        },
+        "restore": {
+          "type": "boolean"
+        },
+        "policy_patch": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "checkpoint",
+        "quiesce",
+        "snapshot",
+        "restore",
+        "policy_patch"
+      ],
+      "additionalProperties": false
+    },
+    "ControlCapability": {
+      "type": "object",
+      "properties": {
+        "capability_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "capability_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "control_modes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "waitable_step",
+              "continuous_local"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        },
+        "supported_contexts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContractRef"
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "coverage_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "local_backend": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "action_schema_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "control_profile_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "timing_contract_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "required_observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContractRef"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "quality_predicates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContractRef"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "policy_schema_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContractRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "update_support": {
+          "$ref": "#/$defs/UpdateSupport"
+        },
+        "fallback_contract": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "local_resource_profile": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResourceClaim"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "validation_report_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "capability_id",
+        "capability_version",
+        "control_modes",
+        "supported_contexts",
+        "coverage_ref",
+        "local_backend",
+        "action_schema_ref",
+        "control_profile_ref",
+        "timing_contract_ref",
+        "required_observations",
+        "quality_predicates",
+        "policy_schema_ref",
+        "update_support",
+        "fallback_contract",
+        "local_resource_profile",
+        "validation_report_ref"
+      ],
+      "additionalProperties": false
+    },
+    "PluginCapability": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "input_schema_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "result_contract": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "permission_scope_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "effect_type": {
+          "enum": [
+            "none",
+            "internal_state",
+            "public_output",
+            "external_effect"
+          ]
+        },
+        "first_required_phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "status": {
+          "enum": [
+            "enabled",
+            "disabled",
+            "unsupported"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "input_schema_ref",
+        "result_contract",
+        "permission_scope_ref",
+        "effect_type",
+        "first_required_phase",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "PluginPermissions": {
+      "type": "object",
+      "properties": {
+        "network_origins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "read_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "write_namespaces": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "credential_scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContractRef"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "network_origins",
+        "read_paths",
+        "write_namespaces",
+        "credential_scopes"
+      ],
+      "additionalProperties": false
+    },
+    "ControllerManifest": {
+      "type": "object",
+      "properties": {
+        "plugin_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "plugin_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "protocol_version": {
+          "const": "0.8.0"
+        },
+        "schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "supported_platforms": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "darwin",
+              "win32",
+              "linux"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true
+        },
+        "lifecycle": {
+          "enum": [
+            "controller",
+            "session_service",
+            "provider"
+          ]
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PluginCapability"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "supported_contexts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContractRef"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ResourceClaim"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "max_concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "update_support": {
+          "$ref": "#/$defs/UpdateSupport"
+        },
+        "success_evidence_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "cleanup_evidence_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "permissions": {
+          "$ref": "#/$defs/PluginPermissions"
+        },
+        "configuration_schema_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "configuration_apply_boundary": {
+          "enum": [
+            "new_instance",
+            "inactive",
+            "checkpoint"
+          ]
+        },
+        "control_capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ControlCapability"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "test_coverage_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "execution_mode": {
+          "enum": [
+            "simulation",
+            "real"
+          ]
+        }
+      },
+      "required": [
+        "plugin_id",
+        "plugin_version",
+        "protocol_version",
+        "schema_digest",
+        "supported_platforms",
+        "lifecycle",
+        "methods",
+        "capabilities",
+        "supported_contexts",
+        "resources",
+        "max_concurrency",
+        "update_support",
+        "success_evidence_ref",
+        "cleanup_evidence_ref",
+        "permissions",
+        "configuration_schema_ref",
+        "configuration_apply_boundary",
+        "control_capabilities",
+        "test_coverage_refs",
+        "execution_mode"
+      ],
+      "additionalProperties": false
+    },
+    "HandshakeInput": {
+      "type": "object",
+      "properties": {
+        "host_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "protocol_versions": {
+          "type": "array",
+          "items": {
+            "const": "0.8.0"
+          },
+          "minItems": 1,
+          "maxItems": 1,
+          "uniqueItems": true
+        },
+        "schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "enabled_phases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Phase"
+          },
+          "minItems": 1,
+          "maxItems": 15,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "host_instance_id",
+        "protocol_versions",
+        "schema_digest",
+        "enabled_phases"
+      ],
+      "additionalProperties": false
+    },
+    "HandshakeResult": {
+      "type": "object",
+      "properties": {
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "plugin_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "protocol_version": {
+          "const": "0.8.0"
+        },
+        "schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "manifest": {
+          "$ref": "#/$defs/ControllerManifest"
+        }
+      },
+      "required": [
+        "connection_id",
+        "plugin_instance_id",
+        "protocol_version",
+        "schema_digest",
+        "manifest"
+      ],
+      "additionalProperties": false
+    },
+    "InstanceInput": {
+      "type": "object",
+      "properties": {
+        "instance_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "instance_id"
+      ],
+      "additionalProperties": false
+    },
+    "ControllerStatus": {
+      "type": "object",
+      "properties": {
+        "instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "activation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "ERROR",
+            "FINALIZED",
+            "INACTIVE",
+            "PREPARED",
+            "PREPARING",
+            "QUIESCING",
+            "STOPPING",
+            "UNCONFIGURED",
+            "UNKNOWN"
+          ]
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "instance_id",
+        "activation_id",
+        "state",
+        "source_revision",
+        "evidence_refs"
+      ],
+      "additionalProperties": false
+    },
+    "AcceptedOperation": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "accepted": {
+          "const": true
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "operation_id",
+        "object_ref",
+        "accepted",
+        "source_revision"
+      ],
+      "additionalProperties": false
+    },
+    "StopInput": {
+      "type": "object",
+      "properties": {
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "reason": {
+          "$ref": "#/$defs/TerminationReason"
+        },
+        "cancel_fence": {
+          "$ref": "#/$defs/CancelFence"
+        },
+        "stop_deadline": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "object_ref",
+        "reason",
+        "cancel_fence",
+        "stop_deadline"
+      ],
+      "additionalProperties": false
+    },
+    "SceneOpenInput": {
+      "type": "object",
+      "properties": {
+        "scene_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "activity_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "owner_scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "scene_id",
+        "activity_id",
+        "owner_scope"
+      ],
+      "additionalProperties": false
+    },
+    "UtteranceOpenInput": {
+      "type": "object",
+      "properties": {
+        "utterance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "scene_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "voice_profile_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "audio_scope": {
+          "enum": [
+            "segment",
+            "utterance"
+          ]
+        },
+        "predecessor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtterancePredecessor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "utterance_id",
+        "scene_id",
+        "voice_profile_ref",
+        "audio_scope",
+        "predecessor"
+      ],
+      "additionalProperties": false
+    },
+    "SegmentCommitInput": {
+      "type": "object",
+      "properties": {
+        "segment_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "utterance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "segment_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "display_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "spoken_text": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "approval_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "dependency_versions": {
+          "$ref": "#/$defs/DataObject"
+        }
+      },
+      "required": [
+        "segment_id",
+        "utterance_id",
+        "segment_seq",
+        "display_text",
+        "spoken_text",
+        "content_digest",
+        "approval_ref",
+        "dependency_versions"
+      ],
+      "additionalProperties": false
+    },
+    "UtteranceSealInput": {
+      "type": "object",
+      "properties": {
+        "utterance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "last_seq": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 9007199254740991
+        },
+        "close_reason": {
+          "$ref": "#/$defs/TerminationReason"
+        }
+      },
+      "required": [
+        "utterance_id",
+        "last_seq",
+        "close_reason"
+      ],
+      "additionalProperties": false
+    },
+    "SceneCloseInput": {
+      "type": "object",
+      "properties": {
+        "scene_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "required_children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "optional_children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "scene_id",
+        "required_children",
+        "optional_children"
+      ],
+      "additionalProperties": false
+    },
+    "AudioEosInput": {
+      "type": "object",
+      "properties": {
+        "audio_stream_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "producer_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "final_sample_exclusive": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "last_chunk_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "audio_stream_id",
+        "producer_instance_id",
+        "final_sample_exclusive",
+        "last_chunk_seq",
+        "content_digest"
+      ],
+      "additionalProperties": false
+    },
+    "CommandContext": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "caller_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "grant_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "operation_id",
+        "payload_digest",
+        "caller_instance_id",
+        "authority_epoch",
+        "object_ref",
+        "deadline",
+        "grant_ref"
+      ],
+      "additionalProperties": false
+    },
+    "RpcId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "RpcSuccess": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/RpcId"
+        },
+        "result": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "RpcFailure": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RpcId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "enum": [
+                    -32700,
+                    -32600,
+                    -32601,
+                    -32602,
+                    -32603
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "data": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "data"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "const": -32000
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "data": {
+                  "$ref": "#/$defs/ErrorEnvelope"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "data"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "RpcEvent": {
+      "type": "object",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "const": "event.publish"
+        },
+        "params": {
+          "$ref": "#/$defs/EventEnvelope"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "additionalProperties": false
+    },
+    "ProviderBudget": {
+      "type": "object",
+      "properties": {
+        "provider_ref": {
+          "$ref": "#/$defs/ContractRef"
+        },
+        "request_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "max_calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "llm_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "tts_characters": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "tts_audio_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "vlm_frames": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rpm": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "tpm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "guard_calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "max_retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "speculative_waste_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pricing_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContractRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "provider_ref",
+        "request_timeout_ms",
+        "max_calls",
+        "llm_tokens",
+        "tts_characters",
+        "tts_audio_ms",
+        "vlm_frames",
+        "rpm",
+        "tpm",
+        "guard_calls",
+        "max_retries",
+        "speculative_waste_units",
+        "pricing_ref"
+      ],
+      "additionalProperties": false
+    },
+    "CostBudget": {
+      "type": "object",
+      "properties": {
+        "currency": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "session_cost_cap": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rolling_hour_cost_cap": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderBudget"
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "currency",
+        "session_cost_cap",
+        "rolling_hour_cost_cap",
+        "providers"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeProfile": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/Id"
+        },
+        "mode": {
+          "enum": [
+            "simulation",
+            "test_only",
+            "public"
+          ]
+        },
+        "schema_version": {
+          "const": "0.8.0"
+        },
+        "enabled_phases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Phase"
+          },
+          "minItems": 1,
+          "maxItems": 15,
+          "uniqueItems": true
+        },
+        "enabled_capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CapabilityIdentity"
+          },
+          "minItems": 0,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "decision": {
+          "type": "object",
+          "properties": {
+            "max_main_inference_inflight": {
+              "const": 1
+            },
+            "signal_coalesce_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_coalesce_wait_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_background_model_inflight": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "max_main_inference_inflight",
+            "signal_coalesce_ms",
+            "max_coalesce_wait_ms",
+            "max_background_model_inflight"
+          ],
+          "additionalProperties": false
+        },
+        "chat": {
+          "type": "object",
+          "properties": {
+            "policy": {
+              "const": "enqueue_only"
+            },
+            "max_pending_items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_pending_age_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "selection_batch_limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          },
+          "required": [
+            "policy",
+            "max_pending_items",
+            "max_pending_age_ms",
+            "selection_batch_limit"
+          ],
+          "additionalProperties": false
+        },
+        "speech": {
+          "type": "object",
+          "properties": {
+            "waiting_slots": {
+              "type": "object",
+              "properties": {
+                "business": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "paid_ack": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "chat": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "business",
+                "paid_ack",
+                "chat"
+              ],
+              "additionalProperties": false
+            },
+            "waiting_output_ms": {
+              "type": "object",
+              "properties": {
+                "business": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "paid_ack": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "chat": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "business",
+                "paid_ack",
+                "chat"
+              ],
+              "additionalProperties": false
+            },
+            "max_waiting_output_ms_total": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "priority_at_idle": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "business",
+                  "paid_ack",
+                  "chat"
+                ]
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "uniqueItems": true
+            },
+            "max_consecutive_noncritical_before_chat": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "chat_aging_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "target_reply_output_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "speculative_tts": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "waiting_slots",
+            "waiting_output_ms",
+            "max_waiting_output_ms_total",
+            "priority_at_idle",
+            "max_consecutive_noncritical_before_chat",
+            "chat_aging_ms",
+            "target_reply_output_ms",
+            "speculative_tts"
+          ],
+          "additionalProperties": false
+        },
+        "paid_ack": {
+          "type": "object",
+          "properties": {
+            "pending_ttl_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_pending_receipts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "read_message_body": {
+              "type": "boolean"
+            },
+            "use_generic_name": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "pending_ttl_ms",
+            "max_pending_receipts",
+            "read_message_body",
+            "use_generic_name"
+          ],
+          "additionalProperties": false
+        },
+        "stage": {
+          "type": "object",
+          "properties": {
+            "startup_prebuffer_target_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_pcm_buffer_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "optional_track_wait_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "required_prepare_timeout_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "soft_finish_boundary_timeout_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          },
+          "required": [
+            "startup_prebuffer_target_ms",
+            "max_pcm_buffer_ms",
+            "optional_track_wait_ms",
+            "required_prepare_timeout_ms",
+            "soft_finish_boundary_timeout_ms"
+          ],
+          "additionalProperties": false
+        },
+        "plan_limits": {
+          "type": "object",
+          "properties": {
+            "max_nodes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "max_handler_depth": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "max_active_instances_per_occurrence": {
+              "const": 1
+            },
+            "allow_arbitrary_code": {
+              "const": false
+            }
+          },
+          "required": [
+            "max_nodes",
+            "max_handler_depth",
+            "max_active_instances_per_occurrence",
+            "allow_arbitrary_code"
+          ],
+          "additionalProperties": false
+        },
+        "recovery": {
+          "type": "object",
+          "properties": {
+            "max_attempts_per_task": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_total_recovery_ms": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "retry_in_doubt_effect": {
+              "const": false
+            }
+          },
+          "required": [
+            "max_attempts_per_task",
+            "max_total_recovery_ms",
+            "retry_in_doubt_effect"
+          ],
+          "additionalProperties": false
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CostBudget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "profile",
+        "mode",
+        "schema_version",
+        "enabled_phases",
+        "enabled_capabilities",
+        "decision",
+        "chat",
+        "speech",
+        "paid_ack",
+        "stage",
+        "plan_limits",
+        "recovery",
+        "cost"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "enum": [
+                  "test_only",
+                  "public"
+                ]
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "cost": {
+                "$ref": "#/$defs/CostBudget"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "AudioProductionRecord": {
+      "type": "object",
+      "properties": {
+        "audio_stream_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "utterance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "segment_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "producer_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "dispatch_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "audio_scope": {
+          "enum": [
+            "segment",
+            "utterance"
+          ]
+        },
+        "format": {
+          "enum": [
+            "pcm_s16le",
+            "pcm_f32le"
+          ]
+        },
+        "sample_rate_hz": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "channels": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "next_chunk_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "received_sample_exclusive": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "final_sample_exclusive": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eos_validated": {
+          "type": "boolean"
+        },
+        "deadline": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "termination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminationRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/AudioProductionState"
+        }
+      },
+      "required": [
+        "audio_stream_id",
+        "utterance_id",
+        "segment_id",
+        "producer_instance_id",
+        "dispatch_revision",
+        "audio_scope",
+        "format",
+        "sample_rate_hz",
+        "channels",
+        "next_chunk_seq",
+        "received_sample_exclusive",
+        "final_sample_exclusive",
+        "eos_validated",
+        "deadline",
+        "termination",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "StopOperationRecord": {
+      "type": "object",
+      "properties": {
+        "stop_operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "fence": {
+          "$ref": "#/$defs/CancelFence"
+        },
+        "requested_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "deadline": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "local_fence_applied": {
+          "type": "boolean"
+        },
+        "endpoint_ack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopPayload"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "record_status": {
+          "enum": [
+            "durable",
+            "pending",
+            "failed"
+          ]
+        },
+        "incident_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recovery_owner_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/StopOperationState"
+        }
+      },
+      "required": [
+        "stop_operation_id",
+        "target",
+        "fence",
+        "requested_at",
+        "deadline",
+        "local_fence_applied",
+        "endpoint_ack",
+        "record_status",
+        "incident_ref",
+        "recovery_owner_ref",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "TextPresentationRecord": {
+      "type": "object",
+      "properties": {
+        "presentation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "scene_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "display_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "spoken_text": {
+          "type": "null"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "approval_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deadline": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "output_evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "maxItems": 128
+        },
+        "termination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminationRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/TextPresentationState"
+        }
+      },
+      "required": [
+        "presentation_id",
+        "scene_id",
+        "display_text",
+        "spoken_text",
+        "content_digest",
+        "approval_ref",
+        "deadline",
+        "output_evidence_refs",
+        "termination",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "SupervisionRecord": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervision_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "operator_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "human_lease_deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connection_healthy": {
+          "type": "boolean"
+        },
+        "grace_deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blocked_scopes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "maxItems": 128
+        },
+        "active_grant_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "maxItems": 128
+        },
+        "incident_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SupervisionModeState"
+        }
+      },
+      "required": [
+        "session_id",
+        "supervision_epoch",
+        "operator_id",
+        "human_lease_deadline",
+        "connection_healthy",
+        "grace_deadline",
+        "blocked_scopes",
+        "active_grant_refs",
+        "incident_ref",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "StagePairingRecord": {
+      "type": "object",
+      "properties": {
+        "pairing_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "device_public_key_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "device_fingerprint": {
+          "$ref": "#/$defs/Digest"
+        },
+        "origin": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "role": {
+          "const": "stage"
+        },
+        "allowed_session_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "maxItems": 128
+        },
+        "pairing_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "server_instance_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connection_instance_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "token_deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revoked_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/StagePairingState"
+        }
+      },
+      "required": [
+        "pairing_id",
+        "device_public_key_ref",
+        "device_fingerprint",
+        "origin",
+        "role",
+        "allowed_session_ids",
+        "pairing_epoch",
+        "server_instance_id",
+        "connection_instance_id",
+        "token_deadline",
+        "revoked_at",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "EvidenceArtifact": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^reports/[^\\\\]+$",
+          "maxLength": 1024
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "TestEvidence": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "SKIP",
+            "PENDING"
+          ]
+        },
+        "executed_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T.+(Z|[+]00:00)$"
+        },
+        "environment": {
+          "$ref": "#/$defs/DataObject"
+        },
+        "runner_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "sut_build_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceArtifact"
+          },
+          "maxItems": 1024
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "executed_at",
+        "environment",
+        "runner_sha256",
+        "sut_build_digest",
+        "artifacts"
+      ],
+      "additionalProperties": false
+    },
+    "AcceptanceReport": {
+      "type": "object",
+      "properties": {
+        "source_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TestEvidence"
+          },
+          "maxItems": 1024
+        }
+      },
+      "required": [
+        "source_digest",
+        "tests"
+      ],
+      "additionalProperties": false
+    },
+    "CapabilityIdentity": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

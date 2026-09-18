@@ -1,0 +1,22 @@
+{
+  "plugin_id": "simulation",
+  "plugin_version": "0.8.0",
+  "protocol_version": "0.8.0",
+  "schema_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "supported_platforms": ["darwin", "win32", "linux"],
+  "lifecycle": "provider",
+  "methods": ["plugin.handshake", "plugin.describe"],
+  "capabilities": [],
+  "supported_contexts": [],
+  "resources": [],
+  "max_concurrency": 1,
+  "update_support": {"checkpoint": false, "quiesce": false, "snapshot": false, "restore": false, "policy_patch": false},
+  "success_evidence_ref": "simulation-success@1",
+  "cleanup_evidence_ref": "simulation-cleanup@1",
+  "permissions": {"network_origins": [], "read_paths": [], "write_namespaces": [], "credential_scopes": []},
+  "configuration_schema_ref": "simulation-configuration@1",
+  "configuration_apply_boundary": "new_instance",
+  "control_capabilities": [],
+  "test_coverage_refs": ["sdk.rpc"],
+  "execution_mode": "simulation"
+}

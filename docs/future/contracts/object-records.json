@@ -1,0 +1,99 @@
+{
+  "schema_version": "0.8.0",
+  "records": [
+    {
+      "machine": "Activity",
+      "schema": "ActivityRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "Task",
+      "schema": "TaskRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "Attempt",
+      "schema": "AttemptRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "Settlement",
+      "schema": "SettlementRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "Effect",
+      "schema": "EffectIntentRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "SessionServiceInstance",
+      "schema": "ServiceInstanceRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "ControllerInstance",
+      "schema": "ControllerInstanceRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "PlanCandidate",
+      "schema": "PlanCandidateRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "PolicyUpdate",
+      "schema": "PolicyUpdateRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "PollRound",
+      "schema": "PollRoundRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "WaitRegistration",
+      "schema": "WaitRegistrationRecord",
+      "state_field": "state"
+    }
+  ],
+  "support_types": [
+    "TaskInputSnapshot",
+    "WorkBudget",
+    "AttemptResult",
+    "SessionServiceSpec",
+    "Checkpoint",
+    "ResumeTicket",
+    "JobHandle",
+    "ExternalWorkRef",
+    "PlanRef"
+  ],
+  "artifact_types": [
+    "VisualObservationRef",
+    "DerivedView",
+    "GroundingProfile",
+    "GroundingRequest",
+    "GroundingResult",
+    "ComputeReusePolicy",
+    "ComputeArtifact",
+    "ControlCandidate",
+    "ExecutionPrefix",
+    "CandidateRepairPolicy",
+    "CandidateRepairRecord",
+    "ReflectionRecord",
+    "RecoveryContextView",
+    "RecoveryReviewPolicy",
+    "RecoveryCapability",
+    "RecoveryProposal",
+    "RecoveryResult",
+    "PixelPoint",
+    "PixelRect",
+    "GroundingLocation",
+    "DependencyStamp",
+    "CandidateAxes",
+    "CandidateAxisBounds",
+    "CandidateStep",
+    "ReflectionItem",
+    "ReflectionItemRef"
+  ]
+}

@@ -1,0 +1,168 @@
+{
+  "schema_version": "0.8.0",
+  "items": [
+    {
+      "id": "EXT-PLATFORM",
+      "title": "首发平台、账号、分区及AI/值守/付费互动规则",
+      "owner": null,
+      "owner_role": "项目维护者/平台规则负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P8"
+      ],
+      "repository_or_scope": null,
+      "next_action": "确认平台/账号/分区，保存适用官方规则全文、日期、审核方式和必要平台确认。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-GAME-LICENSE",
+      "title": "目标游戏直播/收益/剧透/自动操作/截图外发许可",
+      "owner": null,
+      "owner_role": "项目维护者/游戏授权负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P5-public",
+        "P8-story"
+      ],
+      "repository_or_scope": null,
+      "next_action": "以当前规范候选《魔法少女的魔女审判》确认实际目标，逐项保存允许/限制及截图外发条款。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-ASSET-MODEL",
+      "title": "皮套及图像授权",
+      "owner": null,
+      "owner_role": "素材采购/授权负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P8"
+      ],
+      "repository_or_scope": null,
+      "next_action": "逐资产登记来源、权利人、许可文件、直播/收益/剪辑范围、期限、署名及证据位置。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-ASSET-FONT",
+      "title": "字体授权",
+      "owner": null,
+      "owner_role": "素材采购/授权负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P8"
+      ],
+      "repository_or_scope": null,
+      "next_action": "逐资产登记来源、权利人、许可文件、直播/收益/剪辑范围、期限、署名及证据位置。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-ASSET-BGM",
+      "title": "BGM及音效授权",
+      "owner": null,
+      "owner_role": "素材采购/授权负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P8"
+      ],
+      "repository_or_scope": null,
+      "next_action": "逐资产登记来源、权利人、许可文件、直播/收益/剪辑范围、期限、署名及证据位置。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-ASSET-VOICE",
+      "title": "音色/克隆及预录提示授权",
+      "owner": null,
+      "owner_role": "素材采购/授权负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P8"
+      ],
+      "repository_or_scope": null,
+      "next_action": "逐资产登记来源、权利人、许可文件、直播/收益/剪辑范围、期限、署名及证据位置。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-PRIVACY",
+      "title": "个人信息、未成年人及供应商外发处理",
+      "owner": null,
+      "owner_role": "隐私与运营负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P8",
+        "P7-public"
+      ],
+      "repository_or_scope": null,
+      "next_action": "确认数据处理主体、实际供应商/地域、同意/删除流程及适用保护要求。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-AI-DISCLOSURE",
+      "title": "AI声明与服务适用义务",
+      "owner": null,
+      "owner_role": "运营合规负责人",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P8"
+      ],
+      "repository_or_scope": null,
+      "next_action": "核验实际部署方式的适用义务与平台标识操作，保留画面/音视频/切片证据。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-GAME-RUNTIME",
+      "title": "Game Runtime仓库、接口冻结与首次联调",
+      "owner": null,
+      "owner_role": "Game Runtime维护者",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "C0",
+        "P5"
+      ],
+      "repository_or_scope": null,
+      "next_action": "提供独立仓库位置和维护者；按commands/Manifest冻结共同schema_digest；先假端点，再只读Bridge，最后Windows test_only验收。",
+      "evidence_refs": []
+    },
+    {
+      "id": "EXT-IRIS",
+      "title": "Iris共享边界与接入联调",
+      "owner": null,
+      "owner_role": "Bellis与Iris维护者",
+      "opened_date": "2026-09-18",
+      "target_review_date": "2026-09-25",
+      "date_kind": "planning_review_not_delivery_promise",
+      "status": "AWAITING_OWNER",
+      "blocks": [
+        "P7"
+      ],
+      "repository_or_scope": "/Users/cassia/Local/Code/iris_memory_core",
+      "next_action": "依据Iris现行HTTP业务/媒体和WS通知契约登记版本、ACL/墓碑能力与联调时间；不得假设Iris实现Bellis插件RPC。",
+      "evidence_refs": []
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "wait_id": "fixture-policy-wait",
+  "owner_ref": {
+    "kind": "Task",
+    "id": "wait-policy-outcome"
+  },
+  "event_names": [
+    "control.policy_applied",
+    "control.policy_rejected",
+    "control.policy_expired",
+    "control.policy_cancelled",
+    "control.policy_unknown"
+  ],
+  "expected_source": {
+    "authority_id": "fixture-game",
+    "source_instance": "fixture-runtime-1"
+  },
+  "correlation": {
+    "key": "policy_update_id",
+    "value": "fixture-update-1"
+  },
+  "cursor": {
+    "authority_id": "fixture-game",
+    "source_instance": "fixture-runtime-1",
+    "after_seq": -1
+  },
+  "predicate": {
+    "op": "exists",
+    "field_ref": {
+      "node": "$event",
+      "path": "/event_name"
+    }
+  },
+  "deadline": {
+    "clock_domain": "fixture-host",
+    "issued_at_ms": 1000,
+    "expires_at_ms": 2000
+  },
+  "on_timeout": "wait_timeout@1",
+  "on_gap": "wait_gap@1"
+}

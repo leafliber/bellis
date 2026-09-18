@@ -1,0 +1,126 @@
+{
+  "schema_version": "0.8.0",
+  "commands": [
+    {
+      "name": "plugin.handshake",
+      "input_schema": "HandshakeInput",
+      "result_schema": "HandshakeResult",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "plugin.manage",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "plugin.describe",
+      "input_schema": "EmptyInput",
+      "result_schema": "ControllerManifest",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "plugin.manage",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "controller.observe_status",
+      "input_schema": "InstanceInput",
+      "result_schema": "ControllerStatus",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "plugin.manage",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "controller.stop",
+      "input_schema": "StopInput",
+      "result_schema": "AcceptedOperation",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "plugin.manage",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "controller.dispose",
+      "input_schema": "InstanceInput",
+      "result_schema": "AcceptedOperation",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "plugin.manage",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "scene.open",
+      "input_schema": "SceneOpenInput",
+      "result_schema": "AcceptedOperation",
+      "target": "stage",
+      "phase": "P1",
+      "effect_type": "public_output",
+      "permission_scope": "scene.control",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "utterance.open",
+      "input_schema": "UtteranceOpenInput",
+      "result_schema": "AcceptedOperation",
+      "target": "stage",
+      "phase": "P1",
+      "effect_type": "public_output",
+      "permission_scope": "utterance.control",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "segment.commit",
+      "input_schema": "SegmentCommitInput",
+      "result_schema": "AcceptedOperation",
+      "target": "stage",
+      "phase": "P1",
+      "effect_type": "public_output",
+      "permission_scope": "segment.control",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "utterance.seal",
+      "input_schema": "UtteranceSealInput",
+      "result_schema": "AcceptedOperation",
+      "target": "stage",
+      "phase": "P1",
+      "effect_type": "public_output",
+      "permission_scope": "utterance.control",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "scene.close",
+      "input_schema": "SceneCloseInput",
+      "result_schema": "AcceptedOperation",
+      "target": "stage",
+      "phase": "P1",
+      "effect_type": "public_output",
+      "permission_scope": "scene.control",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "audio.eos",
+      "input_schema": "AudioEosInput",
+      "result_schema": "AcceptedOperation",
+      "target": "stage",
+      "phase": "P1",
+      "effect_type": "public_output",
+      "permission_scope": "audio.control",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# 检查与探针输出：每次运行重写，带时间戳与环境版本
+/reports/
+
+# 本地配置与凭据（示例文件用 .env.example，只放脱敏占位值）
+.env
+.env.*
+!.env.example
+
+# Node and local tools
+node_modules/
+dist/
+.cache/
+.pnpm-store/

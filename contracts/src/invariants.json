@@ -1,0 +1,305 @@
+{
+  "schema_version": "0.8.0",
+  "invariants": [
+    {
+      "id": "I01",
+      "requirement": "正常表达/模板只有Scene许可路径；OBS仅固定应急例外",
+      "scenario": "绕过Scene提交模板和普通语音均拒绝；带许可的Scene可提交；OBS固定应急走独立受限入口。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I01"
+      ]
+    },
+    {
+      "id": "I02",
+      "requirement": "单一高层采用权；辅助只返回候选，运行时最终核验",
+      "scenario": "插件、假设备或未认证客户端直接请求签发ExecutionGrant或改变监督模式，均被拒绝并记录来源；已签发授权下的命令在执行前仍由执行网关复核授权、监督代次与期限。接入LiveDirector与辅助规划器后按同一性质扩展。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I02"
+      ]
+    },
+    {
+      "id": "I05",
+      "requirement": "审核片段可增量提交；首段不等完整回答/EOS",
+      "scenario": "延迟EOS与后续文本，首个审核片段先输出，记录首输出和EOS的真实先后。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I05"
+      ]
+    },
+    {
+      "id": "I07",
+      "requirement": "欠载补零不推进内容位置；音字口型绑定媒体时间",
+      "scenario": "制造PCM欠载并补零，内容游标停留；补回数据后字幕随内容游标继续。接入Avatar口型后按同一游标验证。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I07"
+      ]
+    },
+    {
+      "id": "I08",
+      "requirement": "Segment结束、音频EOS、Utterance seal、整段实际输出完成分开",
+      "scenario": "排列segment完成、EOS、seal和输出排空顺序；缺任一必要事实不得正常完成。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I08"
+      ]
+    },
+    {
+      "id": "I09",
+      "requirement": "本地停止不等待远端取消或持久化",
+      "scenario": "远端cancel永不返回，同时冻结持久化；本地栅栏立即关闭并有独立停止进度。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I09"
+      ]
+    },
+    {
+      "id": "I11",
+      "requirement": "旧实例、重复、过期、撤权数据不能复活副作用",
+      "scenario": "撤权后重放旧实例、重复operation和过期消息，均不能增加实际效果次数。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I11"
+      ]
+    },
+    {
+      "id": "I12",
+      "requirement": "每类事实只有登记的权威写入者，端点只能执行其声明的能力；例如Stage无键鼠权限，投票与游戏结果分别由各自引擎权威。",
+      "scenario": "假设备或其它插件发布非自身权威的事实（如监督模式变化、授权结果、其它端点的停止确认），或使用其Manifest未声明的方法，全部拒绝并保留来源。Stage、投票与游戏接入后按同一性质扩展。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I12"
+      ]
+    },
+    {
+      "id": "I13",
+      "requirement": "分类容量/时长/媒体字节有界，普通过载不截断当前表达",
+      "scenario": "填满每类槽位及媒体字节预算，拒绝/延后新增请求，当前合法输出连续。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I13"
+      ]
+    },
+    {
+      "id": "I14",
+      "requirement": "UNKNOWN只允许只读对账或带权限的人工行政结案；重连、结案或新operation_id均不得自动重放旧效果。",
+      "scenario": "媒体对象进入UNKNOWN后重连、换operation_id，均不重发旧输出，只能查询。人工行政结案在接入ManualResolution后按同一性质测试。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I14"
+      ]
+    },
+    {
+      "id": "I15",
+      "requirement": "仅原Utterance normal完成满足原语音依赖；过渡语不能替代",
+      "scenario": "原Utterance提前结束后播放过渡语，原normal依赖仍不满足。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I15"
+      ]
+    },
+    {
+      "id": "I16",
+      "requirement": "双文本、读音、映射、审核、voice和音频绑定同一版本",
+      "scenario": "替换spoken_text、voice、digest或音频流之一，审核许可绑定校验拒绝。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I16"
+      ]
+    },
+    {
+      "id": "I18",
+      "requirement": "推测音频隔离；无正式许可不可进入可播缓冲",
+      "scenario": "未获正式许可的PCM（包括推测合成的音频）到达时，可播缓冲仍为空；撤权后隔离数据销毁。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I18"
+      ]
+    },
+    {
+      "id": "I19",
+      "requirement": "软收尾同归约关闭追加，确认Stage尾部栅栏后才ENDED_EARLY；零已播也不能跳过尾部核验。",
+      "scenario": "零已播及已有输出两种情况下soft_finish，未收到尾部ACK均不能ENDED_EARLY。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I19"
+      ]
+    },
+    {
+      "id": "I20",
+      "requirement": "后续承接发言启动前检查前序真实结果和已播摘要",
+      "scenario": "后继排队期间前序改为异常终止，启动时复核并拒绝要求normal的承接句。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I20"
+      ]
+    },
+    {
+      "id": "I21",
+      "requirement": "公开Overlay无Stage/管理/私有记忆凭证；Origin与身份均校验",
+      "scenario": "Overlay凭据请求Stage与管理端点，以及错误Origin配合法凭据，全部拒绝。接入记忆端点后按同一性质测试。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I21"
+      ]
+    },
+    {
+      "id": "I24",
+      "requirement": "程序心跳（UI或客户端）不等于人工租约；失效收权、重连不复权",
+      "scenario": "仅续程序心跳而不续人工租约，进入restricted；重连不能恢复原执行grant。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I24"
+      ]
+    },
+    {
+      "id": "I27",
+      "requirement": "未批准不换音色；text_only不伪报语音完成",
+      "scenario": "主音色失效时未批准替代音色不得播放；text_only完成不发语音正常完成事件。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I27"
+      ]
+    },
+    {
+      "id": "I28",
+      "requirement": "安全、质量、覆盖、失败样本与时延独立报告",
+      "scenario": "混入拒绝、失败、UNKNOWN和慢样本生成报告，各项分别列出且不丢弃失败样本。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I28"
+      ]
+    },
+    {
+      "id": "I65",
+      "requirement": "合法未知/安全超时入口不受审计成功、普通预算或业务队列准入阻塞",
+      "scenario": "所有适用状态注入日志失败/数据库满/预算耗尽，仍归约到实际未知/对账并禁止相关新效果",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I65"
+      ]
+    },
+    {
+      "id": "I66",
+      "requirement": "本地安全栅栏、端点停止确认、记录状态分开；独立清理责任不随业务终态消失",
+      "scenario": "对象终态后actor退出，清理继续；未持久化即崩溃重启，旧授权不恢复；无清理证据不放行冲突owner",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I66"
+      ]
+    },
+    {
+      "id": "I68",
+      "requirement": "同reason_code只有一个顶层错误映射；不支持、未就绪、过期和状态冲突不可混用",
+      "scenario": "对P0命令分别制造未就绪、过期、状态冲突和能力不支持（Manifest未声明的可选能力）四种情形，各返回errors.json登记的固定类别、原因码与恢复分类，互不混用；静态不支持不重试。检查点未到、恢复过期在其阶段启用时按同一性质测试。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I68"
+      ]
+    },
+    {
+      "id": "I75",
+      "requirement": "STOPPING接受可信自然完成；停止确认必须含最终结果/输出水位，不能抢先写CANCELLED。",
+      "scenario": "STOPPING中交换自然完成与停止ACK顺序，并丢失最终水位；按证据分别成功或UNKNOWN。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I75"
+      ]
+    },
+    {
+      "id": "I77",
+      "requirement": "QUEUED Utterance与TextPresentation也能吸收子效果UNKNOWN；不等待first_output来承认不确定。",
+      "scenario": "Utterance/TextPresentation仍QUEUED时收到子效果UNKNOWN，立刻归约并移交对账。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I77"
+      ]
+    },
+    {
+      "id": "I79",
+      "requirement": "协议消息、记录与示例的字段只来自同一Schema；解析器不补缺字段，不猜能力版本、权限或时限。",
+      "scenario": "向宿主各入口（插件RPC、管理通道、配置加载）发送缺字段、多字段和类型错误的消息，全部拒绝并返回登记错误码，不补默认值；同一正反例经生成校验器与宿主入口判定一致。Action、Plan、Director、ControlFrame在其阶段启用时按同一性质扩展。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I79"
+      ]
+    },
+    {
+      "id": "I81",
+      "requirement": "所有epoch/revision/seq都有唯一writer、scope、递增和比较规则；不同作用域不能数值比大小。",
+      "scenario": "两个作用域相同数字代次、旧writer和跨实例revision混用均拒绝；合法同域递增接受。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I81"
+      ]
+    },
+    {
+      "id": "I82",
+      "requirement": "test_only/public许可与监督模式分别建模；测试通过或客户端、端点重连不自动取得公开输出或其它未许可效果的权限。",
+      "scenario": "test_only测试通过后，或客户端、插件重连后，尝试public输出或未许可效果，必须再次独立授权。接入Stage与游戏输入后按同一性质扩展。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I82"
+      ]
+    },
+    {
+      "id": "I83",
+      "requirement": "Stage设备配对持久化与短连接令牌分离；刷新只恢复身份，新实例不重播旧PCM。",
+      "scenario": "目标OBS中刷新/卸载/重启后证明配对密钥连续；新连接新实例且旧PCM不重播。",
+      "first_required_phase": "P1",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I83"
+      ]
+    },
+    {
+      "id": "I84",
+      "requirement": "错误原因一对一分类，每个顶层类别均有登记原因；未登记字段/事件不能绕过校验。",
+      "scenario": "遍历错误码映射并注入类别冲突、未知事件/字段，拒绝非法消息且所有类别非空。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I84"
+      ]
+    },
+    {
+      "id": "I85",
+      "requirement": "阶段门禁与运行配置按已启用阶段的依赖闭包计算；未登记的阶段不能启用，未启用阶段的状态机、命令与能力保持关闭。",
+      "scenario": "RuntimeProfile启用P1而缺P0、或启用未登记阶段时，宿主拒绝加载；未启用阶段的状态机转换、命令与能力调用全部被拒绝。",
+      "first_required_phase": "P0",
+      "verification_status": "PENDING_SUT",
+      "test_ids": [
+        "sut.I85"
+      ]
+    }
+  ]
+}

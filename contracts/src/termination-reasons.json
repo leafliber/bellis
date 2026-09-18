@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.8.0",
+  "reasons": [
+    "normal",
+    "soft_finish",
+    "policy_rejection",
+    "dependency_invalid",
+    "provider_failure",
+    "operator_request",
+    "supervision_expired",
+    "activity_deadline",
+    "action_deadline",
+    "attempt_deadline",
+    "output_deadline",
+    "prepare_timeout",
+    "guard_timeout",
+    "wait_timeout",
+    "checkpoint_timeout",
+    "stop_timeout",
+    "cleanup_timeout",
+    "reconcile_timeout",
+    "manual_unresolved_close"
+  ],
+  "rule": "请求原因与结果正交；normal只用于完整输出；不因最终取消覆盖原deadline/timeout原因。"
+}

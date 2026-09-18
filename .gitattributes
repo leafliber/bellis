@@ -1,0 +1,5 @@
+* text=auto eol=lf
+docs/generated/** linguist-generated=true
+contracts/generated/** linguist-generated=true
+# Minified compiler output: keep it out of text diffs.
+contracts/generated/validators.mjs -diff

@@ -1,0 +1,158 @@
+{
+  "snapshot": {
+    "choice_instance": "choice-occurrence-A",
+    "choices": [
+      {
+        "id": "A",
+        "text": "选项甲"
+      },
+      {
+        "id": "B",
+        "text": "选项乙"
+      }
+    ],
+    "evidence_refs": [
+      "evidence-1"
+    ]
+  },
+  "draft_1": {
+    "poll_ref": "poll-1",
+    "series_id": "fixture-series",
+    "round_index": 1,
+    "choice_instance": "choice-occurrence-A",
+    "rules_digest": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "vote_1": {
+    "poll_ref": "poll-1",
+    "series_id": "fixture-series",
+    "round_index": 1,
+    "choice_instance": "choice-occurrence-A",
+    "rules_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "frozen_result_ref": "frozen-1",
+    "status": "tie",
+    "winner_id": null,
+    "counts": {
+      "A": 1,
+      "B": 1
+    },
+    "coverage": "upstream_unverifiable",
+    "known_gap": false,
+    "local_processing_integrity": "intact",
+    "usable_for_control": false,
+    "frozen_at": {
+      "clock_domain": "fixture-host",
+      "monotonic_ms": 30000
+    }
+  },
+  "revalidate_1": {
+    "choice_ref": "validated-1",
+    "choice_instance": "choice-occurrence-A",
+    "winner_id": "A",
+    "evidence_refs": [
+      "evidence-fresh"
+    ]
+  },
+  "explain_1": {
+    "utterance_id": "explain_1",
+    "outcome": "COMPLETED",
+    "output_prefix_ref": "prefix-explain_1",
+    "settlement_ref": "settled-explain_1",
+    "evidence_refs": [
+      "fixture-output"
+    ]
+  },
+  "announce_1": {
+    "utterance_id": "announce_1",
+    "outcome": "COMPLETED",
+    "output_prefix_ref": "prefix-announce_1",
+    "settlement_ref": "settled-announce_1",
+    "evidence_refs": [
+      "fixture-output"
+    ]
+  },
+  "choose_1": {
+    "effect_intent_id": "effect-choice-A",
+    "effect_state": "CONFIRMED",
+    "settlement_ref": "settlement-choice-1",
+    "settlement_state": "SETTLED",
+    "evidence_refs": [
+      "fixture-only"
+    ]
+  },
+  "review_1": {
+    "review_request_ref": "review_1"
+  },
+  "review_unknown_1": {
+    "review_request_ref": "review_unknown_1"
+  },
+  "draft_2": {
+    "poll_ref": "poll-2",
+    "series_id": "fixture-series",
+    "round_index": 2,
+    "choice_instance": "choice-occurrence-A",
+    "rules_digest": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "vote_2": {
+    "poll_ref": "poll-2",
+    "series_id": "fixture-series",
+    "round_index": 2,
+    "choice_instance": "choice-occurrence-A",
+    "rules_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "frozen_result_ref": "frozen-2",
+    "status": "winner",
+    "winner_id": "A",
+    "counts": {
+      "A": 2,
+      "B": 1
+    },
+    "coverage": "upstream_unverifiable",
+    "known_gap": false,
+    "local_processing_integrity": "intact",
+    "usable_for_control": true,
+    "frozen_at": {
+      "clock_domain": "fixture-host",
+      "monotonic_ms": 60000
+    }
+  },
+  "revalidate_2": {
+    "choice_ref": "validated-2",
+    "choice_instance": "choice-occurrence-A",
+    "winner_id": "A",
+    "evidence_refs": [
+      "evidence-fresh"
+    ]
+  },
+  "explain_2": {
+    "utterance_id": "explain_2",
+    "outcome": "COMPLETED",
+    "output_prefix_ref": "prefix-explain_2",
+    "settlement_ref": "settled-explain_2",
+    "evidence_refs": [
+      "fixture-output"
+    ]
+  },
+  "announce_2": {
+    "utterance_id": "announce_2",
+    "outcome": "COMPLETED",
+    "output_prefix_ref": "prefix-announce_2",
+    "settlement_ref": "settled-announce_2",
+    "evidence_refs": [
+      "fixture-output"
+    ]
+  },
+  "choose_2": {
+    "effect_intent_id": "effect-choice-A",
+    "effect_state": "CONFIRMED",
+    "settlement_ref": "settlement-choice-2",
+    "settlement_state": "SETTLED",
+    "evidence_refs": [
+      "fixture-only"
+    ]
+  },
+  "review_2": {
+    "review_request_ref": "review_2"
+  },
+  "review_unknown_2": {
+    "review_request_ref": "review_unknown_2"
+  }
+}

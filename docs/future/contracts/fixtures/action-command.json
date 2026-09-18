@@ -1,0 +1,72 @@
+{
+  "schema_version": "0.8.0",
+  "operation_id": "fixture-op-104",
+  "session_id": "fixture-live-session",
+  "source_instance": "fixture-controller",
+  "authority_epoch": 3,
+  "owner_ref": {
+    "kind": "attempt",
+    "id": "fixture-attempt"
+  },
+  "grant_id": "fixture-test-grant",
+  "trace_id": "fixture-trace",
+  "cancel_fences": [
+    {
+      "scope_type": "attempt",
+      "scope_id": "fixture-attempt",
+      "cancel_epoch": 0
+    }
+  ],
+  "payload_type": "control_frame",
+  "payload": {
+    "schema_version": "0.8.0",
+    "frame_id": "fixture-frame-104",
+    "frame_seq": 104,
+    "game_session_id": "fixture-session",
+    "host_id": "fixture-host",
+    "host_epoch": 2,
+    "task_id": "fixture-task",
+    "attempt_id": "fixture-attempt",
+    "producer_instance": "fixture-controller",
+    "control_authority_epoch": 3,
+    "lease_id": "fixture-lease",
+    "input_lease_epoch": 7,
+    "resource_generation": 2,
+    "control_mode": "continuous_local",
+    "target_ref": {
+      "kind": "game_target",
+      "id": "fixture-target"
+    },
+    "action_schema_ref": "fixture-actions@1",
+    "control_profile_ref": "fixture-camera-profile@3",
+    "context_versions": {
+      "input_context_epoch": 9,
+      "transform_version": 4,
+      "control_profile_revision": 3,
+      "calibration_revision": 1,
+      "policy_revision": 12,
+      "goal_version": 1
+    },
+    "evidence_ref": "fixture-observation-203",
+    "deadline": {
+      "clock_domain": "fixture-host-boot2",
+      "issued_at_ms": 1000,
+      "expires_at_ms": 1100
+    },
+    "max_hold_ms": 80,
+    "expected_affordances": [
+      "world_move",
+      "camera_control"
+    ],
+    "held_controls": [
+      "move_backward"
+    ],
+    "analog_axes": {},
+    "pointer_delta": {
+      "dx": 2,
+      "dy": 0,
+      "unit": "backend_relative_counts"
+    },
+    "pulses": []
+  }
+}

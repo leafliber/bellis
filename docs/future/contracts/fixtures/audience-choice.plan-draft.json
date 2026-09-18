@@ -1,0 +1,697 @@
+{
+  "api_version": "bellis.activity/0.8.0",
+  "plan_id": "audience_choice_two_rounds",
+  "revision": 1,
+  "contract_bundle_ref": "audience_choice_fixture@1",
+  "goal_ref": {
+    "goal_id": "choose_current_option",
+    "goal_version": 1
+  },
+  "lifecycle": "finite",
+  "input_bindings": {},
+  "event_handlers": [],
+  "service_requirements": [
+    {
+      "service_ref": "game.state.observe@1",
+      "required_quality_ref": "current_choice_evidence@1",
+      "on_unavailable": "wait_within_deadline"
+    }
+  ],
+  "policies": {
+    "chat_preemption": "enqueue_only",
+    "game_input": "scoped_semantic_actions_only",
+    "unknown_effect": "reconcile_before_any_retry"
+  },
+  "limits": {
+    "max_nodes": 32,
+    "max_handler_depth": 1,
+    "total_runtime_ms": 180000,
+    "no_progress_timeout_ms": 50000
+  },
+  "completion_contract": "audience_choice_completion@1",
+  "failure_policy": "choice_failure_policy@1",
+  "nodes": [
+    {
+      "id": "snapshot",
+      "kind": "Action",
+      "capability": "game.get_current_choice",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.current_choice_input@1",
+      "result_contract": "current_choice_with_evidence@1",
+      "permission_scope_ref": "game.read.current_choice@1",
+      "effect_type": "none",
+      "inputs": {},
+      "timeout_ms": 2000
+    },
+    {
+      "id": "draft_1",
+      "kind": "Action",
+      "capability": "poll.create_draft",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "poll.create_draft_input@1",
+      "result_contract": "persisted_poll_draft@1",
+      "permission_scope_ref": "poll.manage.current_round@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "choices": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choices"
+          }
+        },
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        },
+        "series_id": "fixture-series",
+        "round_index": 1,
+        "rules": {
+          "vote_rule": "first_valid_vote",
+          "identity_rule": "stable_platform_user_id",
+          "coverage_claim": "received_valid_votes",
+          "window_ms": 30000,
+          "late_grace_ms": 0,
+          "tie_policy": {
+            "action": "reopen_once",
+            "max_reopens": 1,
+            "after_reopen": "operator_review"
+          },
+          "zero_vote_policy": "operator_review",
+          "known_gap_policy": "invalidate_and_review"
+        }
+      },
+      "timeout_ms": 3000,
+      "depends_on": [
+        {
+          "node": "snapshot",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ]
+    },
+    {
+      "id": "explain_1",
+      "kind": "Action",
+      "capability": "speech.play_template",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "speech.play_template_input@1",
+      "result_contract": "original_utterance_normal_output_and_settled@1",
+      "permission_scope_ref": "speech.public.scene@1",
+      "effect_type": "public_output",
+      "inputs": {
+        "template_ref": "poll_rules@1",
+        "data": {
+          "poll_ref": {
+            "input_ref": {
+              "node": "draft_1",
+              "path": "/poll_ref"
+            }
+          }
+        }
+      },
+      "timeout_ms": 15000,
+      "depends_on": [
+        {
+          "node": "draft_1",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ]
+    },
+    {
+      "id": "vote_1",
+      "kind": "Action",
+      "capability": "poll.run_prepared_round",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "poll.run_prepared_round_input@1",
+      "result_contract": "frozen_result_with_coverage@1",
+      "permission_scope_ref": "poll.manage.current_round@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "poll_ref": {
+          "input_ref": {
+            "node": "draft_1",
+            "path": "/poll_ref"
+          }
+        }
+      },
+      "timeout_ms": 45000,
+      "depends_on": [
+        {
+          "node": "explain_1",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ]
+    },
+    {
+      "id": "branch_1",
+      "kind": "Switch",
+      "depends_on": [
+        {
+          "node": "vote_1",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ],
+      "cases": [
+        {
+          "case_id": "winner",
+          "condition": {
+            "op": "all",
+            "terms": [
+              {
+                "op": "eq",
+                "field_ref": {
+                  "node": "vote_1",
+                  "path": "/status"
+                },
+                "value": "winner"
+              },
+              {
+                "op": "eq",
+                "field_ref": {
+                  "node": "vote_1",
+                  "path": "/usable_for_control"
+                },
+                "value": true
+              }
+            ]
+          },
+          "next": "announce_1"
+        },
+        {
+          "case_id": "tie",
+          "condition": {
+            "op": "all",
+            "terms": [
+              {
+                "op": "eq",
+                "field_ref": {
+                  "node": "vote_1",
+                  "path": "/status"
+                },
+                "value": "tie"
+              },
+              {
+                "op": "eq",
+                "field_ref": {
+                  "node": "vote_1",
+                  "path": "/known_gap"
+                },
+                "value": false
+              },
+              {
+                "op": "eq",
+                "field_ref": {
+                  "node": "vote_1",
+                  "path": "/local_processing_integrity"
+                },
+                "value": "intact"
+              }
+            ]
+          },
+          "next": "draft_2"
+        }
+      ],
+      "else": "review_1",
+      "unknown": "review_unknown_1"
+    },
+    {
+      "id": "announce_1",
+      "kind": "Action",
+      "capability": "speech.play_template",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "speech.play_template_input@1",
+      "result_contract": "original_utterance_normal_output_and_settled@1",
+      "permission_scope_ref": "speech.public.scene@1",
+      "effect_type": "public_output",
+      "inputs": {
+        "template_ref": "frozen_poll_result@1",
+        "data": {
+          "result_ref": {
+            "input_ref": {
+              "node": "vote_1",
+              "path": "/frozen_result_ref"
+            }
+          }
+        }
+      },
+      "timeout_ms": 15000,
+      "enabled_by": {
+        "node": "branch_1",
+        "branch": "winner"
+      }
+    },
+    {
+      "id": "revalidate_1",
+      "kind": "Action",
+      "capability": "game.validate_choice_context",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.validate_choice_context_input@1",
+      "result_contract": "valid_current_choice@1",
+      "permission_scope_ref": "game.read.current_choice@1",
+      "effect_type": "none",
+      "inputs": {
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        },
+        "winner_id": {
+          "input_ref": {
+            "node": "vote_1",
+            "path": "/winner_id"
+          }
+        }
+      },
+      "timeout_ms": 2000,
+      "depends_on": [
+        {
+          "node": "announce_1",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ]
+    },
+    {
+      "id": "choose_1",
+      "kind": "Action",
+      "capability": "game.choose_option",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.choose_option_input@1",
+      "result_contract": "remote_effect_confirmed_and_input_settled@1",
+      "permission_scope_ref": "game.input.current_choice@1",
+      "effect_type": "external_effect",
+      "inputs": {
+        "choice_ref": {
+          "input_ref": {
+            "node": "revalidate_1",
+            "path": "/choice_ref"
+          }
+        }
+      },
+      "timeout_ms": 5000,
+      "depends_on": [
+        {
+          "node": "revalidate_1",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ],
+      "effect": {
+        "semantic_scope": "current_choice_once@1",
+        "scope_ref": {
+          "node": "snapshot",
+          "path": "/choice_instance"
+        },
+        "expected_result_ref": {
+          "node": "vote_1",
+          "path": "/winner_id"
+        },
+        "retry_requires": "proven_no_effect_and_settled"
+      }
+    },
+    {
+      "id": "review_1",
+      "kind": "Action",
+      "capability": "operator.request_review",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "operator.request_review_input@1",
+      "result_contract": "review_request_recorded@1",
+      "permission_scope_ref": "operator.review.request@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "reason": "vote_not_usable",
+        "result_ref": {
+          "input_ref": {
+            "node": "vote_1",
+            "path": "/frozen_result_ref"
+          }
+        },
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        }
+      },
+      "timeout_ms": 3000,
+      "enabled_by": {
+        "node": "branch_1",
+        "branch": "else"
+      }
+    },
+    {
+      "id": "review_unknown_1",
+      "kind": "Action",
+      "capability": "operator.request_review",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "operator.request_review_input@1",
+      "result_contract": "review_request_recorded@1",
+      "permission_scope_ref": "operator.review.request@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "reason": "vote_condition_unknown",
+        "result_ref": {
+          "input_ref": {
+            "node": "vote_1",
+            "path": "/frozen_result_ref"
+          }
+        },
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        }
+      },
+      "timeout_ms": 3000,
+      "enabled_by": {
+        "node": "branch_1",
+        "branch": "unknown"
+      }
+    },
+    {
+      "id": "draft_2",
+      "kind": "Action",
+      "capability": "poll.create_draft",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "poll.create_draft_input@1",
+      "result_contract": "persisted_poll_draft@1",
+      "permission_scope_ref": "poll.manage.current_round@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "choices": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choices"
+          }
+        },
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        },
+        "series_id": "fixture-series",
+        "round_index": 2,
+        "rules": {
+          "vote_rule": "first_valid_vote",
+          "identity_rule": "stable_platform_user_id",
+          "coverage_claim": "received_valid_votes",
+          "window_ms": 30000,
+          "late_grace_ms": 0,
+          "tie_policy": {
+            "action": "reopen_once",
+            "max_reopens": 1,
+            "after_reopen": "operator_review"
+          },
+          "zero_vote_policy": "operator_review",
+          "known_gap_policy": "invalidate_and_review"
+        }
+      },
+      "timeout_ms": 3000,
+      "enabled_by": {
+        "node": "branch_1",
+        "branch": "tie"
+      }
+    },
+    {
+      "id": "explain_2",
+      "kind": "Action",
+      "capability": "speech.play_template",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "speech.play_template_input@1",
+      "result_contract": "original_utterance_normal_output_and_settled@1",
+      "permission_scope_ref": "speech.public.scene@1",
+      "effect_type": "public_output",
+      "inputs": {
+        "template_ref": "poll_reopen_rules@1",
+        "data": {
+          "poll_ref": {
+            "input_ref": {
+              "node": "draft_2",
+              "path": "/poll_ref"
+            }
+          }
+        }
+      },
+      "timeout_ms": 15000,
+      "depends_on": [
+        {
+          "node": "draft_2",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ]
+    },
+    {
+      "id": "vote_2",
+      "kind": "Action",
+      "capability": "poll.run_prepared_round",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "poll.run_prepared_round_input@1",
+      "result_contract": "frozen_result_with_coverage@1",
+      "permission_scope_ref": "poll.manage.current_round@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "poll_ref": {
+          "input_ref": {
+            "node": "draft_2",
+            "path": "/poll_ref"
+          }
+        }
+      },
+      "timeout_ms": 45000,
+      "depends_on": [
+        {
+          "node": "explain_2",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ]
+    },
+    {
+      "id": "branch_2",
+      "kind": "Switch",
+      "depends_on": [
+        {
+          "node": "vote_2",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ],
+      "cases": [
+        {
+          "case_id": "winner",
+          "condition": {
+            "op": "all",
+            "terms": [
+              {
+                "op": "eq",
+                "field_ref": {
+                  "node": "vote_2",
+                  "path": "/status"
+                },
+                "value": "winner"
+              },
+              {
+                "op": "eq",
+                "field_ref": {
+                  "node": "vote_2",
+                  "path": "/usable_for_control"
+                },
+                "value": true
+              }
+            ]
+          },
+          "next": "announce_2"
+        }
+      ],
+      "else": "review_2",
+      "unknown": "review_unknown_2"
+    },
+    {
+      "id": "announce_2",
+      "kind": "Action",
+      "capability": "speech.play_template",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "speech.play_template_input@1",
+      "result_contract": "original_utterance_normal_output_and_settled@1",
+      "permission_scope_ref": "speech.public.scene@1",
+      "effect_type": "public_output",
+      "inputs": {
+        "template_ref": "frozen_poll_result@1",
+        "data": {
+          "result_ref": {
+            "input_ref": {
+              "node": "vote_2",
+              "path": "/frozen_result_ref"
+            }
+          }
+        }
+      },
+      "timeout_ms": 15000,
+      "enabled_by": {
+        "node": "branch_2",
+        "branch": "winner"
+      }
+    },
+    {
+      "id": "revalidate_2",
+      "kind": "Action",
+      "capability": "game.validate_choice_context",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.validate_choice_context_input@1",
+      "result_contract": "valid_current_choice@1",
+      "permission_scope_ref": "game.read.current_choice@1",
+      "effect_type": "none",
+      "inputs": {
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        },
+        "winner_id": {
+          "input_ref": {
+            "node": "vote_2",
+            "path": "/winner_id"
+          }
+        }
+      },
+      "timeout_ms": 2000,
+      "depends_on": [
+        {
+          "node": "announce_2",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ]
+    },
+    {
+      "id": "choose_2",
+      "kind": "Action",
+      "capability": "game.choose_option",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "game.choose_option_input@1",
+      "result_contract": "remote_effect_confirmed_and_input_settled@1",
+      "permission_scope_ref": "game.input.current_choice@1",
+      "effect_type": "external_effect",
+      "inputs": {
+        "choice_ref": {
+          "input_ref": {
+            "node": "revalidate_2",
+            "path": "/choice_ref"
+          }
+        }
+      },
+      "timeout_ms": 5000,
+      "depends_on": [
+        {
+          "node": "revalidate_2",
+          "accepted_outcomes": [
+            "SUCCEEDED"
+          ],
+          "require_settled": true
+        }
+      ],
+      "effect": {
+        "semantic_scope": "current_choice_once@1",
+        "scope_ref": {
+          "node": "snapshot",
+          "path": "/choice_instance"
+        },
+        "expected_result_ref": {
+          "node": "vote_2",
+          "path": "/winner_id"
+        },
+        "retry_requires": "proven_no_effect_and_settled"
+      }
+    },
+    {
+      "id": "review_2",
+      "kind": "Action",
+      "capability": "operator.request_review",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "operator.request_review_input@1",
+      "result_contract": "review_request_recorded@1",
+      "permission_scope_ref": "operator.review.request@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "reason": "vote_not_usable",
+        "result_ref": {
+          "input_ref": {
+            "node": "vote_2",
+            "path": "/frozen_result_ref"
+          }
+        },
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        }
+      },
+      "timeout_ms": 3000,
+      "enabled_by": {
+        "node": "branch_2",
+        "branch": "else"
+      }
+    },
+    {
+      "id": "review_unknown_2",
+      "kind": "Action",
+      "capability": "operator.request_review",
+      "capability_version": "1.0.0",
+      "input_schema_ref": "operator.request_review_input@1",
+      "result_contract": "review_request_recorded@1",
+      "permission_scope_ref": "operator.review.request@1",
+      "effect_type": "internal_state",
+      "inputs": {
+        "reason": "vote_condition_unknown",
+        "result_ref": {
+          "input_ref": {
+            "node": "vote_2",
+            "path": "/frozen_result_ref"
+          }
+        },
+        "choice_instance": {
+          "input_ref": {
+            "node": "snapshot",
+            "path": "/choice_instance"
+          }
+        }
+      },
+      "timeout_ms": 3000,
+      "enabled_by": {
+        "node": "branch_2",
+        "branch": "unknown"
+      }
+    }
+  ]
+}

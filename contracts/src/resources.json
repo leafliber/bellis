@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.8.0",
+  "resource_kinds": [
+    {
+      "id": "EXCLUSIVE",
+      "meaning": "一个根owner，按阶段持有；只可受限委托或清理后交接。"
+    },
+    {
+      "id": "SNAPSHOT_READ",
+      "meaning": "不可变带版本快照共享读取，不长期锁住可变世界。"
+    },
+    {
+      "id": "CAPACITY",
+      "meaning": "派发前预留有限容量、成本与期限；不是设备抢占保证。"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.8.0",
+  "task_classes": [
+    {
+      "id": "control_critical",
+      "meaning": "必要感知、本地策略和控制监督的独立保留预算。"
+    },
+    {
+      "id": "interactive_model",
+      "meaning": "当前交互生成。"
+    },
+    {
+      "id": "auxiliary_analysis",
+      "meaning": "辅助规划与分析，不能挤占控制保留。"
+    },
+    {
+      "id": "background",
+      "meaning": "后台整理，独立有界预算。"
+    }
+  ]
+}

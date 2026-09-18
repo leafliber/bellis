@@ -1,0 +1,62 @@
+{
+  "schema_version": "0.8.0",
+  "rules": "整数在0..2^53-1内有界；溢出前轮换实例并撤旧权；持久权威计数不可回退；不跨scope/instance比较。 Goal/Plan等业务revision按各自Schema从1开始；序号可以从0开始。",
+  "fields": [
+    {
+      "field": "authority_epoch",
+      "writer": "权威监督/授权器",
+      "scope": "authority_id＋owner_scope",
+      "increment": "高层owner交接、撤权、权威重启",
+      "comparison": "相同scope内必须等于当前值；更大值仅经认证交接采用，不能由消息自动提升"
+    },
+    {
+      "field": "CancelFence.cancel_epoch",
+      "writer": "对象生命周期owner",
+      "scope": "CancelFence.scope_type＋scope_id",
+      "increment": "该对象范围硬取消/撤权",
+      "comparison": "命令逐项精确匹配；公共EventEnvelope没有全局cancel_epoch"
+    },
+    {
+      "field": "dispatch_revision",
+      "writer": "SceneDirector；Stage确认安装",
+      "scope": "utterance_id",
+      "increment": "软收尾/尾部范围调整",
+      "comparison": "新追加/尾部必须最新；已明确保留前缀可在旧revision下按exact hash/seq继续"
+    },
+    {
+      "field": "supervision_epoch",
+      "writer": "独立监督组件",
+      "scope": "broadcast_session_id",
+      "increment": "监督模式变化、显式人工重新授权",
+      "comparison": "ExecutionGrant绑定精确匹配；heartbeat不复权"
+    },
+    {
+      "field": "pairing_epoch",
+      "writer": "配对身份服务",
+      "scope": "pairing_id",
+      "increment": "设备撤销/身份轮换",
+      "comparison": "签名挑战/短token均绑定当前值"
+    },
+    {
+      "field": "source_revision",
+      "writer": "各对象唯一权威Reducer",
+      "scope": "authority_id＋object_id",
+      "increment": "对象事实变更",
+      "comparison": "同scope单调；旧值不能覆盖新投影，同值不同payload报错"
+    },
+    {
+      "field": "segment_seq",
+      "writer": "SceneDirector",
+      "scope": "utterance_id",
+      "increment": "segment.commit成功",
+      "comparison": "连续0..last_seq；草稿拒绝不占seq；seal.last_seq只引用正式seq"
+    },
+    {
+      "field": "EventEnvelope.source_seq",
+      "writer": "原事实的权威事件流；平台无序号时保留null",
+      "scope": "authority_id＋source_instance＋流实例",
+      "increment": "每个新源事实；原事实重放不改序号",
+      "comparison": "同一源流内排序/去重；重连不伪造新事实。EventCursor.after_seq=-1表示首条之前；不能与模型候选source_seq比较。"
+    }
+  ]
+}

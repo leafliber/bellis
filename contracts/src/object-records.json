@@ -1,0 +1,57 @@
+{
+  "schema_version": "0.8.0",
+  "records": [
+    {
+      "machine": "Segment",
+      "schema": "SegmentRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "UtteranceAdmission",
+      "schema": "UtteranceRecord",
+      "state_field": "admission_state"
+    },
+    {
+      "machine": "Utterance",
+      "schema": "UtteranceRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "AudioProduction",
+      "schema": "AudioProductionRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "StopOperation",
+      "schema": "StopOperationRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "Scene",
+      "schema": "SceneRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "TextPresentation",
+      "schema": "TextPresentationRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "SupervisionMode",
+      "schema": "SupervisionRecord",
+      "state_field": "state"
+    },
+    {
+      "machine": "ExecutionGrant",
+      "schema": "ExecutionGrant",
+      "state_field": "state"
+    },
+    {
+      "machine": "StagePairing",
+      "schema": "StagePairingRecord",
+      "state_field": "state"
+    }
+  ],
+  "support_types": [],
+  "artifact_types": []
+}

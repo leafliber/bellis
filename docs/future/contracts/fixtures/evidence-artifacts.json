@@ -1,0 +1,933 @@
+{
+  "objects": {
+    "VisualObservationRef": {
+      "root_observation_id": "obs-current",
+      "game_session_id": "fixture-session",
+      "capture_instance_id": "capture-1",
+      "capture_seq": 203,
+      "captured_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1000
+      },
+      "valid_until": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1500
+      },
+      "root_width_px": 1920,
+      "root_height_px": 1080,
+      "input_context_epoch": 9,
+      "transform_version": 4,
+      "story_scope": "story-current"
+    },
+    "DerivedView": {
+      "view_id": "view-1",
+      "root": {
+        "root_observation_id": "obs-current",
+        "game_session_id": "fixture-session",
+        "capture_instance_id": "capture-1",
+        "capture_seq": 203,
+        "captured_at": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1000
+        },
+        "valid_until": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1500
+        },
+        "root_width_px": 1920,
+        "root_height_px": 1080,
+        "input_context_epoch": 9,
+        "transform_version": 4,
+        "story_scope": "story-current"
+      },
+      "mapping_kind": "crop_resize_no_padding",
+      "crop_root_px": {
+        "x": 960,
+        "y": 540,
+        "width": 960,
+        "height": 540
+      },
+      "view_width_px": 480,
+      "view_height_px": 270,
+      "produced_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1040
+      }
+    },
+    "GroundingProfile": {
+      "profile_ref": "fixture-grounding@1",
+      "strategy": "direct_adapter",
+      "ranker_artifact_ref": null,
+      "grounder_artifact_ref": null,
+      "candidate_crop_limit": 4,
+      "max_grounder_calls": 1,
+      "max_root_age_ms": 500,
+      "verification_contract_ref": "fixture-target-verification@1",
+      "fallback": "refresh_passive",
+      "per_request_timeout_ms": 200,
+      "mapping_kind": "crop_resize_no_padding",
+      "acceptance_report_ref": null
+    },
+    "GroundingRequest": {
+      "request_id": "ground-request-1",
+      "task_id": "fixture-task",
+      "attempt_id": "fixture-attempt",
+      "target_ref": {
+        "kind": "game_choice",
+        "id": "winner_B"
+      },
+      "target_description": "已冻结的winner_B选项",
+      "choice_instance_id": "fixture-choice-1",
+      "root": {
+        "root_observation_id": "obs-current",
+        "game_session_id": "fixture-session",
+        "capture_instance_id": "capture-1",
+        "capture_seq": 203,
+        "captured_at": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1000
+        },
+        "valid_until": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1500
+        },
+        "root_width_px": 1920,
+        "root_height_px": 1080,
+        "input_context_epoch": 9,
+        "transform_version": 4,
+        "story_scope": "story-current"
+      },
+      "context_evidence_refs": [],
+      "profile_ref": "fixture-grounding@1",
+      "deadline": {
+        "clock_domain": "fixture-host-boot2",
+        "issued_at_ms": 1000,
+        "expires_at_ms": 1450
+      }
+    },
+    "GroundingResult": {
+      "result_id": "ground-result-1",
+      "request_id": "ground-request-1",
+      "target_ref": {
+        "kind": "game_choice",
+        "id": "winner_B"
+      },
+      "root": {
+        "root_observation_id": "obs-current",
+        "game_session_id": "fixture-session",
+        "capture_instance_id": "capture-1",
+        "capture_seq": 203,
+        "captured_at": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1000
+        },
+        "valid_until": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1500
+        },
+        "root_width_px": 1920,
+        "root_height_px": 1080,
+        "input_context_epoch": 9,
+        "transform_version": 4,
+        "story_scope": "story-current"
+      },
+      "status": "FOUND",
+      "selected_view": {
+        "view_id": "view-1",
+        "root": {
+          "root_observation_id": "obs-current",
+          "game_session_id": "fixture-session",
+          "capture_instance_id": "capture-1",
+          "capture_seq": 203,
+          "captured_at": {
+            "clock_domain": "fixture-host-boot2",
+            "monotonic_ms": 1000
+          },
+          "valid_until": {
+            "clock_domain": "fixture-host-boot2",
+            "monotonic_ms": 1500
+          },
+          "root_width_px": 1920,
+          "root_height_px": 1080,
+          "input_context_epoch": 9,
+          "transform_version": 4,
+          "story_scope": "story-current"
+        },
+        "mapping_kind": "crop_resize_no_padding",
+        "crop_root_px": {
+          "x": 960,
+          "y": 540,
+          "width": 960,
+          "height": 540
+        },
+        "view_width_px": 480,
+        "view_height_px": 270,
+        "produced_at": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1040
+        }
+      },
+      "location": {
+        "view_point_px": {
+          "x": 100.0,
+          "y": 50.0
+        },
+        "root_point_px": {
+          "x": 1160.0,
+          "y": 640.0
+        }
+      },
+      "evidence_refs": [
+        "obs-current",
+        "target-check-1"
+      ],
+      "verification_ref": "target-check-1",
+      "ranking_score": null,
+      "completed_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1100
+      }
+    },
+    "ComputeReusePolicy": {
+      "policy_ref": "fixture-cache@1",
+      "max_entries": 16,
+      "max_memory_bytes": 65536,
+      "max_disk_bytes": 0,
+      "max_age_ms": 1000,
+      "persistence": "memory_only",
+      "eviction": "lru",
+      "on_invalidation": "drop_and_recompute",
+      "max_entries_per_scope": 4,
+      "max_bytes_per_scope": 4096
+    },
+    "ComputeArtifact": {
+      "artifact_id": "fixture-compute-1",
+      "cache_kind": "instruction_encoding",
+      "instruction_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "goal_ref": {
+        "goal_id": "fixture-goal",
+        "goal_version": 1
+      },
+      "producer_artifact_ref": "fixture-encoder@1",
+      "normalization_ref": "fixture-normalizer@1",
+      "semantic_parameters_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source_view": null,
+      "dependencies": [
+        {
+          "namespace": "goal",
+          "scope_id": "fixture-goal",
+          "revision": "1"
+        }
+      ],
+      "key_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "scope_ref": {
+        "kind": "Task",
+        "id": "fixture-task"
+      },
+      "purpose": "control_semantics",
+      "story_scope": "story-current",
+      "deletion_epoch": 0,
+      "payload_ref": "fixture-encoded-instruction",
+      "byte_length": 1024,
+      "computed_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1000
+      },
+      "expires_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1450
+      }
+    },
+    "ControlCandidate": {
+      "candidate_id": "candidate-base",
+      "stage": "behavior_prior",
+      "task_id": "fixture-task",
+      "attempt_id": "fixture-attempt",
+      "controller_instance_id": "fixture-controller",
+      "goal_ref": {
+        "goal_id": "fixture-goal",
+        "goal_version": 1
+      },
+      "target_ref": {
+        "kind": "game_target",
+        "id": "fixture-target"
+      },
+      "context_versions": {
+        "input_context_epoch": 9,
+        "transform_version": 4,
+        "control_profile_revision": 3,
+        "calibration_revision": 1,
+        "policy_revision": 12,
+        "goal_version": 1
+      },
+      "action_schema_ref": "fixture-actions@1",
+      "control_profile_ref": "fixture-camera-profile@3",
+      "backend_artifact_ref": "fixture-backend@1",
+      "origin_observations": [
+        {
+          "root_observation_id": "obs-prior",
+          "game_session_id": "fixture-session",
+          "capture_instance_id": "capture-1",
+          "capture_seq": 202,
+          "captured_at": {
+            "clock_domain": "fixture-host-boot2",
+            "monotonic_ms": 900
+          },
+          "valid_until": {
+            "clock_domain": "fixture-host-boot2",
+            "monotonic_ms": 1050
+          },
+          "root_width_px": 1920,
+          "root_height_px": 1080,
+          "input_context_epoch": 9,
+          "transform_version": 4,
+          "story_scope": "story-current"
+        }
+      ],
+      "current_observation": null,
+      "conditioned_prefix_ref": "prefix-1",
+      "base_candidate_ref": null,
+      "steps": [
+        {
+          "step_id": "step-2",
+          "action": "camera_delta",
+          "axes": {
+            "x": 1,
+            "y": 0
+          },
+          "duration_ms": 50
+        }
+      ],
+      "deadline": {
+        "clock_domain": "fixture-host-boot2",
+        "issued_at_ms": 1000,
+        "expires_at_ms": 1450
+      },
+      "control_mode": "continuous_local"
+    },
+    "ExecutionPrefix": {
+      "prefix_id": "prefix-1",
+      "task_id": "fixture-task",
+      "attempt_id": "fixture-attempt",
+      "controller_instance_id": "fixture-controller",
+      "broker_instance_id": "fixture-broker",
+      "input_lease_epoch": 7,
+      "frontier_revision": 3,
+      "recorded_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1080
+      },
+      "committed_frame_ids": [
+        "frame-1"
+      ],
+      "committed_step_ids": [
+        "step-1"
+      ],
+      "submitted_frame_ids": [
+        "frame-1"
+      ],
+      "submitted_step_ids": [
+        "step-1"
+      ],
+      "unresolved_command_ids": [],
+      "evidence_refs": [
+        "fixture-broker-journal"
+      ],
+      "lease_id": "fixture-lease"
+    },
+    "CandidateRepairPolicy": {
+      "policy_ref": "fixture-repair@1",
+      "permitted_actions": [
+        "camera_delta"
+      ],
+      "allowed_axes": [
+        "x",
+        "y"
+      ],
+      "max_delta": {
+        "x": 2,
+        "y": 2
+      },
+      "absolute_bound": {
+        "x": 8,
+        "y": 8
+      },
+      "max_candidates": 2,
+      "computation_timeout_ms": 30,
+      "allow_discrete": false,
+      "allow_duration_change": false,
+      "editor_artifact_ref": null,
+      "scorer_artifact_ref": null
+    },
+    "CandidateRepairRecord": {
+      "repair_id": "repair-1",
+      "base_candidate_ref": "candidate-base",
+      "output_candidate_ref": "candidate-output",
+      "prefix_ref": "prefix-1",
+      "latest_observation_ref": "obs-current",
+      "repair_policy_ref": "fixture-repair@1",
+      "outcome": "SELECTED",
+      "reason_code": null,
+      "score": null,
+      "recorded_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1120
+      },
+      "started_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1100
+      }
+    },
+    "ReflectionRecord": {
+      "record_id": "reflection-1",
+      "task_id": "fixture-task",
+      "source_attempt_ids": [
+        "attempt-old"
+      ],
+      "goal_ref": {
+        "goal_id": "fixture-goal",
+        "goal_version": 1
+      },
+      "source_journal_refs": [
+        "journal-old"
+      ],
+      "evidence_refs": [
+        "no-effect-verified",
+        "menu-animation-1"
+      ],
+      "items": [
+        {
+          "item_id": "lesson-1",
+          "category": "operation_lesson",
+          "statement": "当前profile应先核验菜单动画结束，再提交选择。",
+          "claim_status": "evidence_backed",
+          "evidence_refs": [
+            "menu-animation-1"
+          ],
+          "applicability": [
+            {
+              "namespace": "goal",
+              "scope_id": "fixture-goal",
+              "revision": "1"
+            }
+          ],
+          "source_story_scope": "story-current",
+          "cross_scope_review_ref": null
+        },
+        {
+          "item_id": "hypothesis-1",
+          "category": "diagnostic_hypothesis",
+          "statement": "上次定位偏移可能来自布局变化，需要新画面验证。",
+          "claim_status": "hypothesis",
+          "evidence_refs": [],
+          "applicability": [],
+          "source_story_scope": "story-current",
+          "cross_scope_review_ref": null
+        }
+      ],
+      "review_status": "reviewed",
+      "review_ref": "reflection-review-1",
+      "visibility": "task_private",
+      "purpose": "recovery_context",
+      "scope_ref": {
+        "kind": "Task",
+        "id": "fixture-task"
+      },
+      "story_scope": "story-current",
+      "deletion_epoch": 0,
+      "created_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1080
+      },
+      "expires_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1400
+      }
+    },
+    "RecoveryContextView": {
+      "view_id": "context-view-1",
+      "task_id": "fixture-task",
+      "goal_ref": {
+        "goal_id": "fixture-goal",
+        "goal_version": 1
+      },
+      "story_scope": "story-current",
+      "current_state_refs": [
+        {
+          "kind": "Observation",
+          "id": "obs-current"
+        }
+      ],
+      "current_observation_refs": [
+        {
+          "root_observation_id": "obs-current",
+          "game_session_id": "fixture-session",
+          "capture_instance_id": "capture-1",
+          "capture_seq": 203,
+          "captured_at": {
+            "clock_domain": "fixture-host-boot2",
+            "monotonic_ms": 1000
+          },
+          "valid_until": {
+            "clock_domain": "fixture-host-boot2",
+            "monotonic_ms": 1500
+          },
+          "root_width_px": 1920,
+          "root_height_px": 1080,
+          "input_context_epoch": 9,
+          "transform_version": 4,
+          "story_scope": "story-current"
+        }
+      ],
+      "history_summary_refs": [
+        "fixture-history-summary"
+      ],
+      "reflection_items": [
+        {
+          "record_id": "reflection-1",
+          "item_id": "lesson-1"
+        }
+      ],
+      "scope_ref": {
+        "kind": "Task",
+        "id": "fixture-task"
+      },
+      "policy_ref": "fixture-review@1",
+      "source_deletion_epoch": 0,
+      "review_ref": "fixture-context-review",
+      "created_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1100
+      },
+      "expires_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1350
+      }
+    },
+    "RecoveryReviewPolicy": {
+      "policy_ref": "fixture-review@1",
+      "triggers": [
+        "attempt_failed",
+        "no_progress"
+      ],
+      "min_interval_ms": 100,
+      "max_interval_ms": 1000,
+      "max_inflight": 1,
+      "max_reviews_per_task": 3,
+      "max_candidates_per_review": 2,
+      "max_context_items": 8,
+      "max_context_bytes": 8192,
+      "review_timeout_ms": 300,
+      "model_token_budget": 2048,
+      "default_on_unavailable": "request_operator",
+      "max_pending_requests": 2
+    },
+    "RecoveryCapability": {
+      "capability_ref": "fixture-context-rebuild@1",
+      "method": "context_rebuild",
+      "target_scope_ref": {
+        "kind": "Task",
+        "id": "fixture-task"
+      },
+      "restore_scopes": [
+        "branch_context"
+      ],
+      "protected_scopes": [
+        "execution_journal",
+        "effect_and_settlement",
+        "public_output_history",
+        "authorization_and_leases",
+        "deletion_tombstones",
+        "budgets",
+        "outbox_history"
+      ],
+      "result_validation_contract_ref": "fixture-rebuilt-context@1",
+      "permission_scope_ref": "fixture-recovery-permission@1",
+      "effect_type": "none",
+      "requires_operator_confirmation": false,
+      "timeout_ms": 1000,
+      "max_uses": 2
+    },
+    "RecoveryProposal": {
+      "proposal_id": "recovery-proposal-1",
+      "task_id": "fixture-task",
+      "source_attempt_id": "attempt-old",
+      "goal_ref": {
+        "goal_id": "fixture-goal",
+        "goal_version": 1
+      },
+      "base_plan_revision": 1,
+      "method": "context_rebuild",
+      "capability_ref": "fixture-context-rebuild@1",
+      "checkpoint_ref": null,
+      "affected_scopes": [
+        "branch_context"
+      ],
+      "reflection_record_refs": [
+        "reflection-1"
+      ],
+      "recovery_budget_id": "fixture-original-budget",
+      "permission_scope_ref": "fixture-recovery-permission@1",
+      "deadline": {
+        "clock_domain": "fixture-host-boot2",
+        "issued_at_ms": 1000,
+        "expires_at_ms": 1450
+      },
+      "evidence_refs": [
+        "fixture-failure-record"
+      ]
+    },
+    "RecoveryResult": {
+      "result_id": "recovery-result-1",
+      "proposal_id": "recovery-proposal-1",
+      "recovery_task_id": "fixture-recovery-task",
+      "recovery_attempt_id": "fixture-recovery-attempt",
+      "method": "context_rebuild",
+      "outcome": "SUCCEEDED",
+      "restored_scopes": [
+        "branch_context"
+      ],
+      "protected_state_ref": "fixture-protected-state",
+      "goal_ref": {
+        "goal_id": "fixture-goal",
+        "goal_version": 1
+      },
+      "recovery_budget_id": "fixture-original-budget",
+      "post_state_refs": [
+        {
+          "kind": "RecoveryContextView",
+          "id": "context-view-1"
+        }
+      ],
+      "effect_refs": [],
+      "settlement_ref": null,
+      "current_story_scope": "story-current",
+      "evidence_refs": [
+        "fixture-context-review"
+      ],
+      "verified_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1120
+      }
+    }
+  },
+  "repaired_candidate": {
+    "candidate_id": "candidate-output",
+    "stage": "executable_candidate",
+    "task_id": "fixture-task",
+    "attempt_id": "fixture-attempt",
+    "controller_instance_id": "fixture-controller",
+    "goal_ref": {
+      "goal_id": "fixture-goal",
+      "goal_version": 1
+    },
+    "target_ref": {
+      "kind": "game_target",
+      "id": "fixture-target"
+    },
+    "context_versions": {
+      "input_context_epoch": 9,
+      "transform_version": 4,
+      "control_profile_revision": 3,
+      "calibration_revision": 1,
+      "policy_revision": 12,
+      "goal_version": 1
+    },
+    "action_schema_ref": "fixture-actions@1",
+    "control_profile_ref": "fixture-camera-profile@3",
+    "backend_artifact_ref": "fixture-backend@1",
+    "origin_observations": [
+      {
+        "root_observation_id": "obs-prior",
+        "game_session_id": "fixture-session",
+        "capture_instance_id": "capture-1",
+        "capture_seq": 202,
+        "captured_at": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 900
+        },
+        "valid_until": {
+          "clock_domain": "fixture-host-boot2",
+          "monotonic_ms": 1050
+        },
+        "root_width_px": 1920,
+        "root_height_px": 1080,
+        "input_context_epoch": 9,
+        "transform_version": 4,
+        "story_scope": "story-current"
+      }
+    ],
+    "current_observation": {
+      "root_observation_id": "obs-current",
+      "game_session_id": "fixture-session",
+      "capture_instance_id": "capture-1",
+      "capture_seq": 203,
+      "captured_at": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1000
+      },
+      "valid_until": {
+        "clock_domain": "fixture-host-boot2",
+        "monotonic_ms": 1500
+      },
+      "root_width_px": 1920,
+      "root_height_px": 1080,
+      "input_context_epoch": 9,
+      "transform_version": 4,
+      "story_scope": "story-current"
+    },
+    "conditioned_prefix_ref": "prefix-1",
+    "base_candidate_ref": "candidate-base",
+    "steps": [
+      {
+        "step_id": "step-2",
+        "action": "camera_delta",
+        "axes": {
+          "x": 2,
+          "y": 0
+        },
+        "duration_ms": 50
+      }
+    ],
+    "deadline": {
+      "clock_domain": "fixture-host-boot2",
+      "issued_at_ms": 1120,
+      "expires_at_ms": 1450
+    },
+    "control_mode": "continuous_local"
+  },
+  "schema_cases": [
+    {
+      "name": "absent-with-coordinate",
+      "schema": "GroundingResult",
+      "path": [
+        "status"
+      ],
+      "value": "ABSENT",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "found-without-verification",
+      "schema": "GroundingResult",
+      "path": [
+        "verification_ref"
+      ],
+      "value": null,
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "found-without-view",
+      "schema": "GroundingResult",
+      "path": [
+        "selected_view"
+      ],
+      "value": null,
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "memory-cache-with-disk",
+      "schema": "ComputeReusePolicy",
+      "path": [
+        "max_disk_bytes"
+      ],
+      "value": 1,
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "visual-cache-without-view",
+      "schema": "ComputeArtifact",
+      "path": [
+        "cache_kind"
+      ],
+      "value": "visual_features",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "instruction-cache-without-digest",
+      "schema": "ComputeArtifact",
+      "path": [
+        "instruction_digest"
+      ],
+      "value": null,
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "executable-without-observation",
+      "schema": "ControlCandidate",
+      "path": [
+        "stage"
+      ],
+      "value": "executable_candidate",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "discrete-edit",
+      "schema": "ControlCandidate",
+      "path": [
+        "steps",
+        0,
+        "action"
+      ],
+      "value": "click",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "extra-pulse",
+      "schema": "ControlCandidate",
+      "path": [
+        "steps",
+        0,
+        "pulse_id"
+      ],
+      "value": "pulse-1",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "duration-edit-enabled",
+      "schema": "CandidateRepairPolicy",
+      "path": [
+        "allow_duration_change"
+      ],
+      "value": true,
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "selected-without-output",
+      "schema": "CandidateRepairRecord",
+      "path": [
+        "output_candidate_ref"
+      ],
+      "value": null,
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "rejected-with-output",
+      "schema": "CandidateRepairRecord",
+      "path": [
+        "outcome"
+      ],
+      "value": "REJECTED",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "reviewed-without-review",
+      "schema": "ReflectionRecord",
+      "path": [
+        "review_ref"
+      ],
+      "value": null,
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "evidence-backed-without-evidence",
+      "schema": "ReflectionRecord",
+      "path": [
+        "items",
+        0,
+        "evidence_refs"
+      ],
+      "value": [],
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "hypothesis-promoted",
+      "schema": "ReflectionRecord",
+      "path": [
+        "items",
+        1,
+        "claim_status"
+      ],
+      "value": "evidence_backed",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "protected-scope",
+      "schema": "RecoveryProposal",
+      "path": [
+        "affected_scopes"
+      ],
+      "value": [
+        "effect_and_settlement"
+      ],
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "game-save-without-checkpoint",
+      "schema": "RecoveryProposal",
+      "path": [
+        "method"
+      ],
+      "value": "game_save",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "context-restore-world",
+      "schema": "RecoveryCapability",
+      "path": [
+        "restore_scopes"
+      ],
+      "value": [
+        "game_save_state"
+      ],
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "success-without-post-state",
+      "schema": "RecoveryResult",
+      "path": [
+        "post_state_refs"
+      ],
+      "value": [],
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "success-without-evidence",
+      "schema": "RecoveryResult",
+      "path": [
+        "evidence_refs"
+      ],
+      "value": [],
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "unknown-with-verification",
+      "schema": "RecoveryResult",
+      "path": [
+        "outcome"
+      ],
+      "value": "UNKNOWN",
+      "delete": false,
+      "expected": false
+    },
+    {
+      "name": "fake-pause-success",
+      "schema": "RecoveryCapability",
+      "path": [
+        "method"
+      ],
+      "value": "pause_then_restore",
+      "delete": false,
+      "expected": false
+    }
+  ]
+}

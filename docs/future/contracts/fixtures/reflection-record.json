@@ -1,0 +1,66 @@
+{
+  "record_id": "reflection-1",
+  "task_id": "fixture-task",
+  "source_attempt_ids": [
+    "attempt-old"
+  ],
+  "goal_ref": {
+    "goal_id": "fixture-goal",
+    "goal_version": 1
+  },
+  "source_journal_refs": [
+    "journal-old"
+  ],
+  "evidence_refs": [
+    "no-effect-verified",
+    "menu-animation-1"
+  ],
+  "items": [
+    {
+      "item_id": "lesson-1",
+      "category": "operation_lesson",
+      "statement": "当前profile应先核验菜单动画结束，再提交选择。",
+      "claim_status": "evidence_backed",
+      "evidence_refs": [
+        "menu-animation-1"
+      ],
+      "applicability": [
+        {
+          "namespace": "goal",
+          "scope_id": "fixture-goal",
+          "revision": "1"
+        }
+      ],
+      "source_story_scope": "story-current",
+      "cross_scope_review_ref": null
+    },
+    {
+      "item_id": "hypothesis-1",
+      "category": "diagnostic_hypothesis",
+      "statement": "上次定位偏移可能来自布局变化，需要新画面验证。",
+      "claim_status": "hypothesis",
+      "evidence_refs": [],
+      "applicability": [],
+      "source_story_scope": "story-current",
+      "cross_scope_review_ref": null
+    }
+  ],
+  "review_status": "reviewed",
+  "review_ref": "reflection-review-1",
+  "visibility": "task_private",
+  "purpose": "recovery_context",
+  "scope_ref": {
+    "kind": "Task",
+    "id": "fixture-task"
+  },
+  "story_scope": "story-current",
+  "deletion_epoch": 0,
+  "created_at": {
+    "clock_domain": "fixture-host-boot2",
+    "monotonic_ms": 1080
+  },
+  "expires_at": {
+    "clock_domain": "fixture-host-boot2",
+    "monotonic_ms": 1400
+  }
+}
