@@ -9,6 +9,7 @@ import {
   type P0PeerIdentity,
   type P0ProcessObservation,
   type P0ProtocolObservation,
+  type P0ReductionObservation,
   type P0SafetyLimits,
   payloadDigest,
   type RpcRequest,
@@ -398,6 +399,30 @@ export class ObservationWriter {
       return;
     }
     this.#send("endpoint", record);
+  }
+  /** Called by the synchronous reducer only; never consumes stderr as input. */
+  reduction(
+    value: Omit<
+      P0ReductionObservation,
+      "record_type" | "source_instance_id" | "source_seq" | "dropped_observations" | "observed_at"
+    >,
+  ): P0ReductionObservation | undefined {
+    if (!this.#accepting || this.role !== "supervisor" || this.instance === null) return;
+    const state = this.#state("reduction");
+    const record = {
+      ...value,
+      record_type: "p0-reduction-observation",
+      source_instance_id: this.instance,
+      source_seq: state.next++,
+      dropped_observations: state.dropped,
+      observed_at: this.clock.point(),
+    };
+    if (!validate("P0ReductionObservation", record)) {
+      state.dropped++;
+      return;
+    }
+    this.#send("reduction", record);
+    return record;
   }
   requestReceived(connectionId: string, request: RpcRequest): CommandTrigger | undefined {
     const record = this.protocol(connectionId, {
