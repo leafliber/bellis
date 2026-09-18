@@ -18,7 +18,8 @@
     "gate": "node tools/gate.ts",
     "spike:sqlite": "node tools/spikes/sqlite.mjs",
     "spike:browser": "node tools/spikes/browser.mjs",
-    "spike:serve": "node tools/spikes/probe-server.mjs"
+    "spike:serve": "node tools/spikes/probe-server.mjs",
+    "acceptance:p0:tools": "node tools/acceptance/run.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
