@@ -1,7 +1,6 @@
 // Reviewable local evidence only. Hashes bind a run to files; they are not signatures
 // and cannot make an untrusted runner or a fabricated execution trustworthy.
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
   assertValid,
@@ -9,9 +8,10 @@ import {
   payloadDigest,
   type SchemaTypes,
 } from "../../packages/contract-sdk/src/index.ts";
-import { rootPath, sha256 } from "../lib/build-manifest.ts";
-import { type Machine, type PhaseCheck, ROOT, readJson, type TestEntry } from "../lib/registry.ts";
-import { caseId, p0TransitionRequirements, sutScenarios, toolCases } from "./catalog.ts";
+import { rootPath } from "../lib/build-manifest.ts";
+import { type PhaseCheck, ROOT, type TestEntry } from "../lib/registry.ts";
+import { artifactBytes } from "./artifacts.ts";
+import { caseId, toolCases } from "./catalog.ts";
 
 type Run = SchemaTypes["P0TestRunEvidence"];
 type Artifact = SchemaTypes["EvidenceArtifact"];
@@ -19,32 +19,22 @@ type Manifest = SchemaTypes["P0BuildManifest"];
 export const NODE_REPORTER = "--test-reporter=./tools/acceptance/node-reporter.ts";
 export const nodeCommand = (runner: string) => ["node", "--test", NODE_REPORTER, runner];
 
-export function artifactBytes(artifact: Artifact, root = ROOT): Buffer {
-  const path = rootPath(root, artifact.path);
-  const reports = resolve(root, "reports");
-  if (!artifact.path.startsWith("reports/") || !existsSync(path) || !existsSync(reports))
-    throw new Error("invalid evidence path");
-  const realReports = realpathSync(reports);
-  if (realReports !== reports || !realpathSync(path).startsWith(realReports + sep))
-    throw new Error("evidence symlink escape");
-  const stat = statSync(path);
-  if (!stat.isFile() || stat.size > 64 * 1024 * 1024) throw new Error("invalid evidence size/type");
-  const bytes = readFileSync(path);
-  if (sha256(bytes) !== artifact.sha256) throw new Error("evidence hash mismatch");
-  return bytes;
-}
+export { artifactBytes } from "./artifacts.ts";
 
 export function artifactJson(artifact: Artifact, root = ROOT): unknown {
-  return parseJson(artifactBytes(artifact, root).toString("utf8"));
+  return parseJson(new TextDecoder("utf-8", { fatal: true }).decode(artifactBytes(artifact, root)));
 }
 
 type NodeCase = { title: string; status: "PASS" | "FAIL" | "SKIP"; duration_ms: number };
-export function readNodeExecution(bytes: Buffer): {
+export function readNodeExecution(
+  bytes: Buffer,
+  runnerFile: string,
+): {
   cases: NodeCase[];
   completed: boolean;
   passed: boolean;
 } {
-  const wire = bytes.toString("utf8");
+  const wire = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   if (!wire.endsWith("\n")) throw new Error("truncated node:test output");
   const rows = wire
     .trimEnd()
@@ -61,12 +51,24 @@ export function readNodeExecution(bytes: Buffer): {
     rows.some((row, i) => row.sequence !== i || !row.event?.type || !row.event.data)
   )
     throw new Error("incomplete node:test event sequence");
-  const cases: NodeCase[] = [];
+  const runner = resolve(runnerFile);
   for (const { event } of rows) {
+    for (const field of ["file", "entryFile"])
+      if (event.data[field] !== undefined && event.data[field] !== runner)
+        throw new Error("node:test event source differs from registered runner");
+  }
+  const completions = rows.filter(
+    ({ event }) => event.type === "test:complete" && event.data.entryFile !== undefined,
+  );
+  const matched = new Set<number>();
+  const cases: NodeCase[] = [];
+  for (const { event, sequence } of rows) {
     if (event.type !== "test:pass" && event.type !== "test:fail") continue;
     const data = event.data;
     if (data.nesting !== 0)
       throw new Error("node:test nested cases need an explicit catalog adapter");
+    if (data.file !== runner || data.entryFile !== runner)
+      throw new Error("node:test case source missing or different from registered runner");
     const details = data.details as { duration_ms: number };
     if (
       typeof data.name !== "string" ||
@@ -75,6 +77,29 @@ export function readNodeExecution(bytes: Buffer): {
       details.duration_ms < 0
     )
       throw new Error("malformed node:test case");
+    const matches = completions.filter(({ event: complete }) =>
+      ["name", "testId", "parentId", "testNumber", "nesting", "file", "entryFile"].every((field) =>
+        isDeepStrictEqual(complete.data[field], data[field]),
+      ),
+    );
+    const completion = matches[0];
+    if (
+      !completion ||
+      matches.length !== 1 ||
+      matched.has(completion.sequence) ||
+      completion.sequence >= sequence
+    )
+      throw new Error("node:test case completion missing or duplicated");
+    const completedDetails = completion.event.data.details as Record<string, unknown>;
+    if (
+      !completedDetails ||
+      completedDetails.passed !== (event.type === "test:pass") ||
+      completedDetails.duration_ms !== details.duration_ms ||
+      !isDeepStrictEqual(completion.event.data.skip, data.skip) ||
+      !isDeepStrictEqual(completion.event.data.todo, data.todo)
+    )
+      throw new Error("node:test completion/result mismatch");
+    matched.add(completion.sequence);
     cases.push({
       title: data.name,
       status:
@@ -86,6 +111,8 @@ export function readNodeExecution(bytes: Buffer): {
       duration_ms: Math.ceil(details.duration_ms),
     });
   }
+  if (matched.size !== completions.length)
+    throw new Error("node:test completion has no matching result");
   const end = rows.at(-1)?.event;
   if (end?.type !== "test:summary") throw new Error("missing final node:test summary");
   const counts = end.data.counts as Record<string, number>;
@@ -115,6 +142,27 @@ export function readNodeExecution(bytes: Buffer): {
     end.data.duration_ms < 0
   )
     throw new Error("invalid node:test counts or duration");
+  const summaries = rows.filter(({ event }) => event.type === "test:summary");
+  const fileSummary = summaries[0]?.event;
+  const fileCompletions = rows.filter(
+    ({ event }) => event.type === "test:complete" && event.data.entryFile === undefined,
+  );
+  const fileCompletion = fileCompletions[0]?.event.data.details as
+    | Record<string, unknown>
+    | undefined;
+  if (
+    summaries.length !== 2 ||
+    fileSummary?.data.file !== runner ||
+    fileSummary.data.entryFile !== runner ||
+    end.data.file !== undefined ||
+    end.data.entryFile !== undefined ||
+    !isDeepStrictEqual(fileSummary.data.counts, counts) ||
+    fileSummary.data.success !== end.data.success ||
+    fileCompletions.length !== 1 ||
+    fileCompletions[0]?.event.data.file !== runner ||
+    fileCompletion?.passed !== end.data.success
+  )
+    throw new Error("node:test file/final summary mismatch");
   const passed =
     end.data.success === true &&
     counts.failed === 0 &&
@@ -233,9 +281,36 @@ export function validateRun(
   if (isTool) {
     if (!test.runner || !isDeepStrictEqual(run.command, nodeCommand(test.runner)))
       throw new Error("tool command does not execute the complete registered suite");
-    const commands = run.trace.filter((entry) => entry.name === "executed_command");
-    if (commands.length !== 1) throw new Error("actual process command record missing");
-    const commandRecord = artifactJson((commands[0] as Run["trace"][number]).raw_artifact, root);
+    const filenames = ["command.json", "node-events.ndjson", "stderr.txt"];
+    const artifacts = filenames.map((name) => {
+      const matches = run.raw_artifacts.filter((item) => item.path.endsWith(`/${name}`));
+      if (matches.length !== 1) throw new Error(`required tool output missing: ${name}`);
+      return matches[0] as Artifact;
+    });
+    const [command, events, stderr] = artifacts as [Artifact, Artifact, Artifact];
+    const base = command.path.slice(0, -"command.json".length);
+    if (
+      !base.endsWith(`/${test.id}/`) ||
+      !isDeepStrictEqual(run.raw_artifacts, artifacts) ||
+      !isDeepStrictEqual(run.process_outputs, [events, stderr]) ||
+      run.trace.length !== 3 ||
+      artifacts.some((item, index) => item.path !== `${base}${filenames[index]}`)
+    )
+      throw new Error("tool output triplet or process output association incomplete");
+    const names = ["executed_command", "node_test_events", "process_stderr"];
+    if (
+      run.trace.some(
+        (item, index) =>
+          item.name !== names[index] ||
+          item.source_role !== "runner" ||
+          item.source_instance_id !== run.run_id ||
+          item.kind !== "process" ||
+          item.observed_at.clock_domain !== `runner:${run.run_id}` ||
+          !isDeepStrictEqual(item.raw_artifact, artifacts[index]),
+      )
+    )
+      throw new Error("tool output trace association mismatch");
+    const commandRecord = artifactJson(command, root);
     if (
       !isDeepStrictEqual(commandRecord, {
         command: run.command,
@@ -245,9 +320,7 @@ export function validateRun(
       })
     )
       throw new Error("actual command/exit record mismatch");
-    const events = run.process_outputs.filter((a) => a.path.endsWith("/node-events.ndjson"));
-    if (events.length !== 1) throw new Error("raw node:test events missing");
-    const execution = readNodeExecution(artifactBytes(events[0] as Artifact, root));
+    const execution = readNodeExecution(artifactBytes(events, root), rootPath(root, test.runner));
     if (
       !execution.passed ||
       !isDeepStrictEqual(toolAssertions(test.id, execution.cases), run.assertions)
@@ -269,6 +342,8 @@ export function validateRun(
       run.profile_digest !== null ||
       run.endpoint_facts.length ||
       run.session_facts.length ||
+      run.transition_coverage.length ||
+      run.dependency_gates.length ||
       [
         run.summary.rejected_operations,
         run.summary.failed_operations,
@@ -280,33 +355,9 @@ export function validateRun(
     )
       throw new Error("tool tests must not claim SUT facts");
   } else {
-    const expected = sutScenarios[test.id];
-    if (!expected?.length || !isDeepStrictEqual([...run.scenario_ids].sort(), [...expected].sort()))
-      throw new Error("required SUT scenario catalog missing or incomplete");
-    if (!run.profile_digest || !run.endpoint_facts.length || !run.session_facts.length)
-      throw new Error("SUT profile/effect/cleanup facts missing");
-    if (test.id === "exit.P0") {
-      const registry = readJson<{ machines: Machine[] }>(
-        join(root, "contracts/src/state-machines.json"),
-      );
-      const required = p0TransitionRequirements(registry.machines);
-      const actual = run.transition_coverage.map(({ scenario_id, ...row }) => {
-        if (!run.scenario_ids.includes(scenario_id))
-          throw new Error("transition coverage has no executed scenario");
-        return row;
-      });
-      if (required.some((row) => !actual.some((item) => isDeepStrictEqual(row, item))))
-        throw new Error("P0 state/guard coverage incomplete");
-      provided.add("state_guard_coverage");
-    }
-    provided.add("effect_and_cleanup_evidence");
-    provided.add("enabled_profile_digest");
-    provided.add("dependency_gates");
-    provided.add("fault_trace");
-    provided.add("acceptance_report");
-    // P0 has no predecessor phase; a self-PASS dependency would introduce circular admission.
-    if (test.phase === "P0" && run.dependency_gates.length)
-      throw new Error("P0 dependency gates must be explicitly empty");
+    // A catalog and self-consistent arrays cannot substitute for a raw SUT decoder.
+    // W7 must implement source-bound process/fact/reduction verification first.
+    throw new Error("SUT raw process/fact/reduction evidence adapter not implemented");
   }
   for (const name of requirements)
     if (!provided.has(name)) throw new Error(`required evidence unsupported or missing: ${name}`);

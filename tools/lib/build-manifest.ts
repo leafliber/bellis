@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { release } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import {
   assertValid,
   payloadDigest,
@@ -38,6 +38,19 @@ const INSTALL_METADATA = new Set([
   ".pnpm-workspace-state-v1.json",
 ]);
 const INTERMEDIATES = new Set(["obj", "obj.target", ".cache", "config.gypi", "Makefile"]);
+const CODE_EXTENSIONS = new Set([
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".mts",
+  ".cts",
+  ".jsx",
+  ".tsx",
+  ".wasm",
+  ".node",
+]);
+const AMBIGUOUS_CONFIG_EXTENSIONS = new Set([".json", ".jsonc", ".yaml", ".yml", ".toml"]);
 
 export function rootPath(root: string, path: string): string {
   const full = resolve(root, path);
@@ -88,8 +101,21 @@ export function buildManifest(kind: "sut" | "runner", root = ROOT): SchemaTypes[
       add(target);
     } else if (stat.isDirectory()) {
       for (const name of readdirSync(full).sort()) {
-        if (name === ".DS_Store" || name === ".git" || name === ".env" || name.startsWith(".env."))
-          continue;
+        if (name === ".DS_Store" || name === ".git" || name === ".env") continue;
+        if (name.startsWith(".env.")) {
+          // Runtime secrets stay excluded. A code-like name cannot hide a source
+          // dependency; reject ambiguous directories rather than hiding their tree.
+          const info = lstatSync(join(full, name));
+          if (
+            info.isDirectory() ||
+            info.isSymbolicLink() ||
+            AMBIGUOUS_CONFIG_EXTENSIONS.has(extname(name))
+          )
+            throw new Error(
+              `Ambiguous .env configuration/directory/link in build inputs: ${path}/${name}`,
+            );
+          if (!CODE_EXTENSIONS.has(extname(name))) continue;
+        }
         if (
           path.startsWith("node_modules") &&
           (INSTALL_METADATA.has(name) ||

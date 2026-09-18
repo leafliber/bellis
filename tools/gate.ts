@@ -1,9 +1,10 @@
 // P0 gate binds reviewed execution records to the current source, runner, installed
 // dependencies and raw reports. Local hashes are not an authenticity signature.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { assertValid, type SchemaTypes } from "../packages/contract-sdk/src/index.ts";
+import { writeArtifact } from "./acceptance/artifacts.ts";
 import { manifestAs, validateRun } from "./acceptance/evidence.ts";
 import { buildManifest, executionEnvironment, sha256, sourceDigest } from "./lib/build-manifest.ts";
 import { loadRegistry, phaseClosure, ROOT, readJson, type Verification } from "./lib/registry.ts";
@@ -93,6 +94,12 @@ export function evaluate(
   };
 }
 
+export function writeGateOutput(output: string, text: string, root = ROOT): void {
+  if (isAbsolute(output) && resolve(output) !== output)
+    throw new Error("Gate output must be canonical and under reports");
+  writeArtifact(isAbsolute(output) ? relative(root, output) : output, text, root);
+}
+
 function main() {
   const { values } = parseArgs({
     options: {
@@ -112,8 +119,7 @@ function main() {
   const result = evaluate(values.phase, loadRegistry().verification, evidence);
   const text = `${JSON.stringify(result, null, 2)}\n`;
   if (values.output) {
-    mkdirSync(dirname(resolve(values.output)), { recursive: true });
-    writeFileSync(resolve(values.output), text);
+    writeGateOutput(values.output, text);
     console.error(`Wrote ${relative(process.cwd(), resolve(values.output))}`);
   }
   process.stdout.write(text);

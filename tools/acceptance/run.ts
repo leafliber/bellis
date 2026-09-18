@@ -2,52 +2,21 @@
 // suites; unimplemented SUT entries are omitted and remain PENDING at the gate.
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
-import { parseArgs } from "node:util";
+import { relative, resolve } from "node:path";
+import { isDeepStrictEqual, parseArgs } from "node:util";
 import { assertValid, type SchemaTypes } from "../../packages/contract-sdk/src/index.ts";
 import {
   buildManifest,
   executionEnvironment,
   rootPath,
-  sha256,
   sourceDigest,
 } from "../lib/build-manifest.ts";
 import { loadRegistry, ROOT, type Verification } from "../lib/registry.ts";
+import { writeArtifact } from "./artifacts.ts";
 import { toolCases } from "./catalog.ts";
 import { manifestAs, nodeCommand, readNodeExecution, toolAssertions } from "./evidence.ts";
 
-type Artifact = SchemaTypes["EvidenceArtifact"];
-export function writeArtifact(path: string, bytes: string | Buffer, root = ROOT): Artifact {
-  if (!path.startsWith("reports/")) throw new Error("Evidence output must be under reports/");
-  const full = rootPath(root, path);
-  const reports = resolve(root, "reports");
-  if (!full.startsWith(reports + sep)) throw new Error("Evidence output escapes reports");
-  const rootReal = realpathSync(root);
-  if (rootReal !== resolve(root)) throw new Error("Evidence root must be canonical");
-  if (!existsSync(reports)) mkdirSync(reports);
-  if (realpathSync(reports) !== reports) throw new Error("Reports root must not be a symlink");
-  // Inspect each existing parent before creating its child. A pre-existing link
-  // must not cause even an empty directory to be created outside reports.
-  let parent = reports;
-  for (const name of relative(reports, dirname(full)).split(sep).filter(Boolean)) {
-    const next = join(parent, name);
-    if (existsSync(next)) {
-      if (!lstatSync(next).isDirectory() || realpathSync(next) !== next)
-        throw new Error("Evidence parent is a symlink or not a directory");
-    } else mkdirSync(next);
-    parent = next;
-  }
-  writeFileSync(full, bytes, { flag: "wx" });
-  return { path, sha256: sha256(bytes) };
-}
+export { writeArtifact } from "./artifacts.ts";
 
 export function runTools(
   output = `reports/p0/tools-${randomUUID()}`,
@@ -74,6 +43,8 @@ export function runTools(
     (t) => t.phase === "P0" && t.adapter === "contract_tools",
   )) {
     if (entry.implementation_status !== "IMPLEMENTED" || !entry.runner) continue;
+    const runnerFingerprint = sut.files.find((file) => file.path === entry.runner)?.sha256;
+    if (!runnerFingerprint) throw new Error("Registered runner is outside the build manifest");
     const expectedCases = toolCases(entry.id, entry.runner, root);
     const executedAt = new Date().toISOString();
     const runId = randomUUID();
@@ -99,13 +70,26 @@ export function runTools(
       `${JSON.stringify({ command, exit_code: child.status, signal: child.signal, error: child.error?.message ?? null })}\n`,
       root,
     );
+    let bindingError: string | null = null;
+    try {
+      const after = buildManifest("sut", root);
+      if (
+        !isDeepStrictEqual(sut, after) ||
+        !isDeepStrictEqual(runner, manifestAs("runner", after)) ||
+        !isDeepStrictEqual(environment, executionEnvironment(after.dependencies, root)) ||
+        report.source_digest !== sourceDigest(root)
+      )
+        throw new Error("受测构建、运行器依赖或环境在工具执行期间发生变化");
+    } catch (error) {
+      bindingError = String(error);
+    }
     let parsed: ReturnType<typeof readNodeExecution>;
     try {
-      parsed = readNodeExecution(child.stdout ?? Buffer.alloc(0));
+      parsed = readNodeExecution(child.stdout ?? Buffer.alloc(0), rootPath(root, entry.runner));
     } catch (error) {
       const failure = writeArtifact(
         `${base}/runner-error.txt`,
-        `${String(error)}\n${child.error ? String(child.error) : ""}\n`,
+        `${String(error)}\n${child.error ? String(child.error) : ""}\n${bindingError ?? ""}\n`,
         root,
       );
       report.tests.push({
@@ -113,7 +97,7 @@ export function runTools(
         status: "FAIL",
         executed_at: executedAt,
         environment,
-        runner_sha256: sha256(readFileSync(join(root, entry.runner))),
+        runner_sha256: runnerFingerprint,
         sut_build_digest: sut.digest,
         artifacts: [commandRef, failure, events, stderr],
       });
@@ -166,11 +150,12 @@ export function runTools(
         latency_samples_ms: parsed.cases.map((c) => c.duration_ms),
         quality_notes: [
           "本报告的断言计数表示完整 node:test 用例结果，不是 assert.* 调用次数；工具结果不能关闭 SUT 要求。",
+          ...(bindingError ? [bindingError.slice(0, 1024)] : []),
         ],
       },
       raw_artifacts: [commandRef, events, stderr],
       process_outputs: [events, stderr],
-      completed: parsed.completed && !child.error && child.status !== null,
+      completed: parsed.completed && !child.error && child.status !== null && !bindingError,
     };
     assertValid("P0TestRunEvidence", run);
     const raw = writeArtifact(`${base}/run.json`, `${JSON.stringify(run, null, 2)}\n`, root);
@@ -185,7 +170,7 @@ export function runTools(
       status: pass ? "PASS" : "FAIL",
       executed_at: executedAt,
       environment,
-      runner_sha256: sha256(readFileSync(join(root, entry.runner))),
+      runner_sha256: runnerFingerprint,
       sut_build_digest: sut.digest,
       artifacts: [raw],
     });
