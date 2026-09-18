@@ -1,3 +1,5 @@
+import { requireRuntimeVersion } from "../../packages/runtime/src/files.ts";
+import { StartupObservation } from "../../packages/runtime/src/observation.ts";
 import { startSupervisor } from "../../packages/runtime/src/processes.ts";
 
 const args = process.argv.slice(2);
@@ -15,21 +17,22 @@ const close = () => {
 // Install before the first asynchronous startup step, including installation validation.
 process.on("SIGINT", close);
 process.on("SIGTERM", close);
-if (args.length !== 2 || args[0] !== "--config" || !args[1]) {
-  process.stderr.write("用法：supervisor.ts --config <P0RuntimeConfig文件>\n");
-  process.exitCode = 1;
-} else {
-  try {
-    runtime = await startSupervisor(args[1], startup.signal);
-    if (startup.signal.aborted) close();
-  } catch (error) {
-    const cancelled =
-      startup.signal.aborted &&
-      error instanceof Error &&
-      (error.name === "AbortError" || error.message === "STARTUP_CANCELLED");
-    if (!cancelled) {
-      process.stderr.write("P0_SUPERVISOR_STARTUP_REJECTED\n");
-      process.exitCode = 1;
-    }
+const observation = new StartupObservation("supervisor");
+let handedOff = false;
+try {
+  requireRuntimeVersion();
+  observation.stage = "arguments";
+  if (args.length !== 2 || args[0] !== "--config" || !args[1]) throw new Error("INVALID_ARGUMENTS");
+  handedOff = true;
+  runtime = await startSupervisor(args[1], startup.signal);
+  if (startup.signal.aborted) close();
+} catch (error) {
+  const cancelled =
+    startup.signal.aborted &&
+    error instanceof Error &&
+    (error.name === "AbortError" || error.message === "STARTUP_CANCELLED");
+  if (!cancelled) {
+    if (!handedOff) await observation.failed(error);
+    process.exitCode = 1;
   }
 }

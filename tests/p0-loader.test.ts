@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { assertValid } from "../packages/contract-sdk/src/index.ts";
 import { verifyInstallation } from "../packages/runtime/src/config.ts";
 import { verifiedEndpointUrl } from "../packages/runtime/src/endpoint-loader.ts";
 import { safeChildEnvironment, terminateChild } from "../packages/runtime/src/processes.ts";
@@ -40,10 +41,23 @@ test("p0.loader: real launcher rejects replacement after successful preflight wh
     const fd = child.stdio[3];
     assert.ok(fd && "end" in fd);
     fd.end(JSON.stringify(config));
-    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    await new Promise<void>((resolve) => child.once("close", () => resolve()));
     assert.equal(child.exitCode, 1);
     assert.equal(output, "");
-    assert.equal(error, "ENDPOINT_STARTUP_REJECTED\n");
+    const records = error
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(records.length, 2);
+    assertValid("P0ProcessObservation", records[0]);
+    assert.equal(records[0].source_instance_id, config.endpoint_instance_id);
+    assert.equal(records[0].detail.kind, "startup_rejected");
+    assert.equal(records[0].detail.stage, "installation");
+    assert.deepEqual(records[0].detail.error, {
+      kind: "runtime",
+      reason_code: "INSTALLATION_IDENTITY_DENIED",
+    });
+    assertValid("P0ObservationStreamEnd", records[1]);
   } finally {
     await terminateChild(child);
     await fixture.cleanup();

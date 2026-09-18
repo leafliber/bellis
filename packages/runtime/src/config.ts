@@ -20,6 +20,7 @@ import {
 import { reject } from "./errors.ts";
 import { controlledPath, decodeJson, readControlled, readCredential, uid } from "./files.ts";
 import { identityFromKey } from "./identity.ts";
+import type { StartupStage } from "./observation.ts";
 
 const sha256 = (value: Buffer) => createHash("sha256").update(value).digest("hex");
 
@@ -145,11 +146,15 @@ export async function verifyInstallation(
   return { context, manifest };
 }
 
-export async function loadRuntimeConfig(path: string): Promise<{
+export async function loadRuntimeConfig(
+  path: string,
+  stage?: (value: StartupStage) => void,
+): Promise<{
   config: P0RuntimeConfig;
   installation: VerifiedInstallation;
   credential: P0OperatorCredential;
 }> {
+  stage?.("configuration");
   const config = decodeJson(await readControlled(path));
   assertValid("P0RuntimeConfig", config);
   if (config.installation.plugin_id !== "bellis-p0-fake-device")
@@ -182,6 +187,7 @@ export async function loadRuntimeConfig(path: string): Promise<{
     `${config.management_socket_path}.host.identity.json`,
   ];
   if (new Set(paths).size !== paths.length) reject("INSTALLATION_IDENTITY_DENIED");
+  stage?.("installation");
   const installation = await verifyInstallation(config.installation);
   validateProfile(config.profile, installation.context);
   if (
@@ -189,6 +195,7 @@ export async function loadRuntimeConfig(path: string): Promise<{
     payloadDigest(config.installation.allowed_capabilities)
   )
     reject("SIMULATION_SCOPE_DENIED");
+  stage?.("configuration");
   return {
     config,
     installation,
@@ -196,7 +203,11 @@ export async function loadRuntimeConfig(path: string): Promise<{
   };
 }
 
-export async function validateBootstrap(value: unknown): Promise<P0HostBootstrap> {
+export async function validateBootstrap(
+  value: unknown,
+  stage?: (value: StartupStage) => void,
+): Promise<P0HostBootstrap> {
+  stage?.("bootstrap");
   assertValid("P0HostBootstrap", value);
   if (value.installation.plugin_id !== "bellis-p0-fake-device")
     reject("INSTALLATION_IDENTITY_DENIED");
@@ -207,6 +218,7 @@ export async function validateBootstrap(value: unknown): Promise<P0HostBootstrap
     value.identity_key_id,
     value.identity_private_key_pkcs8,
   );
+  stage?.("installation");
   const installation = await verifyInstallation(value.installation);
   validateProfile(value.profile, installation.context);
   if (
@@ -222,6 +234,7 @@ export async function validateBootstrap(value: unknown): Promise<P0HostBootstrap
       payloadDigest(value.installation.allowed_capabilities)
   )
     reject("INSTALLATION_IDENTITY_DENIED");
+  stage?.("bootstrap");
   const directory = dirname(value.supervisor_socket_path);
   await controlledPath(value.host_socket_path, directory, false);
   await controlledPath(`${value.host_socket_path}.identity.json`, directory, false);

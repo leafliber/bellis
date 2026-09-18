@@ -33,6 +33,11 @@ import {
   ConnectionAuthentication,
   type Identity,
 } from "../../packages/runtime/src/identity.ts";
+import {
+  ObservationWriter,
+  observationError,
+  ProtocolObservation,
+} from "../../packages/runtime/src/observation.ts";
 import { JsonChannel } from "../../packages/runtime/src/transport.ts";
 import { EndpointModel } from "./model.ts";
 
@@ -49,6 +54,7 @@ export class EndpointProtocol {
   readonly identity: Identity;
   readonly config: P0EndpointConfig;
   readonly clock: MonotonicClock;
+  readonly observation: ObservationWriter;
   #channels = new Map<JsonChannel, { role: "host" | "supervisor"; authenticated: boolean }>();
   #server: Server | undefined;
   #owned = new OwnedPaths();
@@ -56,41 +62,27 @@ export class EndpointProtocol {
   #ticker: ReturnType<typeof setInterval> | undefined;
   #closing = false;
   #eventSequence = 0;
-  #observationSequence = 0;
-  #dropped = 0;
-  #writes = 0;
   #mutations = new Map<string, string>();
   #safetyMutations = new Map<string, string>();
   onExit: (() => void) | undefined;
 
-  constructor(config: P0EndpointConfig, identity: Identity, clock: MonotonicClock) {
+  constructor(
+    config: P0EndpointConfig,
+    identity: Identity,
+    clock: MonotonicClock,
+    observation?: ObservationWriter,
+  ) {
     this.config = config;
     this.identity = identity;
     this.clock = clock;
+    this.observation =
+      observation ??
+      new ObservationWriter("endpoint", config.endpoint_instance_id, clock, config.limits);
     this.model = new EndpointModel(config, clock);
     this.model.onChange = (fact) => this.#publish(fact);
   }
   #observe(fact: P0EndpointSnapshot): void {
-    const observation = {
-      observation_seq: this.#observationSequence++,
-      endpoint_fact: fact,
-      dropped_observations: this.#dropped,
-    };
-    assertValid("P0EndpointObservation", observation);
-    const bytes = Buffer.from(`${JSON.stringify(observation)}\n`);
-    if (
-      bytes.length > this.config.limits.max_message_bytes ||
-      this.#writes >= this.config.limits.max_pending_requests ||
-      process.stderr.destroyed
-    ) {
-      this.#dropped++;
-      return;
-    }
-    this.#writes++;
-    process.stderr.write(bytes, (error) => {
-      this.#writes--;
-      if (error) this.#dropped++;
-    });
+    this.observation.endpoint(fact);
   }
   #later(callback: () => void, ms: number): void {
     if (this.#timers.size >= this.config.limits.max_pending_requests) {
@@ -160,6 +152,8 @@ export class EndpointProtocol {
       this.model.authorityEpoch,
     );
     const auth = new ConnectionAuthentication(a);
+    const observation = new ProtocolObservation(this.observation, a.connection_id);
+    observation.attach(channel);
     let peer: P0PeerIdentity | undefined;
     let mapping: P0ClockMapping | undefined;
     let handshaken = false;
@@ -340,6 +334,7 @@ export class EndpointProtocol {
             void this.close();
           }, 20);
       } catch (error) {
+        observation.failure("dispatch", observationError(error), request);
         channel.send(
           error instanceof RuntimeRejection
             ? businessFailure(id, context, error.reason)
@@ -542,11 +537,13 @@ export class EndpointProtocol {
     for (const channel of this.#channels.keys()) channel.close();
     // The hard bound also covers filesystem cleanup or stderr backpressure.
     const force = setTimeout(() => this.onExit?.(), 100);
+    const until = performance.now() + 100;
     if (this.#server) {
       if (await this.#owned.matches(this.config.safety_socket_path)) this.#server.close();
       else this.#server.unref();
     }
     await this.#owned.cleanup();
+    await this.observation.finish(Math.max(0, until - performance.now()));
     clearTimeout(force);
     this.onExit?.();
   }

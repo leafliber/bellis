@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,6 @@ import {
   payloadDigest,
 } from "../../contract-sdk/src/index.ts";
 import { RpcConnection } from "./client.ts";
-import { MonotonicClock } from "./clock.ts";
 import { loadRuntimeConfig, validateBootstrap } from "./config.ts";
 import { endpointIdentity, launchEndpoint, queryEndpoint } from "./endpoint-client.ts";
 import {
@@ -20,6 +19,8 @@ import {
   requireRuntimeVersion,
 } from "./files.ts";
 import { exportPrivate, generateIdentity, identityFromKey } from "./identity.ts";
+import { observationError, StartupObservation } from "./observation.ts";
+import { observedSpawn } from "./process-observation.ts";
 import { P0Service } from "./service.ts";
 
 export function safeChildEnvironment(): NodeJS.ProcessEnv {
@@ -92,10 +93,27 @@ export async function startSupervisor(
   configPath: string,
   signal?: AbortSignal,
 ): Promise<{ close: () => Promise<void>; host: ChildProcess }> {
+  const startup = new StartupObservation("supervisor");
+  try {
+    return await supervisorRuntime(configPath, startup, signal);
+  } catch (error) {
+    await startup.failed(error);
+    throw error;
+  }
+}
+
+async function supervisorRuntime(
+  configPath: string,
+  startup: StartupObservation,
+  signal?: AbortSignal,
+): Promise<{ close: () => Promise<void>; host: ChildProcess }> {
   requireRuntimeVersion();
   signal?.throwIfAborted();
-  const { config, installation, credential } = await loadRuntimeConfig(configPath);
+  const { config, installation, credential } = await loadRuntimeConfig(configPath, (stage) => {
+    startup.stage = stage;
+  });
   signal?.throwIfAborted();
+  startup.stage = "configuration";
   const supervisor = identityFromKey(
     "supervisor",
     randomUUID(),
@@ -105,7 +123,8 @@ export async function startSupervisor(
   const host = generateIdentity("host");
   const endpoint = generateIdentity("endpoint");
   const sessionId = randomUUID();
-  const clock = new MonotonicClock();
+  const clock = startup.clock;
+  const observation = startup.bind(supervisor.public.instance_id, config.limits);
   const snapshot = initialSnapshot(
     sessionId,
     supervisor.public.instance_id,
@@ -146,6 +165,7 @@ export async function startSupervisor(
       lastHostHealth = clock.now();
     },
     faultInjectionEnabled: config.fault_injection_enabled,
+    observation,
   });
   const bootstrap: P0HostBootstrap = {
     session_id: sessionId,
@@ -187,6 +207,8 @@ export async function startSupervisor(
         supervisor.public.instance_id,
         clock,
         supervisor.public,
+        undefined,
+        observation,
       );
       if (closed) return;
       const project = (fact: NonNullable<P0SessionSnapshot["endpoint"]["fact"]>) => {
@@ -208,7 +230,8 @@ export async function startSupervisor(
       endpointConnection.onEndpointFact(project, () => 0);
       await endpointConnection.authenticatePeer(supervisor);
       project(await queryEndpoint(endpointConnection, bootstrap.endpoint_config));
-    } catch {
+    } catch (error) {
+      endpointConnection?.observation?.failure("dispatch", observationError(error));
       snapshot.endpoint.quality = snapshot.endpoint.fact ? "stale" : "unknown";
     } finally {
       endpointConnection?.close();
@@ -233,6 +256,7 @@ export async function startSupervisor(
         clock,
         supervisor.public,
         deadline.signal,
+        observation,
       );
       deadline.signal.throwIfAborted();
       connection.onEndpointFact(
@@ -241,7 +265,8 @@ export async function startSupervisor(
       );
       await connection.authenticatePeer(supervisor);
       await connection.peerCall("controller.dispose", { instance_id: endpoint.public.instance_id });
-    } catch {
+    } catch (error) {
+      connection?.observation?.failure("dispatch", observationError(error));
       snapshot.endpoint.quality = "unknown";
     } finally {
       clearTimeout(timer);
@@ -250,12 +275,17 @@ export async function startSupervisor(
   };
   try {
     signal?.throwIfAborted();
+    startup.stage = "listen";
     await service.listen(config.management_socket_path);
     signal?.throwIfAborted();
-    child = spawn(
+    startup.stage = "launch";
+    child = observedSpawn(
       process.execPath,
       [fileURLToPath(new URL("../../../apps/host/host.ts", import.meta.url))],
       { env: safeChildEnvironment(), stdio: ["ignore", "ignore", "inherit", "pipe"] },
+      observation,
+      "host",
+      host.public.instance_id,
     );
     const hostChild = child;
     // Descriptor inheritance preserves endpoint observations even while Host is blocked or gone.
@@ -270,6 +300,7 @@ export async function startSupervisor(
       Math.max(10, Math.floor(config.limits.peer_health_timeout_ms / 3)),
     );
     void pollEndpoint();
+    startup.stage = "connect";
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => finish(new Error("HOST_STARTUP_TIMEOUT")), 5000);
       const poll = setInterval(() => {
@@ -315,6 +346,7 @@ export async function startSupervisor(
           if (failed?.status === "rejected") throw failed.reason;
         } finally {
           await service.close();
+          await observation.finish();
         }
       },
     };
@@ -335,9 +367,28 @@ export async function startHost(
   raw: unknown,
   signal?: AbortSignal,
 ): Promise<{ close: () => Promise<void> }> {
+  const startup = new StartupObservation("host");
+  try {
+    return await hostRuntime(raw, startup, signal);
+  } catch (error) {
+    await startup.failed(error);
+    throw error;
+  }
+}
+
+async function hostRuntime(
+  raw: unknown,
+  startup: StartupObservation,
+  signal?: AbortSignal,
+): Promise<{ close: () => Promise<void> }> {
   requireRuntimeVersion();
   signal?.throwIfAborted();
-  const bootstrap = await validateBootstrap(raw);
+  startup.stage = "bootstrap";
+  assertValid("P0HostBootstrap", raw);
+  const observation = startup.bind(raw.host_instance_id, raw.limits);
+  const bootstrap = await validateBootstrap(raw, (stage) => {
+    startup.stage = stage;
+  });
   signal?.throwIfAborted();
   const identity = identityFromKey(
     "host",
@@ -345,12 +396,14 @@ export async function startHost(
     bootstrap.identity_key_id,
     bootstrap.identity_private_key_pkcs8,
   );
+  const clock = startup.clock;
+  startup.stage = "bootstrap";
   const pinned = await readServiceIdentity(bootstrap.supervisor_socket_path);
   if (payloadDigest(pinned) !== payloadDigest(bootstrap.supervisor_identity))
     throw new Error("SUPERVISOR_IDENTITY_MISMATCH");
+  startup.stage = "configuration";
   const credential = await readCredential(bootstrap.operator_credentials_path);
   signal?.throwIfAborted();
-  const clock = new MonotonicClock();
   const snapshot = initialSnapshot(
     bootstrap.session_id,
     pinned.instance_id,
@@ -359,6 +412,7 @@ export async function startHost(
     bootstrap.installation.allowed_targets,
   );
   snapshot.endpoint.received_at = clock.point();
+  let endpoint: Awaited<ReturnType<typeof launchEndpoint>> | undefined;
   const service = new P0Service({
     identity,
     authority: pinned,
@@ -370,9 +424,25 @@ export async function startHost(
     peers: [pinned],
     snapshot: () => structuredClone(snapshot),
     faultInjectionEnabled: bootstrap.fault_injection_enabled,
+    observation,
+    hostEndpoint: {
+      instanceId: bootstrap.endpoint_config.endpoint_instance_id,
+      projection: () => {
+        const projection = structuredClone(snapshot.endpoint);
+        if (!projection.fact) projection.quality = "unknown";
+        else if (
+          !endpoint ||
+          endpoint.connection.channel.closed ||
+          clock.now() - projection.received_at.monotonic_ms >=
+            bootstrap.limits.peer_health_timeout_ms ||
+          clock.now() >= endpoint.connection.mapping.source_valid_until_ms
+        )
+          projection.quality = "stale";
+        return projection;
+      },
+    },
   });
   let closed = false;
-  let endpoint: Awaited<ReturnType<typeof launchEndpoint>> | undefined;
   let active: RpcConnection | undefined;
   let busy = false;
   const health = async (): Promise<void> => {
@@ -385,6 +455,9 @@ export async function startHost(
         bootstrap.limits,
         identity.public.instance_id,
         clock,
+        pinned,
+        undefined,
+        observation,
       );
       if (closed) return;
       await active.authenticatePeer(identity);
@@ -401,8 +474,10 @@ export async function startHost(
   };
   try {
     signal?.throwIfAborted();
+    startup.stage = "listen";
     await service.listen(bootstrap.host_socket_path);
     signal?.throwIfAborted();
+    startup.stage = "launch";
     endpoint = await launchEndpoint(
       bootstrap.endpoint_config,
       identity,
@@ -424,6 +499,10 @@ export async function startHost(
         };
       },
       signal,
+      observation,
+      (stage) => {
+        startup.stage = stage;
+      },
     );
     endpoint.connection.channel.on("closed", () => {
       snapshot.endpoint.quality = "stale";
@@ -463,6 +542,7 @@ export async function startHost(
       // Normal Host shutdown ends business traffic; Supervisor retains its independent cleanup path.
       endpoint?.child.unref();
       await service.close();
+      await observation.finish();
     },
   };
 }

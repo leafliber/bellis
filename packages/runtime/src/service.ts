@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:net";
 import { dirname } from "node:path";
 import { commands } from "../../../contracts/generated/registries.ts";
 import {
+  type P0EndpointProjection,
   type P0OperatorCredential,
   type P0PeerIdentity,
   type P0SafetyLimits,
@@ -21,6 +22,7 @@ import {
   ConnectionAuthentication,
   type Identity,
 } from "./identity.ts";
+import { type ObservationWriter, observationError, ProtocolObservation } from "./observation.ts";
 import { JsonChannel } from "./transport.ts";
 
 export type ServiceOptions = {
@@ -35,6 +37,8 @@ export type ServiceOptions = {
   snapshot: () => P0SessionSnapshot;
   onHealth?: () => void;
   faultInjectionEnabled: boolean;
+  observation?: ObservationWriter;
+  hostEndpoint?: { instanceId: string; projection: () => P0EndpointProjection };
 };
 
 /** W3 service: actual identity and transport, zero execution authority. */
@@ -67,6 +71,10 @@ export class P0Service {
       o.currentAuthorityEpoch(),
     );
     const auth = new ConnectionAuthentication(a);
+    const observation = o.observation
+      ? new ProtocolObservation(o.observation, a.connection_id)
+      : undefined;
+    observation?.attach(channel);
     let peer: P0PeerIdentity | undefined;
     let pending = 0;
     const expiry = setTimeout(() => channel.close(), o.limits.clock_mapping_ttl_ms);
@@ -150,7 +158,19 @@ export class P0Service {
                 authenticated_at: o.clock.point(),
               };
             else if (request.method === "session.query") result = o.snapshot();
-            else if (request.method === "session.authorize") {
+            else if (request.method === "host.query") {
+              const endpoint = o.hostEndpoint;
+              if (o.identity.public.role !== "host" || !endpoint) reject("ROLE_SCOPE_DENIED");
+              const projection = endpoint.projection();
+              if (
+                projection.source_instance_id !== endpoint.instanceId ||
+                (projection.fact &&
+                  (projection.fact.endpoint_instance_id !== endpoint.instanceId ||
+                    projection.fact.session_id !== o.sessionId))
+              )
+                reject("ROLE_SCOPE_DENIED");
+              result = projection;
+            } else if (request.method === "session.authorize") {
               if (
                 request.params.input.mode !== "simulation" ||
                 request.params.input.supervision_mode !== "supervised" ||
@@ -210,6 +230,7 @@ export class P0Service {
           validateRpcResponse(request.method, response);
           channel.send(response);
         } catch (error) {
+          observation?.failure("dispatch", observationError(error), request);
           channel.send(
             error instanceof RuntimeRejection
               ? businessFailure(id, context, error.reason)

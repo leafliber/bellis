@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { Readable, Writable } from "node:stream";
 import { parseJson } from "../../contract-sdk/src/index.ts";
+
+export type FrameEvidence = { frame_sha256: string; frame_bytes: number };
 
 /** Bounded bytes and pending writes; the same framing serves sockets and child stdio. */
 export class JsonChannel extends EventEmitter {
@@ -21,8 +24,8 @@ export class JsonChannel extends EventEmitter {
     this.maxPending = maxPending;
     input.on("data", this.#data);
     input.on("end", this.#end);
-    input.on("error", this.#failed);
-    output.on("error", this.#failed);
+    input.on("error", (error) => this.#failed("read", error));
+    output.on("error", (error) => this.#failed("write", error));
     input.on("close", this.#close);
   }
   get closed(): boolean {
@@ -45,10 +48,25 @@ export class JsonChannel extends EventEmitter {
       if (newline < 0) break;
       const frame = this.#buffer;
       this.#buffer = Buffer.alloc(0);
+      const evidence = {
+        frame_sha256: createHash("sha256").update(frame).digest("hex"),
+        frame_bytes: frame.length,
+      };
+      let parsed: unknown;
+      let valid = false;
       try {
-        this.emit("message", parseJson(this.#decoder.decode(frame)));
+        parsed = parseJson(this.#decoder.decode(frame));
+        valid = true;
       } catch {
-        this.emit("invalid", "FRAME_INVALID");
+        this.emit("invalid", "FRAME_INVALID", evidence);
+      }
+      if (valid) {
+        try {
+          this.emit("message", parsed, evidence);
+        } catch (error) {
+          this.emit("dispatchError", error);
+          this.close();
+        }
       }
       if (this.#closed || this.#ending) return;
       start = newline + 1;
@@ -59,7 +77,8 @@ export class JsonChannel extends EventEmitter {
     if (this.#buffer.length) this.emit("invalid", "FRAME_TRUNCATED");
     this.close();
   };
-  #failed = (): void => {
+  #failed = (stage: "read" | "write" | "encode", error: unknown): void => {
+    this.emit("transportError", stage, error);
     this.close();
   };
   #close = (): void => {
@@ -67,15 +86,30 @@ export class JsonChannel extends EventEmitter {
   };
   send(value: unknown): boolean {
     if (this.#closed || this.#ending) return false;
-    const data = Buffer.from(`${JSON.stringify(value)}\n`);
+    let data: Buffer;
+    try {
+      data = Buffer.from(`${JSON.stringify(value)}\n`);
+    } catch (error) {
+      this.#failed("encode", error);
+      return false;
+    }
     if (data.length - 1 > this.maxBytes || this.#writes >= this.maxPending) {
       this.close();
       return false;
     }
     this.#writes++;
-    this.output.write(data, () => {
+    this.emit("enqueue", value);
+    try {
+      this.output.write(data, (error) => {
+        this.#writes--;
+        if (error) this.#failed("write", error);
+      });
+      this.emit("queued", value);
+    } catch (error) {
       this.#writes--;
-    });
+      this.#failed("write", error);
+      return false;
+    }
     return true;
   }
   close(): void {

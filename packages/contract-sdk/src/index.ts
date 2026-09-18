@@ -21,13 +21,24 @@ export function validate<K extends keyof SchemaTypes>(
   return validators[name](value);
 }
 
+export class SchemaValidationError extends Error {
+  readonly schemaName: keyof SchemaTypes;
+  readonly keyword: string | null;
+  constructor(schemaName: keyof SchemaTypes, keyword: string | null, diagnostic: unknown) {
+    super(`${schemaName}: ${JSON.stringify(diagnostic)}`);
+    this.schemaName = schemaName;
+    this.keyword = keyword;
+  }
+}
+
 export function assertValid<K extends keyof SchemaTypes>(
   name: K,
   value: unknown,
 ): asserts value is SchemaTypes[K] {
   if (!validate(name, value)) {
     // biome-ignore lint/performance/noDynamicNamespaceImportAccess: report the selected schema validator's errors.
-    throw new Error(`${name}: ${JSON.stringify(validators[name].errors)}`);
+    const errors = validators[name].errors;
+    throw new SchemaValidationError(name, errors?.[0]?.keyword ?? null, errors);
   }
 }
 

@@ -27,6 +27,7 @@ import {
   peerRequest,
   verifyAnnouncement,
 } from "./identity.ts";
+import { type ObservationWriter, observationError, ProtocolObservation } from "./observation.ts";
 import { JsonChannel } from "./transport.ts";
 
 export class RpcConnection {
@@ -34,6 +35,7 @@ export class RpcConnection {
   readonly clock: MonotonicClock;
   readonly instanceId: string;
   readonly limits: P0SafetyLimits;
+  readonly observation: ProtocolObservation | undefined;
   #announcement: P0ConnectionAnnouncement | undefined;
   get announcement(): P0ConnectionAnnouncement {
     if (!this.#announcement) throw new Error("RPC_NOT_ANNOUNCED");
@@ -72,11 +74,16 @@ export class RpcConnection {
     clock: MonotonicClock,
     instance: string,
     limits: P0SafetyLimits,
+    observation?: ObservationWriter,
+    peer?: P0PeerIdentity,
+    authority?: P0PeerIdentity,
   ) {
     this.channel = channel;
     this.clock = clock;
     this.instanceId = instance;
     this.limits = limits;
+    this.observation = observation ? new ProtocolObservation(observation) : undefined;
+    this.observation?.attach(channel, peer, authority);
     channel.on("message", (raw: unknown) => {
       if (!this.#announced) {
         this.#announced = true;
@@ -111,6 +118,7 @@ export class RpcConnection {
               (!seenEvent && this.#eventDigests.size >= 1024) ||
               (!seenRevision && this.#revisionDigests.size >= 1024)
             ) {
+              this.observation?.failure("dispatch", { kind: "internal", code: "invalid_response" });
               channel.close();
               return;
             }
@@ -123,11 +131,13 @@ export class RpcConnection {
             return;
           }
         }
+        this.observation?.failure("dispatch", { kind: "internal", code: "invalid_response" });
         channel.close();
         return;
       }
       const pending = this.#pending.get(raw.id);
       if (!pending) {
+        this.observation?.failure("dispatch", { kind: "internal", code: "invalid_response" });
         channel.close();
         return;
       }
@@ -167,9 +177,16 @@ export class RpcConnection {
     clock = new MonotonicClock(),
     authority: P0PeerIdentity = identity,
     signal?: AbortSignal,
+    observation?: ObservationWriter,
   ): Promise<RpcConnection> {
     signal?.throwIfAborted();
-    await controlledPath(socketPath, dirname(socketPath), true, true);
+    try {
+      await controlledPath(socketPath, dirname(socketPath), true, true);
+    } catch (error) {
+      if (observation)
+        new ProtocolObservation(observation).failure("connect", observationError(error));
+      throw error;
+    }
     signal?.throwIfAborted();
     const sent = clock.now();
     const socket = createConnection(socketPath);
@@ -190,6 +207,7 @@ export class RpcConnection {
         clock,
         sent,
         authority,
+        observation,
       );
     } finally {
       signal?.removeEventListener("abort", abort);
@@ -204,8 +222,18 @@ export class RpcConnection {
     clock: MonotonicClock,
     sent: number,
     authority: P0PeerIdentity = identity,
+    observation?: ObservationWriter,
   ): Promise<RpcConnection> {
-    const connection = new RpcConnection(channel, clock, instance, limits);
+    const connection = new RpcConnection(
+      channel,
+      clock,
+      instance,
+      limits,
+      observation,
+      identity,
+      authority,
+    );
+    let stage: "announcement" | "clock" = "announcement";
     const timer = setTimeout(() => channel.close(), limits.peer_health_timeout_ms);
     try {
       const raw = await new Promise<unknown>((resolve, reject) => {
@@ -214,6 +242,7 @@ export class RpcConnection {
       });
       const received = clock.now();
       connection.#announcement = Object.freeze(verifyAnnouncement(raw, identity, authority));
+      stage = "clock";
       connection.mapping = clockMapping(
         connection.announcement,
         clock,
@@ -224,6 +253,7 @@ export class RpcConnection {
       );
       return connection;
     } catch (error) {
+      connection.observation?.failure(stage, observationError(error));
       channel.close();
       throw error;
     } finally {
@@ -260,6 +290,7 @@ export class RpcConnection {
         return;
       }
       const timer = setTimeout(() => {
+        this.observation?.failure("read", { kind: "internal", code: "request_timeout" }, request);
         this.#pending.delete(request.id);
         reject(new RuntimeRejection("COMMAND_DEADLINE_MISSED"));
         this.channel.close();

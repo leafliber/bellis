@@ -250,7 +250,7 @@ export async function stopProcess(child: ChildProcess): Promise<void> {
   await terminateChild(child);
 }
 
-export function runCli(configPath: string, command: "query" | "authenticate") {
+export function runCli(configPath: string, command: "query" | "authenticate" | "host-query") {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn(
       process.execPath,
@@ -266,10 +266,11 @@ export function runCli(configPath: string, command: "query" | "authenticate") {
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
-      if (stderr.length > 4096) child.kill("SIGKILL");
+      // Includes the actual bounded request/response observations and their stream tail.
+      if (stderr.length > 1_048_576) child.kill("SIGKILL");
     });
     child.on("error", reject);
-    child.on("exit", (code) => {
+    child.on("close", (code) => {
       clearTimeout(timer);
       resolve({ code, stdout, stderr });
     });

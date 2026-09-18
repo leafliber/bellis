@@ -1,4 +1,5 @@
-import { readPrivateBootstrap } from "../../packages/runtime/src/files.ts";
+import { readPrivateBootstrap, requireRuntimeVersion } from "../../packages/runtime/src/files.ts";
+import { StartupObservation } from "../../packages/runtime/src/observation.ts";
 import { startHost } from "../../packages/runtime/src/processes.ts";
 
 const startup = new AbortController();
@@ -14,10 +15,17 @@ const close = () => {
 };
 process.on("SIGINT", close);
 process.on("SIGTERM", close);
+const observation = new StartupObservation("host");
+let handedOff = false;
 
 try {
+  requireRuntimeVersion();
+  observation.stage = "arguments";
   if (process.argv.length !== 2) throw new Error("PRIVATE_BOOTSTRAP_ONLY");
-  runtime = await startHost(await readPrivateBootstrap(3, startup.signal), startup.signal);
+  observation.stage = "bootstrap";
+  const bootstrap = await readPrivateBootstrap(3, startup.signal);
+  handedOff = true;
+  runtime = await startHost(bootstrap, startup.signal);
   if (startup.signal.aborted) close();
 } catch (error) {
   const cancelled =
@@ -26,7 +34,7 @@ try {
     (error.name === "AbortError" ||
       ["STARTUP_CANCELLED", "BOOTSTRAP_CANCELLED"].includes(error.message));
   if (!cancelled) {
-    process.stderr.write("P0_HOST_STARTUP_REJECTED\n");
+    if (!handedOff) await observation.failed(error);
     process.exitCode = 1;
   }
 }

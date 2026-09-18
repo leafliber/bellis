@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   assertValid,
@@ -11,6 +11,8 @@ import {
 import { RpcConnection } from "./client.ts";
 import type { MonotonicClock } from "./clock.ts";
 import { type Identity, identityFromKey } from "./identity.ts";
+import { type ObservationWriter, observationError, type StartupStage } from "./observation.ts";
+import { observedSpawn } from "./process-observation.ts";
 import { safeChildEnvironment, terminateChild } from "./processes.ts";
 import { JsonChannel } from "./transport.ts";
 
@@ -59,12 +61,17 @@ export async function launchEndpoint(
   clock: MonotonicClock,
   onFact: (fact: P0EndpointSnapshot) => void,
   signal?: AbortSignal,
+  observation?: ObservationWriter,
+  stage?: (stage: StartupStage) => void,
 ): Promise<{ child: ChildProcess; connection: RpcConnection }> {
   signal?.throwIfAborted();
-  const child = spawn(
+  const child = observedSpawn(
     process.execPath,
     [fileURLToPath(new URL("../../../apps/host/endpoint-launcher.mjs", import.meta.url))],
     { env: safeChildEnvironment(), stdio: ["pipe", "pipe", "inherit", "pipe"] },
+    observation,
+    "endpoint",
+    config.endpoint_instance_id,
   );
   let connection: RpcConnection | undefined;
   let channel: JsonChannel | undefined;
@@ -82,6 +89,7 @@ export async function launchEndpoint(
       config.limits.max_message_bytes,
       config.limits.max_pending_requests,
     );
+    stage?.("connect");
     const ready = RpcConnection.fromChannel(
       channel,
       endpointIdentity(config),
@@ -90,6 +98,7 @@ export async function launchEndpoint(
       clock,
       clock.now(),
       config.supervisor_identity,
+      observation,
     );
     const fd = child.stdio[3];
     if (!fd || !("end" in fd)) throw new Error("ENDPOINT_BOOTSTRAP_MISSING");
@@ -116,6 +125,7 @@ export async function launchEndpoint(
     signal?.throwIfAborted();
     return { child, connection };
   } catch (error) {
+    connection?.observation?.failure("dispatch", observationError(error));
     connection?.close();
     await terminateChild(child);
     throw error;
