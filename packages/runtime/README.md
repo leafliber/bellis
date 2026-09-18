@@ -1,6 +1,6 @@
 # P0 运行时
 
-本包负责真实本机身份、安装、时钟、有界协议、进程接线与只读观测，不实现媒体、供应商、自动恢复或通用结算。当前具备零授权启动与查询；三状态机、独立监督的完整协调和真实持久化链仍 unsupported。可运行入口见 [apps/host](../../apps/host/README.md)，端点模型见 [fake-device](../../plugins/fake-device/README.md)。
+本包负责真实本机身份、安装、时钟、有界协议、进程接线、只读观测和 P0 三状态机同步归约，不实现媒体、供应商、自动恢复或通用结算。当前运行入口具备零授权启动与查询；归约器已完成模块覆盖，尚未接入运行协调器，独立监督的完整协调和真实持久化链仍 unsupported。可运行入口见 [apps/host](../../apps/host/README.md)，端点模型见 [fake-device](../../plugins/fake-device/README.md)。
 
 ## 模块和 Schema
 
@@ -18,6 +18,8 @@
 | processes.ts | Supervisor/Host 生命周期、最小环境、独立安全轮询和各自 P0EndpointProjection。 |
 | observation.ts | 轻量共享 writer、精确认证器去敏、Schema 化观察与内部触发关联；P0ProtocolObservation、P0ProcessObservation、P0EndpointObservation、P0ObservationStreamEnd。 |
 | process-observation.ts | 父进程真实 spawn/error/exit 接点及实际启动参数摘要；不进入端点加载闭包。 |
+| p0-guards.ts | P0 准入、人工续租、提交绑定、执行、实际停止和输出安全守卫；仅消费已认证通道交付的具体事实。 |
+| p0-reducer.ts | P0Reducer 同步持有 SupervisionMode、ExecutionGrant、StopOperation 及独立清理/隔离记录；输出归约观察和待执行安全动作，不做 I/O。 |
 
 字段与算法只在 [contracts/src](../../contracts/README.md)、[P0 简报](../../docs/generated/P0.md)和[第22.6节](../../docs/spec/22-tech-storage-deployment.md)维护。SDK bindVerifiedP0Installation 是进程内绑定，生产只在实际文件核验完成后使用。
 
@@ -31,13 +33,25 @@
 
 认证主体来自受控凭据，peer 角色来自固定公钥。公告外层发布者与签名 Session owner 分别核验，载荷 owner 固定为监督，外层 epoch 必须相等；客户端保存不可变验签公告。管理 proof 防重放与业务 operation 去重分开，W5/W6 须按稳定主体维护业务操作表。
 
-Supervisor 是监督/grant/StopOperation 的预定唯一归约者，当前只维护初始 stopped、健康及独立端点观察；Host 持执行入口和本地投影。端点独占队列、计数、水位和停止/清理事实。同 source_revision 的完整 fact 固定，读取时间放 Projection.received_at。事件冒充、错误实例/代次、同 source_seq 或 source_revision 异载荷均拒绝；一致旧事件不覆盖新投影。事件历史有界，不能继续证明时关闭连接，不截断事实。
+Supervisor 是监督/grant/StopOperation 的唯一归约 owner；供其使用的 P0Reducer 已实现，当前进程接线仍只维护初始 stopped、健康及独立端点观察，待 W5S 委派给归约器。Host 持执行入口和本地投影。端点独占队列、计数、水位和停止/清理事实。同 source_revision 的完整 fact 固定，读取时间放 Projection.received_at。事件冒充、错误实例/代次、同 source_seq 或 source_revision 异载荷均拒绝；一致旧事件不覆盖新投影。事件历史有界，不能继续证明时关闭连接，不截断事实。
 
 映射由验签公告和客户端前后采样生成，包含 ±1ms 量化保护；期限受目标域、实例、误差和 TTL 检查，失效不猜换算、不自动延期。legacy plugin/controller 封闭输入复用连接认证缓存映射。固定 stdio 不续 TTL，断开/到期先 fence，独立 safety UDS 继续有限查询/清理。
 
 当前生产核心 epoch 仍为 0。端点区分首次 auth 的公告投影、普通请求精确当前代次与监督 lease/revoke 合法推进。W5 要将事件 currentEpoch getter 接到固定监督新验签投影；不能从端点反向提升权威，也不能把零代次接线当 I81 完成。Worker 时钟与事务由 W6 接入。
 
 host.query 经 operator.query 鉴权，核验当前会话及固定端点来源，返回 Host 自己的 P0EndpointProjection；不调用监督或端点查询，不刷新 received_at。无事实为 unknown，实际连接关闭、映射失效或缓存年龄达到 peer_health_timeout_ms 时为 stale。监督独立查询所得的投影与 Host 缓存分别拥有自己的接收时钟，不能互相冒充。
+
+## P0 同步归约模块
+
+P0Reducer 默认 stopped、无 grant、持久化 blocked，是三状态机和本地授权栅栏的单一写入者。转换来自登记表，守卫读取具体身份、安装、时钟、授权、回执与端点事实；调用方不能提交 guard=true、任意 timer 或外部触发摘要。表外事件、守卫拒绝和终态拒绝分别产生 P0ReductionObservation，读取记录返回副本。此模块不认证 socket、不调度进程、不执行设备、不提交数据库，也不创建成功存储替身。
+
+command/health 接收实际服务鉴权结果、原请求、公告和真实 request_received 的内部关联；failure 只接实际进程退出/通道失败回调，不读取 stderr。endpointFact 接收固定端点的验签公告、有效映射，以及完整原查询/响应或原事件信封，重新核验身份、代次、时钟和事实一致性。workerReceipt 绑定 P0StoreCommitInput 与 P0PersistenceReceipt，bindActiveCommit 还须核验精确 ACTIVE 记录的独立提交；这些内部入口不是 RPC，也不能被测试布尔值代替。timer/fire 使用本实例签发的内部 token、原期限和事实基准，过早回调只重排原期限。
+
+同步 fence 先阻断执行、推进适用代次、建立 REQUESTED 停止与隔离，再由 takeActions 交出 endpoint_revoke、query_cleanup 和 persist 意图；意图不等于已发消息或已提交。persistenceRecord 只给当前记录副本，实际事务及对应 Outbox 由 W6 接入。停止终态与清理记录独立：UNKNOWN 不被后到事实改写为 CONFIRMED，清理仍可继续记录，隔离只按适用证明处理，不因新 operation 或新实例零计数解除。
+
+模块最多保留7份 grant；初始目标集合和各 grant 在接纳前按目标预留停止、清理及隔离位置，各集合最多16个目标，预留总量按128限额连同已有隔离核验。管理 operation 记录最多128项，效果历史最多1024项，安全动作按记录身份合并待办，不删除历史换取新授权。上述是模块记录数量边界，不保证完整 P0SessionSnapshot 或 RPC 已符合 max_message_bytes；全响应序列化字节预留和真实传输准入由 W5S/W6 完成。
+
+端点投影替换前统一核验 lease 与 Host 连接期限的映射域、正区间及相对真实 observed_at 的签发时点；有效的过期历史保留，执行资格仍按当前时钟和保守映射上界拒绝。停止证明在监督实际接收时已到截止，即使 timer 回调尚未派发，也先按原 timer 绑定归约 UNKNOWN，再独立确认清理；端点历史时点不能倒填停止确认。实际协调、持久化与故障执行仍按下述未完成边界处理。
 
 ## 只读运行观测
 
@@ -53,7 +67,7 @@ host.query 经 operator.query 鉴权，核验当前会话及固定端点来源�
 
 ## 资源、失败与清理
 
-P0SafetyLimits 限制帧、pending、连接、映射及租约，配置不是实测 SLO。单连接缓冲最多一帧；非法 UTF-8、重复键、批请求、通知、字段和未知方法拒绝，非法前缀后的同 chunk 不再处理，错误回包最多排空 100ms。超时关闭连接并清 pending。端点已有独立停止通道；核心业务与安全工作的容量隔离仍待 W5S，不以当前零授权入口宣称完成。
+P0SafetyLimits 限制帧、pending、连接、映射及租约，配置不是实测 SLO。单连接缓冲最多一帧；非法 UTF-8、重复键、批请求、通知、字段和未知方法拒绝，非法前缀后的同 chunk 不再处理，错误回包最多排空 100ms。超时关闭连接并清 pending。端点已有独立停止通道；核心业务与安全工作的容量隔离、解析批次和管理封读按[第22.6节](../../docs/spec/22-tech-storage-deployment.md)由 W5S 接入，不以当前零授权入口宣称完成。
 
 私有 bootstrap 最多 16 MiB、5 秒。监督等待 Host 健康和独立端点握手事实最多 5 秒。通常终止子进程先 SIGTERM，1秒后 SIGKILL，总2秒仍无退出报 CHILD_STOP_UNCONFIRMED；监督收尾用 stop_timeout_ms 作 Host 软停止宽限，同时清自己服务和有界 dispose。退出不是端点事实。Host 健康丢失后的完整自身寿命仍待 W5。
 
@@ -67,4 +81,6 @@ p0-observation.test.ts 覆盖真实 CLI host-query 的双身份固定、独立�
 
 默认 fd 路径实际验证 FILE 重定向完整序列，以及 PIPE 填满后计时回调仍进展、finish 保留在途状态、当前进程自 SIGKILL 和缺尾原始流。正常捕获逐行核验 Schema、序号、丢失与尾部，背压故障捕获保留真实退出及不完整范围。报告在 reports/p0/w5o/ 与 reports/p0/w5of/；后者含锁定 Node 内置源码的只读核实摘要。FILE 兼容性不证明物理盘阻塞/故障，TTY 未做实际设备验收。复跑命令和完整检查日志入口见 [apps/host](../../apps/host/README.md)。
 
-有效 lease/receipt、有限效果及竞争正例目前是同生产模型的受控模块测试，不是 SQLite 或真实操作员授权。W5R 三状态机、W5S 独立监督协调/容量隔离、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported；14 个 sut.* 与 exit.P0 保持 PENDING。
+p0-reducer.test.ts 覆盖默认无权、准入与回执绑定、续租/心跳分离、原请求与 timer 期限、跨连接重复操作、撤权与后到回执、自然完成/停止乱序、终态与独立清理、逐资源隔离和容量预留；同时验证两类端点期限的错域/倒序/未来签发、未来监督代次及错误 grant 绑定拒绝、旧代次与过期历史，以及停止截止前/等于/之后接收证明的竞争。reports/p0/w5rf/module-after.log 记录26/26受控模块测试；module-coverage.json 标明 controlled-module、20个 P0 可达 source/event 组合及 missing=[]，保留实际归约观察。禁用的 unattended_approved 不制造准入条件，其拒绝与 test_only/public 拒绝保持。supervision_outputs_safe 的缺失/错 owner 反例单列纯守卫来源，不冒充可达生产转换。完整检查原始输出、退出码和环境见同目录 check.log、check.exit、environment.log，复跑命令见 apps/host。
+
+有效 lease/receipt、有限效果及竞争正例目前是同生产模型和归约器的受控模块测试，不是 SQLite 或真实操作员授权。W5S 独立监督协调/容量隔离、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported；14 个 sut.* 与 exit.P0 保持 PENDING。

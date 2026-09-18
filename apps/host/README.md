@@ -29,7 +29,9 @@ launcher 受控读取一次入口 Buffer，核验后执行该 Buffer 的 data: E
 
 Supervisor、Host、端点分别拥有自己的 socket/身份文件并只删除记录的 inode，不覆盖冲突路径。默认 stopped、无 grant、持久化 blocked；握手后可查询真实零计数、水位与 Host 连接期限。失联投影变 stale/unknown，进程退出不是端点停止/清理证明。CLI 每命令建立新连接，用真实凭据和一次挑战认证；stdout 保留实际 RPC id 与完整合法成功/失败回包。没有收到 RPC 回包时不制造回包，stderr 只记录安全分类的本地失败。
 
-session.authorize、session.execute、supervisor.register_effect 在真实存储接入前拒绝。操作员停止/续租/故障配置的完整路径待 W5/W6；端点低层安全调用只接受固定监督。核心 authority_epoch 仍为 0，W5 须从固定监督的新验签公告推进，不能由端点自报提升或刷新固定 stdio TTL。重启不恢复旧权，持久化缺口与 UNKNOWN 隔离待 W6。
+session.authorize、session.execute、supervisor.register_effect 在真实存储接入前拒绝。操作员停止/续租/故障配置的完整路径待 W5S/W6；端点低层安全调用只接受固定监督。P0Reducer 的同步三状态机与守卫已作模块验证，但实际入口尚未委派给它，内部事实接口、资源上限和期限边界见 runtime 说明。核心 authority_epoch 仍为 0，W5S 须从固定监督的新验签公告推进，不能由端点自报提升或刷新固定 stdio TTL。重启不恢复旧权，持久化缺口与 UNKNOWN 隔离待 W6。
+
+当前 CLI 仅支持上列三个动作。新增固定动作/显式参数、prepare/send 的内存业务绑定、核心容量隔离与管理单命令封读按第22.6节在 W5S 实现，不能把当前查询能力当作授权或停止入口已交付；不增加任意 RPC 或磁盘重试队列。
 
 入口在首个异步步骤前安装信号处理；AbortSignal 关闭未完成握手的通道及已建资源。正常收尾并行推进独立 dispose、Host 业务断开和管理路径清理，dispose 总等待受 stop_timeout_ms 约束；无回执保持未知。Host 释放子进程存活引用，端点继续有限安全查询窗口。没有泛化 pkill 或自动重建。
 
@@ -40,9 +42,12 @@ session.authorize、session.execute、supervisor.register_effect 在真实存储
 ```sh
 node --test tests/p0-identity.test.ts tests/p0-authority.test.ts tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts
 node --test tests/p0-observation.test.ts tests/p0-loader.test.ts
+node --test tests/p0-reducer.test.ts
 pnpm check
 ```
 
 真实 socket 测试需允许本机监听，沙箱 EPERM 不能用内存测试替代。reports/p0/w4/ 与 reports/p0/w4f/ 保存端点和身份覆盖；reports/p0/w5o/raw/ 保存真实启动/CLI stdout 与 stderr 原始捕获，正常捕获核验所有行及各来源流尾。reports/p0/w5of/raw/ 保存默认 fd 的 FILE/PIPE 原始字节、控制输出与实际退出元数据，故障流不补尾。两目录保留全部运行日志（含失败运行）；异步 fd 专项见 reports/p0/w5of/observation-third.log 与对应 .exit，15/15；完整锁定环境检查见该目录 check-final.log、check-final.exit。W5O 独立集成检查另见 reports/p0/w5o/l2-check.log。
 
-已覆盖真实 CLI/启动、独立查询、Host SIGKILL、零授权、身份/时钟/Schema、端点取消回包挂起、容量满后的撤权、加载替换与生成漂移；观测新增真实失败响应/退出、Host 与监督投影区分、不刷新缓存、陈旧质量、去敏及日志缺口处理。受控模型的有效 receipt/lease 只证明模块逻辑，不是实际 Worker 或授权证据。三状态机、核心监督协调与容量隔离、Worker/Outbox/完整授权链仍 unsupported，14 个 sut.* 和 exit.P0 保持 PENDING；当前只有 macOS 运行覆盖。
+三状态机专项的26/26模块结果与覆盖来源见 reports/p0/w5rf/module-after.log、module-coverage.json；同目录 check.log、check.exit、environment.log 保存锁定环境完整检查的原始输出、退出码和实际环境。本说明与容量语义包的独立检查另见 reports/p0/w5sc/。报告保留失败运行；模块范围与期限边界见 runtime，不由测试计数推导 SUT 结论。
+
+已覆盖真实 CLI/启动、独立查询、Host SIGKILL、零授权、身份/时钟/Schema、端点取消回包挂起、容量满后的撤权、加载替换与生成漂移；观测新增真实失败响应/退出、Host 与监督投影区分、不刷新缓存、陈旧质量、去敏及日志缺口处理。受控模型与归约器的有效 receipt/lease 只证明模块逻辑，不是实际 Worker 或授权证据。核心监督协调与容量隔离、Worker/Outbox/完整授权链仍 unsupported，14 个 sut.* 和 exit.P0 保持 PENDING；当前只有 macOS 运行覆盖。
