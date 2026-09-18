@@ -16,6 +16,8 @@ pnpm p0:operator --config /absolute/private/runtime.json --command query
 
 `supervisor.ts` 校验配置与实际安装文件后，建立管理 socket，再启动 `host.ts`。Host 没有公开命令行配置入口，只接受私有 fd 3 上的 `P0HostBootstrap`。各实例临时私钥经该描述符传送，操作员凭据及核心私钥不会进入 argv、环境或 stdout。子进程只继承实际 Node 所在 PATH 和固定 LANG。端点专用材料已隔离，W4 才创建端点进程。
 
+Supervisor 将实际已核验入口路径/摘要原样放入 `entry_artifact`，Host 在 bootstrap 校验时精确比较。连接公告签入固定 Session 监督 owner 和当前代次，发布者仍分别是 Supervisor 或 Host；客户端不再自填固定代次。当前运行权威仍停留初始 0，没有代次推进或授权入口。
+
 CLI 使用受控凭据和目标 socket 对应的 `P0PeerIdentity` 文件，验证签名公告后，经同一管理入口执行 `operator.authenticate` 或 `session.query`。每条命令新建连接并使用一次挑战；`test_operator` 不绕过认证。stdout 输出服务端实际 RPC id 和经 Schema 校验的完整成功回包；失败只在 stderr 输出固定错误码并非零退出，不输出证明或凭据。
 
 ## 所有权和失败边界

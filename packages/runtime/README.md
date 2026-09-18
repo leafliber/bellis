@@ -31,6 +31,10 @@ Supervisor 是监督状态、grant 和 StopOperation 的预定唯一归约者，
 
 公告绑定固定服务公钥、角色、实例、会话和单次挑战。管理证明的认证主体来自凭据，不来自 `operator_id` 字符串；peer 角色来自启动时固定公钥。无管理凭据的服务使用显式 null，管理请求直接拒绝。认证连接的 proof 防重放不等于业务 operation 去重；W5/W6 必须以稳定认证主体、会话和 operation 维护原授权与期限，不能把每次 CLI 连接当作新业务身份。
 
+公告的外层发布者与签名载荷中的 Session owner 分别核验：Supervisor 绑定自身权威，Host 的权威来自固定 bootstrap，端点协议 fixture 同样只使用固定监督身份。签名覆盖 authority_id、authority_instance_id 和 authority_epoch，外层 epoch 必须一致；客户端保存不可变的验签公告并据其构造 context。当前核心入口仍无授权、代次为 0，通过受信 getter 复核当前值，公告后发生代次变化即拒绝旧连接请求。非零代次测试只修改受控模块实例，不提供网络修改入口。
+
+该核心入口的“context、公告、当前代次三值相等”限制不能直接作为后续端点的统一前置检查：W4 需分别处理首次连接认证、已认证 Host 的当前代次执行，以及仅认证监督 lease/revoke 的合法 advance；不能重公告或延长固定 stdio 的 TTL 来绕过。
+
 时钟映射从验签公告和客户端前后采样生成，保留整数毫秒量化的 ±1 ms，检查双实例、连接、域、顺序、误差和 TTL。期限取偏移下界并限制于映射有效期，目标侧再次检查；失效直接拒绝。客户端无自动重试，不生成延长期限的补偿请求。W3 仅使用初始 authority_epoch 0；后续撤权代次传播尚未实现。Worker 同域基准留待 W6 显式绑定。
 
 ## 资源、背压与清理
@@ -48,3 +52,5 @@ socket 与身份文件由创建者记录 inode，关闭只删除自己的实例�
 `tests/p0-identity.test.ts` 验证真实核心进程、CLI/socket、stdio 协议 fixture、安装闭包和拒绝路径；`tests/schema.test.ts` 以匹配变更后摘要的合成安装上下文，独立验证 effect、version、refs、权限、管理 method、mode 与 phase 边界。日志在 `reports/p0/w3/`，可复跑命令见入口说明。
 
 W3 没有完成状态机转换覆盖或 SUT 验收。W4 要实现独立假设备及不经过 Host 的监督安全通道，并由该通道读取实际效果/清理事实；W5 实现三状态机、撤权栅栏和持续清理；W6 接入真实持久化后立即运行完整授权→效果→撤权→查询链。此前授权和新增效果保持拒绝。畸形 RPC 的真实入口测试不得改成免鉴权入口，端点 fixture 不能充当 SUT 证据。
+
+W4C 配套检查在 `tests/p0-authority.test.ts`：签名 owner/epoch 与外层篡改、固定 owner 不符、公告后当前代次改变、请求自报更大代次，以及 Host bootstrap 的入口路径/摘要不符。当前 Supervisor 只把已核验 installation.entry 写入 endpoint_config.entry_artifact，Host 精确比较；真正同 Buffer 加载由后续 W4 launcher 实现。新增回执摘要集合和端点事实字段当前没有成功构造器，不能据此声称持久化或端点已经接通。
