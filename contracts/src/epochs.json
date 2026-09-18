@@ -80,18 +80,39 @@
       "comparison": "原始证据索引完整且不重复；不据此改写跨进程发生时间"
     },
     {
-      "field": "P0ReductionObservation.source_seq",
+      "field": "P0ReductionObservation.source_seq / dropped_observations",
       "writer": "实际执行P0归约器的进程；观测模块只记录该进程真实调用",
       "scope": "source_instance_id＋p0-reduction-observation流",
-      "increment": "每条归约观测从0连续增加，拒绝归约同样占序号；溢出前停止该实例新增效果并轮换",
-      "comparison": "只在同来源实例核验连续性，不能跨实例拼接；观测缺口使覆盖证据不完整，不阻塞安全归约"
+      "increment": "每次归约观测尝试从0连续分配source_seq，拒绝归约同样占序号；未写出累计dropped_observations，不回退序号，溢出前停止该实例新增效果并轮换",
+      "comparison": "同来源实例检查序号/累计丢失并核对P0ObservationStreamEnd与原始EOF；不跨实例拼接，缺口/尾部未知不计完整覆盖，不阻塞安全归约"
     },
     {
       "field": "P0EndpointObservation.observation_seq / dropped_observations",
       "writer": "受信假设备当前实例",
       "scope": "endpoint_fact.endpoint_instance_id＋只读观测流",
       "increment": "每次观测尝试从0连续分配observation_seq；写出失败累计dropped_observations，不因丢失而回退序号",
-      "comparison": "同实例检查序号连续与丢失数；不能跨实例拼接，缺口/丢失拒绝完整覆盖证据，日志不参与生产授权或清理归约"
+      "comparison": "同实例检查序号/累计丢失并核对P0ObservationStreamEnd与原始EOF；不能跨实例拼接，缺口/尾部未知不计完整覆盖，日志不参与生产授权或清理归约"
+    },
+    {
+      "field": "P0ProcessObservation.source_seq / dropped_observations",
+      "writer": "实际parent或记录自身启动失败的进程；该进程唯一观测写入器",
+      "scope": "source_role＋source_instance_id＋source_pid＋observed_at.clock_domain＋process流；null实例只用于失败即结束的一条startup_rejected，禁止与非null实例流拼接",
+      "increment": "每次观测尝试从0连续分配source_seq；写出失败累计dropped_observations，不因丢失回退；同一parent的各launch_id共享该流序号",
+      "comparison": "只在固定来源流内检查连续性/累计丢失并核对结束计数与原始EOF；实际PID不代替认证，父进程先死不补造退出或零丢失"
+    },
+    {
+      "field": "P0ProtocolObservation.source_seq / dropped_observations",
+      "writer": "实际发送/接收进程的唯一观测写入器",
+      "scope": "source_role＋source_instance_id＋source_pid＋observed_at.clock_domain＋protocol流；该实例各connection共享序号",
+      "increment": "每次真实协议观测尝试从0连续分配source_seq；写出失败累计dropped_observations，request_received序号供内部command归约关联，禁止caller指定",
+      "comparison": "只在固定来源流内核验连续性/累计丢失及结束计数/EOF；跨连接仍递增，不能跨实例或读写方向另起同名序号，缺失接收观察不能由发送预期补齐"
+    },
+    {
+      "field": "P0ObservationStreamEnd.next_seq / dropped_observations",
+      "writer": "对应Process/Protocol/Reduction/Endpoint流的同一唯一写入器",
+      "scope": "stream＋固定来源角色/实例/PID/单调时钟域；与被结束的数据流一致",
+      "increment": "正常结束只产生一次：next_seq为全部数据观测尝试数，dropped_observations为最终累计未写出数；结束记录不消耗数据序号",
+      "comparison": "end后同流禁止新数据或第二个end；与从0序列及原始capture EOF交叉核验，尾部缺失或异常退出保留不完整；null实例仅对应唯一startup_rejected或其显式丢失，next_seq=1"
     }
   ]
 }

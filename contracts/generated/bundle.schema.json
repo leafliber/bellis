@@ -484,90 +484,13 @@
           ]
         },
         "reason_code": {
-          "enum": [
-            null,
-            "COST_BUDGET_EXCEEDED",
-            "MEDIA_BUFFER_LIMIT_EXCEEDED",
-            "PLAN_LIMIT_EXCEEDED",
-            "PROVIDER_CONCURRENCY_EXCEEDED",
-            "QUEUE_LIMIT_EXCEEDED",
-            "RATE_LIMIT_EXCEEDED",
-            "RETRY_BUDGET_EXCEEDED",
-            "ACTION_DEADLINE_MISSED",
-            "ACTIVITY_DEADLINE_MISSED",
-            "ATTEMPT_DEADLINE_MISSED",
-            "CLEANUP_TIMEOUT",
-            "CONTROL_DEADLINE_MISSED",
-            "GUARD_CONTEXT_TIMEOUT",
-            "GUARD_TIMEOUT",
-            "POLICY_UPDATE_TIMEOUT",
-            "PREPARE_TIMEOUT",
-            "RECONCILE_TIMEOUT",
-            "STOP_TIMEOUT",
-            "WAIT_EVENT_TIMEOUT",
-            "ATTEMPT_STALE",
-            "EVENT_COVERAGE_GAP",
-            "OBSERVATION_STALE",
-            "POLICY_DEPENDENCY_STALE",
-            "RESUME_CONTEXT_STALE",
-            "STAGE_INSTANCE_STALE",
-            "STORY_SCOPE_STALE",
-            "CLEANUP_UNCONFIRMED",
-            "EFFECT_UNCONFIRMED",
-            "OUTPUT_UNCONFIRMED",
-            "POLICY_APPLY_UNCONFIRMED",
-            "CHECKPOINT_UNSUPPORTED",
-            "CONTROL_MODE_UNSUPPORTED",
-            "PAUSE_UNSUPPORTED",
-            "POLICY_UPDATE_UNSUPPORTED",
-            "RESTORE_UNSUPPORTED",
-            "CONTROL_FRAME_CONFLICT",
-            "EVENT_IDENTITY_CONFLICT",
-            "MEDIA_BINDING_MISMATCH",
-            "OPERATION_PAYLOAD_CONFLICT",
-            "SCOPED_EPOCH_CONFLICT",
-            "ACTIVE_OBSERVATION_REQUIRED",
-            "GUARD_CONTEXT_DENIED",
-            "GUARD_REJECTED",
-            "MANUAL_RESOLUTION_INVALID",
-            "POLICY_FIELD_FORBIDDEN",
-            "PUBLIC_PROFILE_NOT_APPROVED",
-            "PROVIDER_CONNECTION_FAILED",
-            "PROVIDER_RATE_LIMITED",
-            "PROVIDER_RESPONSE_INVALID",
-            "ACTION_PROFILE_MISMATCH",
-            "CONTRACT_REFERENCE_INVALID",
-            "CONTROL_FRAME_INVALID",
-            "FIELD_NOT_ALLOWED",
-            "INPUT_BINDING_INVALID",
-            "JSON_INVALID",
-            "PLAN_GRAPH_INVALID",
-            "PREDICATE_INVALID",
-            "REQUIRED_FIELD_MISSING",
-            "TIMEOUT_INVALID",
-            "CHECKPOINT_NOT_REACHED",
-            "CONTROLLER_NOT_READY",
-            "CONTROL_MODE_UNAVAILABLE",
-            "GUARD_UNAVAILABLE",
-            "INVALID_STATE_TRANSITION",
-            "PLAN_REVISION_CONFLICT",
-            "POLICY_BASE_CONFLICT",
-            "POLICY_CANCEL_TOO_LATE",
-            "RESOURCE_NOT_SETTLED",
-            "RESOURCE_QUARANTINED",
-            "SEMANTIC_EFFECT_BLOCKED",
-            "SERVICE_NOT_READY",
-            "STAGE_ALREADY_CONNECTED",
-            "SUPERSESSION_REQUIRED",
-            "AUTHENTICATION_REQUIRED",
-            "DEMONSTRATION_PURPOSE_DENIED",
-            "EXECUTION_GRANT_REVOKED",
-            "INPUT_LEASE_EXPIRED",
-            "PAIRING_REVOKED",
-            "PRIVACY_PURPOSE_DENIED",
-            "ROLE_SCOPE_DENIED",
-            "SUPERVISION_EXPIRED",
-            "TEST_ONLY_SCOPE_VIOLATION"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasonCode"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "evidence_refs": {
@@ -4415,7 +4338,7 @@
         "fact"
       ],
       "additionalProperties": false,
-      "$comment": "宿主只更新接收时间与投影质量；不能修改端点 fact 或用停止请求构造 fact。"
+      "$comment": "Host 的实际本地缓存；source_instance_id 固定为已核验启动配置中的端点实例，非null fact 必须精确匹配该实例及当前session。received_at 是 Host 实际收到该事实时的本地单调时间，查询不得刷新；尚无事实时 quality=unknown、fact=null，received_at 固定为该缓存建立时点，不声称收到端点事实。Host 不得修改 fact 或用停止请求构造事实，host.query 不代理监督/端点查询。"
     },
     "P0SessionSnapshot": {
       "type": "object",
@@ -6483,7 +6406,9 @@
             "command",
             "timer",
             "endpoint_fact",
-            "worker_receipt"
+            "worker_receipt",
+            "process_fact",
+            "protocol_fact"
           ]
         },
         "trigger_id": {
@@ -6504,6 +6429,11 @@
               "type": "null"
             }
           ]
+        },
+        "dropped_observations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -6522,10 +6452,11 @@
         "trigger_id",
         "trigger_digest",
         "observed_at",
-        "timer_deadline"
+        "timer_deadline",
+        "dropped_observations"
       ],
       "additionalProperties": false,
-      "$comment": "生产归约器对真实输入的只读stderr观测，不是命令/公共事件；guard_result 未调用时为null，拒绝时to等于from；timer保留实际计划deadline，其它触发timer_deadline=null。按来源实例连续序号，runner在外部事后关联场景，不接受scenario_id、任意payload或外部指定guard结果。 仅去敏只读覆盖观测，不作为生产授权或停止/清理证明；runner 独立采集端点原始观测并与实际 RPC 端点事实交叉核验。",
+      "$comment": "生产归约器对真实输入的只读stderr观测，不是命令/公共事件；guard_result 未调用时为null，拒绝时to等于from；timer保留实际计划deadline，其它触发timer_deadline=null。command的trigger_digest=SHA256(JCS({method,context:去掉payload_digest,input:去掉整个proof}))，即authenticationDigest；trigger_id=SHA256(JCS({connection_id,receiver_instance_id,request_id,receive_seq}))，其中receive_seq来自接收端真实request_received的source_seq，只由内部调用链传递，不能接受调用方指定或新增RPC字段。序号/累计丢失及结束规则见第24.2节与epochs登记；runner事后关联，不接受scenario_id、任意payload或外部指定guard结果。仅去敏只读覆盖观测，不作为生产授权或停止/清理证明。 process_fact/protocol_fact只能来自已有实例的真实parent exit或实际通道关闭/失败回调：trigger_digest为对应完整P0ProcessObservation/P0ProtocolObservation的JCS SHA256，trigger_id=SHA256(JCS({record_type,source_instance_id,source_pid,source_seq}))；内部传递真实事实，不读取stderr，不伪装timer，null实例启动失败不能归为已有runtime来源。",
       "allOf": [
         {
           "if": {
@@ -6618,6 +6549,29 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "trigger_kind": {
+                "enum": [
+                  "command",
+                  "process_fact",
+                  "protocol_fact"
+                ]
+              }
+            },
+            "required": [
+              "trigger_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "trigger_id": {
+                "$ref": "#/$defs/Digest"
+              }
+            }
+          }
         }
       ]
     },
@@ -6644,7 +6598,1043 @@
         "dropped_observations"
       ],
       "additionalProperties": false,
-      "$comment": "端点产生的去敏只读 stderr 观测；observation_seq 在本端点实例对每次观测尝试连续从0增加，dropped_observations 是本实例因背压等未写出的累计数量。原始描述符直接继承给 runner，不能只收 Host 转发投影。无 RPC/授权/清理证明地位，生产归约仍只接纳认证 query/event；runner 对序号缺口或非零丢失数拒绝完整证据 PASS。"
+      "$comment": "端点产生的去敏只读stderr快照，序号/累计丢失及结束规则见第24.2节与epochs登记。原始描述符直接继承给runner，不能只收Host转发投影；无RPC/授权/清理证明地位，生产归约仍只接纳认证query/event。"
+    },
+    "P0ObservationError": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "runtime"
+            },
+            "reason_code": {
+              "$ref": "#/$defs/ReasonCode"
+            }
+          },
+          "required": [
+            "kind",
+            "reason_code"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "schema"
+            },
+            "schema_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "keyword": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_name",
+            "keyword"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "node"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+            },
+            "code": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80,
+                  "pattern": "^[A-Z][A-Z0-9_]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "errno": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": -2147483648,
+                  "maximum": 2147483647
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "syscall": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_.]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "code",
+            "errno",
+            "syscall"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "internal"
+            },
+            "code": {
+              "enum": [
+                "unexpected_error",
+                "invalid_frame",
+                "invalid_response",
+                "connection_closed",
+                "request_timeout",
+                "transport_write_failed",
+                "startup_failed",
+                "observation_write_failed"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "code"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "$comment": "只保存实际错误的有限安全分类。runtime使用登记ReasonCode；schema只取实际校验器名称与失败keyword，不复制params/实例值；Node仅取实际name/code/errno/syscall，不输出message、stack、path、环境、凭据或私有启动材料。无法安全分类时internal.unexpected_error，不编造服务端RPC拒绝。"
+    },
+    "P0ProcessObservation": {
+      "type": "object",
+      "properties": {
+        "record_type": {
+          "const": "p0-process-observation"
+        },
+        "source_role": {
+          "enum": [
+            "runner",
+            "operator",
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "source_instance_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "source_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dropped_observations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "observed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "detail": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "spawn_attempt"
+                },
+                "launch_id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "child_role": {
+                  "enum": [
+                    "operator",
+                    "host",
+                    "supervisor",
+                    "endpoint"
+                  ]
+                },
+                "expected_instance_id": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "actual_pid": {
+                  "type": "null"
+                },
+                "command_digest": {
+                  "$ref": "#/$defs/Digest"
+                }
+              },
+              "required": [
+                "kind",
+                "launch_id",
+                "child_role",
+                "expected_instance_id",
+                "actual_pid",
+                "command_digest"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "child_role": {
+                        "enum": [
+                          "host",
+                          "endpoint"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "child_role"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "expected_instance_id": {
+                        "$ref": "#/$defs/Id"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "spawned"
+                },
+                "launch_id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "child_role": {
+                  "enum": [
+                    "operator",
+                    "host",
+                    "supervisor",
+                    "endpoint"
+                  ]
+                },
+                "expected_instance_id": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "actual_pid": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                }
+              },
+              "required": [
+                "kind",
+                "launch_id",
+                "child_role",
+                "expected_instance_id",
+                "actual_pid"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "child_role": {
+                        "enum": [
+                          "host",
+                          "endpoint"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "child_role"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "expected_instance_id": {
+                        "$ref": "#/$defs/Id"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "spawn_error"
+                },
+                "launch_id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "child_role": {
+                  "enum": [
+                    "operator",
+                    "host",
+                    "supervisor",
+                    "endpoint"
+                  ]
+                },
+                "expected_instance_id": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "actual_pid": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 2147483647
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "$ref": "#/$defs/P0ObservationError"
+                }
+              },
+              "required": [
+                "kind",
+                "launch_id",
+                "child_role",
+                "expected_instance_id",
+                "actual_pid",
+                "error"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "child_role": {
+                        "enum": [
+                          "host",
+                          "endpoint"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "child_role"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "expected_instance_id": {
+                        "$ref": "#/$defs/Id"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "exited"
+                },
+                "launch_id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "child_role": {
+                  "enum": [
+                    "operator",
+                    "host",
+                    "supervisor",
+                    "endpoint"
+                  ]
+                },
+                "expected_instance_id": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "actual_pid": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2147483647
+                },
+                "exit_code": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "signal": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 32,
+                      "pattern": "^SIG[A-Z0-9]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "launch_id",
+                "child_role",
+                "expected_instance_id",
+                "actual_pid",
+                "exit_code",
+                "signal"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "exit_code": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "signal": {
+                          "type": "null"
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "exit_code": {
+                          "type": "null"
+                        },
+                        "signal": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32,
+                          "pattern": "^SIG[A-Z0-9]+$"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "child_role": {
+                        "enum": [
+                          "host",
+                          "endpoint"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "child_role"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "expected_instance_id": {
+                        "$ref": "#/$defs/Id"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "startup_rejected"
+                },
+                "error": {
+                  "$ref": "#/$defs/P0ObservationError"
+                },
+                "stage": {
+                  "enum": [
+                    "runtime",
+                    "arguments",
+                    "configuration",
+                    "installation",
+                    "bootstrap",
+                    "listen",
+                    "launch",
+                    "connect"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "error",
+                "stage"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "record_type",
+        "source_role",
+        "source_instance_id",
+        "source_pid",
+        "source_seq",
+        "dropped_observations",
+        "observed_at",
+        "detail"
+      ],
+      "additionalProperties": false,
+      "$comment": "实际parent只记录自身创建的进程，launch_id在实际spawn调用前固定；expected_instance_id仅在启动前由子进程自行分配实例时允许null（当前Supervisor/CLI），Host/Endpoint由父级预分配时必须填固定真实实例。该值在同launch_id整条parent流保持不变，后来的认证实例由真实RPC/child来源关联，禁止回写历史或猜测。spawn_attempt.command_digest=SHA256(JCS({exec_path,args}))，取实际传给spawn的可执行路径和完整参数数组，不包含环境或FD私有启动内容；只记录摘要，启动参数不得含凭据内容，runner实际command artifact、当前构建及parent graph用于复核。实际PID不得换绑；spawned来自真实spawn通知，exited只来自真实退出通知，EOF/kill成功不等于exit。startup_rejected.stage记录实际失败位置：runtime为Node环境检查，arguments为入口参数，configuration为受控配置/凭据读取校验，installation为安装制品核验，bootstrap为私有启动材料/身份绑定，listen为本机服务监听，launch为子进程或已核验端点加载启动，connect为CLI建立管理连接；阶段由真实执行位置决定，不从未知错误文本猜测，未知错误保留internal.unexpected_error。source_instance_id=null只用于尚未建立实例且失败即结束的单条startup_rejected流，不能随后变为有实例流；已有实例始终填固定实例。PID/日志描述符不是认证身份。Worker线程留其专用契约，不伪装OS子进程。",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source_instance_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "source_instance_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_seq": {
+                "const": 0
+              },
+              "detail": {
+                "properties": {
+                  "kind": {
+                    "const": "startup_rejected"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "P0ProtocolObservation": {
+      "type": "object",
+      "properties": {
+        "record_type": {
+          "const": "p0-protocol-observation"
+        },
+        "source_role": {
+          "enum": [
+            "runner",
+            "operator",
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "source_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "source_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dropped_observations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "observed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "connection_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "announcement_received"
+                },
+                "announcement": {
+                  "$ref": "#/$defs/EventEnvelope",
+                  "properties": {
+                    "event_name": {
+                      "const": "connection.announced"
+                    }
+                  },
+                  "required": [
+                    "event_name"
+                  ],
+                  "type": "object"
+                },
+                "fixed_peer": {
+                  "$ref": "#/$defs/P0PeerIdentity"
+                },
+                "fixed_authority": {
+                  "$ref": "#/$defs/P0PeerIdentity"
+                }
+              },
+              "required": [
+                "kind",
+                "announcement",
+                "fixed_peer",
+                "fixed_authority"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "request_queued"
+                },
+                "request": {
+                  "$ref": "#/$defs/P0ObservedRpcRequest"
+                }
+              },
+              "required": [
+                "kind",
+                "request"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "request_received"
+                },
+                "request": {
+                  "$ref": "#/$defs/P0ObservedRpcRequest"
+                }
+              },
+              "required": [
+                "kind",
+                "request"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "response_queued"
+                },
+                "rpc": {
+                  "$ref": "#/$defs/P0ObservedRpcResponse"
+                }
+              },
+              "required": [
+                "kind",
+                "rpc"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "response_received"
+                },
+                "rpc": {
+                  "$ref": "#/$defs/P0ObservedRpcResponse"
+                }
+              },
+              "required": [
+                "kind",
+                "rpc"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "event_queued"
+                },
+                "event": {
+                  "$ref": "#/$defs/RpcEvent"
+                }
+              },
+              "required": [
+                "kind",
+                "event"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "event_received"
+                },
+                "event": {
+                  "$ref": "#/$defs/RpcEvent",
+                  "type": "object",
+                  "properties": {
+                    "params": {
+                      "type": "object",
+                      "properties": {
+                        "event_name": {
+                          "not": {
+                            "const": "connection.announced"
+                          }
+                        }
+                      },
+                      "required": [
+                        "event_name"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "params"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "event"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "local_failure"
+                },
+                "stage": {
+                  "enum": [
+                    "connect",
+                    "announcement",
+                    "encode",
+                    "write",
+                    "read",
+                    "parse",
+                    "request_schema",
+                    "response_schema",
+                    "authenticate",
+                    "clock",
+                    "dispatch",
+                    "close"
+                  ]
+                },
+                "request_id": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "operation_id": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Id"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "request_digest": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Digest"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "$ref": "#/$defs/P0ObservationError"
+                },
+                "frame_sha256": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/Digest"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "frame_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 16777216
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "stage",
+                "request_id",
+                "operation_id",
+                "request_digest",
+                "error",
+                "frame_sha256",
+                "frame_bytes"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "frame_sha256": {
+                        "type": "null"
+                      }
+                    },
+                    "required": [
+                      "frame_sha256"
+                    ]
+                  },
+                  "then": {
+                    "properties": {
+                      "frame_bytes": {
+                        "type": "null"
+                      }
+                    }
+                  },
+                  "else": {
+                    "properties": {
+                      "frame_bytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 16777216
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "record_type",
+        "source_role",
+        "source_instance_id",
+        "source_pid",
+        "source_seq",
+        "dropped_observations",
+        "observed_at",
+        "connection_id",
+        "detail"
+      ],
+      "additionalProperties": false,
+      "$comment": "记录真实传输路径而非预期动作。announcement_received保留实际Schema合法公告及签名；fixed_peer/fixed_authority来自已核验本地信任材料，authority必须是固定supervisor，不采用远端自报身份，接收观察本身不表示验签通过。request_queued仅表示真实传输接受入队；request_received在实际解析及RpcRequest Schema通过之后、业务守卫之前产生，不表示已鉴权或已执行。响应保留真实完整结果/失败并按已关联method验证；去敏RPC类型从commands派生，不能任意JsonValue。local_failure只记实际阶段与可从已知合法请求取得的关联，否则为null，不伪造RpcFailure；非法JSON/未知方法/无效Schema不能包装成合法请求或原样泄露载荷。connection_id只在尚无合法公告/已绑定连接的local_failure可null，正常观察必须与实际连接一致。原payload_digest仅比较两端承诺，不能声称去敏后重算完整载荷或离线验证HMAC。 P0ObservedRpcResponse的method=null仅用于无法关联合法登记方法的真实RpcFailure，保留其实际id/保留码，不伪造method或成功结果。 event_queued仅表示真实JsonChannel接受原RpcEvent入队；event_received保留实际收到且RpcEvent Schema合法的完整原事件，不表示已通过writer/epoch守卫。connection.announced的接收只记announcement_received，同一次接收不能再记event_received；发送公告可记event_queued。local_failure的frame_sha256/frame_bytes只在捕获了完整有界原帧时保留原UTF-8字节摘要及长度，否则均null，禁止将截断摘要冒充完整帧；不输出原始任意载荷。",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "connection_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "connection_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "detail": {
+                "properties": {
+                  "kind": {
+                    "const": "local_failure"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "P0ObservationStreamEnd": {
+      "type": "object",
+      "properties": {
+        "record_type": {
+          "const": "p0-observation-stream-end"
+        },
+        "stream": {
+          "enum": [
+            "process",
+            "protocol",
+            "reduction",
+            "endpoint"
+          ]
+        },
+        "source_role": {
+          "enum": [
+            "runner",
+            "operator",
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "source_instance_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_pid": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "next_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dropped_observations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "observed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "record_type",
+        "stream",
+        "source_role",
+        "source_instance_id",
+        "source_pid",
+        "next_seq",
+        "dropped_observations",
+        "observed_at"
+      ],
+      "additionalProperties": false,
+      "$comment": "固定来源的指定只读观测流唯一结束记录；next_seq是该流所有数据观测尝试数，即最后一次尝试序号加1，空流为0，结束记录自身不消耗数据序号。累计丢失必须真实，不能由runner补零。来源/PID/时钟域与该流一致；source_instance_id=null只允许尚未建立实例即启动失败的process流，不能跨null/非null拼接。正常限时排空、最后end及capture EOF共同完整性规则见第24.2节。",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source_instance_id": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "source_instance_id"
+            ]
+          },
+          "then": {
+            "properties": {
+              "stream": {
+                "const": "process"
+              },
+              "next_seq": {
+                "const": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "Phase": {
       "$comment": "derived from verification.json phase_dependencies",
@@ -10423,6 +11413,43 @@
               "$ref": "#/$defs/RpcId"
             },
             "method": {
+              "const": "host.query"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0SessionQueryInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
               "const": "session.execute"
             },
             "params": {
@@ -11907,6 +12934,60 @@
               "$ref": "#/$defs/RpcId"
             },
             "method": {
+              "const": "host.query"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
               "const": "session.execute"
             },
             "params": {
@@ -13180,6 +14261,46 @@
                     },
                     "result": {
                       "$ref": "#/$defs/P0SessionSnapshot"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "host.query"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0EndpointProjection"
                     }
                   },
                   "required": [

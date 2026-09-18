@@ -1710,6 +1710,17 @@ export const commands = {
       "unsupported_reason": null
     },
     {
+      "name": "host.query",
+      "input_schema": "P0SessionQueryInput",
+      "result_schema": "P0EndpointProjection",
+      "target": "host",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "operator.query",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
       "name": "session.execute",
       "input_schema": "P0SubmitInput",
       "result_schema": "P0SimulationResult",
@@ -3295,6 +3306,30 @@ export const contracts = {
       "owner": "受信假设备当前实例",
       "phase": "P0",
       "semantic_rules": "端点 stderr 只读去敏日志，原始描述符直接交验收 runner；序号/丢失数用于证据完整性，不替代认证端点事实或授予清理/执行权限。"
+    },
+    {
+      "ref": "p0-process-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ProcessObservation",
+      "owner": "实际受信parent或记录自身启动失败的进程",
+      "phase": "P0",
+      "semantic_rules": "真实spawn/退出事实的有限stderr观测；预期实例/实际PID分开，EOF或kill成功不是退出证明，父进程先死保留未知。"
+    },
+    {
+      "ref": "p0-protocol-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ProtocolObservation",
+      "owner": "实际传输发送/接收进程",
+      "phase": "P0",
+      "semantic_rules": "完整真实请求/响应经精确去敏并绑定登记方法；本地失败不伪造远端结果，排队/接收不等于鉴权或执行。"
+    },
+    {
+      "ref": "p0-observation-stream-end@1",
+      "kind": "read_only_observation",
+      "schema": "P0ObservationStreamEnd",
+      "owner": "各只读观测流的唯一写入进程",
+      "phase": "P0",
+      "semantic_rules": "只读有限流末尾计数，配合原始EOF证明完整性；异常结束保留不完整，不能补零、补尾或作为生产安全证明。"
     }
   ],
   "capabilities": [
@@ -3307,4 +3342,4 @@ export const contracts = {
     }
   ]
 } as const;
-export const schemaDigest = "1c154cb7fd06740a7c908601ce1e1f78e291bf95fa25aa6d4bcf4058f662575e" as const;
+export const schemaDigest = "ad6e48a89e8ca6df9a4b8c48abace4392488459ec02a95011b2d15e55dd34812" as const;

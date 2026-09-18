@@ -98,6 +98,8 @@ P0 的本机管理与安全 socket 同样采用上述有界帧和登记命令。
 
 管理请求使用 P0OperatorProof。服务端保存的 authentication_key_sha256 是随机操作员秘密的 SHA256 十六进制，解码成字节后作为 HMAC 密钥，属于等价秘密，不是可公开 verifier。先计算 request_digest=SHA256(JCS({method, context 去掉 payload_digest, input 去掉 proof}))；再计算 proof_hmac=HMAC-SHA256(key, JCS(proof 去掉 proof_hmac))，绑定公告摘要、一次性挑战、连接、服务实例、认证调用方实例、客户端 nonce 与请求摘要；最后计算 CommandContext.payload_digest=SHA256(JCS({method,input 含完整 proof}))。此顺序没有自引用。服务端原子消耗挑战；每条管理请求建立新连接取得新挑战，旧连接/旧实例/旧挑战证明不能重放。长期秘密和等价认证密钥均不在网络中发送。operator.authenticate 与其它管理方法调用同一证明验证逻辑；操作员 ID 只表示身份标签。业务去重遵循第4.11节，新的合法连接证明不能刷新原 operation 的权力或期限。管理命令另以 method 和 input 去掉 proof/mapping 的规范摘要识别固定业务输入；同 operation 的授权 scope、grant、代次与原目标期限必须一致。完整传输 payload_digest 仍保护每次实际 input，不把变动的连接证明当成新业务操作。端点执行登记中的 payload_digest 同样表示固定业务输入，排除传输证明/映射/提交回执；不能用包含自身的整个 registration 计算。
 
+host.query 使用第22.5节固定的 Host 管理 socket 与身份文件，通过同一操作员鉴权入口验证 operator.query 权限及当前 session，返回 Host 实际持有的端点投影。来源固定为已核验启动材料中的端点实例，事实还须匹配当前 session；无事实时明确 unknown/null。查询只评估缓存质量，不刷新实际接收时间，不代理监督或端点获取另一份事实。session.query 的监督视图与 host.query 的 Host 视图分别保留，供第24节独立核验。
+
 storage.* 命令只通过监督与其 Worker 的私有通道传递，不能由插件或管理客户端直达；框架仍校验登记的输入、结果与调用方身份。监督在创建 Worker 时经私有启动材料显式分配同一单调时钟域和基准，Worker 必须按该基准解释命令 deadline，不能各自生成不同起点却沿用同一域名。这个同进程绑定不外推到宿主或端点：跨进程继续使用 P0ClockMapping，不猜测共享时钟。P0 的命令、配置、安装、持久化和验收证据类型全部由同一 Schema 定义，不以任意 DataObject 承载执行指令。
 
 

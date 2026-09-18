@@ -130,6 +130,30 @@
       "owner": "受信假设备当前实例",
       "phase": "P0",
       "semantic_rules": "端点 stderr 只读去敏日志，原始描述符直接交验收 runner；序号/丢失数用于证据完整性，不替代认证端点事实或授予清理/执行权限。"
+    },
+    {
+      "ref": "p0-process-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ProcessObservation",
+      "owner": "实际受信parent或记录自身启动失败的进程",
+      "phase": "P0",
+      "semantic_rules": "真实spawn/退出事实的有限stderr观测；预期实例/实际PID分开，EOF或kill成功不是退出证明，父进程先死保留未知。"
+    },
+    {
+      "ref": "p0-protocol-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ProtocolObservation",
+      "owner": "实际传输发送/接收进程",
+      "phase": "P0",
+      "semantic_rules": "完整真实请求/响应经精确去敏并绑定登记方法；本地失败不伪造远端结果，排队/接收不等于鉴权或执行。"
+    },
+    {
+      "ref": "p0-observation-stream-end@1",
+      "kind": "read_only_observation",
+      "schema": "P0ObservationStreamEnd",
+      "owner": "各只读观测流的唯一写入进程",
+      "phase": "P0",
+      "semantic_rules": "只读有限流末尾计数，配合原始EOF证明完整性；异常结束保留不完整，不能补零、补尾或作为生产安全证明。"
     }
   ],
   "capabilities": [
