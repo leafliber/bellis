@@ -10970,6 +10970,2855 @@
         }
       ]
     },
+    "P0ObservedOperatorProof": {
+      "type": "object",
+      "properties": {
+        "credential_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "announcement_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "challenge_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "service_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_nonce": {
+          "$ref": "#/$defs/Id"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "redaction": {
+          "const": "proof_hmac_removed"
+        },
+        "authenticator_sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "credential_id",
+        "announcement_digest",
+        "challenge_id",
+        "connection_id",
+        "service_instance_id",
+        "client_instance_id",
+        "client_nonce",
+        "request_digest",
+        "redaction",
+        "authenticator_sha256"
+      ],
+      "additionalProperties": false,
+      "$comment": "derived from P0OperatorProof; authenticator_sha256 hashes the original authenticator string UTF-8 bytes, never the authentication key; not a production proof"
+    },
+    "P0ObservedPeerProof": {
+      "type": "object",
+      "properties": {
+        "announcement_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "challenge_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "service_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_role": {
+          "enum": [
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "client_nonce": {
+          "$ref": "#/$defs/Id"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "redaction": {
+          "const": "signature_removed"
+        },
+        "authenticator_sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "announcement_digest",
+        "challenge_id",
+        "connection_id",
+        "service_instance_id",
+        "client_instance_id",
+        "client_role",
+        "client_nonce",
+        "request_digest",
+        "redaction",
+        "authenticator_sha256"
+      ],
+      "additionalProperties": false,
+      "$comment": "derived from P0PeerProof; authenticator_sha256 hashes the original authenticator string UTF-8 bytes, never the authentication key; not a production proof"
+    },
+    "P0ObservedRpcRequest": {
+      "$comment": "derived from commands.json and original input shapes; exact proof redaction only",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "plugin.handshake"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/HandshakeInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "plugin.describe"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/EmptyInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "controller.observe_status"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/InstanceInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "controller.stop"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/StopInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "controller.dispose"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/InstanceInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "scene.open"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/SceneOpenInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "utterance.open"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/UtteranceOpenInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "segment.commit"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/SegmentCommitInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "utterance.seal"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/UtteranceSealInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "scene.close"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/SceneCloseInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "audio.eos"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/AudioEosInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "operator.authenticate"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "session.authorize"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "endpoint_instance_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "mode": {
+                      "enum": [
+                        "simulation",
+                        "test_only",
+                        "public"
+                      ]
+                    },
+                    "supervision_mode": {
+                      "enum": [
+                        "supervised",
+                        "unattended_approved"
+                      ]
+                    },
+                    "target_refs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/ObjectRef"
+                      },
+                      "minItems": 1,
+                      "maxItems": 16
+                    },
+                    "allowed_capabilities": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/CapabilityIdentity"
+                      },
+                      "minItems": 1,
+                      "maxItems": 32
+                    },
+                    "effect_limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 100000
+                    },
+                    "queue_limit": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 1024
+                    },
+                    "cost_limit_units": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "human_lease_deadline": {
+                      "$ref": "#/$defs/Deadline"
+                    },
+                    "grant_deadline": {
+                      "$ref": "#/$defs/Deadline"
+                    },
+                    "public_broadcast_allowed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id",
+                    "endpoint_instance_id",
+                    "mode",
+                    "supervision_mode",
+                    "target_refs",
+                    "allowed_capabilities",
+                    "effect_limit",
+                    "queue_limit",
+                    "cost_limit_units",
+                    "human_lease_deadline",
+                    "grant_deadline",
+                    "public_broadcast_allowed"
+                  ],
+                  "additionalProperties": false,
+                  "$comment": "明确人工动作；目标期限均已映射到监督时钟，批准前复核配置、身份、实例、安装信任、未知隔离和真实持久化条件。"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "session.renew"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "supervision_epoch": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "human_lease_deadline": {
+                      "$ref": "#/$defs/Deadline"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id",
+                    "supervision_epoch",
+                    "human_lease_deadline"
+                  ],
+                  "additionalProperties": false,
+                  "$comment": "只延长人工租约，不改变原 grant/action deadline、不扩 scope、不复活终态。"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "session.revoke"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "grant_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "reason": {
+                      "$ref": "#/$defs/TerminationReason"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id",
+                    "grant_id",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "session.stop"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "target_ref": {
+                      "$ref": "#/$defs/ObjectRef"
+                    },
+                    "reason": {
+                      "$ref": "#/$defs/TerminationReason"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id",
+                    "target_ref",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "session.query"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "session.execute"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "grant_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "endpoint_instance_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "action": {
+                      "$ref": "#/$defs/P0SimulationAction"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id",
+                    "grant_id",
+                    "endpoint_instance_id",
+                    "action"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "supervisor.query"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0PeerQueryInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "supervisor.health"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0HealthInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "endpoint.lease"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0EndpointLease"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "endpoint.revoke"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0EndpointRevokeInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "simulation.execute"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0ExecuteInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "simulation.query"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0SimulationQueryInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "clock.sample"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0ClockSampleInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "fault.configure"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedOperatorProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    },
+                    "session_id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "selection": {
+                      "$ref": "#/$defs/P0FaultSelection"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping",
+                    "session_id",
+                    "selection"
+                  ],
+                  "additionalProperties": false,
+                  "$comment": "只允许 test_operator、P0 simulation 且启动显式启用故障注入；不提供普通操作员任意代码入口。"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "storage.commit"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0StoreCommitInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "storage.query"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0StoreQueryInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "storage.ack_outbox"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0StoreAckInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "connection.authenticate"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "type": "object",
+                  "properties": {
+                    "proof": {
+                      "$ref": "#/$defs/P0ObservedPeerProof"
+                    },
+                    "mapping": {
+                      "$ref": "#/$defs/P0ClockMapping"
+                    }
+                  },
+                  "required": [
+                    "proof",
+                    "mapping"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "supervisor.register_effect"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0RegisterEffectInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/RpcId"
+            },
+            "method": {
+              "const": "fault.apply"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/CommandContext"
+                },
+                "input": {
+                  "$ref": "#/$defs/P0FaultApplyInput"
+                }
+              },
+              "required": [
+                "context",
+                "input"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "P0ObservedRpcResponse": {
+      "$comment": "derived from commands.json result schemas; a missing method permits failure only",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "plugin.handshake"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/HandshakeResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "plugin.describe"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/ControllerManifest"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "controller.observe_status"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/ControllerStatus"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "controller.stop"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "controller.dispose"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "scene.open"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "utterance.open"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "segment.commit"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "utterance.seal"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "scene.close"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "audio.eos"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/AcceptedOperation"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "operator.authenticate"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0OperatorIdentity"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "session.authorize"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0AuthorizationResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "session.renew"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/SupervisionRecord"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "session.revoke"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/StopOperationRecord"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "session.stop"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/StopOperationRecord"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "session.query"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0SessionSnapshot"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "session.execute"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0SimulationResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "supervisor.query"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0SessionSnapshot"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "supervisor.health"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0HealthResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "endpoint.lease"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0EndpointSnapshot"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "endpoint.revoke"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0EndpointSnapshot"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "simulation.execute"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0SimulationResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "simulation.query"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0EndpointSnapshot"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "clock.sample"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0ClockSampleResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "fault.configure"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0FaultResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "storage.commit"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0PersistenceReceipt"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "storage.query"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0StoreQueryResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "storage.ack_outbox"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0PersistenceReceipt"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "connection.authenticate"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0PeerAuthenticationResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "supervisor.register_effect"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0RegisteredEffect"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "const": "fault.apply"
+            },
+            "response": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "jsonrpc": {
+                      "const": "2.0"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/RpcId"
+                    },
+                    "result": {
+                      "$ref": "#/$defs/P0FaultResult"
+                    }
+                  },
+                  "required": [
+                    "jsonrpc",
+                    "id",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/RpcFailure"
+                }
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "null"
+            },
+            "response": {
+              "$ref": "#/$defs/RpcFailure"
+            }
+          },
+          "required": [
+            "method",
+            "response"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
     "SegmentState": {
       "$comment": "derived from state-machines.json: Segment",
       "enum": [
