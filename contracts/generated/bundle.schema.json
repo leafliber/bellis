@@ -3677,7 +3677,7 @@
         "external_effects_allowed"
       ],
       "additionalProperties": false,
-      "$comment": "受信安装清单由本机操作员维护；入口及其实际加载制品必须全量核验，不信任插件自报。空白名单不授予权限。"
+      "$comment": "受信安装清单由本机操作员维护；入口及其实际加载制品必须全量核验，不信任插件自报。空白名单不授予权限。 Manifest 固定为核验后 entry 真实目录内的 manifest.json，必须在 artifacts 中；同时验证文件 SHA256 和解析后 JCS 的 manifest_digest，不采用插件自报替代。"
     },
     "P0SafetyLimits": {
       "type": "object",
@@ -3841,7 +3841,7 @@
         "fault_injection_enabled"
       ],
       "additionalProperties": false,
-      "$comment": "P0 宿主专用启动配置；所有路径限定本机受控目录，秘密仅读本机凭据文件，不传入插件环境。"
+      "$comment": "P0 监督专用启动配置；监督保管服务私钥和数据库配置。给宿主派生封闭 P0HostBootstrap，给假设备只传 P0EndpointConfig；所有本机路径遵守第22.3节，秘密不放命令行、环境或日志。"
     },
     "P0AdmissionRecord": {
       "type": "object",
@@ -6084,10 +6084,34 @@
           "maxLength": 4096
         },
         "host_identity": {
-          "$ref": "#/$defs/P0PeerIdentity"
+          "allOf": [
+            {
+              "$ref": "#/$defs/P0PeerIdentity"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "const": "host"
+                }
+              }
+            }
+          ]
         },
         "supervisor_identity": {
-          "$ref": "#/$defs/P0PeerIdentity"
+          "allOf": [
+            {
+              "$ref": "#/$defs/P0PeerIdentity"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "const": "supervisor"
+                }
+              }
+            }
+          ]
         },
         "safety_socket_path": {
           "type": "string",
@@ -6210,6 +6234,107 @@
       ],
       "additionalProperties": false,
       "$comment": "仅经互认证监督专用通道，下发已认证 test_operator 批准的 fault_id/目标实例/有限命令期限；接收者仍验证 simulation、实例和固定故障枚举，不关闭守卫。"
+    },
+    "P0HostBootstrap": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "host_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "identity_key_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "identity_private_key_pkcs8": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "supervisor_identity": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/P0PeerIdentity"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "const": "supervisor"
+                }
+              }
+            }
+          ]
+        },
+        "supervisor_socket_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "host_socket_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "profile": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RuntimeProfile"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "const": "simulation"
+                },
+                "enabled_phases": {
+                  "type": "array",
+                  "items": {
+                    "const": "P0"
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              }
+            }
+          ]
+        },
+        "installation": {
+          "$ref": "#/$defs/P0TrustedInstallation"
+        },
+        "limits": {
+          "$ref": "#/$defs/P0SafetyLimits"
+        },
+        "operator_credentials_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "fault_injection_enabled": {
+          "type": "boolean"
+        },
+        "endpoint_config": {
+          "$ref": "#/$defs/P0EndpointConfig"
+        }
+      },
+      "required": [
+        "session_id",
+        "host_instance_id",
+        "identity_key_id",
+        "identity_private_key_pkcs8",
+        "supervisor_identity",
+        "supervisor_socket_path",
+        "host_socket_path",
+        "profile",
+        "installation",
+        "limits",
+        "operator_credentials_path",
+        "fault_injection_enabled",
+        "endpoint_config"
+      ],
+      "additionalProperties": false,
+      "$comment": "监督受信启动器经私有继承描述符一次传入宿主，读取后关闭描述符；宿主仅持自身临时实例私钥，无监督私钥或数据库路径。supervisor_socket_path=监督 management_socket_path；host_socket_path=supervisor_socket_path+\".host\"。endpoint_config 原样交给已核验端点；session、身份、公钥、安装、limits 必须与已核验启动材料精确匹配，禁止重解释或补默认。"
     },
     "Phase": {
       "$comment": "derived from verification.json phase_dependencies",

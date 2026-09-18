@@ -124,6 +124,7 @@ export const P0EndpointConfig: Validator<SchemaTypes["P0EndpointConfig"]>;
 export const P0RegisterEffectInput: Validator<SchemaTypes["P0RegisterEffectInput"]>;
 export const P0RegisteredEffect: Validator<SchemaTypes["P0RegisteredEffect"]>;
 export const P0FaultApplyInput: Validator<SchemaTypes["P0FaultApplyInput"]>;
+export const P0HostBootstrap: Validator<SchemaTypes["P0HostBootstrap"]>;
 export const Phase: Validator<SchemaTypes["Phase"]>;
 export const EventName: Validator<SchemaTypes["EventName"]>;
 export const EventPayloadBinding: Validator<SchemaTypes["EventPayloadBinding"]>;

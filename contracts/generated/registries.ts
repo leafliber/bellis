@@ -3271,6 +3271,14 @@ export const contracts = {
       "owner": "受信启动器",
       "phase": "P0",
       "semantic_rules": "假设备专用受限配置；只有自身实例私钥和受信host/supervisor公钥，不授予管理/存储凭据。"
+    },
+    {
+      "ref": "p0-host-bootstrap@1",
+      "kind": "configuration",
+      "schema": "P0HostBootstrap",
+      "owner": "独立监督的受信启动器",
+      "phase": "P0",
+      "semantic_rules": "仅私有继承描述符传入宿主。自身临时身份与端点配置中的host公钥一致，固定supervisor身份/会话/安装/profile/limits与监督启动材料一致；不包含监督私钥或数据库路径。"
     }
   ],
   "capabilities": [
@@ -3283,4 +3291,4 @@ export const contracts = {
     }
   ]
 } as const;
-export const schemaDigest = "4c1f69688ed118d5ca219bae8730688df0dac486002373ffb669ac8c46f988c6" as const;
+export const schemaDigest = "66f32088deef4e07e4fc076fb193c5def4d7a724e7e2fd7e68ebe7dda3958447" as const;
