@@ -4056,7 +4056,7 @@
         "registered_at"
       ],
       "additionalProperties": false,
-      "$comment": "宿主是唯一语义写入者；按实例/会话/operation 原子去重，在实际效果准入前与 Outbox 事务登记。 payload_digest 是固定业务输入摘要，排除连接证明/mapping/回执，不等于传输 CommandContext.payload_digest，禁止自引用。 deadline 保留宿主原时钟域；Host→Endpoint 保守映射首次接纳时固定，重试不能重映射延后。"
+      "$comment": "宿主是唯一语义写入者；按实例/会话/operation 原子去重，在实际效果准入前与 Outbox 事务登记。 payload_digest 是固定业务输入摘要，排除连接证明/mapping/回执，不等于传输 CommandContext.payload_digest，禁止自引用。 deadline 保留宿主原时钟域；Host→Endpoint 保守映射首次接纳时固定，重试不能重映射延后。 固定业务摘要精确为 SHA256(JCS({session_id,grant_id,endpoint_instance_id,action}))，action 为完整 P0SimulationAction（包含 interval_ms）；operation_id 与原 deadline 独立由完整 registration 及真实 receipt 绑定。"
     },
     "P0EffectFact": {
       "type": "object",
@@ -4837,7 +4837,7 @@
         "receipt"
       ],
       "additionalProperties": false,
-      "$comment": "仅绑定的监督安全通道可安装；三个期限取最早，且不能超过原 grant 的保守映射。心跳仅能刷新有限连接租约，不能延长人工/grant期限。 端点在认证监督通道上核验 receipt.grant_digests/admission_digests 分别包含完整 grant/admission 的 JCS SHA256，再固定该 lease 的 writer_instance_id；不可省略真实持久化回执或接受调用方自报 durable。 grant.deadline 保留监督原时钟域；deadline 是其按监督→端点 mapping 得到的端点域上限，human_lease_deadline 是人工租约的端点域保守上限，local_lease_deadline 是监督下发的端点域短连接租约上限。三者均不得越过实际 Host 业务连接映射有效期，端点复核原 grant 映射而非修改原记录。"
+      "$comment": "仅绑定的监督安全通道可安装；三个期限取最早，且不能超过原 grant 的保守映射。心跳仅能刷新有限连接租约，不能延长人工/grant期限。 端点在认证监督通道上核验 receipt.grant_digests/admission_digests 分别包含完整 grant/admission 的 JCS SHA256，再固定该 lease 的 writer_instance_id；不可省略真实持久化回执或接受调用方自报 durable。 grant.deadline 保留监督原时钟域；deadline 是其按监督→端点 mapping 得到的端点域上限，human_lease_deadline 是人工租约的端点域保守上限，local_lease_deadline 是监督下发的端点域短连接租约上限。三者均不得越过实际 Host 业务连接映射有效期，端点复核原 grant 映射而非修改原记录。 同一 lease_id 绑定完整输入，重试不得改变或延长期限；新 lease_id 可由固定监督传递真实操作员显式续租后的人工期限，但不得越过首次安装固定的原 grant 映射上限。监督必须区分显式人工续租与连接 heartbeat，后者不得延长人工期限；旧 lease 重放不覆盖后续 lease。"
     },
     "P0EndpointRevokeInput": {
       "type": "object",

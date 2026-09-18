@@ -3307,4 +3307,4 @@ export const contracts = {
     }
   ]
 } as const;
-export const schemaDigest = "11990c890991948199fce8d508b1c1ccf32d9d703fa971ecdc94bd20a5f165be" as const;
+export const schemaDigest = "95b69b3b90c804b88fe100c7e5bf6519365706b44cfe2c294385665d21ded7fa" as const;
