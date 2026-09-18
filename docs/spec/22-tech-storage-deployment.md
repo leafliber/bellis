@@ -10,7 +10,7 @@
 | 活动执行 | 受限静态Plan先行，复杂状态可用XState；不因建模借鉴而强制引入ROS/行为树引擎 |
 | 插件协议 | 本地JSON-RPC或等价有限RPC＋事件；应用层补齐句柄、取消、幂等、时效、效果与结算 |
 | Stage | TypeScript＋Web Audio／AudioWorklet、有限PCM缓冲，审核字幕同源就近同步 |
-| 重计算／控制后端 | Python/原生Worker按生态和实测选择，摄像/解码/模型加载不堵宿主；本地快策略按control_critical单独准入 |
+| 重计算／控制后端 | P0/P1 开发与验收只依赖 Node 和 pnpm；Node Worker 与独立进程隔离阻塞工作。后续后端选型留到对应阶段，不引入 Python 前置。 |
 | 游戏 | 独立Game Runtime＋Game Pack＋Input Broker；保留独立仓库/环境选择 |
 | 控制台/Overlay | 角色分权Web端，独立Origin和凭证 |
 | 持久化 | 单机SQLite＋必要文件/证据存储，有界缓存；不先引入分布式消息集群 |
@@ -37,6 +37,10 @@ Node同步重计算和I/O会影响事件循环；OBS也需要GPU合成资源，�
 
 安全封锁的本地归约不在数据库提交失败时回滚。第11.6节的incident/record_status标明记录缺口；需可靠登记的新效果暂停准入。重启不恢复旧grant/lease，默认关闭相应新增效果，完成端点核验后才能重新授权。独立清理/对账协调器不挂在短命插件或终态actor之下；这不要求另建微服务。
 
+P0 使用已锁定的 better-sqlite3，由监督进程中的独立持久化 Worker 独占数据库写连接；顺序迁移与版本表在启用前核验，不引入 ORM 或第二驱动。只建立授权、首验准入、有限效果登记、停止、清理/隔离与 Outbox 的必要表，不提前建立通用任务/结算表。事务内同时登记状态与相应可靠事件，新增效果取得真实提交回执后才准入；接收异步回执仍须复核当前 grant/实例/代次/期限。Worker 只接受已登记的封闭消息，不接受任意 SQL 或客户端伪造的提交证明。
+
+Outbox 重放保持原 event/operation 和原期限，只重发事实或查询已登记结果，不再次创造效果；禁止把旧 grant 或未决执行意图作为重启恢复队列。停止、撤权和未知归约不等待 Worker；Worker 阻塞、SQLITE_FULL 或失败时关闭可靠新效果准入，记录缺口并保留隔离。启动时不能读取可信清理事实即保持受影响目标封锁，不能以空数据库宣称资源无未知。
+
 ### 22.3 部署视图
 
 ```text
@@ -58,6 +62,8 @@ Node同步重计算和I/O会影响事件循环；OBS也需要GPU合成资源，�
 
 macOS可以开发宿主与协议；实际Windows游戏采集、键鼠、音频和OBS必须真机验收。桌面组件不为了容器一致性脱离交互桌面；Iris等服务可容器化。普通插件可替换不等于每个能力都须独立进程。
 
+P0 部署只启用三条进程职责：宿主、监督（含独立 SQLite Worker）和受信假设备；本地 CLI 经受限管理 socket 发起明确动作。宿主到假设备走有界 stdio JSON-RPC，监督到假设备走独立安全 socket，停止不依赖宿主转发。所有入口只使用 Node；当前 macOS 是本阶段 SUT 验收环境，其它系统的结构检查不构成对应宿主/设备验收。
+
 ### 22.5 插件Manifest与升级
 
 Manifest包含ID/版本、支持平台、Schema版本、输入输出、生命周期、supported contexts、阶段资源、effect类别、最大并发、quiesce/restore/checkpoint能力、成功/清理证据、网络/文件/存储权限、配置生效点与测试覆盖。控制能力另声明control_modes、ActionSchema/Profile、TimingContract、PolicySchema与更新边界、PolicyBackend版本、control_critical预算和完整负载验证引用；这些由Game Runtime实施，Bellis只保留公共契约与必要投影。
@@ -65,6 +71,8 @@ Manifest包含ID/版本、支持平台、Schema版本、输入输出、生命周
 机器定义为ControllerManifest及关联类型（字段见[P0契约简报](../generated/P0.md#字段结构)）。宿主加载时校验精确版本、所有契约引用、方法与能力开关一致性、受信安装来源和启用阶段；simulation不能声明已启用的真实效果。空资源或空权限列表只表示没有该项授权，不表示通配。
 
 缺能力用明确unsupported，不写空实现伪装兼容。仅维护本地可信安装清单和兼容测试，无市场。Schema更改、源码替换、活动Plan修订三条发布线分开；停用要排空/取消/隔离并确认资源，不因插件卸载遗失活动owner。
+
+P0 首验具体限制集中于第20.2节。安装核验必须覆盖入口真实解析路径及其实际加载依赖，不能只检查 Manifest 名称或入口路径字符串。服务身份密钥和操作员凭据保存在本机受控目录，不入库、不写原始日志、不传入插件；用于验收的故障选择仅允许认证 test_operator 在明确启用的 P0 simulation 中使用封闭枚举，不允许任意代码、跳过鉴权或关闭守卫。
 
 ### 22.6 插件ABI与传输绑定
 
@@ -77,3 +85,18 @@ Manifest包含ID/版本、支持平台、Schema版本、输入输出、生命周
 解析错误、无效请求、未知方法、参数错误和内部错误使用JSON-RPC保留整数码；业务拒绝统一-32000并在error.data放完整ErrorEnvelope。业务错误的类别/reason_code/retry_disposition仍由errors.json唯一决定。只有非法/无法读取请求id时响应id为null。RPC accepted只说明登记成功，真实完成/效果/清理仍走事件与查询；event.publish仅承载已登记EventEnvelope，不是新的事件名或执行命令。
 
 公开方法由目标与角色共同限定。describe/status等查询不能夹带主动观察或输入；prepare不授予activate权限。请求、响应、事件分别经过大小/结构/来源/权限/时效核验；取消、资源停止与归约守卫均需真实实现。仓库内SimulationEndpoint仅测试JSON交换和去重，不构成受信执行或设备停止证明。
+
+P0 的本机管理与安全 socket 同样采用上述有界帧和登记命令。受信启动器绑定角色、实例、安装摘要和服务公钥；CLI 从本机受控安装材料取得目标服务公钥和自己的操作员凭据。新连接先收到已登记 connection.announced 公告：服务使用 Node 内置 Ed25519 对去掉 signature 后的规范化载荷加固定域分隔签名。公告限定本连接、服务实例、一次性挑战、协议/契约摘要、目标时钟采样和有限有效期；接收者验签并确认外层来源与载荷一致后才采用。公告不得携带授权或执行动作，这不是通用签名平台。
+
+客户端在建连前、收取公告后分别记本地单调时钟，结合目标接收/发送点建立 target-source 偏移区间：整数毫秒采样的下界为目标发送减源接收再减1毫秒，上界为目标接收减源发送再加1毫秒，覆盖量化误差。只在身份、实例、连接、顺序、误差上限和有限有效期均有效时建立 P0ClockMapping；过宽区间拒绝。源期限映射取偏移下界并受目标有效期上限约束，不增加可执行时间。所有 RPC 的 CommandContext.deadline 仍是明确目标时钟域；clock.sample 只在已有有效映射和认证通道上细化采样。映射失效、目标重启或无法证明先后时拒绝，不猜换算、不因重试或往返延长期限。
+
+管理请求使用 P0OperatorProof。服务端保存的 authentication_key_sha256 是随机操作员秘密的 SHA256 十六进制，解码成字节后作为 HMAC 密钥，属于等价秘密，不是可公开 verifier。先计算 request_digest=SHA256(JCS({method, context 去掉 payload_digest, input 去掉 proof}))；再计算 proof_hmac=HMAC-SHA256(key, JCS(proof 去掉 proof_hmac))，绑定公告摘要、一次性挑战、连接、服务实例、认证调用方实例、客户端 nonce 与请求摘要；最后计算 CommandContext.payload_digest=SHA256(JCS({method,input 含完整 proof}))。此顺序没有自引用。服务端原子消耗挑战；每条管理请求建立新连接取得新挑战，旧连接/旧实例/旧挑战证明不能重放。长期秘密和等价认证密钥均不在网络中发送。operator.authenticate 与其它管理方法调用同一证明验证逻辑；操作员 ID 只表示身份标签。业务去重遵循第4.11节，新的合法连接证明不能刷新原 operation 的权力或期限。管理命令另以 method 和 input 去掉 proof/mapping 的规范摘要识别固定业务输入；同 operation 的授权 scope、grant、代次与原目标期限必须一致。完整传输 payload_digest 仍保护每次实际 input，不把变动的连接证明当成新业务操作。端点执行登记中的 payload_digest 同样表示固定业务输入，排除传输证明/映射/提交回执；不能用包含自身的整个 registration 计算。
+
+storage.* 命令只通过监督与其 Worker 的私有通道传递，不能由插件或管理客户端直达；框架仍校验登记的输入、结果与调用方身份。P0 的命令、配置、安装、持久化和验收证据类型全部由同一 Schema 定义，不以任意 DataObject 承载执行指令。
+
+
+P0 子进程启动使用专用 P0EndpointConfig，由私有继承描述符传送端点自身的临时实例私钥、固定 host/supervisor 公钥、实例/安装身份、通道与有限配置，不传 P0RuntimeConfig 中的操作员凭据、服务私钥或数据库配置。端点连接先用 connection.authenticate 对一次性公告挑战进行签名证明，服务以启动时固定的对端公钥校验后绑定角色/实例；外来声明不能替换固定公钥。签名只用于本阶段连接身份，规则与管理请求一致地排除自引用字段。
+
+宿主通过 supervisor.register_effect 提交封闭效果登记和完整模拟动作；监督核验当前 grant/实例/范围/余量后交私有 storage.commit，在真实事务回执后再次核验授权仍有效。只有成功返回的登记回执才能交给假设备，Worker 或监督未就绪时拒绝新增效果。撤权与独立停止无需走此准入链。
+
+已认证 test_operator 的 fault.configure 由监督核验后，使用 fault.apply 经目标专用安全通道下发；消息固定 fault_id、目标实例、封闭选择与有限目标时钟期限。各进程只接受当前认证监督，持久化 Worker 使用与监督绑定的私有继承通道；不得用任意 child.send、SQL 或通用 batch 夹带故障。故障可使 cancel 永不回包，但不能关闭端点独立租约、鉴权或守卫。

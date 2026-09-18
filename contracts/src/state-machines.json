@@ -1267,7 +1267,7 @@
           "event": "supervision_lost",
           "target": "restricted",
           "guard": "always",
-          "action": "撤相关公开自由输出与游戏输入；固定提示/只读可继续；启动有限宽限",
+          "action": "P0 立即撤销全部新增模拟效果许可，独立监督/端点租约推进停止；其它已启用阶段按其有限收尾策略处理。",
           "phase": "P0"
         },
         {
@@ -1363,7 +1363,7 @@
         "supervised",
         "unattended_approved"
       ],
-      "notes": "表外转换拒绝；终态不可复活；新证据用Reconciliation追加。监督模式stopped为可重新人工授权的安全静止态，不是业务终态。"
+      "notes": "表外转换拒绝；终态不可复活；新证据用Reconciliation追加。监督模式stopped为可重新人工授权的安全静止态，不是业务终态。 P0 的 unattended_approved 只验证守卫拒绝，不可达批准不作为生产能力。"
     },
     {
       "id": "ExecutionGrant",
@@ -1382,7 +1382,7 @@
           "event": "approve",
           "target": "ACTIVE",
           "guard": "execution_grant_valid",
-          "action": "绑定mode=test_only或public、profile/目标/动作/预算/截止/监督代次；test_only不得公开播出",
+          "action": "绑定第20.2节许可模式、会话/宿主/监督/端点实例、精确代次、有限白名单/效果/队列/费用/期限与首验准入；P0 仅 simulation 且禁止公开输出",
           "phase": "P0"
         },
         {

@@ -304,6 +304,30 @@
         },
         "public_broadcast_allowed": {
           "type": "boolean"
+        },
+        "host_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervisor_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "queue_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "admission_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -320,7 +344,12 @@
         "deadline",
         "operator_id",
         "gate_evidence_refs",
-        "public_broadcast_allowed"
+        "public_broadcast_allowed",
+        "host_instance_id",
+        "supervisor_instance_id",
+        "endpoint_instance_id",
+        "queue_limit",
+        "admission_ref"
       ],
       "additionalProperties": false,
       "allOf": [
@@ -342,6 +371,29 @@
             "properties": {
               "public_broadcast_allowed": {
                 "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "simulation"
+              },
+              "state": {
+                "const": "ACTIVE"
+              }
+            },
+            "required": [
+              "mode",
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "admission_ref": {
+                "$ref": "#/$defs/Id"
               }
             }
           }
@@ -2799,6 +2851,32 @@
         },
         "state": {
           "$ref": "#/$defs/StopOperationState"
+        },
+        "supervisor_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_fact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P0EndpointSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleanup_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2812,7 +2890,11 @@
         "record_status",
         "incident_ref",
         "recovery_owner_ref",
-        "state"
+        "state",
+        "supervisor_instance_id",
+        "endpoint_instance_id",
+        "endpoint_fact",
+        "cleanup_ref"
       ],
       "additionalProperties": false
     },
@@ -2954,6 +3036,24 @@
         },
         "state": {
           "$ref": "#/$defs/SupervisionModeState"
+        },
+        "supervisor_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "host_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "record_status": {
+          "enum": [
+            "durable",
+            "pending",
+            "failed"
+          ]
         }
       },
       "required": [
@@ -2966,7 +3066,11 @@
         "blocked_scopes",
         "active_grant_refs",
         "incident_ref",
-        "state"
+        "state",
+        "supervisor_instance_id",
+        "host_instance_id",
+        "source_revision",
+        "record_status"
       ],
       "additionalProperties": false
     },
@@ -3170,6 +3274,2942 @@
         "version"
       ],
       "additionalProperties": false
+    },
+    "P0OperatorCredential": {
+      "type": "object",
+      "properties": {
+        "credential_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "operator_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "role": {
+          "enum": [
+            "operator",
+            "test_operator"
+          ]
+        },
+        "authentication_key_sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "credential_id",
+        "operator_id",
+        "role",
+        "authentication_key_sha256"
+      ],
+      "additionalProperties": false,
+      "$comment": "本机可信管理服务读取的等价认证密钥登记；authentication_key_sha256 是随机操作员秘密的 SHA256 十六进制，作为 HMAC 密钥字节使用，必须像秘密一样保护，不是可公开 verifier。"
+    },
+    "P0OperatorProof": {
+      "type": "object",
+      "properties": {
+        "credential_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "announcement_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "challenge_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "service_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_nonce": {
+          "$ref": "#/$defs/Id"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "proof_hmac": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "credential_id",
+        "announcement_digest",
+        "challenge_id",
+        "connection_id",
+        "service_instance_id",
+        "client_instance_id",
+        "client_nonce",
+        "request_digest",
+        "proof_hmac"
+      ],
+      "additionalProperties": false,
+      "$comment": "HMAC-SHA256 密钥为本机随机操作员秘密的 SHA256 字节。request_digest=SHA256(JCS({method,context:去掉payload_digest,input:去掉proof}))；proof_hmac=HMAC(key,JCS(proof 去掉 proof_hmac))。最后 context.payload_digest=SHA256(JCS({method,input:含完整proof}))，避免自引用。服务验证公告/连接/实例/一次性挑战后原子消费，每管理命令新连接新挑战，不发送长期秘密。"
+    },
+    "P0OperatorIdentity": {
+      "type": "object",
+      "properties": {
+        "credential_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "operator_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "role": {
+          "enum": [
+            "operator",
+            "test_operator"
+          ]
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "authenticated_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "credential_id",
+        "operator_id",
+        "role",
+        "connection_id",
+        "authenticated_at"
+      ],
+      "additionalProperties": false
+    },
+    "P0ConnectionAnnouncement": {
+      "type": "object",
+      "properties": {
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "service_role": {
+          "enum": [
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "service_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "protocol_version": {
+          "const": "0.8.0"
+        },
+        "schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "clock_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "received_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sent_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expires_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "challenge_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "identity_key_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "connection_id",
+        "service_role",
+        "service_instance_id",
+        "session_id",
+        "protocol_version",
+        "schema_digest",
+        "clock_domain",
+        "received_at_ms",
+        "sent_at_ms",
+        "expires_at_ms",
+        "challenge_id",
+        "identity_key_id",
+        "signature"
+      ],
+      "additionalProperties": false,
+      "$comment": "连接专属无效果公告；Node crypto Ed25519 对去掉 signature 后的 JCS 对象加 Bellis-P0-connection 域分隔签名；调用方必须先用受信启动材料固定的公钥验签。"
+    },
+    "P0ClockMapping": {
+      "type": "object",
+      "properties": {
+        "mapping_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_clock_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "target_clock_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source_sent_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "target_received_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "target_sent_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "source_received_at_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "offset_lower_ms": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "offset_upper_ms": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "max_error_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "source_valid_until_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "target_valid_until_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "announcement_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "mapping_id",
+        "connection_id",
+        "source_instance_id",
+        "target_instance_id",
+        "source_clock_domain",
+        "target_clock_domain",
+        "source_sent_at_ms",
+        "target_received_at_ms",
+        "target_sent_at_ms",
+        "source_received_at_ms",
+        "offset_lower_ms",
+        "offset_upper_ms",
+        "max_error_ms",
+        "source_valid_until_ms",
+        "target_valid_until_ms",
+        "announcement_digest"
+      ],
+      "additionalProperties": false,
+      "$comment": "source 是发起者；整数毫秒采样的 target-source 区间保守加量化裕量：下界 target_sent-source_received-1，上界 target_received-source_sent+1，期限取下界映射；绑定身份/实例/连接/采样，有效期或最大误差失效拒绝。"
+    },
+    "P0ClockSampleInput": {
+      "type": "object",
+      "properties": {
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "source_sent_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "mapping",
+        "source_sent_at"
+      ],
+      "additionalProperties": false
+    },
+    "P0ClockSampleResult": {
+      "type": "object",
+      "properties": {
+        "target_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target_received_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "target_sent_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "target_instance_id",
+        "target_received_at",
+        "target_sent_at",
+        "connection_id"
+      ],
+      "additionalProperties": false
+    },
+    "P0TrustedFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "P0TrustedInstallation": {
+      "type": "object",
+      "properties": {
+        "installation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "plugin_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "plugin_version": {
+          "$ref": "#/$defs/Version"
+        },
+        "entry": {
+          "$ref": "#/$defs/P0TrustedFile"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0TrustedFile"
+          },
+          "minItems": 1,
+          "maxItems": 1024
+        },
+        "manifest_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "protocol_version": {
+          "const": "0.8.0"
+        },
+        "schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "allowed_capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CapabilityIdentity"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "allowed_targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "execution_mode": {
+          "const": "simulation"
+        },
+        "external_effects_allowed": {
+          "const": false
+        }
+      },
+      "required": [
+        "installation_id",
+        "plugin_id",
+        "plugin_version",
+        "entry",
+        "artifacts",
+        "manifest_digest",
+        "protocol_version",
+        "schema_digest",
+        "allowed_capabilities",
+        "allowed_targets",
+        "execution_mode",
+        "external_effects_allowed"
+      ],
+      "additionalProperties": false,
+      "$comment": "受信安装清单由本机操作员维护；入口及其实际加载制品必须全量核验，不信任插件自报。空白名单不授予权限。"
+    },
+    "P0SafetyLimits": {
+      "type": "object",
+      "properties": {
+        "max_message_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "max_pending_requests": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "max_effects": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "max_queue_items": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "max_session_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "max_human_lease_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600000
+        },
+        "endpoint_lease_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "peer_health_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "stop_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "cleanup_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "max_clock_error_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "clock_mapping_ttl_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        }
+      },
+      "required": [
+        "max_message_bytes",
+        "max_pending_requests",
+        "max_effects",
+        "max_queue_items",
+        "max_session_ms",
+        "max_human_lease_ms",
+        "endpoint_lease_ms",
+        "peer_health_timeout_ms",
+        "stop_timeout_ms",
+        "cleanup_timeout_ms",
+        "max_clock_error_ms",
+        "clock_mapping_ttl_ms"
+      ],
+      "additionalProperties": false,
+      "$comment": "有界配置范围不是实测性能承诺；映射与租约的实际值写入运行证据。"
+    },
+    "P0RuntimeConfig": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/RuntimeProfile"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "const": "simulation"
+                },
+                "enabled_phases": {
+                  "type": "array",
+                  "items": {
+                    "const": "P0"
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              }
+            }
+          ]
+        },
+        "public_broadcast_allowed": {
+          "const": false
+        },
+        "supervision_mode": {
+          "const": "stopped"
+        },
+        "installation": {
+          "$ref": "#/$defs/P0TrustedInstallation"
+        },
+        "operator_credentials_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "service_identity_key_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "management_socket_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "safety_socket_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "database_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "limits": {
+          "$ref": "#/$defs/P0SafetyLimits"
+        },
+        "fault_injection_enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "profile",
+        "public_broadcast_allowed",
+        "supervision_mode",
+        "installation",
+        "operator_credentials_path",
+        "service_identity_key_path",
+        "management_socket_path",
+        "safety_socket_path",
+        "database_path",
+        "limits",
+        "fault_injection_enabled"
+      ],
+      "additionalProperties": false,
+      "$comment": "P0 宿主专用启动配置；所有路径限定本机受控目录，秘密仅读本机凭据文件，不传入插件环境。"
+    },
+    "P0AdmissionRecord": {
+      "type": "object",
+      "properties": {
+        "admission_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "host_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervisor_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "operator_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "installation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "installation_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "manifest_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "profile_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "schema_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "mode": {
+          "const": "simulation"
+        },
+        "enabled_phases": {
+          "type": "array",
+          "items": {
+            "const": "P0"
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "public_broadcast_allowed": {
+          "const": false
+        },
+        "accepted_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "record_status": {
+          "enum": [
+            "durable",
+            "pending",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "admission_id",
+        "session_id",
+        "host_instance_id",
+        "supervisor_instance_id",
+        "endpoint_instance_id",
+        "operator_id",
+        "installation_id",
+        "installation_digest",
+        "manifest_digest",
+        "profile_digest",
+        "schema_digest",
+        "mode",
+        "enabled_phases",
+        "public_broadcast_allowed",
+        "accepted_at",
+        "record_status"
+      ],
+      "additionalProperties": false,
+      "$comment": "独立监督组件唯一语义写入者；首验准入事实，不是 AcceptanceReport 或任何阶段 PASS。"
+    },
+    "P0PersistenceReceipt": {
+      "type": "object",
+      "properties": {
+        "receipt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "writer_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "transaction_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "committed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "database_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "receipt_id",
+        "writer_instance_id",
+        "transaction_id",
+        "request_digest",
+        "committed_at",
+        "database_version"
+      ],
+      "additionalProperties": false,
+      "$comment": "只能由当前持久化 Worker 在提交成功后产生；宿主经已绑定 Worker 通道验证，不接受客户端自带回执证明。"
+    },
+    "P0EffectRegistration": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "capability": {
+          "const": "simulation.execute"
+        },
+        "payload_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "cost_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "registered_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "operation_id",
+        "session_id",
+        "grant_id",
+        "endpoint_instance_id",
+        "target_ref",
+        "capability",
+        "payload_digest",
+        "units",
+        "cost_units",
+        "deadline",
+        "registered_at"
+      ],
+      "additionalProperties": false,
+      "$comment": "宿主是唯一语义写入者；按实例/会话/operation 原子去重，在实际效果准入前与 Outbox 事务登记。 payload_digest 是固定业务输入摘要，排除连接证明/mapping/回执，不等于传输 CommandContext.payload_digest，禁止自引用。"
+    },
+    "P0EffectFact": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "payload_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "accepted_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requested_units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "completed_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "outcome": {
+          "enum": [
+            "accepted",
+            "completed",
+            "stopped",
+            "unknown"
+          ]
+        },
+        "occurred_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "deadline_missed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operation_id",
+        "endpoint_instance_id",
+        "grant_id",
+        "target_ref",
+        "payload_digest",
+        "accepted_seq",
+        "requested_units",
+        "completed_units",
+        "outcome",
+        "occurred_at",
+        "deadline_missed"
+      ],
+      "additionalProperties": false,
+      "$comment": "仅当前假设备写入真实计数与水位；一个操作只占一个接纳序号，重复命令不增加计数。"
+    },
+    "P0EndpointSnapshot": {
+      "type": "object",
+      "properties": {
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervisor_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervision_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "observed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "active_grant_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lease_deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Deadline"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fence_applied": {
+          "type": "boolean"
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "accepted_watermark": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "completed_effect_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "queued_operation_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "effect_facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0EffectFact"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "not_executed_operation_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "unknown_operation_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "cleanup_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "endpoint_instance_id",
+        "session_id",
+        "supervisor_instance_id",
+        "supervision_epoch",
+        "source_revision",
+        "observed_at",
+        "active_grant_ref",
+        "lease_deadline",
+        "fence_applied",
+        "stopped",
+        "accepted_watermark",
+        "completed_effect_count",
+        "queued_operation_ids",
+        "effect_facts",
+        "not_executed_operation_ids",
+        "unknown_operation_ids",
+        "cleanup_ref"
+      ],
+      "additionalProperties": false,
+      "$comment": "端点唯一写入；水位以本实例从 1 开始接纳，0 表示尚无操作；completed_effect_count 只在本实例递增。停止不能覆盖已有正常完成。"
+    },
+    "P0CleanupRecord": {
+      "type": "object",
+      "properties": {
+        "cleanup_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "stop_operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "recovery_owner_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "confirmed",
+            "unknown"
+          ]
+        },
+        "endpoint_fact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P0EndpointSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unknown_scope_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "record_status": {
+          "enum": [
+            "durable",
+            "pending",
+            "failed"
+          ]
+        },
+        "updated_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "cleanup_id",
+        "stop_operation_id",
+        "recovery_owner_ref",
+        "endpoint_instance_id",
+        "target_ref",
+        "status",
+        "endpoint_fact",
+        "unknown_scope_refs",
+        "record_status",
+        "updated_at"
+      ],
+      "additionalProperties": false,
+      "$comment": "监督组件唯一归约写入者，引用端点事实而不改写；职责在宿主 actor 或 StopOperation 终态后继续。"
+    },
+    "P0IsolationRecord": {
+      "type": "object",
+      "properties": {
+        "isolation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "resource_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "incident_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "recovery_owner_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "enum": [
+            "blocked",
+            "proven_clean"
+          ]
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "record_status": {
+          "enum": [
+            "durable",
+            "pending",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "isolation_id",
+        "resource_ref",
+        "endpoint_instance_id",
+        "incident_ref",
+        "recovery_owner_ref",
+        "status",
+        "evidence_refs",
+        "record_status"
+      ],
+      "additionalProperties": false,
+      "$comment": "监督组件唯一写入；资源身份跨 session/scope/实例稳定，缺失记录或 UNKNOWN 保持 blocked。"
+    },
+    "P0EndpointProjection": {
+      "type": "object",
+      "properties": {
+        "source_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "received_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "quality": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown"
+          ]
+        },
+        "fact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/P0EndpointSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source_instance_id",
+        "received_at",
+        "quality",
+        "fact"
+      ],
+      "additionalProperties": false,
+      "$comment": "宿主只更新接收时间与投影质量；不能修改端点 fact 或用停止请求构造 fact。"
+    },
+    "P0SessionSnapshot": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervision": {
+          "$ref": "#/$defs/SupervisionRecord"
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExecutionGrant"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "admissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0AdmissionRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopOperationRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "cleanup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0CleanupRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "isolation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0IsolationRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "endpoint": {
+          "$ref": "#/$defs/P0EndpointProjection"
+        },
+        "persistence": {
+          "enum": [
+            "ready",
+            "blocked",
+            "failed"
+          ]
+        },
+        "outbox_pending": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "session_id",
+        "supervision",
+        "grants",
+        "admissions",
+        "stops",
+        "cleanup",
+        "isolation",
+        "endpoint",
+        "persistence",
+        "outbox_pending"
+      ],
+      "additionalProperties": false,
+      "$comment": "查询投影来源与端点事实分别表示；默认无活动 grant，重启不能恢复旧队列。"
+    },
+    "P0AuthenticateInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping"
+      ],
+      "additionalProperties": false
+    },
+    "P0AuthorizeInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mode": {
+          "enum": [
+            "simulation",
+            "test_only",
+            "public"
+          ]
+        },
+        "supervision_mode": {
+          "enum": [
+            "supervised",
+            "unattended_approved"
+          ]
+        },
+        "target_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "allowed_capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CapabilityIdentity"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "effect_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "queue_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "cost_limit_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "human_lease_deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "grant_deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "public_broadcast_allowed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping",
+        "session_id",
+        "endpoint_instance_id",
+        "mode",
+        "supervision_mode",
+        "target_refs",
+        "allowed_capabilities",
+        "effect_limit",
+        "queue_limit",
+        "cost_limit_units",
+        "human_lease_deadline",
+        "grant_deadline",
+        "public_broadcast_allowed"
+      ],
+      "additionalProperties": false,
+      "$comment": "明确人工动作；目标期限均已映射到监督时钟，批准前复核配置、身份、实例、安装信任、未知隔离和真实持久化条件。"
+    },
+    "P0AuthorizationResult": {
+      "type": "object",
+      "properties": {
+        "admission": {
+          "$ref": "#/$defs/P0AdmissionRecord"
+        },
+        "grant": {
+          "$ref": "#/$defs/ExecutionGrant"
+        },
+        "supervision": {
+          "$ref": "#/$defs/SupervisionRecord"
+        },
+        "receipt": {
+          "$ref": "#/$defs/P0PersistenceReceipt"
+        }
+      },
+      "required": [
+        "admission",
+        "grant",
+        "supervision",
+        "receipt"
+      ],
+      "additionalProperties": false
+    },
+    "P0RenewInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervision_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "human_lease_deadline": {
+          "$ref": "#/$defs/Deadline"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping",
+        "session_id",
+        "supervision_epoch",
+        "human_lease_deadline"
+      ],
+      "additionalProperties": false,
+      "$comment": "只延长人工租约，不改变原 grant/action deadline、不扩 scope、不复活终态。"
+    },
+    "P0RevokeInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "$ref": "#/$defs/TerminationReason"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping",
+        "session_id",
+        "grant_id",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "P0StopSessionInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "reason": {
+          "$ref": "#/$defs/TerminationReason"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping",
+        "session_id",
+        "target_ref",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "P0SessionQueryInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping",
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    "P0PeerQueryInput": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "session_id",
+        "mapping"
+      ],
+      "additionalProperties": false,
+      "$comment": "仅身份已绑定的 host/supervisor 安全连接；插件没有管理读权限。"
+    },
+    "P0HealthInput": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "peer_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "peer_role": {
+          "enum": [
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "session_id",
+        "peer_instance_id",
+        "peer_role",
+        "mapping"
+      ],
+      "additionalProperties": false,
+      "$comment": "只更新真实连接健康，peer_role/instance 必须匹配通道身份；不延长人工租约或 grant。"
+    },
+    "P0HealthResult": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervision": {
+          "$ref": "#/$defs/SupervisionRecord"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "session_id",
+        "supervision",
+        "observed_at"
+      ],
+      "additionalProperties": false
+    },
+    "P0EndpointLease": {
+      "type": "object",
+      "properties": {
+        "lease_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "grant": {
+          "$ref": "#/$defs/ExecutionGrant"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "human_lease_deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "local_lease_deadline": {
+          "$ref": "#/$defs/Deadline"
+        },
+        "admission": {
+          "$ref": "#/$defs/P0AdmissionRecord"
+        },
+        "receipt": {
+          "$ref": "#/$defs/P0PersistenceReceipt"
+        }
+      },
+      "required": [
+        "lease_id",
+        "grant",
+        "mapping",
+        "deadline",
+        "human_lease_deadline",
+        "local_lease_deadline",
+        "admission",
+        "receipt"
+      ],
+      "additionalProperties": false,
+      "$comment": "仅绑定的监督安全通道可安装；三个期限取最早，且不能超过原 grant 的保守映射。心跳仅能刷新有限连接租约，不能延长人工/grant期限。"
+    },
+    "P0EndpointRevokeInput": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "grant_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervisor_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "supervision_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "fence": {
+          "$ref": "#/$defs/CancelFence"
+        },
+        "stop_operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "$ref": "#/$defs/TerminationReason"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "session_id",
+        "grant_id",
+        "endpoint_instance_id",
+        "supervisor_instance_id",
+        "supervision_epoch",
+        "fence",
+        "stop_operation_id",
+        "reason",
+        "mapping"
+      ],
+      "additionalProperties": false,
+      "$comment": "独立监督直连；安全消息不受普通业务队列、预算或数据库准入约束。"
+    },
+    "P0SimulationAction": {
+      "type": "object",
+      "properties": {
+        "target_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "capability": {
+          "const": "simulation.execute"
+        },
+        "units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "cost_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        }
+      },
+      "required": [
+        "target_ref",
+        "capability",
+        "units",
+        "interval_ms",
+        "cost_units"
+      ],
+      "additionalProperties": false,
+      "$comment": "仅端点自身模拟计数/队列；不执行任意代码、不加载外部设备。"
+    },
+    "P0SubmitInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "grant_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "action": {
+          "$ref": "#/$defs/P0SimulationAction"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping",
+        "session_id",
+        "grant_id",
+        "endpoint_instance_id",
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "P0ExecuteInput": {
+      "type": "object",
+      "properties": {
+        "registration": {
+          "$ref": "#/$defs/P0EffectRegistration"
+        },
+        "receipt": {
+          "$ref": "#/$defs/P0PersistenceReceipt"
+        },
+        "action": {
+          "$ref": "#/$defs/P0SimulationAction"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "registration",
+        "receipt",
+        "action",
+        "mapping"
+      ],
+      "additionalProperties": false,
+      "$comment": "只接受受信宿主业务通道；执行前复核监督下发 lease、原 grant 以及登记回执的固定绑定。"
+    },
+    "P0SimulationResult": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_fact": {
+          "$ref": "#/$defs/P0EndpointSnapshot"
+        }
+      },
+      "required": [
+        "operation_id",
+        "endpoint_fact"
+      ],
+      "additionalProperties": false
+    },
+    "P0SimulationQueryInput": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "session_id",
+        "endpoint_instance_id",
+        "mapping"
+      ],
+      "additionalProperties": false
+    },
+    "P0FaultSelection": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "enum": [
+            "host",
+            "supervisor",
+            "endpoint",
+            "persistence"
+          ]
+        },
+        "fault": {
+          "enum": [
+            "none",
+            "event_loop_block",
+            "process_exit",
+            "disconnect",
+            "cancel_never_returns",
+            "ack_delay",
+            "ack_reverse_order",
+            "database_block",
+            "database_failure",
+            "database_full",
+            "queue_full",
+            "budget_exhausted"
+          ]
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        }
+      },
+      "required": [
+        "target",
+        "fault",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "$comment": "合法 target/fault 配对由实现固定表验证；故障不能关闭鉴权、守卫、有限租约或改变证据断言。",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "const": "host"
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fault": {
+                "enum": [
+                  "none",
+                  "event_loop_block",
+                  "process_exit",
+                  "disconnect",
+                  "queue_full",
+                  "budget_exhausted"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "const": "supervisor"
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fault": {
+                "enum": [
+                  "none",
+                  "event_loop_block",
+                  "process_exit",
+                  "disconnect"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "const": "endpoint"
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fault": {
+                "enum": [
+                  "none",
+                  "event_loop_block",
+                  "process_exit",
+                  "disconnect",
+                  "cancel_never_returns",
+                  "ack_delay",
+                  "ack_reverse_order",
+                  "queue_full",
+                  "budget_exhausted"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "target": {
+                "const": "persistence"
+              }
+            },
+            "required": [
+              "target"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fault": {
+                "enum": [
+                  "none",
+                  "database_block",
+                  "database_failure",
+                  "database_full",
+                  "process_exit"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "P0FaultInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0OperatorProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "selection": {
+          "$ref": "#/$defs/P0FaultSelection"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping",
+        "session_id",
+        "selection"
+      ],
+      "additionalProperties": false,
+      "$comment": "只允许 test_operator、P0 simulation 且启动显式启用故障注入；不提供普通操作员任意代码入口。"
+    },
+    "P0FaultResult": {
+      "type": "object",
+      "properties": {
+        "fault_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "selection": {
+          "$ref": "#/$defs/P0FaultSelection"
+        },
+        "accepted_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "fault_id",
+        "selection",
+        "accepted_at"
+      ],
+      "additionalProperties": false
+    },
+    "P0OutboxRecord": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/EventEnvelope"
+        },
+        "delivery": {
+          "enum": [
+            "pending",
+            "delivered",
+            "blocked"
+          ]
+        }
+      },
+      "required": [
+        "event",
+        "delivery"
+      ],
+      "additionalProperties": false,
+      "$comment": "持久化 Worker 单物理写入；事件事实权威仍由事件登记决定，重放不再次执行效果。"
+    },
+    "P0DurableBatch": {
+      "type": "object",
+      "properties": {
+        "supervision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SupervisionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExecutionGrant"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "admissions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0AdmissionRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0EffectRegistration"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "stops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StopOperationRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "cleanup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0CleanupRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "isolation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0IsolationRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        },
+        "outbox": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0OutboxRecord"
+          },
+          "minItems": 0,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "supervision",
+        "grants",
+        "admissions",
+        "effects",
+        "stops",
+        "cleanup",
+        "isolation",
+        "outbox"
+      ],
+      "additionalProperties": false,
+      "$comment": "单事务状态与 Outbox；Worker 对调用方权威和固定 schema 校验，拒绝任意 SQL。"
+    },
+    "P0StoreCommitInput": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "writer_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "batch": {
+          "$ref": "#/$defs/P0DurableBatch"
+        }
+      },
+      "required": [
+        "request_id",
+        "writer_instance_id",
+        "batch"
+      ],
+      "additionalProperties": false
+    },
+    "P0StoreQueryInput": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "request_id",
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    "P0StoreAckInput": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 1,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "request_id",
+        "event_ids"
+      ],
+      "additionalProperties": false
+    },
+    "P0StoreQueryResult": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "database_version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "batch": {
+          "$ref": "#/$defs/P0DurableBatch"
+        }
+      },
+      "required": [
+        "request_id",
+        "database_version",
+        "batch"
+      ],
+      "additionalProperties": false
+    },
+    "P0BuildFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "symlink"
+          ]
+        },
+        "symlink_target": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes",
+        "kind",
+        "symlink_target"
+      ],
+      "additionalProperties": false,
+      "$comment": "file 的 symlink_target=null，hash/size 对实际文件内容；symlink 的 target 是规范根相对实际目标标识，hash/size 对其 UTF8 标识字节，同时清单覆盖目标文件内容，绑定包解析拓扑；拒绝根外逃逸。"
+    },
+    "P0DependencyIdentity": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "package_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "artifact_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "package_digest",
+        "artifact_digest"
+      ],
+      "additionalProperties": false
+    },
+    "P0BuildManifest": {
+      "type": "object",
+      "properties": {
+        "artifact_type": {
+          "const": "p0-build-manifest"
+        },
+        "kind": {
+          "enum": [
+            "sut",
+            "runner"
+          ]
+        },
+        "coverage_roots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "minItems": 1,
+          "maxItems": 128
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0BuildFile"
+          },
+          "minItems": 1,
+          "maxItems": 20000
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0DependencyIdentity"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "kind",
+        "coverage_roots",
+        "files",
+        "dependencies",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "$comment": "摘要为除 digest 外的 JCS 对象 SHA-256；路径仓库相对、唯一、排序，无 reports/临时路径/时间戳/秘密。gate 自行遍历覆盖规则，不能信任报告自报的缩减清单。"
+    },
+    "P0ExecutionEnvironment": {
+      "type": "object",
+      "properties": {
+        "node_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "node_executable_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "pnpm_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "arch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "os_release": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0DependencyIdentity"
+          },
+          "minItems": 1,
+          "maxItems": 1024
+        }
+      },
+      "required": [
+        "node_version",
+        "node_executable_sha256",
+        "pnpm_version",
+        "platform",
+        "arch",
+        "os_release",
+        "dependencies"
+      ],
+      "additionalProperties": false
+    },
+    "P0EvidenceAssertion": {
+      "type": "object",
+      "properties": {
+        "assertion_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "expected": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "observed": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "assertion_id",
+        "scenario_id",
+        "expected",
+        "observed",
+        "passed"
+      ],
+      "additionalProperties": false,
+      "$comment": "仅记录断言值，不是执行入口；passed 由运行器实际比较产生，不由手写清单决定。"
+    },
+    "P0TraceEntry": {
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "source_role": {
+          "enum": [
+            "runner",
+            "operator",
+            "host",
+            "supervisor",
+            "endpoint",
+            "persistence"
+          ]
+        },
+        "source_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "kind": {
+          "enum": [
+            "command",
+            "response",
+            "event",
+            "process",
+            "assertion"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "payload_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "raw_artifact": {
+          "$ref": "#/$defs/EvidenceArtifact"
+        }
+      },
+      "required": [
+        "index",
+        "source_role",
+        "source_instance_id",
+        "observed_at",
+        "kind",
+        "name",
+        "payload_sha256",
+        "raw_artifact"
+      ],
+      "additionalProperties": false,
+      "$comment": "保留收到的实际协议/进程轨迹；秘密固定去敏，原始文件哈希及去敏规则由 runner 清单覆盖。"
+    },
+    "P0TransitionCoverage": {
+      "type": "object",
+      "properties": {
+        "machine": {
+          "enum": [
+            "SupervisionMode",
+            "ExecutionGrant",
+            "StopOperation"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "event": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "guard": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "disposition": {
+          "enum": [
+            "accepted",
+            "guard_rejected",
+            "table_rejected",
+            "terminal_rejected",
+            "disabled_rejected"
+          ]
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "machine",
+        "state",
+        "event",
+        "guard",
+        "disposition",
+        "scenario_id"
+      ],
+      "additionalProperties": false
+    },
+    "P0DependencyGate": {
+      "type": "object",
+      "properties": {
+        "phase": {
+          "$ref": "#/$defs/Phase"
+        },
+        "status": {
+          "enum": [
+            "PASS",
+            "PENDING"
+          ]
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceArtifact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "phase",
+        "status",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "P0OutcomeSummary": {
+      "type": "object",
+      "properties": {
+        "passed_assertions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failed_assertions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rejected_operations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failed_operations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown_operations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "completed_effect_units": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cleanup_confirmed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cleanup_unknown": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "latency_samples_ms": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "minItems": 0,
+          "maxItems": 100000
+        },
+        "quality_notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "minItems": 0,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "passed_assertions",
+        "failed_assertions",
+        "rejected_operations",
+        "failed_operations",
+        "unknown_operations",
+        "completed_effect_units",
+        "cleanup_confirmed",
+        "cleanup_unknown",
+        "latency_samples_ms",
+        "quality_notes"
+      ],
+      "additionalProperties": false,
+      "$comment": "安全断言、实际业务拒绝/失败/UNKNOWN、效果、清理、质量和时延分别报告，不把预期拒绝改为业务成功。"
+    },
+    "P0TestRunEvidence": {
+      "type": "object",
+      "properties": {
+        "artifact_type": {
+          "const": "p0-test-run"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "test_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "scenario_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 1,
+          "maxItems": 1024
+        },
+        "source_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "sut_build_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "environment": {
+          "$ref": "#/$defs/P0ExecutionEnvironment"
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "exit_code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sut_manifest": {
+          "$ref": "#/$defs/EvidenceArtifact"
+        },
+        "runner_manifest": {
+          "$ref": "#/$defs/EvidenceArtifact"
+        },
+        "trace": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0TraceEntry"
+          },
+          "minItems": 1,
+          "maxItems": 100000
+        },
+        "assertions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0EvidenceAssertion"
+          },
+          "minItems": 1,
+          "maxItems": 100000
+        },
+        "transition_coverage": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0TransitionCoverage"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "endpoint_facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0EndpointSnapshot"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "session_facts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0SessionSnapshot"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        },
+        "profile_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dependency_gates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/P0DependencyGate"
+          },
+          "minItems": 0,
+          "maxItems": 16
+        },
+        "summary": {
+          "$ref": "#/$defs/P0OutcomeSummary"
+        },
+        "raw_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceArtifact"
+          },
+          "minItems": 1,
+          "maxItems": 10000
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "process_outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceArtifact"
+          },
+          "minItems": 1,
+          "maxItems": 1024
+        },
+        "runner_manifest_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": [
+        "artifact_type",
+        "run_id",
+        "test_id",
+        "scenario_ids",
+        "source_digest",
+        "sut_build_digest",
+        "environment",
+        "command",
+        "exit_code",
+        "seed",
+        "sut_manifest",
+        "runner_manifest",
+        "trace",
+        "assertions",
+        "transition_coverage",
+        "endpoint_facts",
+        "session_facts",
+        "profile_digest",
+        "dependency_gates",
+        "summary",
+        "raw_artifacts",
+        "completed",
+        "process_outputs",
+        "runner_manifest_digest"
+      ],
+      "additionalProperties": false,
+      "$comment": "通过 TestEvidence.artifacts 绑定；gate 对 SUT 与 exit.P0 强制验证该类型、完整场景/原始证据和当前构建。P0 无前置阶段时 dependency_gates 是明确空数组。 工具测试也可生成此类型且 profile_digest=null；gate 对 SUT/exit 强制非 null。"
+    },
+    "P0PeerIdentity": {
+      "type": "object",
+      "properties": {
+        "role": {
+          "enum": [
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "identity_key_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "public_key_spki": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "role",
+        "instance_id",
+        "identity_key_id",
+        "public_key_spki"
+      ],
+      "additionalProperties": false,
+      "$comment": "受信启动材料固定的对端公钥，不由来访连接自报采用。"
+    },
+    "P0PeerProof": {
+      "type": "object",
+      "properties": {
+        "announcement_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "challenge_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "service_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "client_role": {
+          "enum": [
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "client_nonce": {
+          "$ref": "#/$defs/Id"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "announcement_digest",
+        "challenge_id",
+        "connection_id",
+        "service_instance_id",
+        "client_instance_id",
+        "client_role",
+        "client_nonce",
+        "request_digest",
+        "signature"
+      ],
+      "additionalProperties": false,
+      "$comment": "Ed25519 签名 proof 去掉 signature 后的 JCS，固定域 Bellis-P0-peer；request_digest 的去除规则与管理证明相同。对端用启动时固定公钥验证、消耗挑战，连接绑定角色/实例后才可调用相应方法。"
+    },
+    "P0PeerAuthenticateInput": {
+      "type": "object",
+      "properties": {
+        "proof": {
+          "$ref": "#/$defs/P0PeerProof"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "proof",
+        "mapping"
+      ],
+      "additionalProperties": false
+    },
+    "P0PeerAuthenticationResult": {
+      "type": "object",
+      "properties": {
+        "connection_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "peer_role": {
+          "enum": [
+            "host",
+            "supervisor",
+            "endpoint"
+          ]
+        },
+        "peer_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "authenticated_at": {
+          "$ref": "#/$defs/ClockPoint"
+        }
+      },
+      "required": [
+        "connection_id",
+        "peer_role",
+        "peer_instance_id",
+        "authenticated_at"
+      ],
+      "additionalProperties": false
+    },
+    "P0EndpointConfig": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "endpoint_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "identity_key_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "identity_private_key_pkcs8": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "host_identity": {
+          "$ref": "#/$defs/P0PeerIdentity"
+        },
+        "supervisor_identity": {
+          "$ref": "#/$defs/P0PeerIdentity"
+        },
+        "safety_socket_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "limits": {
+          "$ref": "#/$defs/P0SafetyLimits"
+        },
+        "installation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "manifest": {
+          "$ref": "#/$defs/ControllerManifest"
+        },
+        "fault": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/P0FaultSelection"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "const": "endpoint"
+                },
+                "fault": {
+                  "const": "none"
+                },
+                "duration_ms": {
+                  "const": 0
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "endpoint_instance_id",
+        "identity_key_id",
+        "identity_private_key_pkcs8",
+        "host_identity",
+        "supervisor_identity",
+        "safety_socket_path",
+        "limits",
+        "installation_id",
+        "manifest",
+        "fault"
+      ],
+      "additionalProperties": false,
+      "$comment": "只经受信启动器的私有继承配置描述符传给假设备。identity_private_key_pkcs8 是端点自己的一次实例身份，不是 host/supervisor 的服务私钥；不含操作员凭据、数据库路径或真实设备凭据。实例/Manifest/公钥来自已核验安装绑定。 启动故障固定 endpoint/none/0；运行时故障只能经认证 test_operator 的 fault.configure 后由监督 fault.apply 下发。"
+    },
+    "P0RegisterEffectInput": {
+      "type": "object",
+      "properties": {
+        "registration": {
+          "$ref": "#/$defs/P0EffectRegistration"
+        },
+        "action": {
+          "$ref": "#/$defs/P0SimulationAction"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        }
+      },
+      "required": [
+        "registration",
+        "action",
+        "mapping"
+      ],
+      "additionalProperties": false,
+      "$comment": "仅已认证 host；监督复核当前 grant/实例/代次/余量/范围与固定业务摘要，事务登记后再复核，失效则拒绝而不恢复旧权。"
+    },
+    "P0RegisteredEffect": {
+      "type": "object",
+      "properties": {
+        "registration": {
+          "$ref": "#/$defs/P0EffectRegistration"
+        },
+        "receipt": {
+          "$ref": "#/$defs/P0PersistenceReceipt"
+        }
+      },
+      "required": [
+        "registration",
+        "receipt"
+      ],
+      "additionalProperties": false
+    },
+    "P0FaultApplyInput": {
+      "type": "object",
+      "properties": {
+        "fault_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "target_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "selection": {
+          "$ref": "#/$defs/P0FaultSelection"
+        },
+        "mapping": {
+          "$ref": "#/$defs/P0ClockMapping"
+        },
+        "deadline": {
+          "$ref": "#/$defs/Deadline"
+        }
+      },
+      "required": [
+        "fault_id",
+        "session_id",
+        "target_instance_id",
+        "selection",
+        "mapping",
+        "deadline"
+      ],
+      "additionalProperties": false,
+      "$comment": "仅经互认证监督专用通道，下发已认证 test_operator 批准的 fault_id/目标实例/有限命令期限；接收者仍验证 simulation、实例和固定故障枚举，不关闭守卫。"
     }
   }
 }

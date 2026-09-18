@@ -363,7 +363,7 @@
     },
     {
       "event_name": "stop.confirmed",
-      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "authority": "StopOperation 生命周期归约由独立监督组件；实际停止事实由目标端点，P0 只接受受信假设备自己的实例",
       "phase": "P0",
       "payload_schema": "StopPayload",
       "reliability": "reliable",
@@ -373,7 +373,7 @@
     },
     {
       "event_name": "stop.unknown",
-      "authority": "Stage边界事实由Stage；宿主归约的生命周期由Bellis",
+      "authority": "StopOperation 生命周期归约由独立监督组件；实际停止事实由目标端点，P0 只接受受信假设备自己的实例",
       "phase": "P0",
       "payload_schema": "StopPayload",
       "reliability": "reliable",
@@ -420,6 +420,46 @@
       "dedupe": "event_id + authority/object occurrence/source_revision",
       "terminal": true,
       "meaning": "独立生命周期结论，实际范围另由端点证据核验"
+    },
+    {
+      "event_name": "connection.announced",
+      "authority": "当前受信本机服务的身份签名密钥",
+      "phase": "P0",
+      "payload_schema": "P0ConnectionAnnouncement",
+      "reliability": "connection_local",
+      "dedupe": "event_id + authority_id/source_instance/source_seq",
+      "terminal": false,
+      "meaning": "无效果、连接专属的时钟引导；客户端验签/实例/Schema/有效期后才采用。不得承载授权。"
+    },
+    {
+      "event_name": "simulation.progressed",
+      "authority": "受信假设备的当前端点实例",
+      "phase": "P0",
+      "payload_schema": "P0EndpointSnapshot",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority_id/source_instance/source_seq",
+      "terminal": false,
+      "meaning": "自身计数、水位与未执行/未知范围，不得发布监督或其它端点事实。"
+    },
+    {
+      "event_name": "simulation.stopped",
+      "authority": "受信假设备的当前端点实例",
+      "phase": "P0",
+      "payload_schema": "P0EndpointSnapshot",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority_id/source_instance/source_seq",
+      "terminal": false,
+      "meaning": "实际端点停止/水位证明，与监督请求和记录状态分开。"
+    },
+    {
+      "event_name": "cleanup.updated",
+      "authority": "独立监督组件",
+      "phase": "P0",
+      "payload_schema": "P0CleanupRecord",
+      "reliability": "reliable",
+      "dedupe": "event_id + authority_id/source_instance/source_seq",
+      "terminal": false,
+      "meaning": "终态后独立推进清理，不能改写不可变停止终态。"
     }
   ]
 }

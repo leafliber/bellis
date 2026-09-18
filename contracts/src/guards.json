@@ -147,11 +147,11 @@
     },
     {
       "id": "supervised_entry_valid",
-      "meaning": "认证操作员显式确认；人工租约/监督组件有效，安全能力与拟启用profile门禁PASS；针对未知范围仍禁止复权。"
+      "meaning": "认证操作员明确确认、有限人工租约、监督/安全通道/端点有限租约就绪，且无冲突未知资源；P0 按第20.2节严格 simulation 首验准入，不要求尚未产生的本次 P0 PASS；其它模式仍须其适用门禁。"
     },
     {
       "id": "unattended_entry_valid",
-      "meaning": "独立运营/平台批准记录有效、profile显式启用无人模式与停播上限；主控、弹幕和心跳不能签发。"
+      "meaning": "独立运营/平台批准记录有效、profile显式启用无人模式与停播上限；主控、弹幕和心跳不能签发。 P0 一律拒绝，不为转换覆盖制造批准条件。"
     },
     {
       "id": "supervision_outputs_safe",
@@ -163,7 +163,7 @@
     },
     {
       "id": "execution_grant_valid",
-      "meaning": "操作员签发、监督模式匹配、scope/期限/预算有限。test_only需C0及执行安全出口，公开输出禁用；public需全部适用P8/领域门禁。"
+      "meaning": "操作员鉴权后明确签发，绑定会话/宿主/监督/端点实例、精确监督代次、非空目标和能力白名单、效果/队列/费用及原截止；真实持久化条件成立。P0 仅第20.2节的 simulation，test_only/public 全拒绝；后续模式仍须适用门禁。"
     },
     {
       "id": "pair_request_valid",
@@ -176,6 +176,18 @@
     {
       "id": "pair_proof_valid",
       "meaning": "已配对未撤销公钥验证单次挑战签名，绑定server_instance/connection_instance/Origin/role/pairing_epoch/expiry；重放拒绝。"
+    },
+    {
+      "id": "p0_simulation_admission_valid",
+      "meaning": "仅 P0/simulation、public_broadcast_allowed=false；实际安装/入口/全部制品/Manifest/协议摘要和精确能力匹配受信清单，身份/监督/安全通道/有限端点租约有效，记录条件成立，无冲突未知资源。不以自身尚未产生的 PASS 作循环前置，不豁免其它守卫。"
+    },
+    {
+      "id": "p0_simulation_execution_valid",
+      "meaning": "每条命令接纳及实际效果前复核已鉴权通道、会话、实例、grant ACTIVE、精确代次、目标/能力、保守时钟映射/期限、原 operation 绑定、余量/队列/费用及真实事务回执；异步提交后重新核验，撤权不可被迟到提交恢复。"
+    },
+    {
+      "id": "p0_endpoint_lease_valid",
+      "meaning": "仅当前独立监督的已认证安全通道，实例/精确代次/准入/原 grant 和回执绑定一致；目标域 lease 不超过人工期限、原 grant 截止、映射有效期和有限本地租约最早值；心跳不复权、不延期原权。"
     }
   ]
 }

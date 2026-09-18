@@ -1268,7 +1268,7 @@ export const stateMachines = {
           "event": "supervision_lost",
           "target": "restricted",
           "guard": "always",
-          "action": "撤相关公开自由输出与游戏输入；固定提示/只读可继续；启动有限宽限",
+          "action": "P0 立即撤销全部新增模拟效果许可，独立监督/端点租约推进停止；其它已启用阶段按其有限收尾策略处理。",
           "phase": "P0"
         },
         {
@@ -1364,7 +1364,7 @@ export const stateMachines = {
         "supervised",
         "unattended_approved"
       ],
-      "notes": "表外转换拒绝；终态不可复活；新证据用Reconciliation追加。监督模式stopped为可重新人工授权的安全静止态，不是业务终态。"
+      "notes": "表外转换拒绝；终态不可复活；新证据用Reconciliation追加。监督模式stopped为可重新人工授权的安全静止态，不是业务终态。 P0 的 unattended_approved 只验证守卫拒绝，不可达批准不作为生产能力。"
     },
     {
       "id": "ExecutionGrant",
@@ -1383,7 +1383,7 @@ export const stateMachines = {
           "event": "approve",
           "target": "ACTIVE",
           "guard": "execution_grant_valid",
-          "action": "绑定mode=test_only或public、profile/目标/动作/预算/截止/监督代次；test_only不得公开播出",
+          "action": "绑定第20.2节许可模式、会话/宿主/监督/端点实例、精确代次、有限白名单/效果/队列/费用/期限与首验准入；P0 仅 simulation 且禁止公开输出",
           "phase": "P0"
         },
         {
@@ -1640,6 +1640,237 @@ export const commands = {
       "phase": "P1",
       "effect_type": "public_output",
       "permission_scope": "audio.control",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "operator.authenticate",
+      "input_schema": "P0AuthenticateInput",
+      "result_schema": "P0OperatorIdentity",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "operator.authenticate",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.authorize",
+      "input_schema": "P0AuthorizeInput",
+      "result_schema": "P0AuthorizationResult",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.authorize",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.renew",
+      "input_schema": "P0RenewInput",
+      "result_schema": "SupervisionRecord",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.authorize",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.revoke",
+      "input_schema": "P0RevokeInput",
+      "result_schema": "StopOperationRecord",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.stop",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.stop",
+      "input_schema": "P0StopSessionInput",
+      "result_schema": "StopOperationRecord",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.stop",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.query",
+      "input_schema": "P0SessionQueryInput",
+      "result_schema": "P0SessionSnapshot",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "operator.query",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.execute",
+      "input_schema": "P0SubmitInput",
+      "result_schema": "P0SimulationResult",
+      "target": "host",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.execute",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "supervisor.query",
+      "input_schema": "P0PeerQueryInput",
+      "result_schema": "P0SessionSnapshot",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "supervisor.peer",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "supervisor.health",
+      "input_schema": "P0HealthInput",
+      "result_schema": "P0HealthResult",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "supervisor.peer",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "endpoint.lease",
+      "input_schema": "P0EndpointLease",
+      "result_schema": "P0EndpointSnapshot",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "supervisor.safety",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "endpoint.revoke",
+      "input_schema": "P0EndpointRevokeInput",
+      "result_schema": "P0EndpointSnapshot",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "supervisor.safety",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "simulation.execute",
+      "input_schema": "P0ExecuteInput",
+      "result_schema": "P0SimulationResult",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "simulation.execute",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "simulation.query",
+      "input_schema": "P0SimulationQueryInput",
+      "result_schema": "P0EndpointSnapshot",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "simulation.query",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "clock.sample",
+      "input_schema": "P0ClockSampleInput",
+      "result_schema": "P0ClockSampleResult",
+      "target": "local_peer",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "connection.clock",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "fault.configure",
+      "input_schema": "P0FaultInput",
+      "result_schema": "P0FaultResult",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.test",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "storage.commit",
+      "input_schema": "P0StoreCommitInput",
+      "result_schema": "P0PersistenceReceipt",
+      "target": "persistence_worker",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "runtime.store",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "storage.query",
+      "input_schema": "P0StoreQueryInput",
+      "result_schema": "P0StoreQueryResult",
+      "target": "persistence_worker",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "runtime.store",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "storage.ack_outbox",
+      "input_schema": "P0StoreAckInput",
+      "result_schema": "P0PersistenceReceipt",
+      "target": "persistence_worker",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "runtime.store",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "connection.authenticate",
+      "input_schema": "P0PeerAuthenticateInput",
+      "result_schema": "P0PeerAuthenticationResult",
+      "target": "local_peer",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "connection.authenticate",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "supervisor.register_effect",
+      "input_schema": "P0RegisterEffectInput",
+      "result_schema": "P0RegisteredEffect",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "host.register_effect",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "fault.apply",
+      "input_schema": "P0FaultApplyInput",
+      "result_schema": "P0FaultResult",
+      "target": "local_peer",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "supervisor.test",
       "idempotency": "operation_id_payload_digest",
       "unsupported_reason": null
     }
@@ -2235,6 +2466,69 @@ export const errors = {
       "meaning": "命令未映射到当前端点明确声明的目标时钟域，不能直接比较或猜测换算。",
       "retry_disposition": "never",
       "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "P0_MODE_DENIED",
+      "meaning": "P0 只接受受信 simulation；test_only/public/unattended 或真实效果拒绝。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "INSTALLATION_IDENTITY_DENIED",
+      "meaning": "实际安装入口、制品、Manifest、实例或能力不匹配受信清单。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "PEER_IDENTITY_DENIED",
+      "meaning": "连接角色/凭据/签名或声明实例与受信通道不符。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "SIMULATION_SCOPE_DENIED",
+      "meaning": "目标/能力/会话不在当前有限 simulation grant 范围。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "PERSISTENCE_NOT_READY",
+      "meaning": "必要可靠登记尚未完成或 Worker 阻塞/失败，新增效果关闭；安全撤权不等待。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "INSTANCE_STALE",
+      "meaning": "会话、宿主、监督或端点实例已过期。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "CLOCK_MAPPING_INVALID",
+      "meaning": "时钟映射绑定、误差或有效期失效；禁止猜换算或重试延期。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "CAPABILITY_UNSUPPORTED",
+      "meaning": "未声明或本阶段未实现的能力，静态不支持。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "FAULT_SELECTION_INVALID",
+      "meaning": "故障选择不属于当前封闭 target/fault 组合。",
+      "retry_disposition": "never",
+      "phase": "P0"
     }
   ]
 } as const;
@@ -2274,7 +2568,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2334,7 +2632,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2349,7 +2651,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2364,7 +2670,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2499,7 +2809,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2529,7 +2843,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2544,7 +2862,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2559,7 +2881,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2574,7 +2900,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2619,7 +2949,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2634,7 +2968,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2649,7 +2987,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2679,7 +3021,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2694,7 +3040,11 @@ export const verification = {
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -2783,12 +3133,17 @@ export const verification = {
         "enabled_profile_digest",
         "dependency_gates",
         "fault_trace",
-        "acceptance_report"
+        "acceptance_report",
+        "sut_build_digest",
+        "runner_dependency_digest",
+        "environment",
+        "state_guard_coverage",
+        "raw_artifact_hashes"
       ],
       "label": "P0：基础约束与安全骨架",
-      "deliverables": "严格消息/错误/作用域/时限；契约生成/检查；SupervisionMode、ExecutionGrant、StopOperation及假端点安全撤权；基础不变量子集。",
+      "deliverables": "真实 Bellis 宿主、独立监督与受信假设备，实际鉴权/有限 stdio/时钟映射；SupervisionMode、ExecutionGrant、StopOperation；SQLite Worker 事务/Outbox、独立撤权停止清理和可复跑受信验收。",
       "not_required": "后续阶段的状态机、游戏C0、Iris、完整DSL、模型或OBS真机。",
-      "criterion": "结构/基础安全参考轨迹通过，所有未启用效果禁用。"
+      "criterion": "当前 macOS 真实多进程与实际存储路径的全部必需场景通过；端点计数/水位和宿主投影交叉核验；构建、runner依赖和原始证据匹配；未启用效果继续禁用。"
     },
     {
       "phase": "P1",
@@ -2835,8 +3190,97 @@ export const contracts = {
       "owner": "Bellis simulation",
       "phase": "P0",
       "semantic_rules": "仅协议联调；不提供真实效果、审核或设备清理证明。"
+    },
+    {
+      "ref": "p0-runtime-configuration@1",
+      "kind": "configuration",
+      "schema": "P0RuntimeConfig",
+      "owner": "Bellis operator",
+      "phase": "P0",
+      "semantic_rules": "仅 P0/simulation；具体准入语义见第20.2节。",
+      "admission_guards": [
+        "p0_simulation_admission_valid"
+      ]
+    },
+    {
+      "ref": "p0-simulation-input@1",
+      "kind": "simulation_input",
+      "schema": "P0ExecuteInput",
+      "owner": "Bellis host",
+      "phase": "P0",
+      "semantic_rules": "有限自身计数效果，真实鉴权、实例、期限、白名单、持久化与幂等全部复核。",
+      "admission_guards": [
+        "p0_simulation_execution_valid"
+      ]
+    },
+    {
+      "ref": "p0-simulation-result@1",
+      "kind": "simulation_fact",
+      "schema": "P0SimulationResult",
+      "owner": "受信假设备",
+      "phase": "P0",
+      "semantic_rules": "结果必须来自当前受信端点实例；计数水位与宿主投影交叉核验。"
+    },
+    {
+      "ref": "p0-simulation-permission@1",
+      "kind": "permission",
+      "schema": "P0EndpointLease",
+      "owner": "独立监督组件",
+      "phase": "P0",
+      "semantic_rules": "仅监督安全通道安装，空白名单无权限；连接健康不延长人工/grant期限。",
+      "admission_guards": [
+        "p0_endpoint_lease_valid"
+      ]
+    },
+    {
+      "ref": "p0-simulation-cleanup@1",
+      "kind": "cleanup_fact",
+      "schema": "P0CleanupRecord",
+      "owner": "独立监督组件",
+      "phase": "P0",
+      "semantic_rules": "监督持有独立清理责任，端点事实保留来源；UNKNOWN 仍隔离。"
+    },
+    {
+      "ref": "p0-installation@1",
+      "kind": "installation",
+      "schema": "P0TrustedInstallation",
+      "owner": "Bellis operator",
+      "phase": "P0",
+      "semantic_rules": "精确安装、入口和实际加载制品核验，不信任自报 simulation。"
+    },
+    {
+      "ref": "p0-build-manifest@1",
+      "kind": "acceptance_artifact",
+      "schema": "P0BuildManifest",
+      "owner": "受信验收运行器",
+      "phase": "P0",
+      "semantic_rules": "gate 重算清单覆盖和当前实际内容摘要，报告不得缩减运行依赖。"
+    },
+    {
+      "ref": "p0-test-run@1",
+      "kind": "acceptance_artifact",
+      "schema": "P0TestRunEvidence",
+      "owner": "受信验收运行器",
+      "phase": "P0",
+      "semantic_rules": "运行器启动实际 SUT、驱动真实入口并断言；不是人工 PASS 清单。"
+    },
+    {
+      "ref": "p0-endpoint-configuration@1",
+      "kind": "configuration",
+      "schema": "P0EndpointConfig",
+      "owner": "受信启动器",
+      "phase": "P0",
+      "semantic_rules": "假设备专用受限配置；只有自身实例私钥和受信host/supervisor公钥，不授予管理/存储凭据。"
     }
   ],
-  "capabilities": []
+  "capabilities": [
+    {
+      "capability": "simulation.execute",
+      "capability_version": "0.8.0",
+      "input_schema_ref": "p0-simulation-input@1",
+      "result_contract": "p0-simulation-result@1",
+      "permission_scope_ref": "p0-simulation-permission@1"
+    }
+  ]
 } as const;
-export const schemaDigest = "b4064237ffab9e669aaeefe126716d854ee418c44640cfc3bf96de1932f96d3c" as const;
+export const schemaDigest = "4c1f69688ed118d5ca219bae8730688df0dac486002373ffb669ac8c46f988c6" as const;

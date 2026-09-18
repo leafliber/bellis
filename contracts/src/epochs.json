@@ -26,7 +26,7 @@
     {
       "field": "supervision_epoch",
       "writer": "独立监督组件",
-      "scope": "broadcast_session_id",
+      "scope": "session_id＋supervisor_instance_id",
       "increment": "监督模式变化、显式人工重新授权",
       "comparison": "ExecutionGrant绑定精确匹配；heartbeat不复权"
     },
@@ -40,7 +40,7 @@
     {
       "field": "source_revision",
       "writer": "各对象唯一权威Reducer",
-      "scope": "authority_id＋object_id",
+      "scope": "authority_id＋source_instance＋object_id",
       "increment": "对象事实变更",
       "comparison": "同scope单调；旧值不能覆盖新投影，同值不同payload报错"
     },
@@ -57,6 +57,27 @@
       "scope": "authority_id＋source_instance＋流实例",
       "increment": "每个新源事实；原事实重放不改序号",
       "comparison": "同一源流内排序/去重；重连不伪造新事实。EventCursor.after_seq=-1表示首条之前；不能与模型候选source_seq比较。"
+    },
+    {
+      "field": "P0EndpointSnapshot.accepted_watermark / P0EffectFact.accepted_seq",
+      "writer": "受信假设备当前实例",
+      "scope": "endpoint_instance_id",
+      "increment": "每个首次接纳的 operation 连续递增，首个为1；watermark=0表示尚未接纳",
+      "comparison": "只同实例比较；同 operation 不再分配序号，重启从新实例开始且旧队列不重放"
+    },
+    {
+      "field": "P0EndpointSnapshot.completed_effect_count",
+      "writer": "受信假设备当前实例",
+      "scope": "endpoint_instance_id",
+      "increment": "每单位实际模拟效果发生后加1；栅栏后不得增加",
+      "comparison": "只同实例核验累计计数，不能把不同实例的数字当连续证明"
+    },
+    {
+      "field": "P0TraceEntry.index",
+      "writer": "受信验收运行器",
+      "scope": "run_id＋test_id",
+      "increment": "每条实际采集轨迹从0连续增加",
+      "comparison": "原始证据索引完整且不重复；不据此改写跨进程发生时间"
     }
   ]
 }

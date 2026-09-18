@@ -14,7 +14,7 @@
     {
       "id": "I02",
       "requirement": "单一高层采用权；辅助只返回候选，运行时最终核验",
-      "scenario": "插件、假设备或未认证客户端直接请求签发ExecutionGrant或改变监督模式，均被拒绝并记录来源；已签发授权下的命令在执行前仍由执行网关复核授权、监督代次与期限。接入LiveDirector与辅助规划器后按同一性质扩展。",
+      "scenario": "插件、假设备或未认证客户端直接请求签发ExecutionGrant或改变监督模式，均被拒绝并记录来源；已签发授权下的命令在执行前仍由执行网关复核授权、监督代次与期限。接入LiveDirector与辅助规划器后按同一性质扩展。 P0 首验仅已认证操作员明确批准有限 simulation；操作员字符串、监督身份冒充、测试脚本不能绕过鉴权。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -54,7 +54,7 @@
     {
       "id": "I09",
       "requirement": "本地停止不等待远端取消或持久化",
-      "scenario": "远端cancel永不返回，同时冻结持久化；本地栅栏立即关闭并有独立停止进度。",
+      "scenario": "远端cancel永不返回，同时冻结持久化；本地栅栏立即关闭并有独立停止进度。 组合注入宿主事件循环阻塞或退出、持久化 Worker 阻塞与 cancel 永不返回，核验监督直连和端点本地有限租约。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -64,7 +64,7 @@
     {
       "id": "I11",
       "requirement": "旧实例、重复、过期、撤权数据不能复活副作用",
-      "scenario": "撤权后重放旧实例、重复operation和过期消息，均不能增加实际效果次数。",
+      "scenario": "撤权后重放旧实例、重复operation和过期消息，均不能增加实际效果次数。 同时覆盖同 operation 异载荷冲突、StopOperation/ExecutionGrant 终态复活及撤权/期限/自然完成乱序；以端点计数判定。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -74,7 +74,7 @@
     {
       "id": "I12",
       "requirement": "每类事实只有登记的权威写入者，端点只能执行其声明的能力；例如Stage无键鼠权限，投票与游戏结果分别由各自引擎权威。",
-      "scenario": "假设备或其它插件发布非自身权威的事实（如监督模式变化、授权结果、其它端点的停止确认），或使用其Manifest未声明的方法，全部拒绝并保留来源。Stage、投票与游戏接入后按同一性质扩展。",
+      "scenario": "假设备或其它插件发布非自身权威的事实（如监督模式变化、授权结果、其它端点的停止确认），或使用其Manifest未声明的方法，全部拒绝并保留来源。Stage、投票与游戏接入后按同一性质扩展。 替换实际假设备入口/加载制品，或 Manifest 与受信安装身份不匹配，同样拒绝。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -164,7 +164,7 @@
     {
       "id": "I24",
       "requirement": "程序心跳（UI或客户端）不等于人工租约；失效收权、重连不复权",
-      "scenario": "仅续程序心跳而不续人工租约，进入restricted；重连不能恢复原执行grant。",
+      "scenario": "仅续程序心跳而不续人工租约，进入restricted；重连不能恢复原执行grant。 人工租约到期后即便 host/CLI 心跳仍在，endpoint.lease 不得延长人工或原 grant 期限；监督/端点失联也关闭新增效果。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -184,7 +184,7 @@
     {
       "id": "I28",
       "requirement": "安全、质量、覆盖、失败样本与时延独立报告",
-      "scenario": "混入拒绝、失败、UNKNOWN和慢样本生成报告，各项分别列出且不丢弃失败样本。",
+      "scenario": "混入拒绝、失败、UNKNOWN和慢样本生成报告，各项分别列出且不丢弃失败样本。 原始断言与实际 SUT 拒绝/失败/UNKNOWN 分开，端点计数/水位/清理事实与宿主投影交叉核验。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -194,7 +194,7 @@
     {
       "id": "I65",
       "requirement": "合法未知/安全超时入口不受审计成功、普通预算或业务队列准入阻塞",
-      "scenario": "所有适用状态注入日志失败/数据库满/预算耗尽，仍归约到实际未知/对账并禁止相关新效果",
+      "scenario": "所有适用状态注入日志失败/数据库满/预算耗尽，仍归约到实际未知/对账并禁止相关新效果 覆盖三状态机 P0 适用安全转换及业务队列满；守卫拒绝、表外事件必须无副作用，禁用模式仅验证拒绝。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -204,7 +204,7 @@
     {
       "id": "I66",
       "requirement": "本地安全栅栏、端点停止确认、记录状态分开；独立清理责任不随业务终态消失",
-      "scenario": "对象终态后actor退出，清理继续；未持久化即崩溃重启，旧授权不恢复；无清理证据不放行冲突owner",
+      "scenario": "对象终态后actor退出，清理继续；未持久化即崩溃重启，旧授权不恢复；无清理证据不放行冲突owner 清理未知、记录缺失或 Outbox 重放后，新 scope/新 operation/重启/测试通过均不解除冲突资源隔离；终态不丢清理责任。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -254,7 +254,7 @@
     {
       "id": "I81",
       "requirement": "所有epoch/revision/seq都有唯一writer、scope、递增和比较规则；不同作用域不能数值比大小。",
-      "scenario": "两个作用域相同数字代次、旧writer和跨实例revision混用均拒绝；合法同域递增接受。",
+      "scenario": "两个作用域相同数字代次、旧writer和跨实例revision混用均拒绝；合法同域递增接受。 时钟映射同时绑定源/目标实例、连接、时钟、误差上限与有效期；无映射/过期/跨实例拒绝，重试不能后移期限。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -264,7 +264,7 @@
     {
       "id": "I82",
       "requirement": "test_only/public许可与监督模式分别建模；测试通过或客户端、端点重连不自动取得公开输出或其它未许可效果的权限。",
-      "scenario": "test_only测试通过后，或客户端、插件重连后，尝试public输出或未许可效果，必须再次独立授权。接入Stage与游戏输入后按同一性质扩展。",
+      "scenario": "test_only测试通过后，或客户端、插件重连后，尝试public输出或未许可效果，必须再次独立授权。接入Stage与游戏输入后按同一性质扩展。 P0 合法 simulation 首验不要求本次尚未产生的 P0 PASS，但首验准入不是任何阶段 PASS；P0 的 test_only/public/unattended 全部拒绝，不制造真实效果许可。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
@@ -294,7 +294,7 @@
     {
       "id": "I85",
       "requirement": "阶段门禁与运行配置按已启用阶段的依赖闭包计算；未登记的阶段不能启用，未启用阶段的状态机、命令与能力保持关闭。",
-      "scenario": "RuntimeProfile启用P1而缺P0、或启用未登记阶段时，宿主拒绝加载；未启用阶段的状态机转换、命令与能力调用全部被拒绝。",
+      "scenario": "RuntimeProfile启用P1而缺P0、或启用未登记阶段时，宿主拒绝加载；未启用阶段的状态机转换、命令与能力调用全部被拒绝。 P0 首验宿主即使收到依赖闭包完整的 P0＋P1 配置也拒绝，本阶段只允许 P0。",
       "first_required_phase": "P0",
       "verification_status": "PENDING_SUT",
       "test_ids": [
