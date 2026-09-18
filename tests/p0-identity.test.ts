@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmod, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { after, before, test } from "node:test";
 import {
   assertValid,
   type P0EndpointConfig,
+  payloadDigest,
   validateManifest,
   validateProfile,
 } from "../packages/contract-sdk/src/index.ts";
@@ -27,6 +29,7 @@ import {
   terminateChild,
 } from "../packages/runtime/src/processes.ts";
 import { JsonChannel } from "../packages/runtime/src/transport.ts";
+import { createProductionFixture } from "./p0-endpoint.helpers.ts";
 import {
   createFixture,
   limits,
@@ -37,6 +40,26 @@ import {
 } from "./p0-identity.helpers.ts";
 
 let fixture: Awaited<ReturnType<typeof createFixture>>;
+
+test("p0.identity: production startup refuses a renamed installation even with matching file and Manifest digests", async () => {
+  const fixture = await createProductionFixture();
+  try {
+    const manifest = { ...fixture.manifest, plugin_id: "renamed-fake" };
+    const path = join(fixture.directory, "fake/manifest.json");
+    const bytes = Buffer.from(JSON.stringify(manifest));
+    await writeFile(path, bytes);
+    fixture.config.installation.plugin_id = manifest.plugin_id;
+    fixture.config.installation.manifest_digest = payloadDigest(manifest);
+    const artifact = fixture.config.installation.artifacts.find((item) => item.path === path);
+    assert.ok(artifact);
+    artifact.sha256 = createHash("sha256").update(bytes).digest("hex");
+    await assert.doesNotReject(verifyInstallation(fixture.config.installation));
+    await writeFile(fixture.configPath, JSON.stringify(fixture.config));
+    await assert.rejects(loadRuntimeConfig(fixture.configPath), /INSTALLATION_IDENTITY_DENIED/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
 before(async () => {
   fixture = await createFixture();
 });
@@ -82,6 +105,8 @@ test("p0.identity: installation verifies actual SDK/runtime closure and refuses 
 });
 
 test("p0.identity: exact config rejects mode/phase/capability changes, missing/extra fields and unsafe paths", async () => {
+  const fixture = await createProductionFixture();
+  await assert.doesNotReject(loadRuntimeConfig(fixture.configPath));
   const good = JSON.stringify(fixture.config);
   const variants = [
     { ...fixture.config, surprise: true },
@@ -129,6 +154,7 @@ test("p0.identity: exact config rejects mode/phase/capability changes, missing/e
   } finally {
     await writeFile(fixture.configPath, good);
     await chmod(fixture.config.operator_credentials_path, 0o600);
+    await fixture.cleanup();
   }
 });
 
@@ -165,6 +191,7 @@ test("p0.identity: child shutdown handles failed spawn and escalates a nonrespon
 test("p0.identity: real Supervisor/Host/CLI authenticate and query; effects remain closed", {
   timeout: 20000,
 }, async () => {
+  const fixture = await createProductionFixture();
   const supervisor = spawn(
     process.execPath,
     [join(repository, "apps/host/supervisor.ts"), "--config", fixture.configPath],
@@ -189,8 +216,7 @@ test("p0.identity: real Supervisor/Host/CLI authenticate and query; effects rema
     assertValid("P0SessionSnapshot", snapshot);
     assert.equal(snapshot.supervision.state, "stopped");
     assert.equal(snapshot.grants.length, 0);
-    assert.equal(snapshot.endpoint.fact, null);
-    assert.equal(snapshot.endpoint.quality, "unknown");
+    if (snapshot.endpoint.fact) assert.equal(snapshot.endpoint.fact.completed_effect_count, 0);
     assert.equal(snapshot.persistence, "blocked");
     const identity = await readServiceIdentity(fixture.config.management_socket_path);
     const connection = await RpcConnection.connect(
@@ -256,11 +282,13 @@ test("p0.identity: real Supervisor/Host/CLI authenticate and query; effects rema
     readFile(`${fixture.config.management_socket_path}.host.identity.json`),
     /ENOENT/,
   );
+  await fixture.cleanup();
 });
 
 test("p0.identity: startup SIGTERM before and after identity publication cancels and cleans owned paths", {
   timeout: 20000,
 }, async (t) => {
+  const fixture = await createProductionFixture();
   const aborted = new AbortController();
   aborted.abort();
   await assert.rejects(startSupervisor(fixture.configPath, aborted.signal), { name: "AbortError" });
@@ -289,11 +317,14 @@ test("p0.identity: startup SIGTERM before and after identity publication cancels
       await assert.rejects(readFile(path), /ENOENT/);
     }
   }
+  await fixture.cleanup();
 });
 
 test("p0.identity: actual management rejects old challenges and invalid target clock mappings", {
   timeout: 20000,
-}, async () => {
+}, async (t) => {
+  const fixture = await createProductionFixture();
+  t.after(() => fixture.cleanup());
   const supervisor = spawn(
     process.execPath,
     [join(repository, "apps/host/supervisor.ts"), "--config", fixture.configPath],
@@ -480,7 +511,9 @@ test("p0.identity: end immediately rejects frames after malformed prefix in the 
 
 test("p0.identity: raw socket rejects malformed UTF8, duplicate keys, batch, unknown methods and oversized frames", {
   timeout: 15000,
-}, async () => {
+}, async (t) => {
+  const fixture = await createProductionFixture();
+  t.after(() => fixture.cleanup());
   const supervisor = spawn(
     process.execPath,
     [join(repository, "apps/host/supervisor.ts"), "--config", fixture.configPath],

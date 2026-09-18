@@ -13,6 +13,7 @@ import {
   verifyAnnouncement,
 } from "../packages/runtime/src/identity.ts";
 import { P0Service } from "../packages/runtime/src/service.ts";
+import { createProductionFixture } from "./p0-endpoint.helpers.ts";
 import { createFixture, limits } from "./p0-identity.helpers.ts";
 
 let fixture: Awaited<ReturnType<typeof createFixture>>;
@@ -176,6 +177,7 @@ test("p0.authority: actual socket uses signed epoch and refuses an announcement 
 });
 
 test("p0.authority: Host bootstrap pins endpoint entry bytes to the actual trusted installation", async () => {
+  const fixture = await createProductionFixture();
   const host = generateIdentity("host"),
     supervisor = generateIdentity("supervisor"),
     endpoint = generateIdentity("endpoint");
@@ -223,4 +225,5 @@ test("p0.authority: Host bootstrap pins endpoint entry bytes to the actual trust
       /INSTALLATION_IDENTITY_DENIED/,
     );
   }
+  await fixture.cleanup();
 });

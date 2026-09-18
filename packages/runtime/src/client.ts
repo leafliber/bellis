@@ -6,12 +6,15 @@ import {
   type CommandContext,
   type P0ClockMapping,
   type P0ConnectionAnnouncement,
+  type P0EndpointSnapshot,
   type P0OperatorCredential,
   type P0PeerIdentity,
   type P0SafetyLimits,
+  payloadDigest,
   type RpcFailure,
   type RpcRequest,
   type RpcSuccess,
+  validate,
   validateRpcResponse,
 } from "../../contract-sdk/src/index.ts";
 import { clockMapping, MonotonicClock, mappedDeadline } from "./clock.ts";
@@ -49,6 +52,16 @@ export class RpcConnection {
   #firstResolve: ((value: unknown) => void) | undefined;
   #firstReject: ((error: Error) => void) | undefined;
   #announced = false;
+  #eventHandler: ((fact: P0EndpointSnapshot) => void) | undefined;
+  #eventEpoch: (() => number) | undefined;
+  #eventSequence = -1;
+  #eventDigests = new Map<number, string>();
+  #revisionDigests = new Map<number, string>();
+  onEndpointFact(handler: (fact: P0EndpointSnapshot) => void, currentEpoch: () => number): void {
+    if (this.announcement.service_role !== "endpoint") reject("ROLE_SCOPE_DENIED");
+    this.#eventHandler = handler;
+    this.#eventEpoch = currentEpoch;
+  }
   #lastResponse: RpcSuccess | RpcFailure | undefined;
   get lastResponse(): RpcSuccess | RpcFailure | undefined {
     return this.#lastResponse ? structuredClone(this.#lastResponse) : undefined;
@@ -71,6 +84,45 @@ export class RpcConnection {
         return;
       }
       if (!raw || typeof raw !== "object" || !("id" in raw) || typeof raw.id !== "string") {
+        if (this.#eventHandler && validate("RpcEvent", raw)) {
+          const event = raw.params;
+          if (
+            ["simulation.progressed", "simulation.stopped"].includes(event.event_name) &&
+            event.authority_id === "endpoint" &&
+            event.source_instance === this.announcement.service_instance_id &&
+            event.session_id === this.announcement.session_id &&
+            event.scope_ref.kind === "Session" &&
+            event.scope_ref.id === this.announcement.session_id &&
+            event.authority_epoch === this.#eventEpoch?.() &&
+            event.source_seq !== null &&
+            validate("P0EndpointSnapshot", event.payload) &&
+            event.payload.endpoint_instance_id === this.announcement.service_instance_id &&
+            event.payload.session_id === this.announcement.session_id &&
+            event.payload.supervisor_instance_id === this.announcement.authority_instance_id &&
+            event.payload.observed_at.clock_domain === this.mapping.target_clock_domain
+          ) {
+            const eventDigest = payloadDigest(event);
+            const revisionDigest = payloadDigest(event.payload);
+            const seenEvent = this.#eventDigests.get(event.source_seq);
+            const seenRevision = this.#revisionDigests.get(event.payload.source_revision);
+            if (
+              (seenEvent && seenEvent !== eventDigest) ||
+              (seenRevision && seenRevision !== revisionDigest) ||
+              (!seenEvent && this.#eventDigests.size >= 1024) ||
+              (!seenRevision && this.#revisionDigests.size >= 1024)
+            ) {
+              channel.close();
+              return;
+            }
+            this.#eventDigests.set(event.source_seq, eventDigest);
+            this.#revisionDigests.set(event.payload.source_revision, revisionDigest);
+            if (event.source_seq > this.#eventSequence) {
+              this.#eventSequence = event.source_seq;
+              this.#eventHandler(structuredClone(event.payload));
+            }
+            return;
+          }
+        }
         channel.close();
         return;
       }
@@ -114,8 +166,11 @@ export class RpcConnection {
     instance: string = randomUUID(),
     clock = new MonotonicClock(),
     authority: P0PeerIdentity = identity,
+    signal?: AbortSignal,
   ): Promise<RpcConnection> {
+    signal?.throwIfAborted();
     await controlledPath(socketPath, dirname(socketPath), true, true);
+    signal?.throwIfAborted();
     const sent = clock.now();
     const socket = createConnection(socketPath);
     const channel = new JsonChannel(
@@ -124,7 +179,21 @@ export class RpcConnection {
       limits.max_message_bytes,
       limits.max_pending_requests,
     );
-    return RpcConnection.fromChannel(channel, identity, limits, instance, clock, sent, authority);
+    const abort = () => channel.close();
+    signal?.addEventListener("abort", abort, { once: true });
+    try {
+      return await RpcConnection.fromChannel(
+        channel,
+        identity,
+        limits,
+        instance,
+        clock,
+        sent,
+        authority,
+      );
+    } finally {
+      signal?.removeEventListener("abort", abort);
+    }
   }
 
   static async fromChannel(
@@ -211,8 +280,19 @@ export class RpcConnection {
     );
   }
   peerCall(method: string, input: object, operation: string = randomUUID()): Promise<unknown> {
+    const legacy = [
+      "plugin.handshake",
+      "plugin.describe",
+      "controller.observe_status",
+      "controller.stop",
+      "controller.dispose",
+    ].includes(method);
     return this.request(
-      completeRequest(method, { ...input, mapping: this.mapping }, this.context(operation)),
+      completeRequest(
+        method,
+        legacy ? input : { ...input, mapping: this.mapping },
+        this.context(operation),
+      ),
     );
   }
   operatorCall(

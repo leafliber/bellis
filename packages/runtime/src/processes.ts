@@ -12,6 +12,7 @@ import {
 import { RpcConnection } from "./client.ts";
 import { MonotonicClock } from "./clock.ts";
 import { loadRuntimeConfig, validateBootstrap } from "./config.ts";
+import { endpointIdentity, launchEndpoint, queryEndpoint } from "./endpoint-client.ts";
 import {
   readControlled,
   readCredential,
@@ -68,7 +69,7 @@ export function initialSnapshot(
   return snapshot;
 }
 
-export async function terminateChild(child: ChildProcess): Promise<void> {
+export async function terminateChild(child: ChildProcess, graceMs = 1000): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((resolve, reject) => {
     const finish = () => {
@@ -77,11 +78,11 @@ export async function terminateChild(child: ChildProcess): Promise<void> {
       child.off("exit", finish);
       resolve();
     };
-    const escalation = setTimeout(() => child.kill("SIGKILL"), 1000);
+    const escalation = setTimeout(() => child.kill("SIGKILL"), graceMs);
     const deadline = setTimeout(() => {
       child.off("exit", finish);
       reject(new Error("CHILD_STOP_UNCONFIRMED"));
-    }, 2000);
+    }, graceMs + 1000);
     child.once("exit", finish);
     child.kill("SIGTERM");
   });
@@ -115,6 +116,10 @@ export async function startSupervisor(
   snapshot.endpoint.received_at = clock.point();
   let lastHostHealth: number | null = null;
   let child: ChildProcess | undefined;
+  let endpointInterval: ReturnType<typeof setInterval> | undefined;
+  let endpointConnection: RpcConnection | undefined;
+  let endpointBusy = false;
+  let closed = false;
   const service = new P0Service({
     identity: supervisor,
     authority: supervisor.public,
@@ -171,6 +176,78 @@ export async function startSupervisor(
     },
   };
   assertValid("P0HostBootstrap", bootstrap);
+  const pollEndpoint = async (): Promise<void> => {
+    if (closed || endpointBusy) return;
+    endpointBusy = true;
+    try {
+      endpointConnection = await RpcConnection.connect(
+        config.safety_socket_path,
+        endpointIdentity(bootstrap.endpoint_config),
+        config.limits,
+        supervisor.public.instance_id,
+        clock,
+        supervisor.public,
+      );
+      if (closed) return;
+      const project = (fact: NonNullable<P0SessionSnapshot["endpoint"]["fact"]>) => {
+        const previous = snapshot.endpoint.fact;
+        if (previous && fact.source_revision < previous.source_revision) return;
+        if (
+          previous &&
+          fact.source_revision === previous.source_revision &&
+          payloadDigest(previous) !== payloadDigest(fact)
+        )
+          throw new Error("ENDPOINT_REVISION_CONFLICT");
+        snapshot.endpoint = {
+          source_instance_id: fact.endpoint_instance_id,
+          received_at: clock.point(),
+          quality: "fresh",
+          fact,
+        };
+      };
+      endpointConnection.onEndpointFact(project, () => 0);
+      await endpointConnection.authenticatePeer(supervisor);
+      project(await queryEndpoint(endpointConnection, bootstrap.endpoint_config));
+    } catch {
+      snapshot.endpoint.quality = snapshot.endpoint.fact ? "stale" : "unknown";
+    } finally {
+      endpointConnection?.close();
+      endpointConnection = undefined;
+      endpointBusy = false;
+    }
+  };
+  const stopEndpoint = async (): Promise<void> => {
+    endpointConnection?.close();
+    let connection: RpcConnection | undefined;
+    const deadline = new AbortController();
+    const timer = setTimeout(() => {
+      deadline.abort();
+      connection?.close();
+    }, config.limits.stop_timeout_ms);
+    try {
+      connection = await RpcConnection.connect(
+        config.safety_socket_path,
+        endpointIdentity(bootstrap.endpoint_config),
+        config.limits,
+        supervisor.public.instance_id,
+        clock,
+        supervisor.public,
+        deadline.signal,
+      );
+      deadline.signal.throwIfAborted();
+      connection.onEndpointFact(
+        () => {},
+        () => 0,
+      );
+      await connection.authenticatePeer(supervisor);
+      await connection.peerCall("controller.dispose", { instance_id: endpoint.public.instance_id });
+    } catch {
+      snapshot.endpoint.quality = "unknown";
+    } finally {
+      clearTimeout(timer);
+      connection?.close();
+    }
+  };
   try {
     signal?.throwIfAborted();
     await service.listen(config.management_socket_path);
@@ -178,19 +255,30 @@ export async function startSupervisor(
     child = spawn(
       process.execPath,
       [fileURLToPath(new URL("../../../apps/host/host.ts", import.meta.url))],
-      { env: safeChildEnvironment(), stdio: ["ignore", "ignore", "pipe", "pipe"] },
+      { env: safeChildEnvironment(), stdio: ["ignore", "ignore", "inherit", "pipe"] },
     );
     const hostChild = child;
-    // Do not relay arbitrary child output: secrets and protocol payloads are not diagnostic text.
-    hostChild.stderr?.resume();
+    // Descriptor inheritance preserves endpoint observations even while Host is blocked or gone.
     const descriptor = hostChild.stdio[3];
     if (!descriptor || !("end" in descriptor)) throw new Error("BOOTSTRAP_CHANNEL_MISSING");
     descriptor.on("error", () => {});
     descriptor.end(JSON.stringify(bootstrap));
+    endpointInterval = setInterval(
+      () => {
+        void pollEndpoint();
+      },
+      Math.max(10, Math.floor(config.limits.peer_health_timeout_ms / 3)),
+    );
+    void pollEndpoint();
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => finish(new Error("HOST_STARTUP_TIMEOUT")), 5000);
       const poll = setInterval(() => {
-        if (lastHostHealth !== null) finish();
+        if (
+          lastHostHealth !== null &&
+          snapshot.endpoint.quality === "fresh" &&
+          snapshot.endpoint.fact?.host_connection_deadline
+        )
+          finish();
       }, 10);
       const exited = () => finish(new Error("HOST_STARTUP_FAILED"));
       const failed = () => finish(new Error("HOST_STARTUP_FAILED"));
@@ -215,14 +303,25 @@ export async function startSupervisor(
       close: async () => {
         if (closing) return;
         closing = true;
+        closed = true;
+        clearInterval(endpointInterval);
         try {
-          await terminateChild(hostChild);
+          const results = await Promise.allSettled([
+            stopEndpoint(),
+            terminateChild(hostChild, config.limits.stop_timeout_ms),
+            service.close(),
+          ]);
+          const failed = results.find((result) => result.status === "rejected");
+          if (failed?.status === "rejected") throw failed.reason;
         } finally {
           await service.close();
         }
       },
     };
   } catch (error) {
+    closed = true;
+    clearInterval(endpointInterval);
+    endpointConnection?.close();
     try {
       if (child) await terminateChild(child);
     } finally {
@@ -273,6 +372,7 @@ export async function startHost(
     faultInjectionEnabled: bootstrap.fault_injection_enabled,
   });
   let closed = false;
+  let endpoint: Awaited<ReturnType<typeof launchEndpoint>> | undefined;
   let active: RpcConnection | undefined;
   let busy = false;
   const health = async (): Promise<void> => {
@@ -303,6 +403,31 @@ export async function startHost(
     signal?.throwIfAborted();
     await service.listen(bootstrap.host_socket_path);
     signal?.throwIfAborted();
+    endpoint = await launchEndpoint(
+      bootstrap.endpoint_config,
+      identity,
+      clock,
+      (fact) => {
+        const previous = snapshot.endpoint.fact;
+        if (previous && fact.source_revision < previous.source_revision) return;
+        if (
+          previous &&
+          fact.source_revision === previous.source_revision &&
+          payloadDigest(previous) !== payloadDigest(fact)
+        )
+          throw new Error("ENDPOINT_REVISION_CONFLICT");
+        snapshot.endpoint = {
+          source_instance_id: fact.endpoint_instance_id,
+          received_at: clock.point(),
+          quality: "fresh",
+          fact,
+        };
+      },
+      signal,
+    );
+    endpoint.connection.channel.on("closed", () => {
+      snapshot.endpoint.quality = "stale";
+    });
     await new Promise<void>((resolve, reject) => {
       const aborted = () => reject(new Error("STARTUP_CANCELLED"));
       signal?.addEventListener("abort", aborted, { once: true });
@@ -315,6 +440,8 @@ export async function startHost(
   } catch (error) {
     closed = true;
     active?.close();
+    endpoint?.connection.close();
+    if (endpoint) await terminateChild(endpoint.child);
     await service.close();
     throw error;
   }
@@ -332,6 +459,9 @@ export async function startHost(
       closed = true;
       clearInterval(interval);
       active?.close();
+      endpoint?.connection.close();
+      // Normal Host shutdown ends business traffic; Supervisor retains its independent cleanup path.
+      endpoint?.child.unref();
       await service.close();
     },
   };

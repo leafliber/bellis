@@ -21,7 +21,8 @@
     "spike:serve": "node tools/spikes/probe-server.mjs",
     "acceptance:p0:tools": "node tools/acceptance/run.ts",
     "p0:supervisor": "node apps/host/supervisor.ts",
-    "p0:operator": "node apps/host/operator.ts"
+    "p0:operator": "node apps/host/operator.ts",
+    "p0:install": "node tools/p0-install.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

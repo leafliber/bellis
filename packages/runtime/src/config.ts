@@ -86,12 +86,28 @@ export async function verifyInstallation(
     },
   });
   if (compilation.warnings.length) reject("INSTALLATION_IDENTITY_DENIED");
+  const singleFake = manifest.plugin_id === "bellis-p0-fake-device";
+  if (singleFake && Object.keys(compilation.metafile.inputs).length !== 1)
+    reject("INSTALLATION_IDENTITY_DENIED");
   const required = new Set([manifestPath]);
   for (const [name, metadata] of Object.entries(compilation.metafile.inputs)) {
     const path = await realpath(resolve(dirname(installation.entry.path), name));
     const bytes = await installationFile(path);
     required.add(path);
     for (const dependency of metadata.imports) {
+      if (
+        singleFake &&
+        (!dependency.external ||
+          ![
+            "node:crypto",
+            "node:events",
+            "node:fs",
+            "node:fs/promises",
+            "node:net",
+            "node:path",
+          ].includes(dependency.path))
+      )
+        reject("INSTALLATION_IDENTITY_DENIED");
       if (["dynamic-import", "require-call", "require-resolve"].includes(dependency.kind))
         reject("INSTALLATION_IDENTITY_DENIED");
       if (
@@ -136,6 +152,8 @@ export async function loadRuntimeConfig(path: string): Promise<{
 }> {
   const config = decodeJson(await readControlled(path));
   assertValid("P0RuntimeConfig", config);
+  if (config.installation.plugin_id !== "bellis-p0-fake-device")
+    reject("INSTALLATION_IDENTITY_DENIED");
   const directory = dirname(path);
   for (const p of [config.operator_credentials_path, config.service_identity_key_path])
     await controlledPath(p, directory, true);
@@ -180,6 +198,8 @@ export async function loadRuntimeConfig(path: string): Promise<{
 
 export async function validateBootstrap(value: unknown): Promise<P0HostBootstrap> {
   assertValid("P0HostBootstrap", value);
+  if (value.installation.plugin_id !== "bellis-p0-fake-device")
+    reject("INSTALLATION_IDENTITY_DENIED");
   const endpoint = value.endpoint_config;
   const identity = identityFromKey(
     "host",

@@ -3,6 +3,8 @@
     "includes": [
       "apps/**",
       "plugins/**",
+      "!plugins/fake-device/generated/endpoint.mjs",
+      "!plugins/fake-device/generated/manifest.json",
       "packages/**",
       "tests/**",
       "tools/**/*.ts",
