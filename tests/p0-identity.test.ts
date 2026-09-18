@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, readFile, symlink, unlink, writeFile } from "node:fs/promises";
+import { appendFileSync, statSync } from "node:fs";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -325,11 +335,40 @@ test("p0.identity: actual management rejects old challenges and invalid target c
 }, async (t) => {
   const fixture = await createProductionFixture();
   t.after(() => fixture.cleanup());
+  const base = join(repository, "reports/p0/w5stf/identity-management");
+  await mkdir(base, { recursive: true });
+  const directory = await mkdtemp(join(base, "run-"));
+  const rawPath = join(directory, "stderr.ndjson");
+  const file = await open(rawPath, "wx", 0o600);
   const supervisor = spawn(
     process.execPath,
     [join(repository, "apps/host/supervisor.ts"), "--config", fixture.configPath],
-    { env: safeChildEnvironment(), stdio: "ignore" },
+    { env: safeChildEnvironment(), stdio: ["ignore", "ignore", file.fd] },
   );
+  await file.close();
+  const record = (detail: object) =>
+    appendFileSync(
+      join(directory, "parent.ndjson"),
+      `${JSON.stringify({ observer_pid: process.pid, monotonic_ms: performance.now(), ...detail })}\n`,
+    );
+  const kill = supervisor.kill.bind(supervisor);
+  supervisor.kill = (signal = "SIGTERM") => {
+    record({ kind: "kill", target_pid: supervisor.pid, signal });
+    return kill(signal);
+  };
+  supervisor.on("exit", (code, signal) =>
+    record({ kind: "exit", target_pid: supervisor.pid, code, signal }),
+  );
+  let overflow = false;
+  const monitor = setInterval(() => {
+    if (!overflow && statSync(rawPath).size > 16 * 1024 * 1024) {
+      overflow = true;
+      record({ kind: "capture_overflow" });
+      supervisor.kill("SIGKILL");
+    }
+  }, 10);
+  t.after(() => clearInterval(monitor));
+  t.diagnostic(`actual management raw=${rawPath} supervisor_pid=${supervisor.pid}`);
   try {
     await waitFor(`${fixture.config.management_socket_path}.host.identity.json`, supervisor);
     const identity = await readServiceIdentity(fixture.config.management_socket_path);
@@ -398,8 +437,14 @@ test("p0.identity: actual management rejects old challenges and invalid target c
       }
     }
   } finally {
-    await stopProcess(supervisor);
+    try {
+      await stopProcess(supervisor);
+    } finally {
+      clearInterval(monitor);
+      record({ kind: "capture_end", bytes: statSync(rawPath).size, overflow });
+    }
   }
+  assert.equal(overflow, false, "finite raw capture must not overflow");
   assert.equal(supervisor.signalCode, null, "Supervisor must handle shutdown even during startup");
   await assert.rejects(
     readFile(`${fixture.config.management_socket_path}.identity.json`),

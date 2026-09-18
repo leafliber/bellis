@@ -355,7 +355,7 @@ async function supervisorRuntime(
     clearInterval(endpointInterval);
     endpointConnection?.close();
     try {
-      if (child) await terminateChild(child);
+      if (child) await terminateChild(child, config.limits.stop_timeout_ms);
     } finally {
       await service.close();
     }
@@ -520,7 +520,7 @@ async function hostRuntime(
     closed = true;
     active?.close();
     endpoint?.connection.close();
-    if (endpoint) await terminateChild(endpoint.child);
+    if (endpoint) await terminateChild(endpoint.child, bootstrap.limits.stop_timeout_ms);
     await service.close();
     throw error;
   }

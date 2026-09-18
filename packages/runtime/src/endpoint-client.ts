@@ -127,7 +127,7 @@ export async function launchEndpoint(
   } catch (error) {
     connection?.observation?.failure("dispatch", observationError(error));
     connection?.close();
-    await terminateChild(child);
+    await terminateChild(child, config.limits.stop_timeout_ms);
     throw error;
   } finally {
     signal?.removeEventListener("abort", aborted);
