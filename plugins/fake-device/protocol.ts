@@ -160,6 +160,9 @@ export class EndpointProtocol {
     const history = new Map<string, { digest: string; result: unknown }>();
     const safetyHistory = new Map<string, { digest: string; result: unknown }>();
     const expiry = setTimeout(() => channel.close(), this.config.limits.clock_mapping_ttl_ms);
+    channel.on("readEnded", () => {
+      if (role === "host") this.model.disconnect();
+    });
     channel.on("closed", () => {
       clearTimeout(expiry);
       this.#channels.delete(channel);

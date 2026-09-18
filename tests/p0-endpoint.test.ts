@@ -38,6 +38,46 @@ class ControlledClock extends MonotonicClock {
   }
 }
 
+test("p0.endpoint protocol module: actual stream EOF fences before retained frames finish parsing", async () => {
+  const f = await modelFixture();
+  const protocol = new EndpointProtocol(f.config, f.endpoint, f.clock);
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.resume();
+  const channel = new JsonChannel(input, output, f.config.limits.max_message_bytes, 32);
+  try {
+    // Controlled module grant/receipt only; no production Host authorization is bypassed.
+    protocol.model.handshake(f.hostMapping);
+    protocol.model.install(f.lease, f.context());
+    const operation = f.execute(2);
+    protocol.model.execute(operation.input, operation.context);
+    protocol.accept(channel, "host");
+    let frames = 0;
+    channel.on("message", () => frames++);
+    let ended = false;
+    channel.on("readEnded", () => {
+      ended = true;
+      assert.ok(frames < 20);
+      assert.equal(protocol.model.snapshot().fence_applied, true);
+      assert.equal(protocol.model.snapshot().host_connection_deadline, null);
+      f.clock.time += 10;
+      protocol.model.tick();
+      assert.equal(protocol.model.snapshot().completed_effect_count, 0);
+    });
+    const closed = once(channel, "closed");
+    input.write(Buffer.from("{}\n".repeat(20)));
+    assert.equal(frames, 8);
+    input.end();
+    await closed;
+    assert.equal(ended, true);
+    assert.equal(frames, 20);
+  } finally {
+    channel.close();
+    await protocol.close();
+    await f.fixture.cleanup();
+  }
+});
+
 test("p0.endpoint module: maximum-length retained facts reserve complete RPC/event/observation wire budget", async () => {
   const f = await modelFixture(true);
   try {
