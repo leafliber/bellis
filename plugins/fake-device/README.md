@@ -8,7 +8,7 @@ main.ts 导出固定 startEndpoint(P0EndpointConfig)，由受信 launcher 用同
 
 pnpm generate 将源码及本次内存契约依赖打包为 generated/endpoint.mjs，生成 generated/manifest.json。仅这两个文件排除格式检查，源码继续 TypeScript/Biome。生成检查固定 builtin、无动态/外部分块及跨 checkout 字节一致。
 
-Schema 为 P0EndpointConfig、P0EndpointLease、P0ExecuteInput、P0EndpointRevokeInput、P0EndpointSnapshot、P0EndpointObservation，以及登记的 plugin/controller/clock/fault 命令。字段和精确规则见 [P0 简报](../../docs/generated/P0.md)及[第22.6节](../../docs/spec/22-tech-storage-deployment.md)。端点不签发 grant、不确认人工授权、不写数据库。
+Schema 为 P0EndpointConfig、P0EndpointLease、P0ExecuteInput、P0EndpointRevokeInput、P0EndpointSnapshot，以及端点/协议/进程观测和登记的 plugin/controller/clock/fault 命令。字段和精确规则见 [P0 简报](../../docs/generated/P0.md)及[第22.6节](../../docs/spec/22-tech-storage-deployment.md)。端点不签发 grant、不确认人工授权、不写数据库。
 
 ## 执行、停止与寿命
 
@@ -28,7 +28,9 @@ stdio EOF/TTL、监督健康超时或最终实例期限进入不可延长的查�
 
 固定监督才能下发封闭 endpoint 故障。queue_full/budget_exhausted 拒绝新效果；cancel_never_returns 只挂起 stop 回包，栅栏与安全通道继续；ack_delay/ack_reverse_order 延迟原事实事件，不改业务结果；event_loop_block 是有限同步故障，结束先查期限；disconnect 封锁并断开；process_exit 实际退出，保留 UNKNOWN 边界。初始 fault 必须 none。
 
-观察是 P0EndpointObservation：每次尝试分配连续序号，失败/容量丢失累计不回退。stderr 写入有界，原始 fd 直达监督/runner；stdout 只协议。观察不参与生产授权或清理归约；缺口/丢失拒绝完整证据结论。
+model.ts 的真实快照通过 P0EndpointObservation 输出；实际 stdio 与 safety UDS 接点通过 P0ProtocolObservation 输出，launcher 和 main.ts 在真实失败阶段产生进程观察。它们共享该端点固定实例的轻量 writer，各流分别管理序号、丢失与正常结束，协议流跨所有连接和方向共用序号。writer 不引入父进程的 child_process 依赖；停止/清理仍以模型和认证入口为准，不消费 stderr。
+
+stderr 原始 fd 直达监督/runner，默认以公开 fs.write 异步写出；stdout 只协议。正常结束给出 P0ObservationStreamEnd，异常退出保留不完整流。close 在同步 fence/观察前安装最终退出定时器；有限 finish 后仍有 OS 写在途时，main 读取实际传入 writer 的状态，仅对自身发 SIGKILL，不依赖 bundle 的全局标记。有限输出预算、背压、排空和错误去敏见 [runtime 观测说明](../../packages/runtime/README.md)。日志缺口/丢失不能支撑完整证据结论，也不能作为生产授权、停止完成或解除隔离凭据。
 
 ## 覆盖
 
@@ -36,4 +38,6 @@ p0-endpoint.test.ts 覆盖真实生成物启动/握手、安全查询、Host SIG
 
 p0-loader.test.ts 实际验证预检后且私有配置未发送时替换入口拒绝，加载核心已读 Buffer 后换路径仍执行原字节。p0-generation.test.ts 从空生成目录启动、比较跨 checkout 全部生成物、拒绝缺失内存依赖与实际漂移。W3 合成 fixture 独立保留，不冒充本设备。
 
-复跑 `node --test tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts` 与 `pnpm check`。完整日志在 reports/p0/w4/ 与 reports/p0/w4f/。这些是中间包覆盖，14个 sut.* 与 exit.P0 仍 PENDING；真实授权、SQLite 故障、状态机归约和组合故障须 W5–W7 验证。
+观测专项 p0-observation.test.ts 实际捕获 Supervisor/Host/Endpoint/CLI 的原始流，核验来源、跨连接序号、丢失和正常尾部，覆盖鉴权 Host 缓存查询、外来事件和畸形帧拒绝；端点原始事实与 Host/监督各自投影交叉核对。该覆盖不是完整 SUT 验收。
+
+复跑 `node --test tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts`、`node --test tests/p0-observation.test.ts tests/p0-loader.test.ts` 与 `pnpm check`。报告在 reports/p0/w4/、reports/p0/w4f/、reports/p0/w5o/ 和 reports/p0/w5of/；完整检查和原始捕获索引见 [入口说明](../../apps/host/README.md)。这些是中间包覆盖，14 个 sut.* 与 exit.P0 仍 PENDING；真实授权、SQLite 故障、状态机归约和组合故障须 W5R/W5S–W7 验证。
