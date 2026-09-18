@@ -196,6 +196,7 @@ export async function validateBootstrap(value: unknown): Promise<P0HostBootstrap
     payloadDigest(endpoint.supervisor_identity) !== payloadDigest(value.supervisor_identity) ||
     payloadDigest(endpoint.limits) !== payloadDigest(value.limits) ||
     endpoint.installation_id !== value.installation.installation_id ||
+    payloadDigest(endpoint.entry_artifact) !== payloadDigest(value.installation.entry) ||
     payloadDigest(endpoint.manifest) !== payloadDigest(installation.manifest) ||
     payloadDigest(value.profile.enabled_capabilities) !==
       payloadDigest(value.installation.allowed_capabilities)

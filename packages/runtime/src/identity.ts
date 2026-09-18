@@ -67,7 +67,18 @@ export function announce(
   session: string,
   clock: MonotonicClock,
   ttlMs: number,
+  authority: P0PeerIdentity,
+  authorityEpoch: number,
 ): P0ConnectionAnnouncement {
+  assertValid("P0PeerIdentity", authority);
+  if (
+    authority.role !== "supervisor" ||
+    !Number.isSafeInteger(authorityEpoch) ||
+    authorityEpoch < 0 ||
+    (identity.public.role === "supervisor" &&
+      payloadDigest(identity.public) !== payloadDigest(authority))
+  )
+    reject("AUTHENTICATION_REQUIRED");
   const received = clock.now();
   const body: Omit<P0ConnectionAnnouncement, "signature"> = {
     connection_id: randomUUID(),
@@ -82,6 +93,9 @@ export function announce(
     expires_at_ms: received + ttlMs,
     challenge_id: randomUUID(),
     identity_key_id: identity.public.identity_key_id,
+    authority_id: authority.role,
+    authority_instance_id: authority.instance_id,
+    authority_epoch: authorityEpoch,
   };
   return {
     ...body,
@@ -101,7 +115,7 @@ export function announcementEvent(a: P0ConnectionAnnouncement): RpcEvent {
       event_id: randomUUID(),
       authority_id: a.service_role,
       source_instance: a.service_instance_id,
-      authority_epoch: 0,
+      authority_epoch: a.authority_epoch,
       source_seq: 0,
       session_id: a.session_id,
       scope_ref: { kind: "Connection", id: a.connection_id },
@@ -118,7 +132,9 @@ export function announcementEvent(a: P0ConnectionAnnouncement): RpcEvent {
 export function verifyAnnouncement(
   event: unknown,
   expected: P0PeerIdentity,
+  authority: P0PeerIdentity = expected,
 ): P0ConnectionAnnouncement {
+  assertValid("P0PeerIdentity", authority);
   assertValid("RpcEvent", event);
   const envelope = event.params;
   if (envelope.event_name !== "connection.announced") reject("AUTHENTICATION_REQUIRED");
@@ -131,8 +147,13 @@ export function verifyAnnouncement(
     a.identity_key_id !== expected.identity_key_id ||
     a.protocol_version !== "0.8.0" ||
     a.schema_digest !== schemaDigest ||
+    authority.role !== "supervisor" ||
+    (expected.role === "supervisor" && payloadDigest(expected) !== payloadDigest(authority)) ||
+    a.authority_id !== authority.role ||
+    a.authority_instance_id !== authority.instance_id ||
     envelope.authority_id !== expected.role ||
     envelope.source_instance !== expected.instance_id ||
+    envelope.authority_epoch !== a.authority_epoch ||
     envelope.session_id !== a.session_id ||
     envelope.scope_ref.kind !== "Connection" ||
     envelope.scope_ref.id !== a.connection_id ||

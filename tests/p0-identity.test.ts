@@ -212,7 +212,14 @@ test("p0.identity: real Supervisor/Host/CLI authenticate and query; effects rema
       connection.close();
     }
     const hostPath = `${fixture.config.management_socket_path}.host`;
-    const host = await RpcConnection.connect(hostPath, await readServiceIdentity(hostPath), limits);
+    const host = await RpcConnection.connect(
+      hostPath,
+      await readServiceIdentity(hostPath),
+      limits,
+      undefined,
+      undefined,
+      identity,
+    );
     try {
       await assert.rejects(
         host.operatorCall(
@@ -389,6 +396,7 @@ test("p0.identity: stdio fixture uses actual signatures and rejects peer imperso
     safety_socket_path: fixture.config.safety_socket_path,
     limits,
     installation_id: fixture.config.installation.installation_id,
+    entry_artifact: structuredClone(fixture.config.installation.entry),
     manifest: fixture.manifest,
     fault: { target: "endpoint", fault: "none", duration_ms: 0 },
   };
@@ -417,6 +425,7 @@ test("p0.identity: stdio fixture uses actual signatures and rejects peer imperso
         supervisor.public.instance_id,
         clock,
         sent,
+        supervisor.public,
       );
       if (impersonate) {
         const attacker = generateIdentity("supervisor");

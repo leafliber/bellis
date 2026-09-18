@@ -31,7 +31,11 @@ export class RpcConnection {
   readonly clock: MonotonicClock;
   readonly instanceId: string;
   readonly limits: P0SafetyLimits;
-  announcement!: P0ConnectionAnnouncement;
+  #announcement: P0ConnectionAnnouncement | undefined;
+  get announcement(): P0ConnectionAnnouncement {
+    if (!this.#announcement) throw new Error("RPC_NOT_ANNOUNCED");
+    return this.#announcement;
+  }
   mapping!: P0ClockMapping;
   #pending = new Map<
     string,
@@ -109,6 +113,7 @@ export class RpcConnection {
     limits: P0SafetyLimits,
     instance: string = randomUUID(),
     clock = new MonotonicClock(),
+    authority: P0PeerIdentity = identity,
   ): Promise<RpcConnection> {
     await controlledPath(socketPath, dirname(socketPath), true, true);
     const sent = clock.now();
@@ -119,7 +124,7 @@ export class RpcConnection {
       limits.max_message_bytes,
       limits.max_pending_requests,
     );
-    return RpcConnection.fromChannel(channel, identity, limits, instance, clock, sent);
+    return RpcConnection.fromChannel(channel, identity, limits, instance, clock, sent, authority);
   }
 
   static async fromChannel(
@@ -129,6 +134,7 @@ export class RpcConnection {
     instance: string,
     clock: MonotonicClock,
     sent: number,
+    authority: P0PeerIdentity = identity,
   ): Promise<RpcConnection> {
     const connection = new RpcConnection(channel, clock, instance, limits);
     const timer = setTimeout(() => channel.close(), limits.peer_health_timeout_ms);
@@ -138,7 +144,7 @@ export class RpcConnection {
         connection.#firstReject = reject;
       });
       const received = clock.now();
-      connection.announcement = verifyAnnouncement(raw, identity);
+      connection.#announcement = Object.freeze(verifyAnnouncement(raw, identity, authority));
       connection.mapping = clockMapping(
         connection.announcement,
         clock,
@@ -163,7 +169,7 @@ export class RpcConnection {
       operation_id: operationId,
       payload_digest: "0".repeat(64),
       caller_instance_id: this.instanceId,
-      authority_epoch: 0,
+      authority_epoch: this.announcement.authority_epoch,
       object_ref: { kind: "Session", id: this.announcement.session_id },
       deadline: mappedDeadline(this.mapping, this.clock.now(), this.limits.peer_health_timeout_ms),
       grant_ref: grant,

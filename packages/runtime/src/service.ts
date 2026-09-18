@@ -25,6 +25,8 @@ import { JsonChannel } from "./transport.ts";
 
 export type ServiceOptions = {
   identity: Identity;
+  authority: P0PeerIdentity;
+  currentAuthorityEpoch: () => number;
   sessionId: string;
   clock: MonotonicClock;
   limits: P0SafetyLimits;
@@ -43,8 +45,10 @@ export class P0Service {
   #owned = new OwnedPaths();
   #socketPath: string | undefined;
   #closing = false;
+  readonly #authority: P0PeerIdentity;
   constructor(options: ServiceOptions) {
     this.options = options;
+    this.#authority = Object.freeze(structuredClone(options.authority));
   }
 
   accept(channel: JsonChannel): void {
@@ -54,7 +58,14 @@ export class P0Service {
       return;
     }
     this.#channels.add(channel);
-    const a = announce(o.identity, o.sessionId, o.clock, o.limits.clock_mapping_ttl_ms);
+    const a = announce(
+      o.identity,
+      o.sessionId,
+      o.clock,
+      o.limits.clock_mapping_ttl_ms,
+      this.#authority,
+      o.currentAuthorityEpoch(),
+    );
     const auth = new ConnectionAuthentication(a);
     let peer: P0PeerIdentity | undefined;
     let pending = 0;
@@ -110,7 +121,11 @@ export class P0Service {
           checkDeadline(context.deadline, o.clock);
           if (context.deadline.expires_at_ms > input.mapping.target_valid_until_ms)
             reject("CLOCK_MAPPING_INVALID");
-          if (context.authority_epoch !== 0) reject("SCOPED_EPOCH_CONFLICT");
+          if (
+            context.authority_epoch !== a.authority_epoch ||
+            a.authority_epoch !== o.currentAuthorityEpoch()
+          )
+            reject("SCOPED_EPOCH_CONFLICT");
           let result: unknown;
           if (request.method === "connection.authenticate") {
             peer = auth.peer(request, o.peers, o.clock.now());

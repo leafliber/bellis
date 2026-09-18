@@ -123,7 +123,7 @@ import { JsonChannel } from ${JSON.stringify(join(runtime, "transport.ts"))};
 const config = await readPrivateBootstrap();
 assertValid("P0EndpointConfig", config);
 const identity = identityFromKey("endpoint", config.endpoint_instance_id, config.identity_key_id, config.identity_private_key_pkcs8);
-const service = new P0Service({ identity, sessionId: config.session_id, clock: new MonotonicClock(), limits: config.limits,
+const service = new P0Service({ identity, authority: config.supervisor_identity, currentAuthorityEpoch: () => 0, sessionId: config.session_id, clock: new MonotonicClock(), limits: config.limits,
  credential: null,
  peers: [config.host_identity, config.supervisor_identity], snapshot: () => { throw new Error("NO_DEVICE_FACTS"); }, faultInjectionEnabled: false });
 const channel = new JsonChannel(process.stdin, process.stdout, config.limits.max_message_bytes, config.limits.max_pending_requests);

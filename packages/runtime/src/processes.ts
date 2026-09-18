@@ -117,6 +117,8 @@ export async function startSupervisor(
   let child: ChildProcess | undefined;
   const service = new P0Service({
     identity: supervisor,
+    authority: supervisor.public,
+    currentAuthorityEpoch: () => 0,
     sessionId,
     clock,
     limits: config.limits,
@@ -163,6 +165,7 @@ export async function startSupervisor(
       safety_socket_path: config.safety_socket_path,
       limits: config.limits,
       installation_id: config.installation.installation_id,
+      entry_artifact: structuredClone(config.installation.entry),
       manifest: installation.manifest,
       fault: { target: "endpoint", fault: "none", duration_ms: 0 },
     },
@@ -259,6 +262,8 @@ export async function startHost(
   snapshot.endpoint.received_at = clock.point();
   const service = new P0Service({
     identity,
+    authority: pinned,
+    currentAuthorityEpoch: () => 0,
     sessionId: bootstrap.session_id,
     clock,
     limits: bootstrap.limits,
