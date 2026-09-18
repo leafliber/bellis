@@ -4,10 +4,10 @@
   "fields": [
     {
       "field": "authority_epoch",
-      "writer": "权威监督/授权器",
-      "scope": "authority_id＋owner_scope",
+      "writer": "权威监督/授权器；P0 唯一写入者为固定独立监督，Host/Endpoint仅持有可信投影",
+      "scope": "authority_id＋authority_instance_id＋owner_scope；P0 owner_scope 固定为签名 session_id 对应的 Session",
       "increment": "高层owner交接、撤权、权威重启",
-      "comparison": "相同scope内必须等于当前值；更大值仅经认证交接采用，不能由消息自动提升"
+      "comparison": "先精确核验writer/实例/Session，再比较。普通命令必须等于当前值；更大值不能自动提升。P0仅固定认证监督的endpoint.lease/revoke可作为登记更新入口，在完整身份/时钟/幂等核验后同一归约封锁旧许可并采用合法前进；lease仍须全部准入守卫。旧值拒绝，跨作用域不比较。"
     },
     {
       "field": "CancelFence.cancel_epoch",
@@ -78,6 +78,20 @@
       "scope": "run_id＋test_id",
       "increment": "每条实际采集轨迹从0连续增加",
       "comparison": "原始证据索引完整且不重复；不据此改写跨进程发生时间"
+    },
+    {
+      "field": "P0ReductionObservation.source_seq",
+      "writer": "实际执行P0归约器的进程；观测模块只记录该进程真实调用",
+      "scope": "source_instance_id＋p0-reduction-observation流",
+      "increment": "每条归约观测从0连续增加，拒绝归约同样占序号；溢出前停止该实例新增效果并轮换",
+      "comparison": "只在同来源实例核验连续性，不能跨实例拼接；观测缺口使覆盖证据不完整，不阻塞安全归约"
+    },
+    {
+      "field": "P0EndpointObservation.observation_seq / dropped_observations",
+      "writer": "受信假设备当前实例",
+      "scope": "endpoint_fact.endpoint_instance_id＋只读观测流",
+      "increment": "每次观测尝试从0连续分配observation_seq；写出失败累计dropped_observations，不因丢失而回退序号",
+      "comparison": "同实例检查序号连续与丢失数；不能跨实例拼接，缺口/丢失拒绝完整覆盖证据，日志不参与生产授权或清理归约"
     }
   ]
 }

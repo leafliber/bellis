@@ -3434,6 +3434,17 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 1024
+        },
+        "authority_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "authority_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "authority_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -3449,10 +3460,13 @@
         "expires_at_ms",
         "challenge_id",
         "identity_key_id",
-        "signature"
+        "signature",
+        "authority_id",
+        "authority_instance_id",
+        "authority_epoch"
       ],
       "additionalProperties": false,
-      "$comment": "连接专属无效果公告；Node crypto Ed25519 对去掉 signature 后的 JCS 对象加 Bellis-P0-connection 域分隔签名；调用方必须先用受信启动材料固定的公钥验签。"
+      "$comment": "连接专属无效果公告；Node crypto Ed25519 对去掉 signature 后的 JCS 对象加 Bellis-P0-connection 域分隔签名；调用方必须先用受信启动材料固定的公钥验签。 authority_id/authority_instance_id/authority_epoch 同属签名载荷；外层 epoch 必须相等，Session owner_scope 从签名 session_id 派生。监督唯一写入，Host/Endpoint 只声明已验证投影，不能用发送服务自身身份替代权威来源。 EventEnvelope.authority_id/source_instance 绑定公告发布者 service_role/service_instance_id；本载荷 authority_id/authority_instance_id 是 Session 权威 owner（固定监督）及其实例，二者不能混同。只有外层 authority_epoch 与签名载荷 authority_epoch 必须相等；接收者分别精确校验发布身份与受信权威投影。"
     },
     "P0ClockMapping": {
       "type": "object",
@@ -3547,7 +3561,7 @@
         "announcement_digest"
       ],
       "additionalProperties": false,
-      "$comment": "source 是发起者；整数毫秒采样的 target-source 区间保守加量化裕量：下界 target_sent-source_received-1，上界 target_received-source_sent+1，期限取下界映射；绑定身份/实例/连接/采样，有效期或最大误差失效拒绝。"
+      "$comment": "source 是发起者；整数毫秒采样的 target-source 区间保守加量化裕量：下界 target_sent-source_received-1，上界 target_received-source_sent+1，期限取下界映射；绑定身份/实例/连接/采样，有效期或最大误差失效拒绝。 P0 宿主到端点的固定 stdio 业务连接只使用初次认证的映射有效期，clock.sample 不刷新签名公告或延长连接寿命；期限到达或断线后端点封锁并关闭业务流。"
     },
     "P0ClockSampleInput": {
       "type": "object",
@@ -3947,6 +3961,30 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 9007199254740991
+        },
+        "grant_digests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "admission_digests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "effect_digests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "maxItems": 128,
+          "uniqueItems": true
         }
       },
       "required": [
@@ -3955,10 +3993,13 @@
         "transaction_id",
         "request_digest",
         "committed_at",
-        "database_version"
+        "database_version",
+        "grant_digests",
+        "admission_digests",
+        "effect_digests"
       ],
       "additionalProperties": false,
-      "$comment": "只能由当前持久化 Worker 在提交成功后产生；宿主经已绑定 Worker 通道验证，不接受客户端自带回执证明。"
+      "$comment": "只能由当前持久化 Worker 在真实提交成功后产生；request_digest 绑定完整 storage.commit 事务，三个摘要集合只从已提交 batch 对应完整记录的 JCS SHA256 产生，不由请求方指定。监督经自身私有 Worker 通道核验 writer/transaction/request_digest 和记录摘要绑定；宿主只接受固定认证监督的成功结果，不直连 Worker，也不接受客户端自带回执或自报 durable。端点经认证监督的 lease 固定 writer_instance_id 并核验完整 grant/admission 摘要，execute 要求同 writer 且 effect_digests 包含完整 registration 摘要；端点不能仅凭局部记录重算完整事务摘要。"
     },
     "P0EffectRegistration": {
       "type": "object",
@@ -4015,7 +4056,7 @@
         "registered_at"
       ],
       "additionalProperties": false,
-      "$comment": "宿主是唯一语义写入者；按实例/会话/operation 原子去重，在实际效果准入前与 Outbox 事务登记。 payload_digest 是固定业务输入摘要，排除连接证明/mapping/回执，不等于传输 CommandContext.payload_digest，禁止自引用。"
+      "$comment": "宿主是唯一语义写入者；按实例/会话/operation 原子去重，在实际效果准入前与 Outbox 事务登记。 payload_digest 是固定业务输入摘要，排除连接证明/mapping/回执，不等于传输 CommandContext.payload_digest，禁止自引用。 deadline 保留宿主原时钟域；Host→Endpoint 保守映射首次接纳时固定，重试不能重映射延后。"
     },
     "P0EffectFact": {
       "type": "object",
@@ -4183,6 +4224,16 @@
               "type": "null"
             }
           ]
+        },
+        "host_connection_deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Deadline"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -4202,10 +4253,11 @@
         "effect_facts",
         "not_executed_operation_ids",
         "unknown_operation_ids",
-        "cleanup_ref"
+        "cleanup_ref",
+        "host_connection_deadline"
       ],
       "additionalProperties": false,
-      "$comment": "端点唯一写入；水位以本实例从 1 开始接纳，0 表示尚无操作；completed_effect_count 只在本实例递增。停止不能覆盖已有正常完成。"
+      "$comment": "端点唯一写入；水位以本实例从 1 开始接纳，0 表示尚无操作；completed_effect_count 只在本实例递增。停止不能覆盖已有正常完成。 host_connection_deadline 使用端点时钟，仅在固定 Host 的 Ed25519 连接认证和 plugin.handshake 精确协议/契约/phase 核验均完成后设置一次，issued_at_ms 为实际完成点，expires_at_ms 不超过最初 stdio 映射 target_valid_until_ms。初始、失联或 TTL 到期为 null；清除后本实例旧 grant 永久封锁，安全 UDS 只保留认证查询/清理。监督从认证端点事实取得期限，以监督→端点 mapping 的 offset_upper_ms 保守逆算为自身截止上界 endpoint.expires_at_ms-offset_upper_ms，再取映射/人工/原 grant/配置最早值；重复查询/采样不刷新旧 grant 或 operation 期限。"
     },
     "P0CleanupRecord": {
       "type": "object",
@@ -4785,7 +4837,7 @@
         "receipt"
       ],
       "additionalProperties": false,
-      "$comment": "仅绑定的监督安全通道可安装；三个期限取最早，且不能超过原 grant 的保守映射。心跳仅能刷新有限连接租约，不能延长人工/grant期限。"
+      "$comment": "仅绑定的监督安全通道可安装；三个期限取最早，且不能超过原 grant 的保守映射。心跳仅能刷新有限连接租约，不能延长人工/grant期限。 端点在认证监督通道上核验 receipt.grant_digests/admission_digests 分别包含完整 grant/admission 的 JCS SHA256，再固定该 lease 的 writer_instance_id；不可省略真实持久化回执或接受调用方自报 durable。 grant.deadline 保留监督原时钟域；deadline 是其按监督→端点 mapping 得到的端点域上限，human_lease_deadline 是人工租约的端点域保守上限，local_lease_deadline 是监督下发的端点域短连接租约上限。三者均不得越过实际 Host 业务连接映射有效期，端点复核原 grant 映射而非修改原记录。"
     },
     "P0EndpointRevokeInput": {
       "type": "object",
@@ -4931,7 +4983,7 @@
         "mapping"
       ],
       "additionalProperties": false,
-      "$comment": "只接受受信宿主业务通道；执行前复核监督下发 lease、原 grant 以及登记回执的固定绑定。"
+      "$comment": "只接受受信宿主业务通道；执行前复核监督下发 lease、原 grant 以及登记回执的固定绑定。 receipt.writer_instance_id 必须匹配监督安装 lease 时固定的 Worker 实例，effect_digests 必须包含完整 registration 的 JCS SHA256；request_digest 仍绑定原完整事务，但端点不以不完整事务成员猜算。"
     },
     "P0SimulationResult": {
       "type": "object",
@@ -6147,6 +6199,9 @@
               }
             }
           ]
+        },
+        "entry_artifact": {
+          "$ref": "#/$defs/P0TrustedFile"
         }
       },
       "required": [
@@ -6160,10 +6215,11 @@
         "limits",
         "installation_id",
         "manifest",
-        "fault"
+        "fault",
+        "entry_artifact"
       ],
       "additionalProperties": false,
-      "$comment": "只经受信启动器的私有继承配置描述符传给假设备。identity_private_key_pkcs8 是端点自己的一次实例身份，不是 host/supervisor 的服务私钥；不含操作员凭据、数据库路径或真实设备凭据。实例/Manifest/公钥来自已核验安装绑定。 启动故障固定 endpoint/none/0；运行时故障只能经认证 test_operator 的 fault.configure 后由监督 fault.apply 下发。"
+      "$comment": "只经受信启动器的私有继承配置描述符传给假设备。identity_private_key_pkcs8 是端点自己的一次实例身份，不是 host/supervisor 的服务私钥；不含操作员凭据、数据库路径或真实设备凭据。实例/Manifest/公钥来自已核验安装绑定。 启动故障固定 endpoint/none/0；运行时故障只能经认证 test_operator 的 fault.configure 后由监督 fault.apply 下发。 entry_artifact 由监督填入已核验 installation.entry，宿主精确复核；受信launcher仅执行一次读取并验证的同一Buffer，禁止重新按路径加载。"
     },
     "P0RegisterEffectInput": {
       "type": "object",
@@ -6335,6 +6391,260 @@
       ],
       "additionalProperties": false,
       "$comment": "监督受信启动器经私有继承描述符一次传入宿主，读取后关闭描述符；宿主仅持自身临时实例私钥，无监督私钥或数据库路径。supervisor_socket_path=监督 management_socket_path；host_socket_path=supervisor_socket_path+\".host\"。endpoint_config 原样交给已核验端点；session、身份、公钥、安装、limits 必须与已核验启动材料精确匹配，禁止重解释或补默认。"
+    },
+    "P0ReductionObservation": {
+      "type": "object",
+      "properties": {
+        "record_type": {
+          "const": "p0-reduction-observation"
+        },
+        "source_instance_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "source_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "object_ref": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "machine": {
+          "enum": [
+            "SupervisionMode",
+            "ExecutionGrant",
+            "StopOperation"
+          ]
+        },
+        "from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SupervisionModeState"
+            },
+            {
+              "$ref": "#/$defs/ExecutionGrantState"
+            },
+            {
+              "$ref": "#/$defs/StopOperationState"
+            }
+          ]
+        },
+        "event": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "to": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SupervisionModeState"
+            },
+            {
+              "$ref": "#/$defs/ExecutionGrantState"
+            },
+            {
+              "$ref": "#/$defs/StopOperationState"
+            }
+          ]
+        },
+        "guard": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "guard_result": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "disposition": {
+          "enum": [
+            "accepted",
+            "guard_rejected",
+            "table_rejected",
+            "terminal_rejected",
+            "disabled_rejected"
+          ]
+        },
+        "trigger_kind": {
+          "enum": [
+            "command",
+            "timer",
+            "endpoint_fact",
+            "worker_receipt"
+          ]
+        },
+        "trigger_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "trigger_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/ClockPoint"
+        },
+        "timer_deadline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClockPoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "record_type",
+        "source_instance_id",
+        "source_seq",
+        "object_ref",
+        "machine",
+        "from",
+        "event",
+        "to",
+        "guard",
+        "guard_result",
+        "disposition",
+        "trigger_kind",
+        "trigger_id",
+        "trigger_digest",
+        "observed_at",
+        "timer_deadline"
+      ],
+      "additionalProperties": false,
+      "$comment": "生产归约器对真实输入的只读stderr观测，不是命令/公共事件；guard_result 未调用时为null，拒绝时to等于from；timer保留实际计划deadline，其它触发timer_deadline=null。按来源实例连续序号，runner在外部事后关联场景，不接受scenario_id、任意payload或外部指定guard结果。 仅去敏只读覆盖观测，不作为生产授权或停止/清理证明；runner 独立采集端点原始观测并与实际 RPC 端点事实交叉核验。",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "machine": {
+                "const": "SupervisionMode"
+              }
+            },
+            "required": [
+              "machine"
+            ]
+          },
+          "then": {
+            "properties": {
+              "from": {
+                "$ref": "#/$defs/SupervisionModeState"
+              },
+              "to": {
+                "$ref": "#/$defs/SupervisionModeState"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "machine": {
+                "const": "ExecutionGrant"
+              }
+            },
+            "required": [
+              "machine"
+            ]
+          },
+          "then": {
+            "properties": {
+              "from": {
+                "$ref": "#/$defs/ExecutionGrantState"
+              },
+              "to": {
+                "$ref": "#/$defs/ExecutionGrantState"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "machine": {
+                "const": "StopOperation"
+              }
+            },
+            "required": [
+              "machine"
+            ]
+          },
+          "then": {
+            "properties": {
+              "from": {
+                "$ref": "#/$defs/StopOperationState"
+              },
+              "to": {
+                "$ref": "#/$defs/StopOperationState"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "trigger_kind": {
+                "const": "timer"
+              }
+            },
+            "required": [
+              "trigger_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "timer_deadline": {
+                "$ref": "#/$defs/ClockPoint"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "timer_deadline": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "P0EndpointObservation": {
+      "type": "object",
+      "properties": {
+        "observation_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "endpoint_fact": {
+          "$ref": "#/$defs/P0EndpointSnapshot"
+        },
+        "dropped_observations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "observation_seq",
+        "endpoint_fact",
+        "dropped_observations"
+      ],
+      "additionalProperties": false,
+      "$comment": "端点产生的去敏只读 stderr 观测；observation_seq 在本端点实例对每次观测尝试连续从0增加，dropped_observations 是本实例因背压等未写出的累计数量。原始描述符直接继承给 runner，不能只收 Host 转发投影。无 RPC/授权/清理证明地位，生产归约仍只接纳认证 query/event；runner 对序号缺口或非零丢失数拒绝完整证据 PASS。"
     },
     "Phase": {
       "$comment": "derived from verification.json phase_dependencies",

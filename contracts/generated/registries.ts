@@ -3227,7 +3227,7 @@ export const contracts = {
       "schema": "P0EndpointLease",
       "owner": "独立监督组件",
       "phase": "P0",
-      "semantic_rules": "仅监督安全通道安装，空白名单无权限；连接健康不延长人工/grant期限。",
+      "semantic_rules": "仅监督安全通道安装，空白名单无权限；连接健康不延长人工/grant期限。 固定监督的endpoint.lease/revoke按epochs登记传播authority_epoch，合法前进不代替任何lease守卫。",
       "admission_guards": [
         "p0_endpoint_lease_valid"
       ]
@@ -3270,7 +3270,7 @@ export const contracts = {
       "schema": "P0EndpointConfig",
       "owner": "受信启动器",
       "phase": "P0",
-      "semantic_rules": "假设备专用受限配置；只有自身实例私钥和受信host/supervisor公钥，不授予管理/存储凭据。"
+      "semantic_rules": "假设备专用受限配置；只有自身实例私钥和受信host/supervisor公钥，不授予管理/存储凭据。 entry_artifact绑定已核验单一endpoint.mjs制品，受信launcher验证并执行同一Buffer。"
     },
     {
       "ref": "p0-host-bootstrap@1",
@@ -3279,6 +3279,22 @@ export const contracts = {
       "owner": "独立监督的受信启动器",
       "phase": "P0",
       "semantic_rules": "仅私有继承描述符传入宿主。自身临时身份与端点配置中的host公钥一致，固定supervisor身份/会话/安装/profile/limits与监督启动材料一致；不包含监督私钥或数据库路径。"
+    },
+    {
+      "ref": "p0-reduction-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ReductionObservation",
+      "owner": "实际运行P0归约器的进程",
+      "phase": "P0",
+      "semantic_rules": "只读stderr结构化观测；真实输入与守卫结果由归约器产生，runner事后关联，不接受外部scenario/指令，不构成新增RPC或守卫授权。"
+    },
+    {
+      "ref": "p0-endpoint-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0EndpointObservation",
+      "owner": "受信假设备当前实例",
+      "phase": "P0",
+      "semantic_rules": "端点 stderr 只读去敏日志，原始描述符直接交验收 runner；序号/丢失数用于证据完整性，不替代认证端点事实或授予清理/执行权限。"
     }
   ],
   "capabilities": [
@@ -3291,4 +3307,4 @@ export const contracts = {
     }
   ]
 } as const;
-export const schemaDigest = "66f32088deef4e07e4fc076fb193c5def4d7a724e7e2fd7e68ebe7dda3958447" as const;
+export const schemaDigest = "11990c890991948199fce8d508b1c1ccf32d9d703fa971ecdc94bd20a5f165be" as const;

@@ -187,7 +187,7 @@
     },
     {
       "id": "p0_endpoint_lease_valid",
-      "meaning": "仅当前独立监督的已认证安全通道，实例/精确代次/准入/原 grant 和回执绑定一致；目标域 lease 不超过人工期限、原 grant 截止、映射有效期和有限本地租约最早值；心跳不复权、不延期原权。"
+      "meaning": "仅当前独立监督的已认证安全通道，实例/精确代次/准入/原 grant 和回执绑定一致；目标域 lease 不超过人工期限、原 grant 截止、映射有效期和有限本地租约最早值；心跳不复权、不延期原权。 authority_epoch 的前进只接受登记的固定监督更新入口，先封锁旧许可，不能仅凭更大值或心跳恢复效果；supervision_epoch 仍按原grant单独精确核验。 端点实际host_connection_deadline必须非null且未来有效，lease/人工/原grant均受其截止约束；Host心跳不能替代端点已认证且握手完成的事实。"
     }
   ]
 }
