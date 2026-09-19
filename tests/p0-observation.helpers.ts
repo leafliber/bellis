@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -89,7 +90,12 @@ export function completeStreams(raw: string): void {
   for (const [key, state] of byStream)
     assert.equal(state.ended, true, `missing actual end: ${key}`);
 }
-export function capture(args: string[], name: string, environment = safeChildEnvironment()) {
+export function capture(
+  args: string[],
+  name: string,
+  environment = safeChildEnvironment(),
+  directory = join(repository, "reports/p0/w5o/raw", `${name}-${randomUUID()}`),
+) {
   const child = spawn(process.execPath, args, {
     cwd: repository,
     env: environment,
@@ -117,11 +123,12 @@ export function capture(args: string[], name: string, environment = safeChildEnv
     overflow,
   });
   const save = async () => {
-    const directory = join(repository, "reports/p0/w5o/raw");
     await mkdir(directory, { recursive: true });
-    await writeFile(join(directory, `${name}.stderr.ndjson`), Buffer.concat(stderr));
-    await writeFile(join(directory, `${name}.stdout`), Buffer.concat(stdout));
+    await writeFile(join(directory, `${name}.stderr.ndjson`), Buffer.concat(stderr), {
+      flag: "wx",
+    });
+    await writeFile(join(directory, `${name}.stdout`), Buffer.concat(stdout), { flag: "wx" });
     assert.equal(overflow, false, "bounded raw capture overflowed");
   };
-  return { child, closed, save, output };
+  return { child, closed, save, output, directory };
 }

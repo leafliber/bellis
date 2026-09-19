@@ -386,7 +386,8 @@ test("p0.identity: actual management rejects old challenges and invalid target c
     );
     try {
       await first.request(original);
-      await assert.rejects(first.request({ ...original, id: "replay" }), /AUTHENTICATION_REQUIRED/);
+      // Management is exactly one accepted frame; a second command is never dispatched.
+      await assert.rejects(first.request({ ...original, id: "replay" }), /RPC_CLOSED/);
     } finally {
       first.close();
     }

@@ -141,19 +141,21 @@ test("p0.authority: actual socket uses signed epoch and refuses an announcement 
       stale.announcement,
       fixture.credential,
     );
+    const stalePromoted = await connect();
     epoch = 8;
     try {
       await assert.rejects(stale.request(oldRequest), /SCOPED_EPOCH_CONFLICT/);
       const promoted = operatorRequest(
         "operator.authenticate",
-        { mapping: stale.mapping },
-        { ...stale.context(), authority_epoch: 8 },
-        stale.announcement,
+        { mapping: stalePromoted.mapping },
+        { ...stalePromoted.context(), authority_epoch: 8 },
+        stalePromoted.announcement,
         fixture.credential,
       );
-      await assert.rejects(stale.request(promoted), /SCOPED_EPOCH_CONFLICT/);
+      await assert.rejects(stalePromoted.request(promoted), /SCOPED_EPOCH_CONFLICT/);
     } finally {
       stale.close();
+      stalePromoted.close();
     }
     const current = await connect();
     try {
@@ -167,9 +169,14 @@ test("p0.authority: actual socket uses signed epoch and refuses an announcement 
       );
       await assert.rejects(current.request(external), /SCOPED_EPOCH_CONFLICT/);
       assert.equal(epoch, 8);
-      await current.operatorCall("operator.authenticate", {}, fixture.credential);
     } finally {
       current.close();
+    }
+    const authenticated = await connect();
+    try {
+      await authenticated.operatorCall("operator.authenticate", {}, fixture.credential);
+    } finally {
+      authenticated.close();
     }
   } finally {
     await service.close();

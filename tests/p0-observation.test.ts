@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter, once } from "node:events";
-import { mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
@@ -438,11 +438,17 @@ test("p0.observation: actual startup rejection preserves stage and safe schema d
 
 test("p0.observation: real CLI host-query pins Host and Supervisor and preserves independent cached projections", {
   timeout: 20000,
-}, async () => {
+}, async (t) => {
+  const rawBase = join(repository, "reports/p0/w5o/raw");
+  await mkdir(rawBase, { recursive: true });
+  const runDirectory = await mkdtemp(join(rawBase, "host-query-run-"));
+  t.diagnostic(`independent projections raw=${runDirectory}`);
   const fixture = await createProductionFixture();
   const supervisor = capture(
     [join(repository, "apps/host/supervisor.ts"), "--config", fixture.configPath],
     "supervisor-host-query",
+    safeChildEnvironment(),
+    runDirectory,
   );
   try {
     await waitFor(`${fixture.config.management_socket_path}.host.identity.json`, supervisor.child);
@@ -450,6 +456,8 @@ test("p0.observation: real CLI host-query pins Host and Supervisor and preserves
       const run = capture(
         [join(repository, "apps/host/operator.ts"), "--config", path, "--command", action],
         name,
+        safeChildEnvironment(),
+        runDirectory,
       );
       const [code] = await run.closed;
       await run.save();
@@ -461,7 +469,6 @@ test("p0.observation: real CLI host-query pins Host and Supervisor and preserves
       first = await cli("host-query", `host-query-ready-${attempt}`);
       assert.equal(first.code, 0);
       if (first.response.result.fact?.host_connection_deadline) break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert.ok(first?.response.result.fact?.host_connection_deadline);
     const second = await cli("host-query", "host-query-again");
@@ -474,8 +481,23 @@ test("p0.observation: real CLI host-query pins Host and Supervisor and preserves
       "query must not refresh Host cache arrival time",
     );
     assert.equal(again.fact?.completed_effect_count, 0);
-    const sup = await cli("query", "supervisor-query");
-    assert.equal(sup.code, 0);
+    // Host handshake and the independent Supervisor safety poll have different
+    // readiness boundaries. Every attempt is the real authenticated CLI query;
+    // a Host fact cannot stand in for receipt by the Supervisor.
+    let sup: Awaited<ReturnType<typeof cli>> | undefined;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      sup = await cli("query", `supervisor-query-ready-${attempt}`);
+      assert.equal(sup.code, 0);
+      assert.equal(sup.response.result.session_id, again.fact?.session_id);
+      assert.equal(sup.response.result.endpoint.source_instance_id, again.source_instance_id);
+      if (
+        sup.response.result.endpoint.quality === "fresh" &&
+        sup.response.result.endpoint.fact?.host_connection_deadline
+      )
+        break;
+    }
+    assert.ok(sup?.response.result.endpoint.fact?.host_connection_deadline);
+    assert.equal(sup.response.result.endpoint.quality, "fresh");
     assert.notEqual(
       sup.response.result.endpoint.received_at.clock_domain,
       again.received_at?.clock_domain,
