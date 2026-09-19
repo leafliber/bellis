@@ -388,7 +388,8 @@ test("p0.endpoint client module: event source/epoch and same-sequence/revision c
         () => 0,
       );
       const fact = f.model.snapshot();
-      fact.observed_at.clock_domain = targetClock.domain;
+      // Bind the fixture to this actual target clock, not another model clock's numeric point.
+      fact.observed_at = targetClock.point();
       const event = {
         jsonrpc: "2.0",
         method: "event.publish",

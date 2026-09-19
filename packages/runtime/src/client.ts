@@ -3,7 +3,9 @@ import { createConnection } from "node:net";
 import { dirname } from "node:path";
 import {
   assertValid,
+  type ClockPoint,
   type CommandContext,
+  type Deadline,
   type P0ClockMapping,
   type P0ConnectionAnnouncement,
   type P0EndpointSnapshot,
@@ -11,13 +13,14 @@ import {
   type P0PeerIdentity,
   type P0SafetyLimits,
   payloadDigest,
+  type RpcEvent,
   type RpcFailure,
   type RpcRequest,
   type RpcSuccess,
   validate,
   validateRpcResponse,
 } from "../../contract-sdk/src/index.ts";
-import { clockMapping, MonotonicClock, mappedDeadline } from "./clock.ts";
+import { clockMapping, MonotonicClock, mappedDeadline, validateMapping } from "./clock.ts";
 import { RuntimeRejection, reject } from "./errors.ts";
 import { controlledPath, readServiceIdentity } from "./files.ts";
 import {
@@ -30,6 +33,80 @@ import {
 import { type ObservationWriter, observationError, ProtocolObservation } from "./observation.ts";
 import { JsonChannel } from "./transport.ts";
 
+function freeze<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+export type RpcExchange = Readonly<{
+  request: RpcRequest;
+  response: RpcSuccess | RpcFailure;
+  announcement: RpcEvent;
+  mapping: P0ClockMapping;
+  received_at: ClockPoint;
+}>;
+/** The actual response exists, but it is not a timely business result. */
+export class LateRpcResponse extends RuntimeRejection {
+  readonly exchange: RpcExchange;
+  constructor(exchange: RpcExchange) {
+    super("COMMAND_DEADLINE_MISSED");
+    this.exchange = exchange;
+  }
+}
+export type EndpointEventDelivery = Readonly<{
+  event: RpcEvent;
+  announcement: RpcEvent;
+  mapping: P0ClockMapping;
+  received_at: ClockPoint;
+}>;
+export type OperatorMethod =
+  | "operator.authenticate"
+  | "session.query"
+  | "host.query"
+  | "session.authorize"
+  | "session.renew"
+  | "session.revoke"
+  | "session.stop"
+  | "session.execute"
+  | "fault.configure";
+export type OperatorInput<M extends OperatorMethod> = Omit<
+  Extract<RpcRequest, { method: M }>["params"]["input"],
+  "proof" | "mapping"
+>;
+export type PreparedOperator = Readonly<{
+  request: RpcRequest;
+  service: P0PeerIdentity;
+  authority: P0PeerIdentity;
+}>;
+const preparedOperators = new WeakMap<
+  PreparedOperator,
+  {
+    clock: MonotonicClock;
+    origin: bigint;
+    domain: string;
+    caller: string;
+    credential: string;
+  }
+>();
+export type OperatorOptions = { operation?: string; grant?: string | null; timeoutMs?: number };
+function resultOf(exchange: RpcExchange): unknown {
+  const response = exchange.response;
+  if ("error" in response)
+    throw response.error.data
+      ? new RuntimeRejection(response.error.data.reason_code)
+      : new Error(`RPC_PROTOCOL_${response.error.code}`);
+  return structuredClone(response.result);
+}
+function credentialBinding(credential: P0OperatorCredential): string {
+  return payloadDigest({
+    credential_id: credential.credential_id,
+    operator_id: credential.operator_id,
+    role: credential.role,
+  });
+}
+
 export class RpcConnection {
   readonly channel: JsonChannel;
   readonly clock: MonotonicClock;
@@ -37,16 +114,28 @@ export class RpcConnection {
   readonly limits: P0SafetyLimits;
   readonly observation: ProtocolObservation | undefined;
   #announcement: P0ConnectionAnnouncement | undefined;
+  #announcementEvent: RpcEvent | undefined;
+  readonly #peer: P0PeerIdentity;
+  readonly #authority: P0PeerIdentity;
+  get announcementEvent(): Readonly<RpcEvent> {
+    if (!this.#announcementEvent) throw new Error("RPC_NOT_ANNOUNCED");
+    return this.#announcementEvent;
+  }
   get announcement(): P0ConnectionAnnouncement {
     if (!this.#announcement) throw new Error("RPC_NOT_ANNOUNCED");
     return this.#announcement;
   }
-  mapping!: P0ClockMapping;
+  #mapping: P0ClockMapping | undefined;
+  get mapping(): P0ClockMapping {
+    if (!this.#mapping) throw new Error("RPC_NOT_ANNOUNCED");
+    return this.#mapping;
+  }
   #pending = new Map<
     string,
     {
-      method: string;
-      resolve: (value: unknown) => void;
+      request: RpcRequest;
+      waitUntil: number;
+      resolve: (value: RpcExchange) => void;
       reject: (error: Error) => void;
       timer: ReturnType<typeof setTimeout>;
     }
@@ -56,13 +145,26 @@ export class RpcConnection {
   #announced = false;
   #eventHandler: ((fact: P0EndpointSnapshot) => void) | undefined;
   #eventEpoch: (() => number) | undefined;
+  #eventArchive: ((delivery: EndpointEventDelivery) => void) | undefined;
+  #futureEvent: ((delivery: EndpointEventDelivery) => void) | undefined;
   #eventSequence = -1;
+  #projectedRevision = -1;
+  #eventIds = new Map<string, string>();
   #eventDigests = new Map<number, string>();
   #revisionDigests = new Map<number, string>();
-  onEndpointFact(handler: (fact: P0EndpointSnapshot) => void, currentEpoch: () => number): void {
+  onEndpointFact(
+    handler: (fact: P0EndpointSnapshot) => void,
+    currentEpoch: () => number,
+    futureEvent?: (delivery: EndpointEventDelivery) => void,
+  ): void {
     if (this.announcement.service_role !== "endpoint") reject("ROLE_SCOPE_DENIED");
     this.#eventHandler = handler;
     this.#eventEpoch = currentEpoch;
+    this.#futureEvent = futureEvent;
+  }
+  onEndpointEvent(handler: (delivery: EndpointEventDelivery) => void): void {
+    if (this.announcement.service_role !== "endpoint") reject("ROLE_SCOPE_DENIED");
+    this.#eventArchive = handler;
   }
   #lastResponse: RpcSuccess | RpcFailure | undefined;
   get lastResponse(): RpcSuccess | RpcFailure | undefined {
@@ -82,6 +184,9 @@ export class RpcConnection {
     this.clock = clock;
     this.instanceId = instance;
     this.limits = limits;
+    if (!peer || !authority) throw new Error("RPC_IDENTITY_REQUIRED");
+    this.#peer = Object.freeze(structuredClone(peer));
+    this.#authority = Object.freeze(structuredClone(authority));
     this.observation = observation ? new ProtocolObservation(observation) : undefined;
     this.observation?.attach(channel, peer, authority);
     channel.on("message", (raw: unknown) => {
@@ -100,21 +205,27 @@ export class RpcConnection {
             event.session_id === this.announcement.session_id &&
             event.scope_ref.kind === "Session" &&
             event.scope_ref.id === this.announcement.session_id &&
-            event.authority_epoch === this.#eventEpoch?.() &&
             event.source_seq !== null &&
             validate("P0EndpointSnapshot", event.payload) &&
             event.payload.endpoint_instance_id === this.announcement.service_instance_id &&
             event.payload.session_id === this.announcement.session_id &&
             event.payload.supervisor_instance_id === this.announcement.authority_instance_id &&
-            event.payload.observed_at.clock_domain === this.mapping.target_clock_domain
+            event.payload.observed_at.clock_domain === this.mapping.target_clock_domain &&
+            event.occurred_at?.clock_domain === this.mapping.target_clock_domain &&
+            payloadDigest(event.occurred_at) === payloadDigest(event.payload.observed_at) &&
+            event.payload.observed_at.monotonic_ms <=
+              this.clock.now() + this.mapping.offset_upper_ms
           ) {
             const eventDigest = payloadDigest(event);
             const revisionDigest = payloadDigest(event.payload);
+            const seenId = this.#eventIds.get(event.event_id);
             const seenEvent = this.#eventDigests.get(event.source_seq);
             const seenRevision = this.#revisionDigests.get(event.payload.source_revision);
             if (
+              (seenId && seenId !== eventDigest) ||
               (seenEvent && seenEvent !== eventDigest) ||
               (seenRevision && seenRevision !== revisionDigest) ||
+              (!seenId && this.#eventIds.size >= 1024) ||
               (!seenEvent && this.#eventDigests.size >= 1024) ||
               (!seenRevision && this.#revisionDigests.size >= 1024)
             ) {
@@ -122,12 +233,53 @@ export class RpcConnection {
               channel.close();
               return;
             }
+            const delivery = freeze(
+              structuredClone({
+                event: raw,
+                announcement: this.announcementEvent,
+                mapping: this.mapping,
+                received_at: this.clock.point(),
+              }),
+            );
+            const currentEpoch = this.#eventEpoch?.();
+            if (
+              !Number.isSafeInteger(currentEpoch) ||
+              currentEpoch === undefined ||
+              currentEpoch < 0
+            ) {
+              this.observation?.failure("dispatch", { kind: "internal", code: "invalid_response" });
+              channel.close();
+              return;
+            }
+            this.#eventIds.set(event.event_id, eventDigest);
             this.#eventDigests.set(event.source_seq, eventDigest);
             this.#revisionDigests.set(event.payload.source_revision, revisionDigest);
-            if (event.source_seq > this.#eventSequence) {
-              this.#eventSequence = event.source_seq;
+            // Archive actual, validated envelopes independently of the current projection.
+            this.#eventArchive?.(delivery);
+            const fresh =
+              delivery.received_at.monotonic_ms < this.mapping.source_valid_until_ms &&
+              delivery.received_at.monotonic_ms + this.mapping.offset_upper_ms <
+                this.mapping.target_valid_until_ms;
+            if (fresh && event.authority_epoch > currentEpoch) {
+              if (this.#futureEvent) this.#futureEvent(delivery);
+              else {
+                this.observation?.failure("dispatch", {
+                  kind: "internal",
+                  code: "invalid_response",
+                });
+                channel.close();
+              }
+            } else if (
+              fresh &&
+              !seenId &&
+              event.authority_epoch === currentEpoch &&
+              event.source_seq > this.#eventSequence &&
+              event.payload.source_revision > this.#projectedRevision
+            ) {
               this.#eventHandler(structuredClone(event.payload));
+              this.#projectedRevision = event.payload.source_revision;
             }
+            this.#eventSequence = Math.max(this.#eventSequence, event.source_seq);
             return;
           }
         }
@@ -135,6 +287,7 @@ export class RpcConnection {
         channel.close();
         return;
       }
+      const receivedAt = this.clock.point();
       const pending = this.#pending.get(raw.id);
       if (!pending) {
         this.observation?.failure("dispatch", { kind: "internal", code: "invalid_response" });
@@ -142,15 +295,31 @@ export class RpcConnection {
         return;
       }
       try {
-        validateRpcResponse(pending.method, raw);
-        this.#lastResponse = raw as RpcSuccess | RpcFailure;
-        if ("error" in raw) {
-          assertValid("RpcFailure", raw);
-          throw raw.error.data
-            ? new RuntimeRejection(raw.error.data.reason_code)
-            : new Error(`RPC_PROTOCOL_${raw.error.code}`);
+        validateRpcResponse(pending.request.method, raw);
+        const response = raw as RpcSuccess | RpcFailure;
+        this.#lastResponse = structuredClone(response);
+        const exchange = freeze(
+          structuredClone({
+            request: pending.request,
+            response,
+            announcement: this.announcementEvent,
+            mapping: this.mapping,
+            received_at: receivedAt,
+          }),
+        );
+        if (
+          receivedAt.monotonic_ms >= pending.waitUntil ||
+          receivedAt.monotonic_ms + this.mapping.offset_upper_ms >=
+            pending.request.params.context.deadline.expires_at_ms
+        ) {
+          this.observation?.failure(
+            "read",
+            { kind: "internal", code: "request_timeout" },
+            pending.request,
+          );
+          throw new LateRpcResponse(exchange);
         }
-        pending.resolve((raw as RpcSuccess).result);
+        pending.resolve(exchange);
       } catch (error) {
         pending.reject(error instanceof Error ? error : new Error("RPC_INVALID_RESPONSE"));
       } finally {
@@ -241,15 +410,13 @@ export class RpcConnection {
         connection.#firstReject = reject;
       });
       const received = clock.now();
-      connection.#announcement = Object.freeze(verifyAnnouncement(raw, identity, authority));
+      const announcement = verifyAnnouncement(raw, identity, authority);
+      assertValid("RpcEvent", raw);
+      connection.#announcementEvent = freeze(structuredClone(raw)) as RpcEvent;
+      connection.#announcement = freeze(structuredClone(announcement));
       stage = "clock";
-      connection.mapping = clockMapping(
-        connection.announcement,
-        clock,
-        instance,
-        sent,
-        received,
-        limits,
+      connection.#mapping = freeze(
+        clockMapping(connection.announcement, clock, instance, sent, received, limits),
       );
       return connection;
     } catch (error) {
@@ -263,27 +430,45 @@ export class RpcConnection {
     }
   }
 
-  context(operationId: string = randomUUID(), grant: string | null = null): CommandContext {
+  context(
+    operationId: string = randomUUID(),
+    grant: string | null = null,
+    authorityEpoch = this.announcement.authority_epoch,
+    timeoutMs = this.limits.peer_health_timeout_ms,
+  ): CommandContext {
+    if (!Number.isSafeInteger(authorityEpoch) || authorityEpoch < 0)
+      reject("SCOPED_EPOCH_CONFLICT");
+    if (
+      !Number.isSafeInteger(timeoutMs) ||
+      timeoutMs <= 0 ||
+      timeoutMs > this.limits.peer_health_timeout_ms
+    )
+      reject("TIMEOUT_INVALID");
     return {
       operation_id: operationId,
       payload_digest: "0".repeat(64),
       caller_instance_id: this.instanceId,
-      authority_epoch: this.announcement.authority_epoch,
+      authority_epoch: authorityEpoch,
       object_ref: { kind: "Session", id: this.announcement.session_id },
-      deadline: mappedDeadline(this.mapping, this.clock.now(), this.limits.peer_health_timeout_ms),
+      deadline: mappedDeadline(this.mapping, this.clock.now(), timeoutMs),
       grant_ref: grant,
     };
   }
 
   request(request: RpcRequest): Promise<unknown> {
+    return this.requestExchange(request).then(resultOf);
+  }
+  requestExchange(request: RpcRequest): Promise<RpcExchange> {
     assertValid("RpcRequest", request);
+    request = freeze(structuredClone(request)) as RpcRequest;
     if (this.#pending.size >= this.limits.max_pending_requests) reject("QUEUE_LIMIT_EXCEEDED");
     if (this.#pending.has(request.id)) reject("OPERATION_PAYLOAD_CONFLICT");
-    return new Promise<unknown>((resolve, reject) => {
+    return new Promise<RpcExchange>((resolve, reject) => {
+      const now = this.clock.now();
       const remaining = Math.min(
         this.limits.peer_health_timeout_ms,
-        request.params.context.deadline.expires_at_ms -
-          (this.clock.now() + this.mapping.offset_upper_ms),
+        this.mapping.source_valid_until_ms - now,
+        request.params.context.deadline.expires_at_ms - (now + this.mapping.offset_upper_ms),
       );
       if (remaining <= 0) {
         reject(new RuntimeRejection("COMMAND_DEADLINE_MISSED"));
@@ -295,7 +480,13 @@ export class RpcConnection {
         reject(new RuntimeRejection("COMMAND_DEADLINE_MISSED"));
         this.channel.close();
       }, remaining);
-      this.#pending.set(request.id, { method: request.method, resolve, reject, timer });
+      this.#pending.set(request.id, {
+        request,
+        waitUntil: now + remaining,
+        resolve,
+        reject,
+        timer,
+      });
       if (!this.channel.send(request)) {
         clearTimeout(timer);
         this.#pending.delete(request.id);
@@ -310,7 +501,21 @@ export class RpcConnection {
       peerRequest({ mapping: this.mapping }, this.context(), this.announcement, identity),
     );
   }
-  peerCall(method: string, input: object, operation: string = randomUUID()): Promise<unknown> {
+  peerCall(
+    method: string,
+    input: object,
+    operation: string = randomUUID(),
+    authorityEpoch = this.announcement.authority_epoch,
+  ): Promise<unknown> {
+    return this.peerExchange(method, input, operation, authorityEpoch).then(resultOf);
+  }
+  peerExchange(
+    method: string,
+    input: object,
+    operation: string = randomUUID(),
+    authorityEpoch = this.announcement.authority_epoch,
+  ): Promise<RpcExchange> {
+    if (method === "connection.authenticate") reject("ROLE_SCOPE_DENIED");
     const legacy = [
       "plugin.handshake",
       "plugin.describe",
@@ -318,11 +523,11 @@ export class RpcConnection {
       "controller.stop",
       "controller.dispose",
     ].includes(method);
-    return this.request(
+    return this.requestExchange(
       completeRequest(
         method,
         legacy ? input : { ...input, mapping: this.mapping },
-        this.context(operation),
+        this.context(operation, null, authorityEpoch),
       ),
     );
   }
@@ -332,11 +537,130 @@ export class RpcConnection {
     credential: P0OperatorCredential,
     operation: string = randomUUID(),
   ): Promise<unknown> {
-    return this.request(
+    return this.sendPrepared(
+      this.prepareOperator(
+        method as OperatorMethod,
+        input as OperatorInput<OperatorMethod>,
+        credential,
+        { operation },
+      ),
+      credential,
+    ).then(resultOf);
+  }
+  prepareOperator<M extends OperatorMethod>(
+    method: M,
+    input: OperatorInput<M>,
+    credential: P0OperatorCredential,
+    options: OperatorOptions = {},
+  ): PreparedOperator {
+    if (
+      ![
+        "operator.authenticate",
+        "session.query",
+        "host.query",
+        "session.authorize",
+        "session.renew",
+        "session.revoke",
+        "session.stop",
+        "session.execute",
+        "fault.configure",
+      ].includes(method) ||
+      "proof" in input ||
+      "mapping" in input
+    )
+      reject("ROLE_SCOPE_DENIED");
+    if ("session_id" in input && input.session_id !== this.announcement.session_id)
+      reject("ROLE_SCOPE_DENIED");
+    const grant =
+      (method === "session.execute" || method === "session.revoke") &&
+      "grant_id" in input &&
+      typeof input.grant_id === "string"
+        ? input.grant_id
+        : null;
+    if (options.grant !== undefined && options.grant !== grant)
+      reject("OPERATION_PAYLOAD_CONFLICT");
+    const request = operatorRequest(
+      method,
+      { ...input, mapping: this.mapping },
+      this.context(
+        options.operation,
+        grant,
+        this.announcement.authority_epoch,
+        options.timeoutMs ?? this.limits.peer_health_timeout_ms,
+      ),
+      this.announcement,
+      credential,
+    );
+    const prepared = freeze(
+      structuredClone({ request, service: this.#peer, authority: this.#authority }),
+    );
+    preparedOperators.set(prepared, {
+      clock: this.clock,
+      origin: this.clock.origin,
+      domain: this.clock.domain,
+      caller: this.instanceId,
+      credential: credentialBinding(credential),
+    });
+    this.#checkPrepared(prepared, credential);
+    return prepared;
+  }
+  #checkPrepared(prepared: PreparedOperator, credential: P0OperatorCredential): void {
+    const fixed = preparedOperators.get(prepared);
+    if (
+      !fixed ||
+      fixed.clock !== this.clock ||
+      fixed.origin !== this.clock.origin ||
+      fixed.domain !== this.clock.domain ||
+      fixed.caller !== this.instanceId ||
+      fixed.credential !== credentialBinding(credential)
+    )
+      reject("AUTHENTICATION_REQUIRED");
+    const { request } = prepared;
+    const c = request.params.context;
+    if (
+      payloadDigest(prepared.service) !== payloadDigest(this.#peer) ||
+      payloadDigest(prepared.authority) !== payloadDigest(this.#authority) ||
+      c.object_ref.kind !== "Session" ||
+      c.object_ref.id !== this.announcement.session_id ||
+      c.caller_instance_id !== this.instanceId
+    )
+      reject("ROLE_SCOPE_DENIED");
+    if (c.authority_epoch !== this.announcement.authority_epoch) reject("SCOPED_EPOCH_CONFLICT");
+    validateMapping(this.mapping, this.announcement, this.instanceId, this.limits);
+    const now = this.clock.now();
+    if (now >= this.mapping.source_valid_until_ms) reject("CLOCK_MAPPING_INVALID");
+    const deadlines: Deadline[] = [c.deadline];
+    if (request.method === "session.authorize")
+      deadlines.push(
+        request.params.input.human_lease_deadline,
+        request.params.input.grant_deadline,
+      );
+    if (request.method === "session.renew")
+      deadlines.push(request.params.input.human_lease_deadline);
+    for (const deadline of deadlines) {
+      if (
+        deadline.clock_domain !== this.mapping.target_clock_domain ||
+        deadline.expires_at_ms <= deadline.issued_at_ms ||
+        deadline.expires_at_ms > this.mapping.target_valid_until_ms
+      )
+        reject("CLOCK_MAPPING_INVALID");
+      if (now + this.mapping.offset_upper_ms >= deadline.expires_at_ms)
+        reject("COMMAND_DEADLINE_MISSED");
+    }
+  }
+  sendPrepared(prepared: PreparedOperator, credential: P0OperatorCredential): Promise<RpcExchange> {
+    this.#checkPrepared(prepared, credential);
+    const original = structuredClone(prepared.request) as RpcRequest;
+    const {
+      proof: _proof,
+      mapping: _mapping,
+      ...business
+    } = original.params.input as Record<string, unknown>;
+    return this.requestExchange(
       operatorRequest(
-        method,
-        { ...input, mapping: this.mapping },
-        this.context(operation),
+        original.method,
+        { ...business, mapping: this.mapping },
+        original.params.context,
         this.announcement,
         credential,
       ),

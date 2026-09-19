@@ -13,6 +13,11 @@ import {
   StartupObservation,
   writeCliResult,
 } from "../../packages/runtime/src/observation.ts";
+import {
+  operatorTarget,
+  parseOperatorCommand,
+  prepareOperatorCommand,
+} from "../../packages/runtime/src/operator-command.ts";
 
 const startup = new StartupObservation("operator");
 let connection: RpcConnection | undefined;
@@ -21,29 +26,21 @@ let output: Buffer | undefined;
 try {
   requireRuntimeVersion();
   startup.stage = "arguments";
-  const args = process.argv.slice(2);
-  if (
-    args.length !== 4 ||
-    args[0] !== "--config" ||
-    !args[1] ||
-    args[2] !== "--command" ||
-    !["authenticate", "query", "host-query"].includes(args[3] ?? "")
-  )
-    throw new Error("INVALID_ARGUMENTS");
+  const command = parseOperatorCommand(process.argv.slice(2));
   startup.stage = "configuration";
-  const config = decodeJson(await readControlled(args[1]));
+  const config = decodeJson(await readControlled(command.configPath));
   assertValid("P0RuntimeConfig", config);
   const instance = randomUUID();
   const observation = startup.bind(instance, config.limits);
   const credential = await readCredential(config.operator_credentials_path);
   const authority = await readServiceIdentity(config.management_socket_path);
   if (authority.role !== "supervisor") throw new Error("SUPERVISOR_IDENTITY_MISMATCH");
-  const hostQuery = args[3] === "host-query";
-  const socket = hostQuery
+  const hostTarget = operatorTarget(command) === "host";
+  const socket = hostTarget
     ? `${config.management_socket_path}.host`
     : config.management_socket_path;
-  const peer = hostQuery ? await readServiceIdentity(socket) : authority;
-  if (peer.role !== (hostQuery ? "host" : "supervisor"))
+  const peer = hostTarget ? await readServiceIdentity(socket) : authority;
+  if (peer.role !== (hostTarget ? "host" : "supervisor"))
     throw new Error("SERVICE_IDENTITY_MISMATCH");
   startup.stage = "connect";
   connection = await RpcConnection.connect(
@@ -56,24 +53,16 @@ try {
     undefined,
     observation,
   );
-  const method =
-    args[3] === "authenticate"
-      ? "operator.authenticate"
-      : hostQuery
-        ? "host.query"
-        : "session.query";
-  const input =
-    method === "operator.authenticate" ? {} : { session_id: connection.announcement.session_id };
+  const prepared = prepareOperatorCommand(command, config, connection, credential);
   issuing = true;
-  await connection.operatorCall(method, input, credential);
-  output = Buffer.from(`${JSON.stringify(connection.lastResponse)}\n`);
+  const exchange = await connection.sendPrepared(prepared, credential);
+  output = Buffer.from(`${JSON.stringify(exchange.response)}\n`);
+  if ("error" in exchange.response) process.exitCode = 1;
 } catch (error) {
   if (!issuing) await startup.failed(error);
   else {
-    // Exactly one management command is issued on this connection. Preserve its real failure response.
-    const response = connection?.lastResponse;
-    if (response && "error" in response) output = Buffer.from(`${JSON.stringify(response)}\n`);
-    else connection?.observation?.failure("dispatch", observationError(error));
+    // A transport failure (including a late response) has no timely business result.
+    connection?.observation?.failure("dispatch", observationError(error));
   }
   process.exitCode = 1;
 } finally {
