@@ -83,3 +83,5 @@ Session（直播会话）
 各代次字段的唯一写入者、比较作用域、递增时机与接纳规则登记在`contracts/src/epochs.json`，表格见[P0 契约简报](../generated/P0.md#代次与序号)。
 
 `DirectorRecord.source_seq/last_source_seq`用于模型候选流；`segment_seq/last_seq`用于已提交媒体。两者不是别名。宿主记录候选→正式片段映射，拒绝候选不占正式序号；异常或拒绝不能用映射压缩伪造normal完成。EventEnvelope.source_seq另属权威事件流，不与模型序号比较。所有sequence的起点、闭区间/半开区间和空值规则由相应Schema定义。
+
+P0 的 operation 去重以认证主体、会话、grant、目标端点实例及业务 operation_id 为固定身份；其中尚未签发 grant 的管理动作以认证操作员、会话和 operation_id 为键。CLI 重启、新连接、caller_instance_id 改变不新建同一业务操作。原载荷、作用域、代次与原期限保持固定；连接挑战与传输 ID 可以更新，但不得借此再次产生效果。相同 operation 异载荷拒绝，已失效的原权只允许查询既有事实；新 operation 也不能绕过未知资源隔离。调用方实例本身必须与该次认证证明和连接一致。

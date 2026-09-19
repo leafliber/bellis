@@ -2,6 +2,8 @@
 // snapshots and precompiled Ajv validators. JSON Schema stays authoritative for
 // bounds, conditionals and closed objects; no trusted guard or device action is generated.
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import standalone from "ajv/dist/standalone/index.js";
 import { build } from "esbuild";
@@ -122,7 +124,9 @@ export async function validatorsModule(bundle: SchemaDocument): Promise<string> 
   const exports = Object.fromEntries(
     Object.keys(bundle.$defs).map((name) => [name, refFor(bundle, name)]),
   );
+  const runtimeFiles = new Map<string, string>();
   const result = await build({
+    absWorkingDir: ROOT,
     stdin: {
       contents: standaloneCode(ajv, exports),
       resolveDir: ROOT,
@@ -134,6 +138,30 @@ export async function validatorsModule(bundle: SchemaDocument): Promise<string> 
     platform: "neutral",
     target: "es2023",
     legalComments: "none",
+    plugins: [
+      {
+        name: "stable-validator-runtime",
+        setup(builder) {
+          builder.onResolve({ filter: /.*/ }, (args) => {
+            const importer = runtimeFiles.get(args.importer);
+            const physical = createRequire(importer ?? import.meta.url).resolve(args.path);
+            const marker = physical.lastIndexOf("/node_modules/");
+            if (marker < 0) throw new Error("VALIDATOR_RUNTIME_DEPENDENCY_DENIED");
+            const logical = physical.slice(marker + "/node_modules/".length);
+            const previous = runtimeFiles.get(logical);
+            if (previous && previous !== physical)
+              throw new Error("VALIDATOR_RUNTIME_IDENTITY_CONFLICT");
+            runtimeFiles.set(logical, physical);
+            return { path: logical, namespace: "validator-runtime" };
+          });
+          builder.onLoad({ filter: /.*/, namespace: "validator-runtime" }, (args) => {
+            const physical = runtimeFiles.get(args.path);
+            if (!physical) throw new Error("VALIDATOR_RUNTIME_MISSING");
+            return { contents: readFileSync(physical, "utf8"), loader: "js" };
+          });
+        },
+      },
+    ],
   });
   const output = result.outputFiles[0];
   if (!output) throw new Error("esbuild produced no validator output");

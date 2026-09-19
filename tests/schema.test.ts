@@ -5,11 +5,14 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { errors } from "../contracts/generated/registries.ts";
 import {
   assertValid,
+  bindVerifiedP0Installation,
+  payloadDigest,
   validate,
   validateManifest,
   validateProfile,
 } from "../packages/contract-sdk/src/index.ts";
 import { fixture, manifest } from "./helpers.ts";
+import { syntheticManifest } from "./p0-identity.helpers.ts";
 
 const bundle = JSON.parse(readFileSync("contracts/generated/bundle.schema.json", "utf8"));
 
@@ -112,4 +115,122 @@ test("sdk.schema: manifest refuses unsupported flags, unknown methods and simula
   bad.update_support.restore = true;
   assert.throws(() => validateManifest(bad));
   assert.throws(() => validateManifest({ ...manifest(), methods: ["unknown.method"] }));
+});
+
+test("sdk.schema: P0 installation context permits only the precise registered simulation boundary", () => {
+  // Synthetic SDK binding only. Filesystem installation trust is exercised by p0.identity.
+  const good = syntheticManifest();
+  const contextFor = (value: typeof good) =>
+    bindVerifiedP0Installation({
+      installation_id: "sdk-synthetic",
+      plugin_id: value.plugin_id,
+      plugin_version: value.plugin_version,
+      entry: { path: "/synthetic/entry.mjs", sha256: "0".repeat(64) },
+      artifacts: [{ path: "/synthetic/entry.mjs", sha256: "0".repeat(64) }],
+      manifest_digest: payloadDigest(value),
+      protocol_version: "0.8.0",
+      schema_digest: value.schema_digest,
+      allowed_capabilities: [{ name: "simulation.execute", version: "0.8.0" }],
+      allowed_targets: [{ kind: "SimulationCounter", id: "synthetic-counter" }],
+      execution_mode: "simulation",
+      external_effects_allowed: false,
+    });
+  assert.doesNotThrow(() => validateManifest(good, undefined, contextFor(good)));
+  assert.throws(() => validateManifest(good), /SIMULATION_INSTALLATION_REQUIRED/);
+  const variants = [
+    { ...good, execution_mode: "real" as const },
+    {
+      ...good,
+      capabilities: good.capabilities.map((cap) => ({
+        ...cap,
+        effect_type: "external_effect" as const,
+      })),
+    },
+    {
+      ...good,
+      capabilities: good.capabilities.map((cap) => ({ ...cap, name: "unknown.capability" })),
+    },
+    { ...good, capabilities: good.capabilities.map((cap) => ({ ...cap, version: "0.8.1" })) },
+    {
+      ...good,
+      capabilities: good.capabilities.map((cap) => ({
+        ...cap,
+        input_schema_ref: "p0-simulation-result@1",
+      })),
+    },
+    {
+      ...good,
+      capabilities: good.capabilities.map((cap) => ({
+        ...cap,
+        first_required_phase: "P1" as const,
+      })),
+    },
+    { ...good, permissions: { ...good.permissions, network_origins: ["https://example.invalid"] } },
+    { ...good, methods: [...good.methods, "session.authorize"] },
+    { ...good, configuration_schema_ref: "runtime-profile@1" },
+  ];
+  for (const value of variants) {
+    // Match the changed manifest digest deliberately: semantic rejection must remain independent.
+    assert.throws(() => validateManifest(value, undefined, contextFor(value)));
+  }
+  const profile = {
+    ...validateProfile(fixture("runtime-profile.json")),
+    enabled_phases: ["P0"],
+    enabled_capabilities: [{ name: "simulation.execute", version: "0.8.0" }],
+  };
+  assert.doesNotThrow(() => validateProfile(profile, contextFor(good)));
+  assert.throws(() => validateProfile(profile), /SIMULATION_INSTALLATION_REQUIRED/);
+  const otherMode = {
+    ...profile,
+    mode: "test_only",
+    cost: {
+      currency: "synthetic",
+      session_cost_cap: 1,
+      rolling_hour_cost_cap: 1,
+      providers: [
+        {
+          provider_ref: "synthetic-budget@1",
+          request_timeout_ms: 1,
+          max_calls: 1,
+          llm_tokens: 0,
+          tts_characters: 0,
+          tts_audio_ms: 0,
+          vlm_frames: 0,
+          rpm: 1,
+          tpm: 0,
+          guard_calls: 1,
+          max_retries: 0,
+          speculative_waste_units: 0,
+          pricing_ref: null,
+        },
+      ],
+    },
+  };
+  assertValid("RuntimeProfile", otherMode);
+  assert.throws(() => validateProfile(otherMode), /SIMULATION_EFFECTS_DISABLED/);
+  assert.throws(() => validateProfile(otherMode, contextFor(good)), /SIMULATION_EFFECTS_DISABLED/);
+  assert.throws(
+    () => validateProfile({ ...otherMode, mode: "public" }, contextFor(good)),
+    /SIMULATION_EFFECTS_DISABLED/,
+  );
+  assert.throws(
+    () => validateManifest({ ...good, execution_mode: "real" }),
+    /SIMULATION_CAPABILITY_ENABLED/,
+  );
+  assert.throws(
+    () => validateProfile({ ...profile, enabled_phases: ["P0", "P1"] }, contextFor(good)),
+    /SIMULATION_EFFECTS_DISABLED/,
+  );
+  assert.throws(
+    () =>
+      validateProfile(
+        { ...profile, enabled_capabilities: [{ name: "real.output", version: "0.8.0" }] },
+        contextFor(good),
+      ),
+    /PROFILE_UNKNOWN_CAPABILITY/,
+  );
+  assert.throws(
+    () => validateManifest(good, undefined, { installation: contextFor(good).installation }),
+    /SIMULATION_INSTALLATION_REQUIRED/,
+  );
 });

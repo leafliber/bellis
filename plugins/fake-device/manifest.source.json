@@ -1,0 +1,56 @@
+{
+  "plugin_id": "bellis-p0-fake-device",
+  "plugin_version": "0.8.0",
+  "protocol_version": "0.8.0",
+  "supported_platforms": ["darwin"],
+  "lifecycle": "controller",
+  "methods": [
+    "plugin.handshake",
+    "plugin.describe",
+    "controller.observe_status",
+    "controller.stop",
+    "controller.dispose",
+    "simulation.execute",
+    "simulation.query",
+    "endpoint.lease",
+    "endpoint.revoke",
+    "connection.authenticate",
+    "clock.sample",
+    "fault.apply"
+  ],
+  "capabilities": [
+    {
+      "name": "simulation.execute",
+      "version": "0.8.0",
+      "input_schema_ref": "p0-simulation-input@1",
+      "result_contract": "p0-simulation-result@1",
+      "permission_scope_ref": "p0-simulation-permission@1",
+      "effect_type": "internal_state",
+      "first_required_phase": "P0",
+      "status": "enabled"
+    }
+  ],
+  "supported_contexts": [],
+  "resources": [],
+  "max_concurrency": 1,
+  "update_support": {
+    "checkpoint": false,
+    "quiesce": false,
+    "snapshot": false,
+    "restore": false,
+    "policy_patch": false
+  },
+  "success_evidence_ref": "p0-simulation-result@1",
+  "cleanup_evidence_ref": "p0-simulation-cleanup@1",
+  "permissions": {
+    "network_origins": [],
+    "read_paths": [],
+    "write_namespaces": [],
+    "credential_scopes": []
+  },
+  "configuration_schema_ref": "p0-endpoint-configuration@1",
+  "configuration_apply_boundary": "new_instance",
+  "control_capabilities": [],
+  "test_coverage_refs": [],
+  "execution_mode": "simulation"
+}

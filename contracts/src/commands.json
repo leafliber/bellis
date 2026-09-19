@@ -121,6 +121,248 @@
       "permission_scope": "audio.control",
       "idempotency": "operation_id_payload_digest",
       "unsupported_reason": null
+    },
+    {
+      "name": "operator.authenticate",
+      "input_schema": "P0AuthenticateInput",
+      "result_schema": "P0OperatorIdentity",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "operator.authenticate",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.authorize",
+      "input_schema": "P0AuthorizeInput",
+      "result_schema": "P0AuthorizationResult",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.authorize",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.renew",
+      "input_schema": "P0RenewInput",
+      "result_schema": "SupervisionRecord",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.authorize",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.revoke",
+      "input_schema": "P0RevokeInput",
+      "result_schema": "StopOperationRecord",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.stop",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.stop",
+      "input_schema": "P0StopSessionInput",
+      "result_schema": "StopOperationRecord",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.stop",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.query",
+      "input_schema": "P0SessionQueryInput",
+      "result_schema": "P0SessionSnapshot",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "operator.query",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "host.query",
+      "input_schema": "P0SessionQueryInput",
+      "result_schema": "P0EndpointProjection",
+      "target": "host",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "operator.query",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "session.execute",
+      "input_schema": "P0SubmitInput",
+      "result_schema": "P0SimulationResult",
+      "target": "host",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.execute",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "supervisor.query",
+      "input_schema": "P0PeerQueryInput",
+      "result_schema": "P0SessionSnapshot",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "supervisor.peer",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "supervisor.health",
+      "input_schema": "P0HealthInput",
+      "result_schema": "P0HealthResult",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "supervisor.peer",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "endpoint.lease",
+      "input_schema": "P0EndpointLease",
+      "result_schema": "P0EndpointSnapshot",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "supervisor.safety",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "endpoint.revoke",
+      "input_schema": "P0EndpointRevokeInput",
+      "result_schema": "P0EndpointSnapshot",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "supervisor.safety",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "simulation.execute",
+      "input_schema": "P0ExecuteInput",
+      "result_schema": "P0SimulationResult",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "simulation.execute",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "simulation.query",
+      "input_schema": "P0SimulationQueryInput",
+      "result_schema": "P0EndpointSnapshot",
+      "target": "plugin",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "simulation.query",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "clock.sample",
+      "input_schema": "P0ClockSampleInput",
+      "result_schema": "P0ClockSampleResult",
+      "target": "local_peer",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "connection.clock",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "fault.configure",
+      "input_schema": "P0FaultInput",
+      "result_schema": "P0FaultResult",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "operator.test",
+      "idempotency": "authenticated_operation_business_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "storage.commit",
+      "input_schema": "P0StoreCommitInput",
+      "result_schema": "P0PersistenceReceipt",
+      "target": "persistence_worker",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "runtime.store",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "storage.query",
+      "input_schema": "P0StoreQueryInput",
+      "result_schema": "P0StoreQueryResult",
+      "target": "persistence_worker",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "runtime.store",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "storage.ack_outbox",
+      "input_schema": "P0StoreAckInput",
+      "result_schema": "P0PersistenceReceipt",
+      "target": "persistence_worker",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "runtime.store",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "connection.authenticate",
+      "input_schema": "P0PeerAuthenticateInput",
+      "result_schema": "P0PeerAuthenticationResult",
+      "target": "local_peer",
+      "phase": "P0",
+      "effect_type": "none",
+      "permission_scope": "connection.authenticate",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "supervisor.register_effect",
+      "input_schema": "P0RegisterEffectInput",
+      "result_schema": "P0RegisteredEffect",
+      "target": "supervisor",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "host.register_effect",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
+    },
+    {
+      "name": "fault.apply",
+      "input_schema": "P0FaultApplyInput",
+      "result_schema": "P0FaultResult",
+      "target": "local_peer",
+      "phase": "P0",
+      "effect_type": "internal_state",
+      "permission_scope": "supervisor.test",
+      "idempotency": "operation_id_payload_digest",
+      "unsupported_reason": null
     }
   ]
 }
