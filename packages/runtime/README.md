@@ -10,7 +10,7 @@
 | config.ts | P0RuntimeConfig、P0HostBootstrap、P0TrustedInstallation、实际 Manifest 与依赖闭包。 |
 | identity.ts | Ed25519 公告/peer 挑战、HMAC 与一次挑战；P0ConnectionAnnouncement、P0PeerProof、P0OperatorProof。 |
 | clock.ts | 单调时钟、保守区间与目标域期限；P0ClockMapping、Deadline。 |
-| transport.ts | socket/stdio 有界 UTF-8 NDJSON、严格 JSON、有限写入和立即停止接收；区分解析、派发与传输失败。 |
+| transport.ts | socket/stdio 有界 UTF-8 NDJSON、共享批次解析、严格 JSON、封读与有限写入；区分真实读 EOF、全连接关闭及解析/派发/传输失败。 |
 | client.ts | 验签、有限 pending/时限、原始回包、端点来源及序号/版本冲突检查；真实收发接点的协议观测。 |
 | service.ts | 核心角色/scope/时钟/摘要与初始代次检查，鉴权 host.query；未接真实存储前拒绝新效果。 |
 | endpoint-loader.ts | O_NOFOLLOW、有限一次 Buffer、文件身份及内容哈希，生成固定 data URL。 |
@@ -67,15 +67,23 @@ command/health 接收实际服务鉴权结果、原请求、公告和真实 requ
 
 ## 资源、失败与清理
 
-P0SafetyLimits 限制帧、pending、连接、映射及租约，配置不是实测 SLO。单连接缓冲最多一帧；非法 UTF-8、重复键、批请求、通知、字段和未知方法拒绝，非法前缀后的同 chunk 不再处理，错误回包最多排空 100ms。超时关闭连接并清 pending。端点已有独立停止通道；核心业务与安全工作的容量隔离、解析批次和管理封读按[第22.6节](../../docs/spec/22-tech-storage-deployment.md)由 W5S 接入，不以当前零授权入口宣称完成。
+P0SafetyLimits 限制帧、pending、连接、映射及租约，配置不是实测 SLO。JsonChannel 每批共享8帧/64KiB扫描追加预算，同一轮连续 data 回调不能各自重新取得预算；耗尽后通过 setImmediate 续跑。令 M=max_message_bytes，解析器持有的输入 Buffer 总上限为 M+max(64KiB,M+1)，不含解码字符串/对象，也不含独立的 max_pending_requests 份输出帧额度。接纳 chunk 的复制受后项上限约束；完整 JSON 帧仍一次解码和解析，最大 M，不宣称 CPU 工作被按时间抢占。
 
-私有 bootstrap 最多 16 MiB、5 秒。监督等待 Host 健康和独立端点握手事实最多 5 秒。通常终止子进程先 SIGTERM，1秒后 SIGKILL，总2秒仍无退出报 CHILD_STOP_UNCONFIRMED；监督收尾用 stop_timeout_ms 作 Host 软停止宽限，同时清自己服务和有界 dispose。退出不是端点事实。Host 健康丢失后的完整自身寿命仍待 W5。
+sealRead 立即停止输入及同 chunk 后续派发，释放待解析 Buffer 和 continuation，但保留异步回包能力；它是传输原语，管理连接单命令策略尚待服务层接入。end 封读后安排100ms有限排空，close 取消 continuation/排空 timer 并关闭通道。实际输入 end 立即发出 readEnded，再处理余留解析；共享 socket 的 full close 则是整条连接失联，不能当作仍可写的半连接 EOF。非法 UTF-8、重复键和超限输入拒绝，非法前缀后不再处理同 chunk；RPC 的批请求、通知、字段和未知方法仍由对应入口校验拒绝。
+
+终止 stream 只保留不捕获 channel/timer 的静态 error 吸收器，处理 Node stdio 在 close 后仍发出的 EPIPE 等迟到错误，不继续 I/O；活动通道的首个传输错误仍输出观察并关闭。真实 Node PIPE 已复现 stdout close→error:EPIPE→close 顺序。端点已有独立停止通道；核心业务/安全容量隔离、服务端管理单命令及监督协调仍按[第22.6节](../../docs/spec/22-tech-storage-deployment.md)由 W5S 后续接入。
+
+私有 bootstrap 最多 16 MiB、5 秒。监督等待 Host 健康和独立端点握手事实最多 5 秒。terminateChild 先发 SIGTERM，在传入宽限后升级 SIGKILL，再等待最多1000ms确认实际退出，否则报 CHILD_STOP_UNCONFIRMED。Supervisor、Host 和 launchEndpoint 的启动异常清理均显式使用已验证配置的 stop_timeout_ms 作子进程软停止宽限；正常监督收尾仍沿用既有配置宽限、服务清理和有界 dispose。这些是配置与等待界限，不是实测 SLO。退出不是端点清理证明，Host 健康丢失后的完整自身寿命仍待 W5。
 
 端点 stderr 原始 fd 直接继承；生产只采认证 RPC/event/query，日志不是授权/清理输入。只清自身 inode，异常遗留不覆盖、不自动恢复。永久 OS 死锁不是本地 timer 能保证的清理范围；无证明保持 UNKNOWN。
 
 ## 实际覆盖与未完成项
 
 reports/p0/w4/ 保存真实身份/CLI、单制品启动、独立查询、Host SIGKILL、零权拒绝、取消挂起、容量隔离、TOCTOU、空生成目录和跨 checkout 全部生成物一致/漂移拒绝结果。SDK 精确能力反例与 W3 合成 stdio/多文件闭包 fixture 保留。
+
+p0-transport.test.ts 的17项覆盖共享帧/字节批次、最大帧与分片 UTF-8、封读后异步响应、原始帧摘要、超限/截断、EOF/全连接关闭、背压不重发、迟到错误和有界排空。其中 child stdout PIPE 回归运行真实 Node 子进程；端点另以真实 PassThrough EOF 验证未解析完余留帧时已同步 fence，该测试的 grant/receipt 为受控模型输入。两者都不证明物理故障或停止 SLO，复跑命令和原始报告集中见 [入口说明](../../apps/host/README.md)。
+
+p0-startup-stop.test.ts 通过真实 Host SIGSTOP 验证启动取消期间按配置升级终止：监督记录实际 Host SIGKILL 退出与 connect 阶段 startup_rejected 后，以 code 0、signal null 退出；该断言定位启动异常路径，不以已就绪后的正常 close 代替。Host 自有路径清理以及未经认证查询的端点清理仍为 UNKNOWN，保留故障 fixture 和 raw 供复核。原始失败分类及证据索引见入口说明。
 
 p0-observation.test.ts 覆盖真实 CLI host-query 的双身份固定、独立缓存/陈旧质量、错会话/来源/凭据、畸形 socket 帧、外来事件拒绝，以及真实启动阶段、spawn/exit/ENOENT；受控模块覆盖跨连接序号、精确去敏、响应抛错前观察、背压/丢失/缺尾、sink 与异步写回调错误。异步写模块另测部分写、EAGAIN/EINTR/零进展、固定期限及晚回调；这些回调故障不是物理文件故障证据。
 

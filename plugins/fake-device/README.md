@@ -22,6 +22,8 @@ lease 核验完整 grant/admission 的事务摘要并固定 writer；执行还�
 
 stdio EOF/TTL、监督健康超时或最终实例期限进入不可延长的查询窗口，清 Host 连接期限并禁新效果。绝对寿命为启动点加 max_session_ms 与 cleanup_timeout_ms，首次最终 fence 再收紧到 cleanup_timeout_ms 窗口；心跳/重连/查询不延长。到期只清自身 inode，dispose 可提前结束。永久 OS 挂死不能由本地 timer 证明清理，exit 不等于停止证明。
 
+固定 Host 通道的实际 readEnded 直接同步调用 model.disconnect，先 fence、清连接期限和队列，再允许传输层续处理余留帧；不等待批次解析完成或 closed。整条通道关闭同样撤权，但不把 socket full close 当成可继续写出的半连接 EOF。传输 Buffer、批次、封读和终止错误处理的精确边界见 [runtime](../../packages/runtime/README.md)。
+
 ## 背压、故障和观察
 
 历史最多1024条，接纳前还按实际序列化大小预留最终事实、两份最坏未执行/未知 ID 数组、每条数值增长及消息封装余量；满时拒绝新效果，不截断历史。grant/lease/幂等记录有界，普通与安全 mutation 分开；安全自身记录满时仍先完成合法 fence/清理，禁新权后报告登记失败。
@@ -36,8 +38,12 @@ stderr 原始 fd 直达监督/runner，默认以公开 fs.write 异步写出；s
 
 p0-endpoint.test.ts 覆盖真实生成物启动/握手、安全查询、Host SIGKILL/EOF、零计数、角色/时钟/旧实例/畸形输入、容量满后撤权及挂起 cancel；模块覆盖完整摘要、预算、重复冲突、有限单位、到期、续租上限、最长 ID 最坏事实、完成/停止顺序和事件冲突。权威前进反例区分有效更新后旧 grant 拒绝、相同 lease 重放、三种普通容量耗尽，以及身份/时钟/幂等无效请求不推进。
 
+EOF 模块反例使用真实 PassThrough 流，在20个余留帧尚未解析完时断读，核验 fence、连接期限清除及计数不再增长；其 grant/receipt 由受控模型提供，不是生产授权或真实持久化。真实 Node child PIPE 的迟到 EPIPE 回归属于传输组件测试，原始证据与四文件专项命令见 [入口说明](../../apps/host/README.md)。
+
+启动取消组件中的 Host SIGKILL 不证明 Host 自有路径清理；端点即使留下退出或 stderr 观察，未经认证查询的清理仍为 UNKNOWN。故障 fixture 与 raw 保留供复核，测试 teardown 不充当生产清理证明；对应回归入口和证据索引见入口说明。
+
 p0-loader.test.ts 实际验证预检后且私有配置未发送时替换入口拒绝，加载核心已读 Buffer 后换路径仍执行原字节。p0-generation.test.ts 从空生成目录启动、比较跨 checkout 全部生成物、拒绝缺失内存依赖与实际漂移。W3 合成 fixture 独立保留，不冒充本设备。
 
 观测专项 p0-observation.test.ts 实际捕获 Supervisor/Host/Endpoint/CLI 的原始流，核验来源、跨连接序号、丢失和正常尾部，覆盖鉴权 Host 缓存查询、外来事件和畸形帧拒绝；端点原始事实与 Host/监督各自投影交叉核对。该覆盖不是完整 SUT 验收。
 
-复跑 `node --test tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts`、`node --test tests/p0-observation.test.ts tests/p0-loader.test.ts` 与 `pnpm check`。报告在 reports/p0/w4/、reports/p0/w4f/、reports/p0/w5o/ 和 reports/p0/w5of/；完整检查和原始捕获索引见 [入口说明](../../apps/host/README.md)。这些是中间包覆盖，14 个 sut.* 与 exit.P0 仍 PENDING；真实授权、SQLite 故障、状态机归约和组合故障须 W5R/W5S–W7 验证。
+复跑 `node --test tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts`、`node --test tests/p0-observation.test.ts tests/p0-loader.test.ts` 与 `pnpm check`。报告在 reports/p0/w4/、reports/p0/w4f/、reports/p0/w5o/、reports/p0/w5of/ 和 reports/p0/w5st/；完整检查和原始捕获索引见 [入口说明](../../apps/host/README.md)。这些是中间包覆盖，14 个 sut.* 与 exit.P0 仍 PENDING；真实授权、SQLite 故障、状态机实际入口归约和组合故障须 W5S–W7 验证。

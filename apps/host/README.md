@@ -35,6 +35,8 @@ session.authorize、session.execute、supervisor.register_effect 在真实存储
 
 入口在首个异步步骤前安装信号处理；AbortSignal 关闭未完成握手的通道及已建资源。正常收尾并行推进独立 dispose、Host 业务断开和管理路径清理，dispose 总等待受 stop_timeout_ms 约束；无回执保持未知。Host 释放子进程存活引用，端点继续有限安全查询窗口。没有泛化 pkill 或自动重建。
 
+Supervisor、Host 和 launchEndpoint 的启动异常清理均沿用已验证的 stop_timeout_ms 子进程宽限，正常停止预算不变；具体升级与实际退出确认边界见 [runtime](../../packages/runtime/README.md)。被 SIGKILL 不证明进程自有路径已清理，缺少认证端点查询时仍保留 UNKNOWN。
+
 观测默认使用异步 fd 输出，完整性和在途状态沿同一 writer 对象传递，包含私有 launcher 传入端点的 writer。CLI 的一个 stdout 结果也异步有限排空，正常成功/失败回包保持完整。入口完成必要安全关闭和有限 finish 后检查活跃 OS 写请求；仍在途时只对当前 process.pid 发 SIGKILL，保留真实 signal 与不完整日志，不能把这种退出称为正常成功。无在途请求时按实际业务退出码结束。该策略不关闭继承 fd、不杀父子进程组；库只暴露状态。端点首次可能观察或异步清理前安装最终退出定时器，同步 fence 在任何 await 之前。
 
 ## 覆盖
@@ -43,11 +45,20 @@ session.authorize、session.execute、supervisor.register_effect 在真实存储
 node --test tests/p0-identity.test.ts tests/p0-authority.test.ts tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts
 node --test tests/p0-observation.test.ts tests/p0-loader.test.ts
 node --test tests/p0-reducer.test.ts
+node --test tests/p0-transport.test.ts tests/p0-endpoint.test.ts tests/p0-identity.test.ts tests/p0-observation.test.ts
+node --test tests/p0-startup-stop.test.ts tests/p0-identity.test.ts tests/p0-observation.test.ts
+node --test tests/p0-startup-stop.test.ts
 pnpm check
 ```
 
 真实 socket 测试需允许本机监听，沙箱 EPERM 不能用内存测试替代。reports/p0/w4/ 与 reports/p0/w4f/ 保存端点和身份覆盖；reports/p0/w5o/raw/ 保存真实启动/CLI stdout 与 stderr 原始捕获，正常捕获核验所有行及各来源流尾。reports/p0/w5of/raw/ 保存默认 fd 的 FILE/PIPE 原始字节、控制输出与实际退出元数据，故障流不补尾。两目录保留全部运行日志（含失败运行）；异步 fd 专项见 reports/p0/w5of/observation-third.log 与对应 .exit，15/15；完整锁定环境检查见该目录 check-final.log、check-final.exit。W5O 独立集成检查另见 reports/p0/w5o/l2-check.log。
 
 三状态机专项的26/26模块结果与覆盖来源见 reports/p0/w5rf/module-after.log、module-coverage.json；同目录 check.log、check.exit、environment.log 保存锁定环境完整检查的原始输出、退出码和实际环境。本说明与容量语义包的独立检查另见 reports/p0/w5sc/。报告保留失败运行；模块范围与期限边界见 runtime，不由测试计数推导 SUT 结论。
+
+传输四文件专项为53/53，见 reports/p0/w5st/targeted-final.log 与 targeted-final.exit；完整检查 check.log、check.exit 及 L2 亲验 l2-check.log 为55/55一致性检查、127/127测试，无失败或跳过。environment.log 保存实际 Node/pnpm 环境；targeted.log、targeted-second.log 与 failed-first/、failed-second/ 保留前两轮失败输出和原始捕获，stdio-teardown-order.log 保留真实 Node stdio 关闭/EPIPE 顺序。封读、批次与终止监听器边界见 [runtime](../../packages/runtime/README.md)，Host EOF 的端点归约见 [fake-device](../../plugins/fake-device/README.md)。本次说明的复核输出与退出码另存 reports/p0/w5std/。
+
+启动收尾回归证据在 reports/p0/w5stf/：regression-before-second.log 记录配置宽限未传入时父 watchdog 对 Supervisor 发出 SIGKILL；targeted-after.log 为24/24，branch-assertion.log 为启动取消分支专项1/1，check-final.log 与 l2-check.log 为55/55一致性检查、128/128测试。修复后的原始记录证明 Supervisor 接收 SIGTERM，记录真实 Host SIGKILL 和 connect 阶段 startup_rejected 后以 code 0、signal null 退出。startup-stop/run-*/ 下保留 parent.ndjson、stderr.ndjson、result.json 及故障 fixture 路径；identity-management/run-*/ 保留管理用例的父进程动作与 stderr，environment.log 保存运行环境。结果仅证明本次组件行为，不证明 Host 路径或未经认证查询的端点已清理，也不构成停止 SLO。
+
+证据限制：reports/p0/w5std/l2-check.log 的一次126/127仅观察到 Supervisor SIGKILL，原用例 stdio=ignore，无法归因；w5stf 的5次单例和收窄诊断范围的完整检查未复现，该受控回归只证明配置预算缺口，不追认原偶发根因。full-diagnostic.classification.json 将误改非目标 stdio 的首轮诊断标为 instrumentation-invalid；regression-before.log 的首次固化测试前置失败也保留，不作为产品缺陷证据。上述失败不改写为通过。本说明包复核输出与退出码在 reports/p0/w5stfd/。
 
 已覆盖真实 CLI/启动、独立查询、Host SIGKILL、零授权、身份/时钟/Schema、端点取消回包挂起、容量满后的撤权、加载替换与生成漂移；观测新增真实失败响应/退出、Host 与监督投影区分、不刷新缓存、陈旧质量、去敏及日志缺口处理。受控模型与归约器的有效 receipt/lease 只证明模块逻辑，不是实际 Worker 或授权证据。核心监督协调与容量隔离、Worker/Outbox/完整授权链仍 unsupported，14 个 sut.* 和 exit.P0 保持 PENDING；当前只有 macOS 运行覆盖。
