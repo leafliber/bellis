@@ -4605,7 +4605,8 @@
         "grant_id",
         "reason"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$comment": "session.revoke的单停止回执、精确grant reservation归属和operation固定关联统一见P0StopSessionInput的$comment。"
     },
     "P0StopSessionInput": {
       "type": "object",
@@ -4633,7 +4634,8 @@
         "target_ref",
         "reason"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$comment": "P0的session.stop/session.revoke均返回一条实际StopOperationRecord，以下为唯一回执选择规则，不新增聚合停止对象。reservation由本会话归约owner按(initial或精确grant_id, target_ref)预留固定stop_operation_id；只在当前固定Supervisor/Endpoint实例与session内选择，不跨实例借用历史证明。session.revoke固定选择输入grant_id对应grant.target_refs[0]的reservation，不得按target匹配initial或其它grant。session.stop在完整身份/scope/时钟/幂等冲突检查之后、同步fence改变grant状态之前固定选择：先取包含target_ref的ACTIVE/REQUESTED grant，按grant_id字符串字典升序（不依赖locale）选首个的reservation；否则取该target尚未生成Stop的reservation，initial优先，其余按grant_id同序；否则选择已有真实记录，优先Stop仍REQUESTED、关联cleanup缺失/未confirmed或对应isolation仍blocked的记录，同组依次按cancel_epoch降序、同域requested_at.monotonic_ms降序、stop_operation_id字符串字典升序。随后先真实fence，再按已选reservation的固定ID取实际Stop；预期记录缺失时明确失败，不回退到同target历史CONFIRMED或伪造成功。唯一业务账本固定operation到owner/target/stop_id及原回执，合法重复不重新选择、不创建Stop或延长期限；安全账本满仍先fence，再明确拒绝无法登记的后续工作。没有新停止记录的新operation可返回既有事实，但保留原requested_at/deadline/状态/incident，不声称新证明。单条回执不代表其它目标或历史事件已停止/清理，全部stops/cleanup/isolation由session.query返回；旧UNKNOWN不因新operation或单条CONFIRMED消除。"
     },
     "P0SessionQueryInput": {
       "type": "object",
@@ -6456,7 +6458,7 @@
         "dropped_observations"
       ],
       "additionalProperties": false,
-      "$comment": "生产归约器对真实输入的只读stderr观测，不是命令/公共事件；guard_result 未调用时为null，拒绝时to等于from；timer保留实际计划deadline，其它触发timer_deadline=null。command的trigger_digest=SHA256(JCS({method,context:去掉payload_digest,input:去掉整个proof}))，即authenticationDigest；trigger_id=SHA256(JCS({connection_id,receiver_instance_id,request_id,receive_seq}))，其中receive_seq来自接收端真实request_received的source_seq，只由内部调用链传递，不能接受调用方指定或新增RPC字段。序号/累计丢失及结束规则见第24.2节与epochs登记；runner事后关联，不接受scenario_id、任意payload或外部指定guard结果。仅去敏只读覆盖观测，不作为生产授权或停止/清理证明。 process_fact/protocol_fact只能来自已有实例的真实parent exit或实际通道关闭/失败回调：trigger_digest为对应完整P0ProcessObservation/P0ProtocolObservation的JCS SHA256，trigger_id=SHA256(JCS({record_type,source_instance_id,source_pid,source_seq}))；内部传递真实事实，不读取stderr，不伪装timer，null实例启动失败不能归为已有runtime来源。",
+      "$comment": "生产归约器对真实输入的只读stderr观测，不是命令/公共事件；guard_result 未调用时为null，拒绝时to等于from；timer保留实际计划deadline，其它触发timer_deadline=null。command的trigger_digest=SHA256(JCS({method,context:去掉payload_digest,input:去掉整个proof}))，即authenticationDigest；trigger_id=SHA256(JCS({connection_id,receiver_instance_id,request_id,receive_seq}))，其中receive_seq来自接收端真实request_received的source_seq，只由内部调用链传递，不能接受调用方指定或新增RPC字段。序号/累计丢失及结束规则见第24.2节与epochs登记；runner事后关联，不接受scenario_id、任意payload或外部指定guard结果。仅去敏只读覆盖观测，不作为生产授权或停止/清理证明。 process_fact/protocol_fact只能来自已有实例的真实parent exit、监督本实例shutdown_requested或实际通道关闭/失败回调：trigger_digest为对应完整P0ProcessObservation/P0ProtocolObservation的JCS SHA256，trigger_id=SHA256(JCS({record_type,source_instance_id,source_pid,source_seq}))；内部传递真实事实，不读取stderr，不伪装timer，null实例启动失败不能归为已有runtime来源。 监督自身shutdown_requested只驱动已有safe_stop及其派生revoke，不作为任意事件驱动入口；核验固定本实例角色、实例、PID、时钟域和实际非未来时点。Host自身关闭观察不能作为Supervisor本实例触发，也不能经stderr驱动监督；监督仍消费实际peer失联或parent退出。",
       "allOf": [
         {
           "if": {
@@ -7138,6 +7140,108 @@
                 "stage"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "const": "shutdown_requested"
+                },
+                "cause": {
+                  "enum": [
+                    "signal",
+                    "runtime_close",
+                    "startup_abort"
+                  ]
+                },
+                "signal": {
+                  "enum": [
+                    "SIGINT",
+                    "SIGTERM",
+                    null
+                  ]
+                },
+                "startup_stage": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "runtime",
+                        "arguments",
+                        "configuration",
+                        "installation",
+                        "bootstrap",
+                        "listen",
+                        "launch",
+                        "connect"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "cause",
+                "signal",
+                "startup_stage"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "cause": {
+                          "const": "signal"
+                        },
+                        "signal": {
+                          "enum": [
+                            "SIGINT",
+                            "SIGTERM"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "cause": {
+                          "const": "runtime_close"
+                        },
+                        "signal": {
+                          "type": "null"
+                        },
+                        "startup_stage": {
+                          "type": "null"
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "cause": {
+                          "const": "startup_abort"
+                        },
+                        "signal": {
+                          "type": "null"
+                        },
+                        "startup_stage": {
+                          "enum": [
+                            "runtime",
+                            "arguments",
+                            "configuration",
+                            "installation",
+                            "bootstrap",
+                            "listen",
+                            "launch",
+                            "connect"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -7153,7 +7257,7 @@
         "detail"
       ],
       "additionalProperties": false,
-      "$comment": "实际parent只记录自身创建的进程，launch_id在实际spawn调用前固定；expected_instance_id仅在启动前由子进程自行分配实例时允许null（当前Supervisor/CLI），Host/Endpoint由父级预分配时必须填固定真实实例。该值在同launch_id整条parent流保持不变，后来的认证实例由真实RPC/child来源关联，禁止回写历史或猜测。spawn_attempt.command_digest=SHA256(JCS({exec_path,args}))，取实际传给spawn的可执行路径和完整参数数组，不包含环境或FD私有启动内容；只记录摘要，启动参数不得含凭据内容，runner实际command artifact、当前构建及parent graph用于复核。实际PID不得换绑；spawned来自真实spawn通知，exited只来自真实退出通知，EOF/kill成功不等于exit。startup_rejected.stage记录实际失败位置：runtime为Node环境检查，arguments为入口参数，configuration为受控配置/凭据读取校验，installation为安装制品核验，bootstrap为私有启动材料/身份绑定，listen为本机服务监听，launch为子进程或已核验端点加载启动，connect为CLI建立管理连接；阶段由真实执行位置决定，不从未知错误文本猜测，未知错误保留internal.unexpected_error。source_instance_id=null只用于尚未建立实例且失败即结束的单条startup_rejected流，不能随后变为有实例流；已有实例始终填固定实例。PID/日志描述符不是认证身份。Worker线程留其专用契约，不伪装OS子进程。",
+      "$comment": "实际parent只记录自身创建的进程，launch_id在实际spawn调用前固定；expected_instance_id仅在启动前由子进程自行分配实例时允许null（当前Supervisor/CLI），Host/Endpoint由父级预分配时必须填固定真实实例。该值在同launch_id整条parent流保持不变，后来的认证实例由真实RPC/child来源关联，禁止回写历史或猜测。spawn_attempt.command_digest=SHA256(JCS({exec_path,args}))，取实际传给spawn的可执行路径和完整参数数组，不包含环境或FD私有启动内容；只记录摘要，启动参数不得含凭据内容，runner实际command artifact、当前构建及parent graph用于复核。实际PID不得换绑；spawned来自真实spawn通知，exited只来自真实退出通知，EOF/kill成功不等于exit。startup_rejected.stage记录实际失败位置：runtime为Node环境检查，arguments为入口参数，configuration为受控配置/凭据读取校验，installation为安装制品核验，bootstrap为私有启动材料/身份绑定，listen为本机服务监听，launch为子进程或已核验端点加载启动，connect为CLI建立管理连接；阶段由真实执行位置决定，不从未知错误文本猜测，未知错误保留internal.unexpected_error。source_instance_id=null只用于尚未建立实例且失败即结束的单条startup_rejected流，不能随后变为有实例流；已有实例始终填固定实例。PID/日志描述符不是认证身份。Worker线程留其专用契约，不伪装OS子进程。 shutdown_requested只记录已有固定实例Host/Supervisor自身实际关闭原因：signal仅由真实SIGINT/SIGTERM回调产生，启动期间startup_stage为实际阶段、运行期间为null；runtime_close来自实际内部close调用，signal/startup_stage均为null；startup_abort来自实际启动取消回调，signal=null且startup_stage为实际阶段，不把其它启动错误写成abort。source_role/source_instance_id/source_pid/observed_at.clock_domain必须来自该本实例固定writer，observed_at为实际回调时点，不在后续catch补造；不得伪装child退出或由外部参数指定来源。首次关闭事实沿受信内部调用链传递，关闭顺序和重入规则见第20.1节；日志写出不是安全归约前置。",
       "allOf": [
         {
           "if": {
@@ -7180,6 +7284,38 @@
                 "required": [
                   "kind"
                 ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "detail": {
+                "properties": {
+                  "kind": {
+                    "const": "shutdown_requested"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            },
+            "required": [
+              "detail"
+            ]
+          },
+          "then": {
+            "properties": {
+              "source_role": {
+                "enum": [
+                  "host",
+                  "supervisor"
+                ]
+              },
+              "source_instance_id": {
+                "$ref": "#/$defs/Id"
               }
             }
           }

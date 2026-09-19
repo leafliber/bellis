@@ -95,9 +95,9 @@
     },
     {
       "field": "P0ProcessObservation.source_seq / dropped_observations",
-      "writer": "实际parent或记录自身启动失败的进程；该进程唯一观测写入器",
+      "writer": "实际parent或记录自身启动拒绝/本实例关闭请求的进程；该进程唯一观测写入器",
       "scope": "source_role＋source_instance_id＋source_pid＋observed_at.clock_domain＋process流；null实例只用于失败即结束的一条startup_rejected，禁止与非null实例流拼接",
-      "increment": "每次观测尝试从0连续分配source_seq；写出失败累计dropped_observations，不因丢失回退；同一parent的各launch_id共享该流序号",
+      "increment": "每次观测尝试从0连续分配source_seq；写出失败累计dropped_observations，不因丢失回退；同一parent的各launch_id及本实例shutdown_requested共享该流序号，首次关闭事实不得在catch中补造时点或另起来源",
       "comparison": "只在固定来源流内检查连续性/累计丢失并核对结束计数与原始EOF；实际PID不代替认证，父进程先死不补造退出或零丢失"
     },
     {

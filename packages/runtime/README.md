@@ -11,7 +11,8 @@
 | identity.ts | Ed25519 公告/peer 挑战、HMAC 与一次挑战；P0ConnectionAnnouncement、P0PeerProof、P0OperatorProof。 |
 | clock.ts | 单调时钟、保守区间与目标域期限；P0ClockMapping、Deadline。 |
 | transport.ts | socket/stdio 有界 UTF-8 NDJSON、共享批次解析、严格 JSON、封读与有限写入；区分真实读 EOF、全连接关闭及解析/派发/传输失败。 |
-| client.ts | 验签、有限 pending/时限、原始回包、端点来源及序号/版本冲突检查；真实收发接点的协议观测。 |
+| client.ts | 验签、有限 pending/时限、不可伪造 Prepared、逐请求 RpcExchange、原始事件与投影分离；真实收发接点的协议观测。 |
+| operator-command.ts | 九个固定 CLI 动作的显式参数、已登记命令构造及配置范围校验；不隐式查询、不提供任意 payload。 |
 | service.ts | 实际鉴权/scope/时钟/代次检查、管理封读、固定 peer 分类与冻结 ServiceInvocation 委派；鉴权 host.query，未接真实存储前拒绝新效果。 |
 | service-capacity.ts | 全服务普通/安全/查询在途与未结算任务预算，固定期限、断连后脱离回包及迟回调回收；不取消业务任务、不持业务账本。 |
 | endpoint-loader.ts | O_NOFOLLOW、有限一次 Buffer、文件身份及内容哈希，生成固定 data URL。 |
@@ -44,6 +45,14 @@ Supervisor 是监督/grant/StopOperation 的唯一归约 owner；供其使用的
 
 host.query 经 operator.query 鉴权，核验当前会话及固定端点来源，返回 Host 自己的 P0EndpointProjection；不调用监督或端点查询，不刷新 received_at。无事实为 unknown，实际连接关闭、映射失效或缓存年龄达到 peer_health_timeout_ms 时为 stale。监督独立查询所得的投影与 Host 缓存分别拥有自己的接收时钟，不能互相冒充。
 
+## 客户端与显式操作
+
+prepareOperator 为九个登记管理方法构造 PreparedOperator，通过私有 WeakMap 绑定原实际 clock 对象及 origin/domain、调用实例和操作员身份，公开请求/服务/owner 快照深度冻结；复制同形对象不能取得 Prepared 身份。sendPrepared 在新连接上复核固定服务、公钥 owner、实例、Session、scope/grant/代次以及原命令、人工租约和 grant 的全部期限。重连只换本次 challenge/mapping/proof/RPC id，保留原业务输入和截止；错时钟对象、origin、目标域或新映射无法覆盖原截止时拒绝，不重新换算延期。它只在本进程内使用，不提供磁盘重放或自动重试。
+
+requestExchange 返回对应请求的完整 RpcRequest、真实 RpcSuccess/RpcFailure、原验签公告、映射与实际接收点，整体深度冻结；失败仍保留其实际保留码或 ErrorEnvelope，不借用全局 lastResponse。响应在原截止到达后即使 Schema 合法，也以 LateRpcResponse 携带实际 exchange 拒绝，不能作为及时成功；CLI 对传输失败或迟到响应不输出虚构业务结果，协议观察仍保留实际收到的事实。公开观测继续按固定规则去敏，不输出私钥或等价认证秘密。
+
+onEndpointEvent 交付经身份/结构/事件时点核验的原信封及接收绑定，供归档；onEndpointFact 只推进有效映射内、当前 authority_epoch 且序号和 source_revision 均前进的投影。重复事件、同 revision 相同事实不刷新投影，旧代次或失效映射只留历史；同 event_id/source_seq/revision 异摘要或各1024项摘要表耗尽时关闭连接，不删除旧账换额度。authority_epoch 与事实的 supervision_epoch 分别处理，不要求数值相等；未来 authority_epoch 交受信回调或拒绝，不能从端点反向提升 owner。W5S-I 仍须把固定 Supervisor 最新 owner 验证及真实 grant/监督代次绑定接入这些回调。
+
 ## 服务委派与容量
 
 P0Service 在完整 RpcRequest Schema 校验后记录原 request_received；实际鉴权、scope、摘要、时钟和当前代次检查通过后，才把原请求、公告、该内部 trigger 及公开 actor 身份复制并深度冻结为 ServiceInvocation。actor 不含 authentication_key、私钥或等价秘密；它不由调用方自报 operator_id 获得。ServiceDelegate.beginSafety 在连接分类和任务容量拒绝前同步执行，要求协调器先完成本地 fence，再由 dispatch 返回同一停止记录；服务不等待数据库或 cancel 才调用该接口。生产唯一业务账本与归约接线仍待 W5S-I，当前测试委派只证明接口顺序。无 delegate 时 authorize/execute/register_effect 继续返回 PERSISTENCE_NOT_READY，fault 配置/应用返回 SERVICE_NOT_READY；host.query 固定读取本机缓存，不能被 delegate 替换。
@@ -59,6 +68,8 @@ P0Reducer 默认 stopped、无 grant、持久化 blocked，是三状态机和本
 command/health 接收实际服务鉴权结果、原请求、公告和真实 request_received 的内部关联；failure 只接实际进程退出/通道失败回调，不读取 stderr。endpointFact 接收固定端点的验签公告、有效映射，以及完整原查询/响应或原事件信封，重新核验身份、代次、时钟和事实一致性。workerReceipt 绑定 P0StoreCommitInput 与 P0PersistenceReceipt，bindActiveCommit 还须核验精确 ACTIVE 记录的独立提交；这些内部入口不是 RPC，也不能被测试布尔值代替。timer/fire 使用本实例签发的内部 token、原期限和事实基准，过早回调只重排原期限。
 
 同步 fence 先阻断执行、推进适用代次、建立 REQUESTED 停止与隔离，再由 takeActions 交出 endpoint_revoke、query_cleanup 和 persist 意图；意图不等于已发消息或已提交。persistenceRecord 只给当前记录副本，实际事务及对应 Outbox 由 W6 接入。停止终态与清理记录独立：UNKNOWN 不被后到事实改写为 CONFIRMED，清理仍可继续记录，隔离只按适用证明处理，不因新 operation 或新实例零计数解除。
+
+本实例 shutdown_requested 触发与单停止回执选择已登记前置契约，尚待 W5S-I 实装。关闭顺序以第20.1节为准，回执按 P0StopSessionInput 固定 operation 与精确 reservation，不以同目标旧 CONFIRMED 代替新 grant 的停止；现归约器 failure 仍只接受真实 peer 退出/通道失败，不能把新增 Schema 分支当作运行入口已接通。
 
 模块最多保留7份 grant；初始目标集合和各 grant 在接纳前按目标预留停止、清理及隔离位置，各集合最多16个目标，预留总量按128限额连同已有隔离核验。管理 operation 记录最多128项，效果历史最多1024项，安全动作按记录身份合并待办，不删除历史换取新授权。上述是模块记录数量边界，不保证完整 P0SessionSnapshot 或 RPC 已符合 max_message_bytes；全响应序列化字节预留和真实传输准入由 W5S/W6 完成。
 
@@ -86,6 +97,8 @@ sealRead 立即停止输入及同 chunk 后续派发，释放待解析 Buffer �
 
 私有 bootstrap 最多 16 MiB、5 秒。监督等待 Host 健康和独立端点握手事实最多 5 秒。terminateChild 先发 SIGTERM，在传入宽限后升级 SIGKILL，再等待最多1000ms确认实际退出，否则报 CHILD_STOP_UNCONFIRMED。Supervisor、Host 和 launchEndpoint 的启动异常清理均显式使用已验证配置的 stop_timeout_ms 作子进程软停止宽限；正常监督收尾仍沿用既有配置宽限、服务清理和有界 dispose。这些是配置与等待界限，不是实测 SLO。退出不是端点清理证明，Host 健康丢失后的完整自身寿命仍待 W5。
 
+Host/Supervisor 的 listen 已结束后，启动失败或取消会先启动自有本机路径清理，再与子进程 terminate 并行等待；launchEndpoint 内部等待端点退出之前也调用 Host 的同一清理入口，不再依赖外层 catch 才开始清理。清理不抢在 listen 的身份文件发布完成之前执行。局部 service.close 与返回的 runtime.close 分别复用首次 Promise；启动异常通过 allSettled 收取各项结果，原启动错误和清理错误一并保留。仍只通过既有 OwnedPaths 核对 inode，删除本机路径不是端点停止或设备清理证明。这是 W5S-F 的已实现范围，本实例 shutdown_requested 与同步关闭归约仍待 W5S-I。
+
 端点 stderr 原始 fd 直接继承；生产只采认证 RPC/event/query，日志不是授权/清理输入。只清自身 inode，异常遗留不覆盖、不自动恢复。永久 OS 死锁不是本地 timer 能保证的清理范围；无证明保持 UNKNOWN。
 
 ## 实际覆盖与未完成项
@@ -96,6 +109,8 @@ p0-transport.test.ts 的17项覆盖共享帧/字节批次、最大帧与分片 U
 
 p0-startup-stop.test.ts 通过真实 Host SIGSTOP 验证启动取消期间按配置升级终止：监督记录实际 Host SIGKILL 退出与 connect 阶段 startup_rejected 后，以 code 0、signal null 退出；该断言定位启动异常路径，不以已就绪后的正常 close 代替。Host 自有路径清理以及未经认证查询的端点清理仍为 UNKNOWN，保留故障 fixture 和 raw 供复核。原始失败分类及证据索引见入口说明。
 
+p0-startup-cleanup.test.ts 的两项真实进程回归分别取消 Host/Supervisor，在端点已安装处理器与安全监听后暂停端点，验证原定子进程终止预算内、端点仍暂停时，本机路径已独立删除。未执行认证端点清理查询，设备清理仍为 UNKNOWN。F 三文件专项13/13及 L2 完整55/55一致性、163/163测试的报告、修前两项有效失败与早期 PID fixture 失败，统一见 [入口说明](../../apps/host/README.md)中的 reports/p0/w5sf/ 索引。
+
 p0-observation.test.ts 覆盖真实 CLI host-query 的双身份固定、独立缓存/陈旧质量、错会话/来源/凭据、畸形 socket 帧、外来事件拒绝，以及真实启动阶段、spawn/exit/ENOENT；受控模块覆盖跨连接序号、精确去敏、响应抛错前观察、背压/丢失/缺尾、sink 与异步写回调错误。异步写模块另测部分写、EAGAIN/EINTR/零进展、固定期限及晚回调；这些回调故障不是物理文件故障证据。
 
 默认 fd 路径实际验证 FILE 重定向完整序列，以及 PIPE 填满后计时回调仍进展、finish 保留在途状态、当前进程自 SIGKILL 和缺尾原始流。正常捕获逐行核验 Schema、序号、丢失与尾部，背压故障捕获保留真实退出及不完整范围。报告在 reports/p0/w5o/ 与 reports/p0/w5of/；后者含锁定 Node 内置源码的只读核实摘要。FILE 兼容性不证明物理盘阻塞/故障，TTY 未做实际设备验收。复跑命令和完整检查日志入口见 [apps/host](../../apps/host/README.md)。
@@ -104,4 +119,6 @@ p0-reducer.test.ts 覆盖默认无权、准入与回执绑定、续租/心跳分
 
 p0-service.test.ts 的16项受控模块测试覆盖 N=1 普通任务饱和时独立安全/查询/Host health、冻结输入及原 trigger、先 fence 后容量拒绝、期限与 unfinished 回收、断连与迟回调、候选淘汰/固定期限、固定 peer 分类与当前代次、同 chunk 管理封读、N=1 peer 鉴权流水、慢回包连接额度、默认无权及身份/角色拒绝。受控委派中的稳定 actor 账本用于验证调用边界，不是生产账本。真实 UDS 身份/帧及 Host 缓存查询覆盖沿用 p0-identity/p0-authority/p0-observation 测试；原始输出、失败诊断及复跑命令统一见 [入口说明](../../apps/host/README.md)。
 
-有效 lease/receipt、有限效果及竞争正例目前是同生产模型和归约器的受控模块测试，不是 SQLite 或真实操作员授权。W5S-L 显式 CLI、W5S-E 端点双安全接线、W5S-I 生产协调、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported；14 个 sut.* 与 exit.P0 保持 PENDING。
+p0-client.test.ts 的13项受控模块测试覆盖 Prepared 身份/深冻结、原业务与期限绑定、重连反例、独立权威代次、逐请求乱序回包/保留码、迟到成功拒绝，以及原事件归档、投影去重/旧代次/失效映射和冲突。p0-operator.test.ts 的4项包含封闭参数/构造模块测试，以及九动作真实 CLI 鉴权和真实 UDS 断连无伪造回包测试；共新增17项。复跑命令、30/30专项及161/161完整结果和失败记录索引见 [入口说明](../../apps/host/README.md)。
+
+有效 lease/receipt、有限效果及竞争正例目前是同生产模型和归约器的受控模块测试，不是 SQLite 或真实操作员授权。九动作 CLI 已可发出真实请求，但 authorize/execute 仍 PERSISTENCE_NOT_READY，renew/revoke/stop 仍 CONTROLLER_NOT_READY，fault 仍 SERVICE_NOT_READY。W5S-E 按 write completion、双安全通道/实例账本/有限响应事件、fault 生命周期/compact Work 三包串行推进；W5S-I 生产协调/关闭归约、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported。F 的本机清理修复不改变这些边界；14 个 sut.* 与 exit.P0 保持 PENDING。

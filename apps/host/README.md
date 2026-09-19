@@ -15,6 +15,22 @@ pnpm p0:operator --config /absolute/private/runtime.json --command query
 pnpm p0:operator --config /absolute/private/runtime.json --command host-query
 ```
 
+CLI 必须显式给出 --config 和 --command，没有默认 query；可选 --operation-id 固定本次操作，省略时生成 UUID，--timeout-ms 省略时取 peer_health_timeout_ms，显式值也不得超过该预算。以下列出各动作额外必需参数；--target 使用两个值 KIND ID，只有 authorize 可重复目标，最多16个且不得重复。
+
+| 动作 | 真实入口 | 额外必需参数 |
+| --- | --- | --- |
+| authenticate | Supervisor / operator.authenticate | 无 |
+| query | Supervisor / session.query | 无 |
+| host-query | Host / host.query | 无 |
+| authorize | Supervisor / session.authorize | --endpoint-instance、--target KIND ID、--capability simulation.execute、--effect-limit、--queue-limit、--cost-limit、--human-lease-ms、--grant-ms |
+| renew | Supervisor / session.renew | --supervision-epoch、--human-lease-ms |
+| revoke | Supervisor / session.revoke | --grant-id |
+| stop | Supervisor / session.stop | --target KIND ID |
+| execute | Host / session.execute | --grant-id、--endpoint-instance、--target KIND ID、--units、--interval-ms、--cost-units |
+| fault | Supervisor / fault.configure | --fault-target、--fault、--duration-ms |
+
+参数拒绝未知、重复、缺值或动作不适用项；数值参数只接受十进制安全整数，并须满足实际配置和 Schema。目标须在安装白名单内，capability 只接受已登记且已启用的 simulation.execute；fault 配对须通过 P0FaultSelection，不能用任意 payload。授权固定 simulation/supervised/public_broadcast_allowed=false；人工租约由显式动作给出，心跳不续租。Session 与管理 authority_epoch 来自实际验签公告，renew 的 supervision_epoch 必须单独显式给出，不能混用。CLI 不隐式查询端点/监督来补参数，也不自动重试；prepare/send 的进程内原业务绑定及真实 exchange 见 runtime 说明。
+
 p0:install 显式复制当前生成制品到新目录并输出已核验 P0TrustedInstallation；父目录须当前 UID 的 0700 实目录。启动不重写信任清单、不自动接受改动。本包不初始化凭据、运行配置或数据库；测试只在临时目录建立隔离材料。配置、密钥、数据不入库。
 
 Schema、固定路径和身份规则以 [P0 简报](../../docs/generated/P0.md)及[第22章](../../docs/spec/22-tech-storage-deployment.md)为准。真实启动只允许 bellis-p0-fake-device 单 ESM、仅 P0 simulation；通用 SDK 结构校验不授予安装信任。
@@ -29,13 +45,15 @@ launcher 受控读取一次入口 Buffer，核验后执行该 Buffer 的 data: E
 
 Supervisor、Host、端点分别拥有自己的 socket/身份文件并只删除记录的 inode，不覆盖冲突路径。默认 stopped、无 grant、持久化 blocked；握手后可查询真实零计数、水位与 Host 连接期限。失联投影变 stale/unknown，进程退出不是端点停止/清理证明。CLI 每命令建立新连接，用真实凭据和一次挑战认证；stdout 保留实际 RPC id 与完整合法成功/失败回包。没有收到 RPC 回包时不制造回包，stderr 只记录安全分类的本地失败。
 
-session.authorize、session.execute、supervisor.register_effect 在真实存储接入前拒绝。操作员停止/续租/故障配置的完整路径待 W5S/W6；端点低层安全调用只接受固定监督。P0Reducer 的同步三状态机与守卫已作模块验证，但实际入口尚未委派给它，内部事实接口、资源上限和期限边界见 runtime 说明。核心 authority_epoch 仍为 0，W5S 须从固定监督的新验签公告推进，不能由端点自报提升或刷新固定 stdio TTL。重启不恢复旧权，持久化缺口与 UNKNOWN 隔离待 W6。
+session.authorize、session.execute、supervisor.register_effect 在真实存储接入前返回 PERSISTENCE_NOT_READY；实际 CLI 的 renew/revoke/stop 当前返回 CONTROLLER_NOT_READY，fault 返回 SERVICE_NOT_READY。这些中间拒绝保留真实结果，成功路径仍待 W5S-I/W6；端点低层安全调用只接受固定监督。P0Reducer 的同步三状态机与守卫已作模块验证，但实际入口尚未委派给它，内部事实接口、资源上限和期限边界见 runtime 说明。核心 authority_epoch 仍为 0，W5S-I 须从固定监督的新验签公告推进，不能由端点自报提升或刷新固定 stdio TTL。重启不恢复旧权，持久化缺口与 UNKNOWN 隔离待 W6。
 
-当前 CLI 仅支持上列三个动作。W5S-C 已交付服务容量隔离、管理首个 Schema 合法帧封读、固定 peer 分类，以及校验后冻结的 ServiceInvocation 和同步 beginSafety 委派接口；接口、资源与失败边界见 [runtime](../../packages/runtime/README.md)。生产唯一业务账本/归约器尚未接入，无 delegate 的效果入口仍 PERSISTENCE_NOT_READY，fault 仍 unsupported；host-query 保持真实本机缓存语义。后续按 W5S-L 显式动作和 prepare/send 内存业务绑定、W5S-E 端点双安全通道、W5S-I 监督协调、W6 实际持久化依次推进；当前查询能力不代表授权或停止入口已交付，不增加任意 RPC 或磁盘重试队列。
+W5S-L 已交付上述九动作、逐请求完整 exchange 与 prepare/send 内存绑定。W5S-C 已交付服务容量隔离、管理首个 Schema 合法帧封读、固定 peer 分类，以及校验后冻结的 ServiceInvocation 和同步 beginSafety 委派接口；接口、资源与失败边界见 [runtime](../../packages/runtime/README.md)。后续按 W5S-E-T 的 write completion、E-P1 的双通道/实例账本/有限响应事件、E-P2 的 fault 生命周期/compact Work、W5S-I 监督协调、W6 实际持久化串行推进。W5S-IC 只登记关闭触发与单停止回执的前置契约，尚未实现本实例关闭归约；实际信号/内部 close 接线仍待 I，不能由 Schema 通过声称已完成。
 
 入口在首个异步步骤前安装信号处理；AbortSignal 关闭未完成握手的通道及已建资源。正常收尾并行推进独立 dispose、Host 业务断开和管理路径清理，dispose 总等待受 stop_timeout_ms 约束；无回执保持未知。Host 释放子进程存活引用，端点继续有限安全查询窗口。没有泛化 pkill 或自动重建。
 
 Supervisor、Host 和 launchEndpoint 的启动异常清理均沿用已验证的 stop_timeout_ms 子进程宽限，正常停止预算不变；具体升级与实际退出确认边界见 [runtime](../../packages/runtime/README.md)。被 SIGKILL 不证明进程自有路径已清理，缺少认证端点查询时仍保留 UNKNOWN。
+
+W5S-F 已使 listen 完成后的 Host/Supervisor 本机路径清理先启动，与子进程终止独立推进，复用首次关闭 Promise 并保留原启动和清理错误。Host 在 launchEndpoint 内部等待失败子进程之前即可开始局部清理；路径仍只按原 inode 所有权删除，不作为端点清理证明，也不表示 I 的关闭归约已经接通。
 
 观测默认使用异步 fd 输出，完整性和在途状态沿同一 writer 对象传递，包含私有 launcher 传入端点的 writer。CLI 的一个 stdout 结果也异步有限排空，正常成功/失败回包保持完整。入口完成必要安全关闭和有限 finish 后检查活跃 OS 写请求；仍在途时只对当前 process.pid 发 SIGKILL，保留真实 signal 与不完整日志，不能把这种退出称为正常成功。无在途请求时按实际业务退出码结束。该策略不关闭继承 fd、不杀父子进程组；库只暴露状态。端点首次可能观察或异步清理前安装最终退出定时器，同步 fence 在任何 await 之前。
 
@@ -48,8 +66,10 @@ node --test tests/p0-reducer.test.ts
 node --test tests/p0-transport.test.ts tests/p0-endpoint.test.ts tests/p0-identity.test.ts tests/p0-observation.test.ts
 node --test tests/p0-startup-stop.test.ts tests/p0-identity.test.ts tests/p0-observation.test.ts
 node --test tests/p0-startup-stop.test.ts
+node --test tests/p0-startup-cleanup.test.ts tests/p0-startup-stop.test.ts tests/p0-identity.test.ts
 node --test tests/p0-service.test.ts
 node --test tests/p0-service.test.ts tests/p0-identity.test.ts tests/p0-authority.test.ts tests/p0-observation.test.ts
+node --test tests/p0-client.test.ts tests/p0-operator.test.ts tests/p0-endpoint.test.ts
 pnpm check
 ```
 
@@ -63,8 +83,12 @@ pnpm check
 
 证据限制：reports/p0/w5std/l2-check.log 的一次126/127仅观察到 Supervisor SIGKILL，原用例 stdio=ignore，无法归因；w5stf 的5次单例和收窄诊断范围的完整检查未复现，该受控回归只证明配置预算缺口，不追认原偶发根因。full-diagnostic.classification.json 将误改非目标 stdio 的首轮诊断标为 instrumentation-invalid；regression-before.log 的首次固化测试前置失败也保留，不作为产品缺陷证据。上述失败不改写为通过。本说明包复核输出与退出码在 reports/p0/w5stfd/。
 
+本机清理独立性报告在 reports/p0/w5sf/：run-summary.json 索引实际命令、环境、原始文件和哈希；targeted-after.log 为上述三文件专项13/13，check-1.log 与 L2 亲验 l2-check.log 均为55/55一致性、163/163测试、0跳过。startup-cleanup/run-*/ 保存真实父进程动作、stderr、结果与实际继承 PIPE EOF。regression-before-2.log 的修前两项失败在处理器/监听已就绪且端点实际暂停时复现 Host 路径残留；regression-before.log 的早期 PID fixture 未维持暂停、实际发生 SIGTERM 退出，不能充作挂起子进程反例。original-failure.json 与 reports/p0/w5slic/failed-check-2/ 保留原 run-WYBB8M 和哈希；该运行端点迟退原因仍未确认，后续受控回归只证明清理等待顺序缺口。父进程退出不等于继承 fd EOF，路径删除与 PID 退出也不等于端点清理。LD/IC 与本次 F 说明收尾的独立检查索引在 reports/p0/w5slic/fd-final/。
+
 服务容量报告集中在 reports/p0/w5svc/：run-summary.json 索引实际命令与早期失败，service-third.log 为16/16受控模块测试，check-first.log 为55/55一致性检查、144/144测试；cf-summary.json 索引只修改测试同步的回归，cf-affected.log 为29/29，cf-check.log 和 L2 亲验 l2-check-after.log 均为55/55、144/144，无跳过。报告记录 Node 24.21.0、pnpm 11.11.0、macOS arm64；本次文档检查输出保存在 reports/p0/w5scd/。
 
 该目录 l2-failure/ 保留一次55/55、143/144的真实失败，diagnosis.json、failure-runtime-timeline.json 与 archive-manifest.json 记录归因、时序和文件哈希：用例先取得 Host 缓存事实，随即错误地假定 Supervisor 独立轮询也已就绪。修复仅让测试在有限次数内等待监督自身绑定正确的事实，保留独立 received_at 断言，生产服务不变。归档的 host-query-denied/stale 两份 raw 来自旧 session，已明确排除出本次归因；新运行使用独立捕获目录，不混算成功，也不跨时钟域推断先后。
 
-已覆盖真实 CLI/启动、独立查询、Host SIGKILL、零授权、身份/时钟/Schema、端点取消回包挂起、容量满后的撤权、加载替换与生成漂移；观测新增真实失败响应/退出、Host 与监督投影区分、不刷新缓存、陈旧质量、去敏及日志缺口处理。服务容量的受控 Promise/委派、模型与归约器的有效 receipt/lease 只证明模块逻辑，不是实际 Worker 或授权证据。显式授权/停止 CLI、端点双安全接线、核心监督协调、Worker/Outbox/完整授权链仍 unsupported，14 个 sut.* 和 exit.P0 保持 PENDING；当前只有 macOS 运行覆盖。
+客户端/CLI 报告在 reports/p0/w5sl/：13项 client 模块测试和4项 operator 测试新增17项，targeted-4.log 为30/30专项，check-2.log 与 L2 亲验 l2-check.log 为55/55一致性、161/161测试、0跳过。run-summary.json 索引命令、环境、全部失败及 raw 文件哈希；cli-raw/ 的每动作 UUID 目录和 client-raw/ 的每运行 UUID 目录保留独立原始文件，不覆盖或混算。check-1.log 的158/160失败保留：端点 fixture 只换时钟域却沿用另一时钟的1000ms时点，修为实际 targetClock.point()；peerCall 的 async 包装改变原同步 Schema 拒绝，修回同步构造/校验并保留原断言。其它编译/fixture 错误及首轮真实 UDS 沙箱 EPERM 也在索引中，不改写为通过。本次契约/说明的生成、Schema 探查和完整检查输出另存 reports/p0/w5slic/。
+
+已覆盖真实 CLI/启动、独立查询、Host SIGKILL、零授权、身份/时钟/Schema、端点取消回包挂起、容量满后的撤权、加载替换与生成漂移；观测新增真实失败响应/退出、Host 与监督投影区分、不刷新缓存、陈旧质量、去敏及日志缺口处理。服务容量的受控 Promise/委派、模型与归约器的有效 receipt/lease 只证明模块逻辑，不是实际 Worker 或授权证据。九动作 CLI 的真实鉴权与未就绪拒绝不代表授权/停止成功；端点双安全接线、核心监督协调/关闭归约、Worker/Outbox/完整授权链仍 unsupported，14 个 sut.* 和 exit.P0 保持 PENDING；当前只有 macOS 运行覆盖。

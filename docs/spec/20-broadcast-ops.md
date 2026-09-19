@@ -19,6 +19,12 @@ OBS官方API区分普通stop与force stop；后者尝试不等待排队数据，
 
 P0 仅验证真实宿主、监督、持久化与假设备进程上的有限模拟效果。其独立停止是监督直连端点和端点本地租约，不接入或宣称 OBS、音频、键鼠、平台停止；真实设备路径须由相应阶段另行验收。
 
+P0 的 session.stop/session.revoke 单条回执只描述选定的真实 StopOperation，不代表全部目标或历史事件已停止、清理。具体 reservation 选择及 operation 绑定规则统一见 P0StopSessionInput；完整停止、清理和隔离事实通过 session.query 查询，不能以同目标旧 CONFIRMED 冒充本次新效果的停止证明。
+
+本实例主动关闭也必须先同步封准入，再由监督归约已有 safe_stop 及其派生 revoke，建立适用的停止与隔离，之后才进行异步清理、I/O、await 或观测 finish；零 grant 不免除已有未知资源的处理。本进程主动调用 abort 前先同步 fence；应用自身 SIGINT/SIGTERM 回调先保留真实 signal 记录并 fence，再主动 startup.abort。外部 AbortSignal 的 startup_abort 则在实际取消回调首步记录并同步 fence，随后才异步清理，不能声称先于已经发生的外部 abort。首次关闭事实及关闭 Promise 复用，不因重复调用刷新停止期限。safe_stopping 没有表内 safe_stop 转换；同一安全流程中的重复 close 或新 stop 复用已有栅栏、原 Stop 和 timer，不通过表外事件重开流程或刷新 deadline。
+
+writer 绑定后须在下一次 await 前建立协调器和内部关闭 callback，启动期间的信号保留实际回调的原记录与时点，不在稍后 catch 补造。listen/spawn/connect 等非 abort 启动失败，如已有运行对象，应实际调用内部 close 并记录 runtime_close，先同步栅栏再异步清理；真实 startup_rejected 独立保留，不伪装 startup_abort。pre-bind 没有 runtime 时不编造实例。Host 只封自身执行，监督依实际 peer 失联或 parent exit 处理；日志失败不阻止安全归约，任何路径都不读取 stderr 驱动生产状态，也不虚构子进程已退出或提前制造 timeout。
+
 ### 20.2 监督模式与ExecutionGrant
 
 监督模式、ExecutionGrant 和 StopOperation 的状态、守卫及字段见[P0 契约简报](../generated/P0.md)。stopped 是可由认证操作员明确重新授权的安全静止态；它不证明所有端点已停或所有资源已清理。人工租约与程序连接健康分别记录：心跳只能说明连接在线，不能人工确认、延长人工租约或恢复旧 grant。失联或期限到达先关闭新增效果，监督与端点分别推进停止；恢复必须重新鉴权、确认新实例和适用清理事实并明确授权。
