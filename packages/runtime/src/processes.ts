@@ -167,6 +167,9 @@ async function supervisorRuntime(
     faultInjectionEnabled: config.fault_injection_enabled,
     observation,
   });
+  // Called only after listen has settled, never while identity publication is pending.
+  let localClose: Promise<void> | undefined;
+  const closeLocal = () => (localClose ??= service.close());
   const bootstrap: P0HostBootstrap = {
     session_id: sessionId,
     host_instance_id: host.public.instance_id,
@@ -328,37 +331,46 @@ async function supervisorRuntime(
       if (signal?.aborted) aborted();
     });
     signal?.throwIfAborted();
-    let closing = false;
+    let closePromise: Promise<void> | undefined;
     return {
       host: hostChild,
-      close: async () => {
-        if (closing) return;
-        closing = true;
-        closed = true;
-        clearInterval(endpointInterval);
-        try {
-          const results = await Promise.allSettled([
-            stopEndpoint(),
-            terminateChild(hostChild, config.limits.stop_timeout_ms),
-            service.close(),
-          ]);
-          const failed = results.find((result) => result.status === "rejected");
-          if (failed?.status === "rejected") throw failed.reason;
-        } finally {
-          await service.close();
-          await observation.finish();
-        }
-      },
+      close: () =>
+        (closePromise ??= (async () => {
+          closed = true;
+          clearInterval(endpointInterval);
+          try {
+            const results = await Promise.allSettled([
+              stopEndpoint(),
+              terminateChild(hostChild, config.limits.stop_timeout_ms),
+              closeLocal(),
+            ]);
+            const failed = results.find((result) => result.status === "rejected");
+            if (failed?.status === "rejected") throw failed.reason;
+          } finally {
+            try {
+              await closeLocal();
+            } finally {
+              await observation.finish();
+            }
+          }
+        })()),
     };
   } catch (error) {
     closed = true;
     clearInterval(endpointInterval);
     endpointConnection?.close();
-    try {
-      if (child) await terminateChild(child, config.limits.stop_timeout_ms);
-    } finally {
-      await service.close();
-    }
+    // Local owned paths must not wait for a blocked Host (or its own child).
+    const cleanup = closeLocal();
+    const results = await Promise.allSettled([
+      cleanup,
+      child ? terminateChild(child, config.limits.stop_timeout_ms) : undefined,
+    ]);
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length)
+      throw new AggregateError(
+        [error, ...failures.map((result) => result.reason)],
+        "SUPERVISOR_STARTUP_CLEANUP_FAILED",
+      );
     throw error;
   }
 }
@@ -445,6 +457,16 @@ async function hostRuntime(
   let closed = false;
   let active: RpcConnection | undefined;
   let busy = false;
+  let localClose: Promise<void> | undefined;
+  const closeLocal = () => {
+    if (!localClose) {
+      closed = true;
+      active?.close();
+      endpoint?.connection.close();
+      localClose = service.close();
+    }
+    return localClose;
+  };
   const health = async (): Promise<void> => {
     if (closed || busy) return;
     busy = true;
@@ -503,6 +525,7 @@ async function hostRuntime(
       (stage) => {
         startup.stage = stage;
       },
+      closeLocal,
     );
     endpoint.connection.channel.on("closed", () => {
       snapshot.endpoint.quality = "stale";
@@ -517,11 +540,19 @@ async function hostRuntime(
     });
     signal?.throwIfAborted();
   } catch (error) {
-    closed = true;
-    active?.close();
-    endpoint?.connection.close();
-    if (endpoint) await terminateChild(endpoint.child, bootstrap.limits.stop_timeout_ms);
-    await service.close();
+    // launchEndpoint starts the same cleanup before waiting on its failed child.
+    // When launch succeeded, keep local cleanup independent of later termination too.
+    const cleanup = closeLocal();
+    const results = await Promise.allSettled([
+      cleanup,
+      endpoint ? terminateChild(endpoint.child, bootstrap.limits.stop_timeout_ms) : undefined,
+    ]);
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length)
+      throw new AggregateError(
+        [error, ...failures.map((result) => result.reason)],
+        "HOST_STARTUP_CLEANUP_FAILED",
+      );
     throw error;
   }
   const interval = setInterval(
@@ -532,17 +563,19 @@ async function hostRuntime(
     },
     Math.max(10, Math.floor(bootstrap.limits.peer_health_timeout_ms / 3)),
   );
+  let closePromise: Promise<void> | undefined;
   return {
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      clearInterval(interval);
-      active?.close();
-      endpoint?.connection.close();
-      // Normal Host shutdown ends business traffic; Supervisor retains its independent cleanup path.
-      endpoint?.child.unref();
-      await service.close();
-      await observation.finish();
-    },
+    close: () =>
+      (closePromise ??= (async () => {
+        clearInterval(interval);
+        const cleanup = closeLocal();
+        // Normal Host shutdown ends business traffic; Supervisor retains its independent cleanup path.
+        endpoint?.child.unref();
+        try {
+          await cleanup;
+        } finally {
+          await observation.finish();
+        }
+      })()),
   };
 }

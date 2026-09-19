@@ -63,6 +63,7 @@ export async function launchEndpoint(
   signal?: AbortSignal,
   observation?: ObservationWriter,
   stage?: (stage: StartupStage) => void,
+  closeLocalOnStartupFailure?: () => Promise<void>,
 ): Promise<{ child: ChildProcess; connection: RpcConnection }> {
   signal?.throwIfAborted();
   const child = observedSpawn(
@@ -75,7 +76,15 @@ export async function launchEndpoint(
   );
   let connection: RpcConnection | undefined;
   let channel: JsonChannel | undefined;
+  let localCleanup: Promise<void> | undefined;
+  const beginLocalCleanup = () => {
+    localCleanup ??= closeLocalOnStartupFailure?.();
+    // Abort callbacks cannot await. Preserve rejection for the catch below.
+    void localCleanup?.catch(() => {});
+    return localCleanup;
+  };
   const aborted = () => {
+    beginLocalCleanup();
     channel?.close();
     connection?.close();
     child.stdin?.destroy();
@@ -125,9 +134,19 @@ export async function launchEndpoint(
     signal?.throwIfAborted();
     return { child, connection };
   } catch (error) {
+    const cleanup = beginLocalCleanup();
     connection?.observation?.failure("dispatch", observationError(error));
     connection?.close();
-    await terminateChild(child, config.limits.stop_timeout_ms);
+    const results = await Promise.allSettled([
+      terminateChild(child, config.limits.stop_timeout_ms),
+      cleanup,
+    ]);
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length)
+      throw new AggregateError(
+        [error, ...failures.map((result) => result.reason)],
+        "ENDPOINT_STARTUP_CLEANUP_FAILED",
+      );
     throw error;
   } finally {
     signal?.removeEventListener("abort", aborted);
