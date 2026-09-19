@@ -31,7 +31,7 @@ Supervisor、Host、端点分别拥有自己的 socket/身份文件并只删除�
 
 session.authorize、session.execute、supervisor.register_effect 在真实存储接入前拒绝。操作员停止/续租/故障配置的完整路径待 W5S/W6；端点低层安全调用只接受固定监督。P0Reducer 的同步三状态机与守卫已作模块验证，但实际入口尚未委派给它，内部事实接口、资源上限和期限边界见 runtime 说明。核心 authority_epoch 仍为 0，W5S 须从固定监督的新验签公告推进，不能由端点自报提升或刷新固定 stdio TTL。重启不恢复旧权，持久化缺口与 UNKNOWN 隔离待 W6。
 
-当前 CLI 仅支持上列三个动作。新增固定动作/显式参数、prepare/send 的内存业务绑定、核心容量隔离与管理单命令封读按第22.6节在 W5S 实现，不能把当前查询能力当作授权或停止入口已交付；不增加任意 RPC 或磁盘重试队列。
+当前 CLI 仅支持上列三个动作。W5S-C 已交付服务容量隔离、管理首个 Schema 合法帧封读、固定 peer 分类，以及校验后冻结的 ServiceInvocation 和同步 beginSafety 委派接口；接口、资源与失败边界见 [runtime](../../packages/runtime/README.md)。生产唯一业务账本/归约器尚未接入，无 delegate 的效果入口仍 PERSISTENCE_NOT_READY，fault 仍 unsupported；host-query 保持真实本机缓存语义。后续按 W5S-L 显式动作和 prepare/send 内存业务绑定、W5S-E 端点双安全通道、W5S-I 监督协调、W6 实际持久化依次推进；当前查询能力不代表授权或停止入口已交付，不增加任意 RPC 或磁盘重试队列。
 
 入口在首个异步步骤前安装信号处理；AbortSignal 关闭未完成握手的通道及已建资源。正常收尾并行推进独立 dispose、Host 业务断开和管理路径清理，dispose 总等待受 stop_timeout_ms 约束；无回执保持未知。Host 释放子进程存活引用，端点继续有限安全查询窗口。没有泛化 pkill 或自动重建。
 
@@ -48,6 +48,8 @@ node --test tests/p0-reducer.test.ts
 node --test tests/p0-transport.test.ts tests/p0-endpoint.test.ts tests/p0-identity.test.ts tests/p0-observation.test.ts
 node --test tests/p0-startup-stop.test.ts tests/p0-identity.test.ts tests/p0-observation.test.ts
 node --test tests/p0-startup-stop.test.ts
+node --test tests/p0-service.test.ts
+node --test tests/p0-service.test.ts tests/p0-identity.test.ts tests/p0-authority.test.ts tests/p0-observation.test.ts
 pnpm check
 ```
 
@@ -61,4 +63,8 @@ pnpm check
 
 证据限制：reports/p0/w5std/l2-check.log 的一次126/127仅观察到 Supervisor SIGKILL，原用例 stdio=ignore，无法归因；w5stf 的5次单例和收窄诊断范围的完整检查未复现，该受控回归只证明配置预算缺口，不追认原偶发根因。full-diagnostic.classification.json 将误改非目标 stdio 的首轮诊断标为 instrumentation-invalid；regression-before.log 的首次固化测试前置失败也保留，不作为产品缺陷证据。上述失败不改写为通过。本说明包复核输出与退出码在 reports/p0/w5stfd/。
 
-已覆盖真实 CLI/启动、独立查询、Host SIGKILL、零授权、身份/时钟/Schema、端点取消回包挂起、容量满后的撤权、加载替换与生成漂移；观测新增真实失败响应/退出、Host 与监督投影区分、不刷新缓存、陈旧质量、去敏及日志缺口处理。受控模型与归约器的有效 receipt/lease 只证明模块逻辑，不是实际 Worker 或授权证据。核心监督协调与容量隔离、Worker/Outbox/完整授权链仍 unsupported，14 个 sut.* 和 exit.P0 保持 PENDING；当前只有 macOS 运行覆盖。
+服务容量报告集中在 reports/p0/w5svc/：run-summary.json 索引实际命令与早期失败，service-third.log 为16/16受控模块测试，check-first.log 为55/55一致性检查、144/144测试；cf-summary.json 索引只修改测试同步的回归，cf-affected.log 为29/29，cf-check.log 和 L2 亲验 l2-check-after.log 均为55/55、144/144，无跳过。报告记录 Node 24.21.0、pnpm 11.11.0、macOS arm64；本次文档检查输出保存在 reports/p0/w5scd/。
+
+该目录 l2-failure/ 保留一次55/55、143/144的真实失败，diagnosis.json、failure-runtime-timeline.json 与 archive-manifest.json 记录归因、时序和文件哈希：用例先取得 Host 缓存事实，随即错误地假定 Supervisor 独立轮询也已就绪。修复仅让测试在有限次数内等待监督自身绑定正确的事实，保留独立 received_at 断言，生产服务不变。归档的 host-query-denied/stale 两份 raw 来自旧 session，已明确排除出本次归因；新运行使用独立捕获目录，不混算成功，也不跨时钟域推断先后。
+
+已覆盖真实 CLI/启动、独立查询、Host SIGKILL、零授权、身份/时钟/Schema、端点取消回包挂起、容量满后的撤权、加载替换与生成漂移；观测新增真实失败响应/退出、Host 与监督投影区分、不刷新缓存、陈旧质量、去敏及日志缺口处理。服务容量的受控 Promise/委派、模型与归约器的有效 receipt/lease 只证明模块逻辑，不是实际 Worker 或授权证据。显式授权/停止 CLI、端点双安全接线、核心监督协调、Worker/Outbox/完整授权链仍 unsupported，14 个 sut.* 和 exit.P0 保持 PENDING；当前只有 macOS 运行覆盖。

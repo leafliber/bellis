@@ -12,7 +12,8 @@
 | clock.ts | 单调时钟、保守区间与目标域期限；P0ClockMapping、Deadline。 |
 | transport.ts | socket/stdio 有界 UTF-8 NDJSON、共享批次解析、严格 JSON、封读与有限写入；区分真实读 EOF、全连接关闭及解析/派发/传输失败。 |
 | client.ts | 验签、有限 pending/时限、原始回包、端点来源及序号/版本冲突检查；真实收发接点的协议观测。 |
-| service.ts | 核心角色/scope/时钟/摘要与初始代次检查，鉴权 host.query；未接真实存储前拒绝新效果。 |
+| service.ts | 实际鉴权/scope/时钟/代次检查、管理封读、固定 peer 分类与冻结 ServiceInvocation 委派；鉴权 host.query，未接真实存储前拒绝新效果。 |
+| service-capacity.ts | 全服务普通/安全/查询在途与未结算任务预算，固定期限、断连后脱离回包及迟回调回收；不取消业务任务、不持业务账本。 |
 | endpoint-loader.ts | O_NOFOLLOW、有限一次 Buffer、文件身份及内容哈希，生成固定 data URL。 |
 | endpoint-client.ts | 私有启动、stdio 鉴权/握手、精确 Manifest 与 P0EndpointSnapshot 查询。 |
 | processes.ts | Supervisor/Host 生命周期、最小环境、独立安全轮询和各自 P0EndpointProjection。 |
@@ -39,7 +40,17 @@ Supervisor 是监督/grant/StopOperation 的唯一归约 owner；供其使用的
 
 当前生产核心 epoch 仍为 0。端点区分首次 auth 的公告投影、普通请求精确当前代次与监督 lease/revoke 合法推进。W5 要将事件 currentEpoch getter 接到固定监督新验签投影；不能从端点反向提升权威，也不能把零代次接线当 I81 完成。Worker 时钟与事务由 W6 接入。
 
+服务已支持固定 peer 在鉴权后使用当前 owner 的 request epoch，原验签公告、映射与 TTL 不变；首次 connection.authenticate 和 operator 请求仍拒绝旧公告代次。该服务能力不代表生产权威推进已接通。
+
 host.query 经 operator.query 鉴权，核验当前会话及固定端点来源，返回 Host 自己的 P0EndpointProjection；不调用监督或端点查询，不刷新 received_at。无事实为 unknown，实际连接关闭、映射失效或缓存年龄达到 peer_health_timeout_ms 时为 stale。监督独立查询所得的投影与 Host 缓存分别拥有自己的接收时钟，不能互相冒充。
+
+## 服务委派与容量
+
+P0Service 在完整 RpcRequest Schema 校验后记录原 request_received；实际鉴权、scope、摘要、时钟和当前代次检查通过后，才把原请求、公告、该内部 trigger 及公开 actor 身份复制并深度冻结为 ServiceInvocation。actor 不含 authentication_key、私钥或等价秘密；它不由调用方自报 operator_id 获得。ServiceDelegate.beginSafety 在连接分类和任务容量拒绝前同步执行，要求协调器先完成本地 fence，再由 dispatch 返回同一停止记录；服务不等待数据库或 cancel 才调用该接口。生产唯一业务账本与归约接线仍待 W5S-I，当前测试委派只证明接口顺序。无 delegate 时 authorize/execute/register_effect 继续返回 PERSISTENCE_NOT_READY，fault 配置/应用返回 SERVICE_NOT_READY；host.query 固定读取本机缓存，不能被 delegate 替换。
+
+服务按第22.6节实施三类共享任务预算：令 N=max_pending_requests，普通 live 为 N、unfinished 为2N；安全和查询各自 live 为2、unfinished 为4。到期释放 live 并脱离回包，原任务实际 settle 才释放 unfinished；断连不取消任务、不提前返还额度，迟到回调只回收任务，不再回包。关闭服务释放自身计时器和连接关联，保留有限未结算单元直到原 Promise 真实 settle；关闭不等待任意业务 Promise，也不声称已取消。
+
+连接分类预算保留到实际 closed，任务完成不提前释放慢回包连接；操作员普通连接最多 N，安全/查询各2，固定 peer 每类1。候选最多2个，只淘汰最旧未鉴权连接，固定接入期限不按到包或鉴权续期；已鉴权但尚无首业务方法的 peer 仍受原期限限制。Host health/business、Supervisor control 各有独立固定连接分类，由真实角色和首业务方法锁定，Host health 不等待普通异步池。operator 首个 Schema 合法帧立即 sealRead，丢弃同 chunk 后续输入，完成检查后仍可异步回包；peer authenticate 不算唯一业务帧。每连接 N+2 是公告/鉴权响应的有限协议输出余量，不增加业务额度，也不是时延 SLO。持续恶意同 UID 洪泛不在无条件可用性保证内。
 
 ## P0 同步归约模块
 
@@ -67,11 +78,11 @@ command/health 接收实际服务鉴权结果、原请求、公告和真实 requ
 
 ## 资源、失败与清理
 
-P0SafetyLimits 限制帧、pending、连接、映射及租约，配置不是实测 SLO。JsonChannel 每批共享8帧/64KiB扫描追加预算，同一轮连续 data 回调不能各自重新取得预算；耗尽后通过 setImmediate 续跑。令 M=max_message_bytes，解析器持有的输入 Buffer 总上限为 M+max(64KiB,M+1)，不含解码字符串/对象，也不含独立的 max_pending_requests 份输出帧额度。接纳 chunk 的复制受后项上限约束；完整 JSON 帧仍一次解码和解析，最大 M，不宣称 CPU 工作被按时间抢占。
+P0SafetyLimits 限制帧、pending、连接、映射及租约，配置不是实测 SLO。JsonChannel 每批共享8帧/64KiB扫描追加预算，同一轮连续 data 回调不能各自重新取得预算；耗尽后通过 setImmediate 续跑。令 M=max_message_bytes，解析器持有的输入 Buffer 总上限为 M+max(64KiB,M+1)，不含解码字符串/对象，也不含由调用入口单独配置的有限输出帧额度，P0Service 为上述 N+2。接纳 chunk 的复制受后项上限约束；完整 JSON 帧仍一次解码和解析，最大 M，不宣称 CPU 工作被按时间抢占。
 
-sealRead 立即停止输入及同 chunk 后续派发，释放待解析 Buffer 和 continuation，但保留异步回包能力；它是传输原语，管理连接单命令策略尚待服务层接入。end 封读后安排100ms有限排空，close 取消 continuation/排空 timer 并关闭通道。实际输入 end 立即发出 readEnded，再处理余留解析；共享 socket 的 full close 则是整条连接失联，不能当作仍可写的半连接 EOF。非法 UTF-8、重复键和超限输入拒绝，非法前缀后不再处理同 chunk；RPC 的批请求、通知、字段和未知方法仍由对应入口校验拒绝。
+sealRead 立即停止输入及同 chunk 后续派发，释放待解析 Buffer 和 continuation，但保留异步回包能力；服务层已用它实施上述管理单命令策略。end 封读后安排100ms有限排空，close 取消 continuation/排空 timer 并关闭通道。实际输入 end 立即发出 readEnded，再处理余留解析；共享 socket 的 full close 则是整条连接失联，不能当作仍可写的半连接 EOF。非法 UTF-8、重复键和超限输入拒绝，非法前缀后不再处理同 chunk；RPC 的批请求、通知、字段和未知方法仍由对应入口校验拒绝。
 
-终止 stream 只保留不捕获 channel/timer 的静态 error 吸收器，处理 Node stdio 在 close 后仍发出的 EPIPE 等迟到错误，不继续 I/O；活动通道的首个传输错误仍输出观察并关闭。真实 Node PIPE 已复现 stdout close→error:EPIPE→close 顺序。端点已有独立停止通道；核心业务/安全容量隔离、服务端管理单命令及监督协调仍按[第22.6节](../../docs/spec/22-tech-storage-deployment.md)由 W5S 后续接入。
+终止 stream 只保留不捕获 channel/timer 的静态 error 吸收器，处理 Node stdio 在 close 后仍发出的 EPIPE 等迟到错误，不继续 I/O；活动通道的首个传输错误仍输出观察并关闭。真实 Node PIPE 已复现 stdout close→error:EPIPE→close 顺序。端点已有独立 safety UDS；Supervisor 的双安全连接、端点事件/响应容量隔离和完整监督协调仍待 W5S-E/I 接入。
 
 私有 bootstrap 最多 16 MiB、5 秒。监督等待 Host 健康和独立端点握手事实最多 5 秒。terminateChild 先发 SIGTERM，在传入宽限后升级 SIGKILL，再等待最多1000ms确认实际退出，否则报 CHILD_STOP_UNCONFIRMED。Supervisor、Host 和 launchEndpoint 的启动异常清理均显式使用已验证配置的 stop_timeout_ms 作子进程软停止宽限；正常监督收尾仍沿用既有配置宽限、服务清理和有界 dispose。这些是配置与等待界限，不是实测 SLO。退出不是端点清理证明，Host 健康丢失后的完整自身寿命仍待 W5。
 
@@ -91,4 +102,6 @@ p0-observation.test.ts 覆盖真实 CLI host-query 的双身份固定、独立�
 
 p0-reducer.test.ts 覆盖默认无权、准入与回执绑定、续租/心跳分离、原请求与 timer 期限、跨连接重复操作、撤权与后到回执、自然完成/停止乱序、终态与独立清理、逐资源隔离和容量预留；同时验证两类端点期限的错域/倒序/未来签发、未来监督代次及错误 grant 绑定拒绝、旧代次与过期历史，以及停止截止前/等于/之后接收证明的竞争。reports/p0/w5rf/module-after.log 记录26/26受控模块测试；module-coverage.json 标明 controlled-module、20个 P0 可达 source/event 组合及 missing=[]，保留实际归约观察。禁用的 unattended_approved 不制造准入条件，其拒绝与 test_only/public 拒绝保持。supervision_outputs_safe 的缺失/错 owner 反例单列纯守卫来源，不冒充可达生产转换。完整检查原始输出、退出码和环境见同目录 check.log、check.exit、environment.log，复跑命令见 apps/host。
 
-有效 lease/receipt、有限效果及竞争正例目前是同生产模型和归约器的受控模块测试，不是 SQLite 或真实操作员授权。W5S 独立监督协调/容量隔离、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported；14 个 sut.* 与 exit.P0 保持 PENDING。
+p0-service.test.ts 的16项受控模块测试覆盖 N=1 普通任务饱和时独立安全/查询/Host health、冻结输入及原 trigger、先 fence 后容量拒绝、期限与 unfinished 回收、断连与迟回调、候选淘汰/固定期限、固定 peer 分类与当前代次、同 chunk 管理封读、N=1 peer 鉴权流水、慢回包连接额度、默认无权及身份/角色拒绝。受控委派中的稳定 actor 账本用于验证调用边界，不是生产账本。真实 UDS 身份/帧及 Host 缓存查询覆盖沿用 p0-identity/p0-authority/p0-observation 测试；原始输出、失败诊断及复跑命令统一见 [入口说明](../../apps/host/README.md)。
+
+有效 lease/receipt、有限效果及竞争正例目前是同生产模型和归约器的受控模块测试，不是 SQLite 或真实操作员授权。W5S-L 显式 CLI、W5S-E 端点双安全接线、W5S-I 生产协调、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported；14 个 sut.* 与 exit.P0 保持 PENDING。
