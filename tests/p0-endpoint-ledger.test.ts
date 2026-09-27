@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import type { CommandContext, P0EndpointSnapshot } from "../packages/contract-sdk/src/index.ts";
 import { RpcConnection } from "../packages/runtime/src/client.ts";
@@ -351,7 +351,28 @@ test("p0.endpoint protocol module: full safety ledger fences before error; inval
   const protocol = new EndpointProtocol(m.config, m.endpoint, endpointClock);
   const toEndpoint = new PassThrough();
   const toClient = new PassThrough();
-  const server = new JsonChannel(toEndpoint, toClient, m.config.limits.max_message_bytes, 16);
+  let activeWrite = 0;
+  const completedWaiters = new Set<() => void>();
+  const serverOutput = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      activeWrite++;
+      toClient.write(chunk, (error) => {
+        callback(error);
+        queueMicrotask(() => {
+          activeWrite--;
+          if (activeWrite === 0 && serverOutput.writableLength === 0) {
+            for (const resolve of completedWaiters) resolve();
+            completedWaiters.clear();
+          }
+        });
+      });
+    },
+  });
+  const outputCompleted = () =>
+    activeWrite === 0 && serverOutput.writableLength === 0
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => completedWaiters.add(resolve));
+  const server = new JsonChannel(toEndpoint, serverOutput, m.config.limits.max_message_bytes, 16);
   const client = new JsonChannel(toClient, toEndpoint, m.config.limits.max_message_bytes, 16);
   let connection: RpcConnection | undefined;
   try {
@@ -388,10 +409,13 @@ test("p0.endpoint protocol module: full safety ledger fences before error; inval
     );
     assert.deepEqual(protocol.model.snapshot(), beforeInvalid);
     for (let index = 0; index < 128; index++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await outputCompleted();
       await connection.peerCall("endpoint.revoke", { ...revoke, stop_operation_id: randomUUID() });
     }
     const beforeFull = protocol.model.snapshot();
+    // The reader can see a frame before the server's local Writable callback
+    // completes; the callback barrier keeps this test focused on ledger state.
+    await outputCompleted();
     await assert.rejects(
       connection.peerCall("endpoint.revoke", {
         ...revoke,
@@ -401,6 +425,7 @@ test("p0.endpoint protocol module: full safety ledger fences before error; inval
       /SCOPED_EPOCH_CONFLICT/,
     );
     assert.deepEqual(protocol.model.snapshot(), beforeFull);
+    await outputCompleted();
     await assert.rejects(
       connection.peerCall("endpoint.revoke", { ...revoke, stop_operation_id: randomUUID() }),
       /QUEUE_LIMIT_EXCEEDED/,
@@ -411,6 +436,7 @@ test("p0.endpoint protocol module: full safety ledger fences before error; inval
     assert.equal(afterFull.host_connection_deadline, null);
     assert.ok(protocol.model.finalDeadline !== null);
     const afterRejected = protocol.model.snapshot();
+    await outputCompleted();
     await assert.rejects(
       connection.peerCall("endpoint.revoke", { ...revoke, endpoint_instance_id: randomUUID() }),
       /ROLE_SCOPE_DENIED/,

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { createConnection } from "node:net";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { test } from "node:test";
 import {
   assertValid,
@@ -42,9 +42,26 @@ test("p0.endpoint protocol module: actual stream EOF fences before retained fram
   const f = await modelFixture();
   const protocol = new EndpointProtocol(f.config, f.endpoint, f.clock);
   const input = new PassThrough();
-  const output = new PassThrough();
-  output.resume();
-  const channel = new JsonChannel(input, output, f.config.limits.max_message_bytes, 32);
+  // This parser/EOF check needs an immediately completing local sink. A slow
+  // sink is exercised separately by the bounded-output tests below.
+  class ImmediateWritable extends EventEmitter {
+    write(_chunk: Buffer, callback: (error?: Error | null) => void): boolean {
+      callback();
+      return true;
+    }
+    destroy(): void {
+      this.emit("close");
+    }
+    end(callback?: () => void): void {
+      callback?.();
+    }
+  }
+  const channel = new JsonChannel(
+    input,
+    new ImmediateWritable() as unknown as Writable,
+    f.config.limits.max_message_bytes,
+    32,
+  );
   try {
     // Controlled module grant/receipt only; no production Host authorization is bypassed.
     protocol.model.handshake(f.hostMapping);
@@ -856,11 +873,43 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
     const protocol = new EndpointProtocol(f.config, f.endpoint, f.clock);
     const connections: RpcConnection[] = [];
     const serverChannels = new Map<RpcConnection, JsonChannel>();
+    const outputWaiters = new Map<RpcConnection, () => Promise<void>>();
+    const outputCompleted = async (connection: RpcConnection) => {
+      const wait = outputWaiters.get(connection);
+      assert.ok(wait);
+      await wait();
+    };
     const source = new ControlledClock("controlled-supervisor");
     const connect = async () => {
       const toEndpoint = new PassThrough();
       const toClient = new PassThrough();
-      const server = new JsonChannel(toEndpoint, toClient, f.config.limits.max_message_bytes, 16);
+      let activeWrite = 0;
+      const completedWaiters = new Set<() => void>();
+      const serverOutput = new Writable({
+        write(chunk: Buffer, _encoding, callback) {
+          activeWrite++;
+          toClient.write(chunk, (error) => {
+            callback(error);
+            queueMicrotask(() => {
+              activeWrite--;
+              if (activeWrite === 0 && serverOutput.writableLength === 0) {
+                for (const resolve of completedWaiters) resolve();
+                completedWaiters.clear();
+              }
+            });
+          });
+        },
+      });
+      const waitForOutput = () =>
+        activeWrite === 0 && serverOutput.writableLength === 0
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => completedWaiters.add(resolve));
+      const server = new JsonChannel(
+        toEndpoint,
+        serverOutput,
+        f.config.limits.max_message_bytes,
+        16,
+      );
       const client = new JsonChannel(toClient, toEndpoint, f.config.limits.max_message_bytes, 16);
       const ready = RpcConnection.fromChannel(
         client,
@@ -875,6 +924,7 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
       const connection = await ready;
       connections.push(connection);
       serverChannels.set(connection, server);
+      outputWaiters.set(connection, waitForOutput);
       // Only this controlled module fixture reads the model's authority directly.
       connection.onEndpointFact(
         () => {},
@@ -906,10 +956,12 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
         ...initial.params.context,
         authority_epoch: 1,
       });
+      await outputCompleted(safety);
       await assert.rejects(safety.request(conflict), /OPERATION_PAYLOAD_CONFLICT/);
       assert.equal(protocol.model.authorityEpoch, 0);
       assert.deepEqual(protocol.model.snapshot(), before);
       const crossLedgerConflict = async () => {
+        await outputCompleted(safety);
         await assert.rejects(
           safety.request(
             completeRequest(
@@ -949,6 +1001,9 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
           value.mapping.target_valid_until_ms = 99;
         },
       ]) {
+        // This guard test is about original lease input, not a burst of
+        // simultaneously retained error responses on the controlled stream.
+        await outputCompleted(safety);
         const invalid = freshGrant(lease);
         mutate(invalid);
         await assert.rejects(
@@ -961,9 +1016,9 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
       }
       // The initial lease occupies one ordinary history/mutation slot.
       for (let index = 0; index < 127; index++) {
-        // PassThrough delivers replies synchronously; allow its bounded write callbacks to drain
-        // just as socket I/O does, so this case fills history rather than the transport write queue.
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        // Retain the ledger limit as the variable under test: wait for the
+        // forwarding sink's actual local write callback before the next call.
+        await outputCompleted(safety);
         const context = safety.context();
         await safety.request(
           completeRequest(
@@ -981,6 +1036,7 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
         );
       }
       if (reconnect) {
+        await outputCompleted(safety);
         // A fresh authenticated connection removes per-connection history pressure only.
         safety.close();
         // This controlled PassThrough pair does not deliver the peer close synchronously.
@@ -1018,6 +1074,7 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
       }
       const next = freshGrant(lease);
       next.mapping = safety.mapping;
+      await outputCompleted(safety);
       await assert.rejects(
         safety.request(
           completeRequest("endpoint.lease", next, { ...safety.context(), authority_epoch: 1 }),

@@ -39,6 +39,11 @@ import {
   ProtocolObservation,
 } from "../../packages/runtime/src/observation.ts";
 import { JsonChannel } from "../../packages/runtime/src/transport.ts";
+import {
+  EndpointOutput,
+  type EndpointOutputKind,
+  type EndpointOutputTicket,
+} from "./endpoint-output.ts";
 import { EndpointModel } from "./model.ts";
 import {
   type EndpointLedgerKind,
@@ -77,9 +82,9 @@ const supervisorControlMethods = new Set([
   "fault.apply",
 ]);
 
-// Physical write cells are separate from the service-wide ordinary task allowance N.
-// P1c will account for response and event classes before submitting these cells.
-const ENDPOINT_WIRE_RESERVE = 8;
+// Per channel: N ordinary + 2 safety + 2 query + 2 event + 1 emergency + 4 setup.
+// The full frame, not just its payload, occupies its class until local write completion.
+const ENDPOINT_WIRE_RESERVE = 11;
 
 export class EndpointProtocol {
   readonly model: EndpointModel;
@@ -92,10 +97,14 @@ export class EndpointProtocol {
   #server: Server | undefined;
   #owned = new OwnedPaths();
   #timers = new Set<ReturnType<typeof setTimeout>>();
+  #delayedEvents = new Map<ReturnType<typeof setTimeout>, EndpointOutputTicket[]>();
   #ticker: ReturnType<typeof setInterval> | undefined;
   #closing = false;
   #eventSequence = 0;
   #operations: EndpointOperationLedger;
+  #output: EndpointOutput;
+  #outputFailed = false;
+  #emergencyAttempted = false;
   onExit: (() => void) | undefined;
 
   constructor(
@@ -112,25 +121,66 @@ export class EndpointProtocol {
       new ObservationWriter("endpoint", config.endpoint_instance_id, clock, config.limits);
     this.model = new EndpointModel(config, clock);
     this.#operations = new EndpointOperationLedger(config.limits.max_message_bytes);
+    this.#output = new EndpointOutput(
+      config.limits.max_message_bytes,
+      config.limits.max_pending_requests,
+      (channel) => this.#outputFailure(channel),
+    );
     this.model.onChange = (fact) => this.#publish(fact);
   }
   #observe(fact: P0EndpointSnapshot): void {
     this.observation.endpoint(fact);
   }
-  #later(callback: () => void, ms: number): void {
-    if (this.#timers.size >= this.config.limits.max_pending_requests + ENDPOINT_WIRE_RESERVE) {
-      for (const channel of this.#channels.keys()) channel.close();
-      this.model.disconnect();
-      return;
-    }
+  #later(callback: () => void, ms: number): boolean {
+    if (this.#timers.size >= this.config.limits.max_pending_requests + ENDPOINT_WIRE_RESERVE)
+      return false;
     const timer = setTimeout(() => {
       this.#timers.delete(timer);
       if (!this.#closing) callback();
     }, ms);
     this.#timers.add(timer);
+    return true;
+  }
+  #outputFailure(channel: JsonChannel | null): void {
+    if (channel) this.#output.markFailed(channel);
+    if (!this.#outputFailed) {
+      // Mark before disconnect publishes a new stopped fact. This branch owns
+      // the sole emergency fence attempt, not a recursive stream of failures.
+      this.#outputFailed = true;
+      this.#cancelDelayedEvents();
+      try {
+        this.model.disconnect();
+      } finally {
+        channel?.close();
+      }
+    } else channel?.close();
+  }
+  #cancelDelayedEvents(): void {
+    for (const [timer, tickets] of this.#delayedEvents) {
+      clearTimeout(timer);
+      this.#timers.delete(timer);
+      for (const ticket of tickets) this.#output.cancel(ticket);
+    }
+    this.#delayedEvents.clear();
+  }
+  #sendSetup(channel: JsonChannel, value: unknown, after?: (written: boolean) => void): void {
+    const ticket = this.#output.reserve(channel, "setup", value);
+    if (!ticket) {
+      this.#outputFailure(channel);
+      return;
+    }
+    this.#output.send(ticket, value, after);
   }
   #publish(fact: P0EndpointSnapshot): void {
     this.#observe(fact);
+    const afterFailure = this.#outputFailed;
+    const emergency = fact.stopped && fact.cleanup_ref !== null;
+    if (afterFailure) {
+      if (!emergency || this.#emergencyAttempted) return;
+      // Attempted is not delivered: only the peer can attest receipt, and a
+      // later authenticated query must still supply the actual stop fact.
+      this.#emergencyAttempted = true;
+    }
     const event = {
       jsonrpc: "2.0",
       method: "event.publish",
@@ -150,20 +200,66 @@ export class EndpointProtocol {
         payload: fact,
       },
     };
-    assertValid("RpcEvent", event);
-    for (const [channel, state] of this.#channels) {
-      if (!state.authenticated || state.lane === "candidate" || state.lane === "cancel") continue;
-      const send = () => {
-        if (!channel.closed) channel.send(event);
-      };
-      // Delay a progress receipt without rewriting its original facts. A later stop can arrive first.
-      if (
-        this.model.fault() === "ack_delay" ||
-        (this.model.fault() === "ack_reverse_order" && !fact.stopped)
-      )
-        this.#later(send, this.config.limits.stop_timeout_ms);
-      else send();
+    try {
+      assertValid("RpcEvent", event);
+    } catch {
+      this.#outputFailure(null);
+      return;
     }
+    const kind: EndpointOutputKind = afterFailure ? "emergency" : "event";
+    const delayed =
+      !afterFailure &&
+      (this.model.fault() === "ack_delay" ||
+        (this.model.fault() === "ack_reverse_order" && !fact.stopped));
+    const deliveries: EndpointOutputTicket[] = [];
+    for (const [channel, state] of this.#channels) {
+      if (
+        !state.authenticated ||
+        state.lane === "candidate" ||
+        state.lane === "cancel" ||
+        this.#output.failed(channel)
+      )
+        continue;
+      const ticket = this.#output.reserve(channel, kind, event);
+      if (!ticket) {
+        this.#outputFailure(channel);
+        // A nested emergency fact may already be under way. The older outer
+        // envelope was never submitted, so it must not overtake that fence.
+        for (const pending of deliveries) this.#output.cancel(pending);
+        return;
+      }
+      deliveries.push(ticket);
+    }
+    const broadcast = () => {
+      for (const ticket of deliveries) {
+        if (this.#outputFailed && !afterFailure) {
+          this.#output.cancel(ticket);
+          continue;
+        }
+        this.#output.send(ticket, event);
+      }
+    };
+    if (!deliveries.length) return;
+    // One original envelope and one timer for all recipients. Delivery never
+    // rewrites event_id, source_seq, occurrence time or the snapshot payload.
+    if (delayed) {
+      if (this.#timers.size >= this.config.limits.max_pending_requests + ENDPOINT_WIRE_RESERVE) {
+        for (const ticket of deliveries) this.#output.cancel(ticket);
+        this.#outputFailure(null);
+        return;
+      }
+      const timer = setTimeout(() => {
+        this.#timers.delete(timer);
+        this.#delayedEvents.delete(timer);
+        if (this.#closing || this.#outputFailed) {
+          for (const ticket of deliveries) this.#output.cancel(ticket);
+          return;
+        }
+        broadcast();
+      }, this.config.limits.stop_timeout_ms);
+      this.#timers.add(timer);
+      this.#delayedEvents.set(timer, deliveries);
+    } else broadcast();
   }
   accept(channel: JsonChannel, role: ChannelRole): void {
     if (channel.closed || this.#closing || (role === "host" && this.#hostAccepted)) {
@@ -224,12 +320,11 @@ export class EndpointProtocol {
       if (role === "host") this.model.disconnect();
     });
     channel.on("invalid", () => {
-      channel.send(protocolFailure(null, -32700));
-      channel.end();
+      this.#sendSetup(channel, protocolFailure(null, -32700), () => channel.end());
     });
     channel.on("message", (raw: unknown) => {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-        channel.send(protocolFailure(null, -32600));
+        this.#sendSetup(channel, protocolFailure(null, -32600));
         return;
       }
       const envelope = raw as Record<string, unknown>;
@@ -238,19 +333,21 @@ export class EndpointProtocol {
           ? envelope.id
           : null;
       if (id === null || envelope.jsonrpc !== "2.0" || typeof envelope.method !== "string") {
-        channel.send(protocolFailure(id, -32600));
+        this.#sendSetup(channel, protocolFailure(id, -32600));
         return;
       }
       if (!commands.commands.some((c) => c.name === envelope.method)) {
-        channel.send(protocolFailure(id, -32601));
+        this.#sendSetup(channel, protocolFailure(id, -32601));
         return;
       }
       if (!validate("RpcRequest", raw)) {
-        channel.send(protocolFailure(id, -32602));
+        this.#sendSetup(channel, protocolFailure(id, -32602));
         return;
       }
       const request: RpcRequest = raw;
       const { input, context } = request.params;
+      let responseTicket: EndpointOutputTicket | null | undefined;
+      let suppressStopResponse = false;
       try {
         this.model.tick(false);
         if (
@@ -289,6 +386,11 @@ export class EndpointProtocol {
             a.authority_epoch !== this.model.authorityEpoch
           )
             reject("SCOPED_EPOCH_CONFLICT");
+          responseTicket = this.#output.reserve(channel, "setup");
+          if (!responseTicket) {
+            this.#outputFailure(channel);
+            return;
+          }
           peer = auth.peer(
             request,
             [role === "host" ? this.config.host_identity : this.config.supervisor_identity],
@@ -386,6 +488,15 @@ export class EndpointProtocol {
             operation_id: context.operation_id,
           };
           const prior = this.#operations.lookup(identity, businessDigest, a.connection_id);
+          suppressStopResponse =
+            request.method === "controller.stop" && this.model.fault() === "cancel_never_returns";
+          if (!suppressStopResponse) {
+            responseTicket = this.#output.reserve(channel, category);
+            if (!responseTicket && !safetyAction) {
+              this.#outputFailure(channel);
+              return;
+            }
+          }
           if (role === "supervisor") {
             if (state.lane === "candidate") {
               state.lane = lane ?? "candidate";
@@ -439,27 +550,42 @@ export class EndpointProtocol {
             }
           }
         }
-        if (request.method === "controller.stop" && this.model.fault() === "cancel_never_returns")
+        if (suppressStopResponse) return;
+        if (!responseTicket) {
+          // A legal safety command has already applied its fence, but its
+          // response could not be retained. Preserve the fact and isolate.
+          this.#outputFailure(channel);
           return;
+        }
         const response = { jsonrpc: "2.0", id, result };
         validateRpcResponse(request.method, response);
-        channel.send(response);
-        if (request.method === "controller.dispose")
-          this.#later(() => {
+        this.#output.send(responseTicket, response);
+        if (request.method === "controller.dispose") {
+          if (
+            !this.#later(() => {
+              void this.close();
+            }, 20)
+          ) {
+            this.#outputFailure(null);
             void this.close();
-          }, 20);
+          }
+        }
       } catch (error) {
         observation.failure("dispatch", observationError(error), request);
-        channel.send(
+        const failure =
           error instanceof RuntimeRejection
             ? businessFailure(id, context, error.reason)
-            : protocolFailure(id, -32603),
-        );
-        if (error instanceof RuntimeRejection && error.reason === "AUTHENTICATION_REQUIRED")
-          channel.end();
+            : protocolFailure(id, -32603);
+        const ticket = responseTicket ?? this.#output.reserve(channel, "setup", failure);
+        if (!ticket) this.#outputFailure(channel);
+        else
+          this.#output.send(ticket, failure, () => {
+            if (error instanceof RuntimeRejection && error.reason === "AUTHENTICATION_REQUIRED")
+              channel.end();
+          });
       }
     });
-    channel.send(announcementEvent(a));
+    this.#sendSetup(channel, announcementEvent(a));
   }
   #validateOriginalBusiness(
     request: RpcRequest,
@@ -755,23 +881,35 @@ export class EndpointProtocol {
         if (input.deadline.expires_at_ms > context.deadline.expires_at_ms)
           reject("CLOCK_MAPPING_INVALID");
         this.model.setFault(input.selection);
-        if (input.selection.fault === "event_loop_block")
-          this.#later(() => {
-            const end = Math.min(
-              this.clock.now() + input.selection.duration_ms,
-              this.model.absoluteDeadline,
-            );
-            while (this.clock.now() < end) {
-              /* Explicit bounded synchronous fault, never a production wait. */
-            }
-            this.model.tick(false);
-          }, 0);
-        if (["process_exit", "disconnect"].includes(input.selection.fault))
-          this.#later(() => {
-            if (input.selection.fault === "process_exit") process.exit(17);
-            this.model.disconnect();
-            for (const channel of this.#channels.keys()) channel.close();
-          }, 20);
+        if (input.selection.fault === "event_loop_block") {
+          if (
+            !this.#later(() => {
+              const end = Math.min(
+                this.clock.now() + input.selection.duration_ms,
+                this.model.absoluteDeadline,
+              );
+              while (this.clock.now() < end) {
+                /* Explicit bounded synchronous fault, never a production wait. */
+              }
+              this.model.tick(false);
+            }, 0)
+          ) {
+            this.#outputFailure(null);
+            reject("QUEUE_LIMIT_EXCEEDED");
+          }
+        }
+        if (["process_exit", "disconnect"].includes(input.selection.fault)) {
+          if (
+            !this.#later(() => {
+              if (input.selection.fault === "process_exit") process.exit(17);
+              this.model.disconnect();
+              for (const channel of this.#channels.keys()) channel.close();
+            }, 20)
+          ) {
+            this.#outputFailure(null);
+            reject("QUEUE_LIMIT_EXCEEDED");
+          }
+        }
         return {
           fault_id: input.fault_id,
           selection: input.selection,
@@ -831,6 +969,7 @@ export class EndpointProtocol {
     const until = performance.now() + 100;
     this.model.disconnect();
     if (this.#ticker) clearInterval(this.#ticker);
+    this.#cancelDelayedEvents();
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     for (const channel of this.#channels.keys()) channel.close();

@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createConnection, type Socket } from "node:net";
 import { test } from "node:test";
-import { assertValid, type P0EndpointSnapshot } from "../packages/contract-sdk/src/index.ts";
+import {
+  assertValid,
+  type P0EndpointSnapshot,
+  type RpcEvent,
+} from "../packages/contract-sdk/src/index.ts";
 import { RpcConnection } from "../packages/runtime/src/client.ts";
 import { MonotonicClock } from "../packages/runtime/src/clock.ts";
 import { launchEndpoint, queryEndpoint } from "../packages/runtime/src/endpoint-client.ts";
@@ -53,6 +57,32 @@ test("p0.endpoint process: N=1 Host, Supervisor control and cancel remain indepe
   let rejectedCandidate: RpcConnection | undefined;
   try {
     launched = await launchEndpoint(m.config, m.host, clock, () => {});
+    const hostStops: RpcEvent[] = [];
+    const controlStops: RpcEvent[] = [];
+    let hostStopSeen!: () => void;
+    let controlStopSeen!: () => void;
+    const hostStop = new Promise<void>((resolve) => {
+      hostStopSeen = resolve;
+    });
+    const controlStop = new Promise<void>((resolve) => {
+      controlStopSeen = resolve;
+    });
+    const collectStop = (target: RpcEvent[], seen: () => void) => (value: unknown) => {
+      if (
+        !value ||
+        typeof value !== "object" ||
+        !("method" in value) ||
+        value.method !== "event.publish"
+      )
+        return;
+      assertValid("RpcEvent", value);
+      if (value.params.event_name !== "simulation.stopped") return;
+      const fact = value.params.payload as P0EndpointSnapshot;
+      if (!fact.cleanup_ref) return;
+      target.push(value);
+      seen();
+    };
+    launched.connection.channel.on("message", collectStop(hostStops, hostStopSeen));
     control = await RpcConnection.connect(
       m.config.safety_socket_path,
       m.endpoint.public,
@@ -61,6 +91,7 @@ test("p0.endpoint process: N=1 Host, Supervisor control and cancel remain indepe
       clock,
       m.supervisor.public,
     );
+    control.channel.on("message", collectStop(controlStops, controlStopSeen));
     let resolveStop: (() => void) | undefined;
     const stopEvent = new Promise<void>((resolve) => {
       resolveStop = resolve;
@@ -176,8 +207,20 @@ test("p0.endpoint process: N=1 Host, Supervisor control and cancel remain indepe
         },
       );
     await within(stopEvent, 1000);
+    await within(Promise.all([hostStop, controlStop]), 1000);
     assert.equal(stopSettled, false);
     const afterStop = await queryEndpoint(control, m.config);
+    const hostStopFact = hostStops[0];
+    const controlStopFact = controlStops[0];
+    assert.ok(hostStopFact);
+    assert.ok(controlStopFact);
+    assert.equal(hostStopFact.params.event_id, controlStopFact.params.event_id);
+    assert.equal(hostStopFact.params.source_seq, controlStopFact.params.source_seq);
+    assert.deepEqual(hostStopFact.params.payload, controlStopFact.params.payload);
+    assert.equal(
+      (hostStopFact.params.payload as P0EndpointSnapshot).source_revision,
+      afterStop.source_revision,
+    );
     assert.equal(afterStop.fence_applied, true);
     assert.equal(afterStop.stopped, true);
     assert.ok(afterStop.cleanup_ref);
