@@ -4,6 +4,15 @@ import type { Readable, Writable } from "node:stream";
 import { parseJson } from "../../contract-sdk/src/index.ts";
 
 export type FrameEvidence = { frame_sha256: string; frame_bytes: number };
+export type WriteCompletion =
+  | { status: "written" }
+  | { status: "failed"; reason: "closed" | "encode" | "limit" | "write" | "dispatch" };
+type Completion = (result: WriteCompletion) => void;
+type PendingWrite = {
+  complete: Completion | undefined;
+  submitting: boolean;
+  result: WriteCompletion | undefined;
+};
 
 const BATCH_FRAMES = 8;
 const BATCH_BYTES = 64 * 1024;
@@ -42,9 +51,11 @@ export class JsonChannel extends EventEmitter {
   #pumping = false;
   #eof = false;
   #readSealed = false;
-  #writes = new Set<symbol>();
+  #writes = new Set<PendingWrite>();
   #closed = false;
   #ending = false;
+  #failureReported = false;
+  #reportingDispatch = false;
   #decoder = new TextDecoder("utf-8", { fatal: true });
   constructor(input: Readable, output: Writable, maxBytes: number, maxPending: number) {
     super();
@@ -191,22 +202,33 @@ export class JsonChannel extends EventEmitter {
   #readError = (error: unknown): void => this.#failed("read", error);
   #writeError = (error: unknown): void => this.#failed("write", error);
   #failed = (stage: "read" | "write" | "encode", error: unknown): void => {
-    if (this.#closed) return;
+    if (this.#closed || this.#failureReported) return;
+    this.#failureReported = true; // The first actual transport error owns this channel's report.
+    this.#ending = true; // Error observers cannot reenter an accepting sender.
+    this.#failWrites(stage === "read" ? "closed" : stage);
     try {
       this.emit("transportError", stage, error);
     } catch {
       // Diagnostic failure must not escape cleanup.
     } finally {
-      this.close();
+      this.#close(stage === "read" ? "closed" : stage);
     }
   };
   #dispatchFailed(error: unknown): void {
+    this.#ending = true;
+    this.#failWrites("dispatch");
+    if (this.#reportingDispatch) {
+      this.#close("dispatch");
+      return;
+    }
+    this.#reportingDispatch = true;
     try {
       this.emit("dispatchError", error);
     } catch {
       // Preserve shutdown even if the observer failed.
     } finally {
-      this.close();
+      this.#close("dispatch");
+      this.#reportingDispatch = false;
     }
   }
   #inputClosed = (): void => {
@@ -217,53 +239,97 @@ export class JsonChannel extends EventEmitter {
   #outputClosed = (): void => {
     this.close();
   };
-  send(value: unknown): boolean {
-    if (this.#closed || this.#ending) return false;
+  #notify(complete: Completion | undefined, result: WriteCompletion): void {
+    try {
+      complete?.(result);
+    } catch (error) {
+      this.#dispatchFailed(error);
+    }
+  }
+  #notifyWrite(cell: PendingWrite): void {
+    if (!cell.result || cell.submitting) return;
+    const complete = cell.complete;
+    cell.complete = undefined;
+    this.#notify(complete, cell.result);
+  }
+  #settleWrite(cell: PendingWrite, result: WriteCompletion): void {
+    if (cell.result) return;
+    cell.result = result;
+    this.#writes.delete(cell);
+    this.#notifyWrite(cell);
+  }
+  #failWrites(reason: Extract<WriteCompletion, { status: "failed" }>["reason"]): void {
+    // Fix the outcome before observers or _destroy can invoke old write callbacks.
+    // close() releases all these cells before notifying any completion.
+    for (const cell of this.#writes) cell.result ??= { status: "failed", reason };
+  }
+  /** true means accepted, including write(false) backpressure. Completion proves
+   * only the local Writable callback, never peer receipt or an application ACK.
+   * Completion may run before send returns; reserve caller-owned slots first.
+   */
+  send(value: unknown, complete?: Completion): boolean {
+    if (this.#closed || this.#ending) {
+      this.#notify(complete, { status: "failed", reason: "closed" });
+      return false;
+    }
     let data: Buffer;
     try {
       data = Buffer.from(`${JSON.stringify(value)}\n`);
     } catch (error) {
       this.#failed("encode", error);
+      this.#notify(complete, { status: "failed", reason: "encode" });
       return false;
     }
     if (data.length - 1 > this.maxBytes || this.#writes.size >= this.maxPending) {
-      this.close();
+      this.#close("limit");
+      this.#notify(complete, { status: "failed", reason: "limit" });
       return false;
     }
-    const token = Symbol();
-    this.#writes.add(token);
-    const settle = (error?: Error | null) => {
-      if (!this.#writes.delete(token)) return;
+    const cell: PendingWrite = { complete, submitting: true, result: undefined };
+    this.#writes.add(cell);
+    let called = false;
+    let callbackError: Error | null | undefined;
+    const written = (error?: Error | null) => {
+      if (cell.result || called) return;
+      called = true;
+      callbackError = error;
+      // A hostile synchronous callback may still be followed by write throwing.
+      if (cell.submitting) return;
       if (error) this.#failed("write", error);
+      else this.#settleWrite(cell, { status: "written" });
     };
     try {
-      this.emit("enqueue", value);
-    } catch (error) {
-      settle();
-      this.#dispatchFailed(error);
-      return false;
+      try {
+        this.emit("enqueue", value);
+      } catch (error) {
+        this.#dispatchFailed(error);
+        return false;
+      }
+      if (this.#closed || this.#ending) {
+        this.#settleWrite(cell, { status: "failed", reason: "closed" });
+        return false;
+      }
+      try {
+        // false means accepted backpressure, never a retry instruction.
+        this.output.write(data, written);
+      } catch (error) {
+        this.#failed("write", callbackError ?? error);
+        return false;
+      }
+      if (callbackError) this.#failed("write", callbackError);
+      if (this.#closed) return false;
+      try {
+        this.emit("queued", value);
+      } catch (error) {
+        this.#dispatchFailed(error);
+        return false;
+      }
+    } finally {
+      cell.submitting = false;
+      if (cell.result) this.#notifyWrite(cell);
+      else if (called) this.#settleWrite(cell, { status: "written" });
     }
-    if (this.#closed || this.#ending) {
-      settle();
-      return false;
-    }
-    try {
-      // false means accepted backpressure, never a retry instruction.
-      this.output.write(data, settle);
-    } catch (error) {
-      settle();
-      this.#failed("write", error);
-      return false;
-    }
-    if (this.#closed) return false;
-    try {
-      this.emit("queued", value);
-    } catch (error) {
-      settle();
-      this.#dispatchFailed(error);
-      return false;
-    }
-    return true;
+    return !this.#closed;
   }
   /** Seal only input; a handler may still send its later async result. */
   sealRead(): void {
@@ -280,12 +346,17 @@ export class JsonChannel extends EventEmitter {
     this.#endOffset = 0;
   }
   close(): void {
+    this.#close("closed");
+  }
+  #close(reason: Extract<WriteCompletion, { status: "failed" }>["reason"]): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#failWrites(reason);
+    const writes = [...this.#writes];
+    this.#writes.clear();
     this.sealRead();
     clearTimeout(this.#endTimer);
     this.#endTimer = undefined;
-    this.#writes.clear();
     this.input.off("end", this.#end);
     this.input.off("error", this.#readError);
     this.input.off("close", this.#inputClosed);
@@ -295,7 +366,12 @@ export class JsonChannel extends EventEmitter {
     }
     destroyStream(this.input);
     if ((this.output as unknown) !== this.input) destroyStream(this.output);
-    this.emit("closed");
+    for (const cell of writes) this.#notifyWrite(cell);
+    try {
+      this.emit("closed");
+    } catch (error) {
+      this.#dispatchFailed(error);
+    }
   }
   end(): void {
     if (this.#closed || this.#ending) return;
