@@ -169,7 +169,8 @@ test("p0.endpoint production: ordinary capacity cannot block safety revoke/query
       () => 0,
     );
     await safety.authenticatePeer(m.supervisor);
-    for (let index = 0; index < 128; index++) {
+    // The Host handshake is the first instance-level ordinary operation.
+    for (let index = 0; index < 127; index++) {
       const context = safety.context();
       await safety.request(
         completeRequest(
@@ -664,10 +665,12 @@ test("p0.endpoint module: valid authority advance fences before old-grant admiss
   }
 });
 
-test("p0.endpoint module: full lease ledger cannot retain effects after valid authority advance", async () => {
+test("p0.endpoint module: full lease identity isolates pending effects before authority advance", async () => {
   const f = await modelFixture();
   try {
-    for (let index = 0; index < 128; index++)
+    const original = { ...f.lease, lease_id: randomUUID() };
+    f.model.install(original, f.context());
+    for (let index = 1; index < 128; index++)
       f.model.install({ ...f.lease, lease_id: randomUUID() }, f.context());
     const work = f.execute();
     f.model.execute(work.input, work.context);
@@ -675,13 +678,17 @@ test("p0.endpoint module: full lease ledger cannot retain effects after valid au
       () => f.model.install(freshGrant(f.lease), { ...f.context(), authority_epoch: 1 }),
       /QUEUE_LIMIT_EXCEEDED/,
     );
-    assert.equal(f.model.authorityEpoch, 1);
+    assert.equal(f.model.authorityEpoch, 0);
     assert.equal(f.model.snapshot().supervision_epoch, 0);
     assert.equal(f.model.snapshot().fence_applied, true);
+    assert.equal(f.model.snapshot().active_grant_ref, null);
+    assert.equal(f.model.snapshot().host_connection_deadline, null);
+    assert.ok(f.model.finalDeadline !== null);
     f.clock.time += 10;
     f.model.tick();
     assert.equal(f.model.snapshot().completed_effect_count, 0);
     assert.deepEqual(f.model.snapshot().queued_operation_ids, []);
+    assert.throws(() => f.model.install(original, f.context()), /EXECUTION_GRANT_REVOKED/);
   } finally {
     await f.fixture.cleanup();
   }
@@ -786,6 +793,63 @@ test("p0.endpoint module: invalid identity, mapping, fence or lease replay canno
   }
 });
 
+test("p0.endpoint module: failed lease admission still binds its full lease ID before authority advance", async () => {
+  const f = await modelFixture();
+  try {
+    const failed = structuredClone(f.lease);
+    failed.receipt.grant_digests = [];
+    assert.throws(
+      () => f.model.install(failed, { ...f.context(), authority_epoch: 1 }),
+      /PERSISTENCE_NOT_READY/,
+    );
+    assert.equal(f.model.authorityEpoch, 1);
+    assert.equal(f.model.snapshot().fence_applied, true);
+    assert.equal(f.model.snapshot().active_grant_ref, null);
+    const afterFailure = f.model.snapshot();
+    const changed = structuredClone(failed);
+    changed.mapping.mapping_id = randomUUID();
+    changed.mapping.connection_id = randomUUID();
+    assert.throws(
+      () => f.model.install(changed, { ...f.context(), authority_epoch: 2 }),
+      /OPERATION_PAYLOAD_CONFLICT/,
+    );
+    assert.equal(f.model.authorityEpoch, 1);
+    assert.deepEqual(f.model.snapshot(), afterFailure);
+  } finally {
+    await f.fixture.cleanup();
+  }
+});
+
+test("p0.endpoint module: full lease-identity retention isolates old grant without adopting a new epoch", async () => {
+  const f = await modelFixture();
+  try {
+    f.model.install(f.lease, f.context());
+    assert.equal(f.model.snapshot().fence_applied, false);
+    for (let index = 0; index < 127; index++) {
+      const failed = structuredClone(f.lease);
+      failed.lease_id = randomUUID();
+      failed.receipt.grant_digests = [];
+      assert.throws(() => f.model.install(failed, f.context()), /PERSISTENCE_NOT_READY/);
+    }
+    const overflow = structuredClone(f.lease);
+    overflow.lease_id = randomUUID();
+    overflow.receipt.grant_digests = [];
+    assert.throws(
+      () => f.model.install(overflow, { ...f.context(), authority_epoch: 1 }),
+      /QUEUE_LIMIT_EXCEEDED/,
+    );
+    assert.equal(f.model.authorityEpoch, 0);
+    assert.equal(f.model.snapshot().fence_applied, true);
+    assert.equal(f.model.snapshot().active_grant_ref, null);
+    assert.equal(f.model.snapshot().host_connection_deadline, null);
+    assert.ok(f.model.finalDeadline !== null);
+    assert.throws(() => f.model.install(f.lease, f.context()), /EXECUTION_GRANT_REVOKED/);
+    assert.equal(f.model.snapshot().fence_applied, true);
+  } finally {
+    await f.fixture.cleanup();
+  }
+});
+
 test("p0.endpoint protocol module: authentication and replay precede advance; both ordinary ledgers follow its fence", async () => {
   for (const reconnect of [false, true]) {
     const f = await modelFixture();
@@ -829,7 +893,10 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
       await safety.authenticatePeer(f.supervisor);
       const lease = structuredClone(f.lease);
       lease.mapping = safety.mapping;
-      const initial = completeRequest("endpoint.lease", lease, safety.context());
+      const leaseContext = safety.context();
+      // The RPC processing deadline may be shorter than the original finite lease.
+      leaseContext.deadline.expires_at_ms = 500;
+      const initial = completeRequest("endpoint.lease", lease, leaseContext);
       await safety.request(initial);
       const work = f.execute();
       protocol.model.execute(work.input, work.context);
@@ -922,6 +989,19 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
         safety = await connect();
         await safety.authenticatePeer(f.supervisor);
         await crossLedgerConflict();
+        const sameLeaseDifferentMapping = structuredClone(lease);
+        sameLeaseDifferentMapping.mapping = safety.mapping;
+        await assert.rejects(
+          safety.request(
+            completeRequest("endpoint.lease", sameLeaseDifferentMapping, {
+              ...safety.context(),
+              authority_epoch: 1,
+            }),
+          ),
+          /OPERATION_PAYLOAD_CONFLICT/,
+        );
+        assert.equal(protocol.model.authorityEpoch, 0);
+        assert.deepEqual(protocol.model.snapshot(), before);
         const globalConflict = freshGrant(lease);
         globalConflict.mapping = safety.mapping;
         await assert.rejects(

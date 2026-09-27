@@ -40,6 +40,11 @@ import {
 } from "../../packages/runtime/src/observation.ts";
 import { JsonChannel } from "../../packages/runtime/src/transport.ts";
 import { EndpointModel } from "./model.ts";
+import {
+  type EndpointLedgerKind,
+  EndpointOperationLedger,
+  endpointBusinessDigest,
+} from "./operation-ledger.ts";
 
 const legacy = new Set([
   "plugin.handshake",
@@ -73,7 +78,7 @@ const supervisorControlMethods = new Set([
 ]);
 
 // Physical write cells are separate from the service-wide ordinary task allowance N.
-// P1b will account for response and event classes before submitting these cells.
+// P1c will account for response and event classes before submitting these cells.
 const ENDPOINT_WIRE_RESERVE = 8;
 
 export class EndpointProtocol {
@@ -90,8 +95,7 @@ export class EndpointProtocol {
   #ticker: ReturnType<typeof setInterval> | undefined;
   #closing = false;
   #eventSequence = 0;
-  #mutations = new Map<string, string>();
-  #safetyMutations = new Map<string, string>();
+  #operations: EndpointOperationLedger;
   onExit: (() => void) | undefined;
 
   constructor(
@@ -107,6 +111,7 @@ export class EndpointProtocol {
       observation ??
       new ObservationWriter("endpoint", config.endpoint_instance_id, clock, config.limits);
     this.model = new EndpointModel(config, clock);
+    this.#operations = new EndpointOperationLedger(config.limits.max_message_bytes);
     this.model.onChange = (fact) => this.#publish(fact);
   }
   #observe(fact: P0EndpointSnapshot): void {
@@ -208,8 +213,6 @@ export class EndpointProtocol {
     let peer: P0PeerIdentity | undefined;
     let mapping: P0ClockMapping | undefined;
     let handshaken = false;
-    const history = new Map<string, { digest: string; result: unknown }>();
-    const safetyHistory = new Map<string, { digest: string; result: unknown }>();
     const expiry = setTimeout(() => channel.close(), this.config.limits.clock_mapping_ttl_ms);
     channel.on("readEnded", () => {
       if (role === "host") this.model.disconnect();
@@ -335,8 +338,9 @@ export class EndpointProtocol {
           if (!allowed.includes(request.method)) reject("ROLE_SCOPE_DENIED");
           if (role === "host" && request.method !== "plugin.handshake" && !handshaken)
             reject("CONTROLLER_NOT_READY");
+          let lane: "control" | "cancel" | null = null;
           if (role === "supervisor") {
-            const lane = supervisorCancelMethods.has(request.method)
+            lane = supervisorCancelMethods.has(request.method)
               ? "cancel"
               : supervisorControlMethods.has(request.method)
                 ? "control"
@@ -344,64 +348,95 @@ export class EndpointProtocol {
             if (!lane || (state.lane !== "candidate" && state.lane !== lane))
               reject("ROLE_SCOPE_DENIED");
             this.#validateSupervisorTarget(request, context, currentMapping);
-            if (state.lane === "candidate") {
-              if ([...this.#channels.values()].some((other) => other.lane === lane))
-                reject("QUEUE_LIMIT_EXCEEDED");
-              state.lane = lane;
-              clearTimeout(state.candidateTimer);
-              state.candidateTimer = undefined;
-            }
-            this.model.supervisorSeen();
+            if (
+              state.lane === "candidate" &&
+              [...this.#channels.values()].some((other) => other.lane === lane)
+            )
+              reject("QUEUE_LIMIT_EXCEEDED");
           }
-          const digest = payloadDigest({
-            method: request.method,
-            input,
-            context: { ...context, payload_digest: null },
-          });
-          const key = `${peer.instance_id}:${context.operation_id}`;
+          this.#validateOriginalBusiness(request, context, currentMapping, role);
+          if (request.method === "endpoint.lease")
+            this.model.assertLeaseIdentity(request.params.input);
           const safetyAction = [
             "endpoint.revoke",
             "controller.stop",
             "controller.dispose",
           ].includes(request.method);
-          const safetyRead = [
+          const query = [
             "simulation.query",
             "controller.observe_status",
             "clock.sample",
+            "plugin.describe",
           ].includes(request.method);
-          const cache = safetyAction || safetyRead ? safetyHistory : history;
-          const mutations = safetyAction ? this.#safetyMutations : this.#mutations;
-          // Capacity is isolated for safety, but operation identity spans both ledgers.
-          const prior = history.get(key) ?? safetyHistory.get(key);
-          if (prior && prior.digest !== digest) reject("OPERATION_PAYLOAD_CONFLICT");
-          const mutating = [
-            "endpoint.lease",
-            "endpoint.revoke",
-            "controller.stop",
-            "controller.dispose",
-            "fault.apply",
-          ].includes(request.method);
-          const old = this.#mutations.get(key) ?? this.#safetyMutations.get(key);
-          if (old && old !== digest) reject("OPERATION_PAYLOAD_CONFLICT");
-          if (request.method === "endpoint.lease" || request.method === "endpoint.revoke")
-            this.model.observeAuthorityUpdate(request.params.input, context);
-          if (prior) result = prior.result;
-          else {
-            const cacheFull = cache.size >= 128;
-            if (cacheFull && !safetyAction) reject("QUEUE_LIMIT_EXCEEDED");
-            if (mutating) {
-              if (!old && mutations.size >= 128 && !safetyAction) reject("QUEUE_LIMIT_EXCEEDED");
+          const category: EndpointLedgerKind = safetyAction
+            ? "safety"
+            : query
+              ? "query"
+              : "ordinary";
+          const businessDigest = endpointBusinessDigest(
+            request.method,
+            input as Record<string, unknown>,
+            context,
+          );
+          const identity = {
+            peer_role: role,
+            peer_instance_id: peer.instance_id,
+            session_id: this.config.session_id,
+            endpoint_instance_id: this.config.endpoint_instance_id,
+            operation_id: context.operation_id,
+          };
+          const prior = this.#operations.lookup(identity, businessDigest, a.connection_id);
+          if (role === "supervisor") {
+            if (state.lane === "candidate") {
+              state.lane = lane ?? "candidate";
+              clearTimeout(state.candidateTimer);
+              state.candidateTimer = undefined;
             }
+            this.model.supervisorSeen();
+          }
+          if (prior.found) {
+            if (request.method === "endpoint.lease") {
+              const fact = this.model.snapshot();
+              if (
+                this.model.finalDeadline !== null ||
+                fact.fence_applied ||
+                fact.active_grant_ref !== request.params.input.grant.grant_id ||
+                !fact.host_connection_deadline ||
+                !fact.lease_deadline ||
+                fact.lease_deadline.expires_at_ms <= this.clock.now()
+              )
+                reject("EXECUTION_GRANT_REVOKED");
+            }
+            result = prior.result;
+          } else {
+            if (request.method === "endpoint.lease" || request.method === "endpoint.revoke")
+              this.model.observeAuthorityUpdate(request.params.input, context);
+            const boundConnection = ["plugin.handshake", "clock.sample"].includes(request.method)
+              ? a.connection_id
+              : null;
+            const reservation = this.#operations.reserve(
+              category,
+              identity,
+              businessDigest,
+              boundConnection,
+            );
+            if (!reservation && !safetyAction) reject("QUEUE_LIMIT_EXCEEDED");
             result = this.#dispatch(request, currentMapping, role, a.connection_id, () => {
               handshaken = true;
             });
-            if (safetyAction && (cacheFull || mutations.size >= 128)) {
-              // The validated safety action already fenced/cleaned; failed bookkeeping never rolls it back.
+            if (!reservation) {
+              // A legal safety action fenced first. Its missing registration isolates this instance.
               this.model.disconnect();
               reject("QUEUE_LIMIT_EXCEEDED");
             }
-            if (mutating) mutations.set(key, digest);
-            cache.set(key, { digest, result });
+            try {
+              validateRpcResponse(request.method, { jsonrpc: "2.0", id, result });
+              this.#operations.commit(reservation, result);
+            } catch (error) {
+              // A post-effect encoding failure cannot return success or roll a safety fence back.
+              this.model.disconnect();
+              throw error;
+            }
           }
         }
         if (request.method === "controller.stop" && this.model.fault() === "cancel_never_returns")
@@ -425,6 +460,108 @@ export class EndpointProtocol {
       }
     });
     channel.send(announcementEvent(a));
+  }
+  #validateOriginalBusiness(
+    request: RpcRequest,
+    context: RpcRequest["params"]["context"],
+    mapping: P0ClockMapping,
+    role: ChannelRole,
+  ): void {
+    const now = this.clock.now();
+    switch (request.method) {
+      case "plugin.handshake": {
+        const input = request.params.input;
+        if (
+          role !== "host" ||
+          input.host_instance_id !== this.config.host_identity.instance_id ||
+          input.schema_digest !== schemaDigest ||
+          payloadDigest(input.protocol_versions) !== payloadDigest(["0.8.0"]) ||
+          payloadDigest(input.enabled_phases) !== payloadDigest(["P0"])
+        )
+          reject("INSTALLATION_IDENTITY_DENIED");
+        break;
+      }
+      case "clock.sample":
+        if (request.params.input.source_sent_at.clock_domain !== mapping.source_clock_domain)
+          reject("CLOCK_MAPPING_INVALID");
+        break;
+      case "simulation.query": {
+        const input = request.params.input;
+        if (
+          input.session_id !== this.config.session_id ||
+          input.endpoint_instance_id !== this.config.endpoint_instance_id
+        )
+          reject("ROLE_SCOPE_DENIED");
+        break;
+      }
+      case "controller.observe_status":
+      case "controller.dispose":
+        if (request.params.input.instance_id !== this.config.endpoint_instance_id)
+          reject("ROLE_SCOPE_DENIED");
+        break;
+      case "controller.stop": {
+        const input = request.params.input;
+        if (
+          payloadDigest(input.object_ref) !== payloadDigest(context.object_ref) ||
+          input.cancel_fence.scope_type !== "session" ||
+          input.cancel_fence.scope_id !== this.config.session_id ||
+          input.cancel_fence.cancel_epoch !== this.model.authorityEpoch
+        )
+          reject("ROLE_SCOPE_DENIED");
+        if (
+          input.stop_deadline.clock_domain !== this.clock.domain ||
+          input.stop_deadline.monotonic_ms > context.deadline.expires_at_ms
+        )
+          reject("CLOCK_MAPPING_INVALID");
+        if (input.stop_deadline.monotonic_ms <= now) reject("COMMAND_DEADLINE_MISSED");
+        break;
+      }
+      case "endpoint.lease": {
+        const input = request.params.input;
+        if (
+          input.grant.deadline.clock_domain !== mapping.source_clock_domain ||
+          input.grant.deadline.expires_at_ms + mapping.offset_lower_ms <= now
+        )
+          reject("CLOCK_MAPPING_INVALID");
+        for (const deadline of [
+          input.deadline,
+          input.human_lease_deadline,
+          input.local_lease_deadline,
+        ]) {
+          checkDeadline(deadline, this.clock);
+          if (deadline.expires_at_ms > mapping.target_valid_until_ms)
+            reject("CLOCK_MAPPING_INVALID");
+        }
+        break;
+      }
+      case "simulation.execute": {
+        const input = request.params.input;
+        const registration = input.registration;
+        if (
+          registration.session_id !== this.config.session_id ||
+          registration.endpoint_instance_id !== this.config.endpoint_instance_id ||
+          registration.operation_id !== context.operation_id ||
+          registration.grant_id !== context.grant_ref
+        )
+          reject("SIMULATION_SCOPE_DENIED");
+        if (
+          registration.deadline.clock_domain !== mapping.source_clock_domain ||
+          registration.deadline.expires_at_ms + mapping.offset_lower_ms <= now
+        )
+          reject("COMMAND_DEADLINE_MISSED");
+        const fact = this.model.snapshot();
+        if (
+          fact.fence_applied ||
+          fact.active_grant_ref !== registration.grant_id ||
+          !fact.lease_deadline ||
+          fact.lease_deadline.expires_at_ms <= now
+        )
+          reject("EXECUTION_GRANT_REVOKED");
+        break;
+      }
+      default:
+        break;
+    }
   }
   #validateSupervisorTarget(
     request: RpcRequest,

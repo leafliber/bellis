@@ -30,6 +30,7 @@ export class EndpointModel {
   #revoked = new Set<string>();
   #grants = new Map<string, string>();
   #leases = new Map<string, string>();
+  #leaseClaims = new Map<string, string>();
   #grantLimits = new Map<string, number>();
   #operations = new Map<string, { digest: string; work: Work }>();
   #reserved = 0;
@@ -143,6 +144,21 @@ export class EndpointModel {
     checkDeadline(value, this.clock);
     if (value.expires_at_ms > upper) reject("CLOCK_MAPPING_INVALID");
   }
+  /** A lease ID binds the original full input, including the connection mapping. */
+  assertLeaseIdentity(input: P0EndpointLease): void {
+    const previous = this.#leaseClaims.get(input.lease_id) ?? this.#leases.get(input.lease_id);
+    if (previous && previous !== payloadDigest(input)) reject("OPERATION_PAYLOAD_CONFLICT");
+  }
+  #claimLeaseIdentity(input: P0EndpointLease): void {
+    this.assertLeaseIdentity(input);
+    if (this.#leaseClaims.has(input.lease_id)) return;
+    if (this.#leaseClaims.size >= 128) {
+      // An unrecorded lease ID could be replayed with changed input. Isolate instead.
+      this.disconnect();
+      reject("QUEUE_LIMIT_EXCEEDED");
+    }
+    this.#leaseClaims.set(input.lease_id, payloadDigest(input));
+  }
   /** Called only after the protocol's fixed-supervisor authentication and signed mapping checks.
    * An existing idempotency conflict is invalid; capacity and later admission failures cannot
    * swallow a trusted authority update after the complete identity/clock/idempotency checks.
@@ -175,7 +191,11 @@ export class EndpointModel {
       input.fence.scope_id !== this.config.session_id
     )
       reject("ROLE_SCOPE_DENIED");
-    if (!("grant" in input) && input.fence.cancel_epoch !== context.authority_epoch)
+    if (
+      !("grant" in input) &&
+      (input.fence.cancel_epoch !== context.authority_epoch ||
+        input.supervision_epoch < this.#fact.supervision_epoch)
+    )
       reject("SCOPED_EPOCH_CONFLICT");
     const m = input.mapping;
     if (
@@ -198,11 +218,8 @@ export class EndpointModel {
       context.deadline.expires_at_ms > m.target_valid_until_ms
     )
       reject("CLOCK_MAPPING_INVALID");
-    if ("grant" in input) {
-      const previous = this.#leases.get(input.lease_id);
-      if (previous && previous !== payloadDigest(input)) reject("OPERATION_PAYLOAD_CONFLICT");
-    }
     if (context.authority_epoch < this.authorityEpoch) reject("SCOPED_EPOCH_CONFLICT");
+    if ("grant" in input) this.#claimLeaseIdentity(input);
     if (context.authority_epoch > this.authorityEpoch) {
       // One synchronous reduction: observers only see the new epoch with the old grant already fenced.
       this.authorityEpoch = context.authority_epoch;
@@ -216,7 +233,7 @@ export class EndpointModel {
     const { grant: g, admission: a, mapping: m, receipt } = input;
     const leaseDigest = payloadDigest(input);
     const oldLease = this.#leases.get(input.lease_id);
-    if (oldLease && oldLease !== leaseDigest) reject("OPERATION_PAYLOAD_CONFLICT");
+    this.assertLeaseIdentity(input);
     if (
       context.caller_instance_id !== this.config.supervisor_identity.instance_id ||
       context.authority_epoch < this.authorityEpoch ||

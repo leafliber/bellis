@@ -51,6 +51,7 @@ test("p0.generation: empty generated directories, current-memory contracts, dete
       "plugins/fake-device/main.ts",
       "plugins/fake-device/model.ts",
       "plugins/fake-device/protocol.ts",
+      "plugins/fake-device/operation-ledger.ts",
       "plugins/fake-device/manifest.source.json",
     ]) {
       await mkdir(dirname(join(directory, path)), { recursive: true });
