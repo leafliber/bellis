@@ -791,6 +791,7 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
     const f = await modelFixture();
     const protocol = new EndpointProtocol(f.config, f.endpoint, f.clock);
     const connections: RpcConnection[] = [];
+    const serverChannels = new Map<RpcConnection, JsonChannel>();
     const source = new ControlledClock("controlled-supervisor");
     const connect = async () => {
       const toEndpoint = new PassThrough();
@@ -809,6 +810,7 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
       protocol.accept(server, "supervisor");
       const connection = await ready;
       connections.push(connection);
+      serverChannels.set(connection, server);
       // Only this controlled module fixture reads the model's authority directly.
       connection.onEndpointFact(
         () => {},
@@ -914,6 +916,9 @@ test("p0.endpoint protocol module: authentication and replay precede advance; bo
       if (reconnect) {
         // A fresh authenticated connection removes per-connection history pressure only.
         safety.close();
+        // This controlled PassThrough pair does not deliver the peer close synchronously.
+        // Release the former control lane before the replacement makes its first request.
+        serverChannels.get(safety)?.close();
         safety = await connect();
         await safety.authenticatePeer(f.supervisor);
         await crossLedgerConflict();
@@ -1072,6 +1077,7 @@ test("p0.endpoint production: fixed Host stdio plus independent Supervisor safet
   const facts: unknown[] = [];
   let child: Awaited<ReturnType<typeof launchEndpoint>> | undefined;
   let safety: RpcConnection | undefined;
+  let cancel: RpcConnection | undefined;
   try {
     child = await launchEndpoint(m.config, m.host, clock, (fact) => facts.push(fact));
     safety = await RpcConnection.connect(
@@ -1185,9 +1191,22 @@ test("p0.endpoint production: fixed Host stdio plus independent Supervisor safet
     assert.equal(stopped.host_connection_deadline, null);
     assert.equal(stopped.stopped, true);
     assert.equal(stopped.completed_effect_count, 0);
-    await safety.peerCall("controller.dispose", { instance_id: m.config.endpoint_instance_id });
+    cancel = await RpcConnection.connect(
+      m.config.safety_socket_path,
+      m.endpoint.public,
+      m.config.limits,
+      m.supervisor.public.instance_id,
+      clock,
+      m.supervisor.public,
+    );
+    await cancel.authenticatePeer(m.supervisor);
+    await cancel.peerCall("controller.observe_status", {
+      instance_id: m.config.endpoint_instance_id,
+    });
+    await cancel.peerCall("controller.dispose", { instance_id: m.config.endpoint_instance_id });
     assert.ok(facts.length > 0);
   } finally {
+    cancel?.close();
     safety?.close();
     child?.connection.close();
     if (child) await terminateChild(child.child);

@@ -49,13 +49,41 @@ const legacy = new Set([
   "controller.dispose",
 ]);
 
+type ChannelRole = "host" | "supervisor";
+type ChannelLane = "host" | "candidate" | "control" | "cancel";
+type ChannelState = {
+  role: ChannelRole;
+  lane: ChannelLane;
+  authenticated: boolean;
+  candidateDeadline: number | null;
+  candidateTimer: ReturnType<typeof setTimeout> | undefined;
+};
+
+const supervisorCancelMethods = new Set([
+  "controller.observe_status",
+  "controller.stop",
+  "controller.dispose",
+]);
+const supervisorControlMethods = new Set([
+  "endpoint.lease",
+  "endpoint.revoke",
+  "simulation.query",
+  "clock.sample",
+  "fault.apply",
+]);
+
+// Physical write cells are separate from the service-wide ordinary task allowance N.
+// P1b will account for response and event classes before submitting these cells.
+const ENDPOINT_WIRE_RESERVE = 8;
+
 export class EndpointProtocol {
   readonly model: EndpointModel;
   readonly identity: Identity;
   readonly config: P0EndpointConfig;
   readonly clock: MonotonicClock;
   readonly observation: ObservationWriter;
-  #channels = new Map<JsonChannel, { role: "host" | "supervisor"; authenticated: boolean }>();
+  #channels = new Map<JsonChannel, ChannelState>();
+  #hostAccepted = false;
   #server: Server | undefined;
   #owned = new OwnedPaths();
   #timers = new Set<ReturnType<typeof setTimeout>>();
@@ -85,7 +113,7 @@ export class EndpointProtocol {
     this.observation.endpoint(fact);
   }
   #later(callback: () => void, ms: number): void {
-    if (this.#timers.size >= this.config.limits.max_pending_requests) {
+    if (this.#timers.size >= this.config.limits.max_pending_requests + ENDPOINT_WIRE_RESERVE) {
       for (const channel of this.#channels.keys()) channel.close();
       this.model.disconnect();
       return;
@@ -119,7 +147,7 @@ export class EndpointProtocol {
     };
     assertValid("RpcEvent", event);
     for (const [channel, state] of this.#channels) {
-      if (!state.authenticated) continue;
+      if (!state.authenticated || state.lane === "candidate" || state.lane === "cancel") continue;
       const send = () => {
         if (!channel.closed) channel.send(event);
       };
@@ -132,17 +160,40 @@ export class EndpointProtocol {
       else send();
     }
   }
-  accept(channel: JsonChannel, role: "host" | "supervisor"): void {
-    if (
-      this.#closing ||
-      this.#channels.size >= this.config.limits.max_pending_requests ||
-      (role === "host" && [...this.#channels.values()].some((state) => state.role === "host"))
-    ) {
+  accept(channel: JsonChannel, role: ChannelRole): void {
+    if (channel.closed || this.#closing || (role === "host" && this.#hostAccepted)) {
       channel.close();
       return;
     }
-    const state = { role, authenticated: false };
+    if (role === "supervisor") {
+      const candidates = [...this.#channels].filter(([, state]) => state.lane === "candidate");
+      if (candidates.length >= 2) {
+        const oldestUnauthenticated = candidates.find(([, state]) => !state.authenticated);
+        if (!oldestUnauthenticated) {
+          channel.close();
+          return;
+        }
+        oldestUnauthenticated[0].close();
+      }
+    } else this.#hostAccepted = true;
+    const candidateBudget = Math.min(
+      this.config.limits.clock_mapping_ttl_ms,
+      this.config.limits.peer_health_timeout_ms,
+      this.config.limits.stop_timeout_ms,
+    );
+    const state: ChannelState = {
+      role,
+      lane: role === "host" ? "host" : "candidate",
+      authenticated: false,
+      candidateDeadline: role === "host" ? null : this.clock.now() + candidateBudget,
+      candidateTimer: undefined,
+    };
     this.#channels.set(channel, state);
+    if (role === "supervisor") {
+      state.candidateTimer = setTimeout(() => {
+        if (state.lane === "candidate") channel.close();
+      }, candidateBudget);
+    }
     const a = announce(
       this.identity,
       this.config.session_id,
@@ -165,6 +216,7 @@ export class EndpointProtocol {
     });
     channel.on("closed", () => {
       clearTimeout(expiry);
+      clearTimeout(state.candidateTimer);
       this.#channels.delete(channel);
       if (role === "host") this.model.disconnect();
     });
@@ -198,6 +250,14 @@ export class EndpointProtocol {
       const { input, context } = request.params;
       try {
         this.model.tick(false);
+        if (
+          state.lane === "candidate" &&
+          state.candidateDeadline !== null &&
+          this.clock.now() >= state.candidateDeadline
+        ) {
+          channel.close();
+          return;
+        }
         if (
           context.object_ref.kind !== "Session" ||
           context.object_ref.id !== this.config.session_id
@@ -251,7 +311,6 @@ export class EndpointProtocol {
               : context.authority_epoch !== this.model.authorityEpoch
           )
             reject("SCOPED_EPOCH_CONFLICT");
-          if (role === "supervisor") this.model.supervisorSeen();
           const allowed =
             role === "host"
               ? [
@@ -276,6 +335,24 @@ export class EndpointProtocol {
           if (!allowed.includes(request.method)) reject("ROLE_SCOPE_DENIED");
           if (role === "host" && request.method !== "plugin.handshake" && !handshaken)
             reject("CONTROLLER_NOT_READY");
+          if (role === "supervisor") {
+            const lane = supervisorCancelMethods.has(request.method)
+              ? "cancel"
+              : supervisorControlMethods.has(request.method)
+                ? "control"
+                : null;
+            if (!lane || (state.lane !== "candidate" && state.lane !== lane))
+              reject("ROLE_SCOPE_DENIED");
+            this.#validateSupervisorTarget(request, context, currentMapping);
+            if (state.lane === "candidate") {
+              if ([...this.#channels.values()].some((other) => other.lane === lane))
+                reject("QUEUE_LIMIT_EXCEEDED");
+              state.lane = lane;
+              clearTimeout(state.candidateTimer);
+              state.candidateTimer = undefined;
+            }
+            this.model.supervisorSeen();
+          }
           const digest = payloadDigest({
             method: request.method,
             input,
@@ -348,6 +425,85 @@ export class EndpointProtocol {
       }
     });
     channel.send(announcementEvent(a));
+  }
+  #validateSupervisorTarget(
+    request: RpcRequest,
+    context: RpcRequest["params"]["context"],
+    mapping: P0ClockMapping,
+  ): void {
+    switch (request.method) {
+      case "controller.observe_status":
+      case "controller.dispose":
+        if (request.params.input.instance_id !== this.config.endpoint_instance_id)
+          reject("ROLE_SCOPE_DENIED");
+        break;
+      case "controller.stop": {
+        const input = request.params.input;
+        if (
+          payloadDigest(input.object_ref) !== payloadDigest(context.object_ref) ||
+          input.cancel_fence.scope_type !== "session" ||
+          input.cancel_fence.scope_id !== this.config.session_id ||
+          input.cancel_fence.cancel_epoch !== this.model.authorityEpoch
+        )
+          reject("ROLE_SCOPE_DENIED");
+        if (
+          input.stop_deadline.clock_domain !== this.clock.domain ||
+          input.stop_deadline.monotonic_ms > context.deadline.expires_at_ms
+        )
+          reject("CLOCK_MAPPING_INVALID");
+        break;
+      }
+      case "simulation.query":
+        if (
+          request.params.input.session_id !== this.config.session_id ||
+          request.params.input.endpoint_instance_id !== this.config.endpoint_instance_id
+        )
+          reject("ROLE_SCOPE_DENIED");
+        break;
+      case "endpoint.lease": {
+        const grant = request.params.input.grant;
+        if (
+          grant.session_id !== this.config.session_id ||
+          grant.endpoint_instance_id !== this.config.endpoint_instance_id ||
+          grant.supervisor_instance_id !== this.config.supervisor_identity.instance_id ||
+          grant.host_instance_id !== this.config.host_identity.instance_id
+        )
+          reject("ROLE_SCOPE_DENIED");
+        break;
+      }
+      case "endpoint.revoke": {
+        const input = request.params.input;
+        if (
+          input.session_id !== this.config.session_id ||
+          input.endpoint_instance_id !== this.config.endpoint_instance_id ||
+          input.supervisor_instance_id !== this.config.supervisor_identity.instance_id ||
+          input.fence.scope_type !== "session" ||
+          input.fence.scope_id !== this.config.session_id ||
+          input.fence.cancel_epoch !== context.authority_epoch
+        )
+          reject("ROLE_SCOPE_DENIED");
+        break;
+      }
+      case "clock.sample":
+        if (request.params.input.source_sent_at.clock_domain !== mapping.source_clock_domain)
+          reject("CLOCK_MAPPING_INVALID");
+        break;
+      case "fault.apply": {
+        const input = request.params.input;
+        if (
+          input.session_id !== this.config.session_id ||
+          input.target_instance_id !== this.config.endpoint_instance_id ||
+          input.selection.target !== "endpoint"
+        )
+          reject("ROLE_SCOPE_DENIED");
+        checkDeadline(input.deadline, this.clock);
+        if (input.deadline.expires_at_ms > context.deadline.expires_at_ms)
+          reject("CLOCK_MAPPING_INVALID");
+        break;
+      }
+      default:
+        reject("ROLE_SCOPE_DENIED");
+    }
   }
   #dispatch(
     request: RpcRequest,
@@ -498,7 +654,7 @@ export class EndpointProtocol {
           socket,
           socket,
           this.config.limits.max_message_bytes,
-          this.config.limits.max_pending_requests,
+          this.config.limits.max_pending_requests + ENDPOINT_WIRE_RESERVE,
         ),
         "supervisor",
       ),
@@ -519,7 +675,7 @@ export class EndpointProtocol {
         process.stdin,
         process.stdout,
         this.config.limits.max_message_bytes,
-        this.config.limits.max_pending_requests,
+        this.config.limits.max_pending_requests + ENDPOINT_WIRE_RESERVE,
       ),
       "host",
     );
