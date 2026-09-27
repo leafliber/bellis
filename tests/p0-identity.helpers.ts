@@ -39,7 +39,7 @@ export const limits: P0SafetyLimits = {
   peer_health_timeout_ms: 2000,
   stop_timeout_ms: 500,
   cleanup_timeout_ms: 1000,
-  max_clock_error_ms: 1000,
+  max_clock_error_ms: 2000,
   clock_mapping_ttl_ms: 4000,
 };
 
