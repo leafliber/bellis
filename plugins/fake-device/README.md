@@ -4,7 +4,7 @@
 
 ## 文件和职责
 
-main.ts 导出固定 startEndpoint(P0EndpointConfig)，由受信 launcher 用同一已验证 Buffer 加载。model.ts 是计数、水位、队列、lease 与端点事实的唯一写入者；protocol.ts 管理 stdio、独立 safety UDS、认证/时钟、封闭故障及有限观察。manifest.source.json 不手填契约摘要。
+main.ts 导出固定 startEndpoint(P0EndpointConfig)，由受信 launcher 用同一已验证 Buffer 加载。model.ts 是计数、水位、队列、lease 与端点事实的唯一写入者；operation-ledger.ts 是端点实例普通/安全/查询操作历史的唯一写入者；protocol.ts 管理 stdio、独立 safety UDS、认证/时钟、封闭故障及有限观察。manifest.source.json 不手填契约摘要。
 
 pnpm generate 将源码及本次内存契约依赖打包为 generated/endpoint.mjs，生成 generated/manifest.json。仅这两个文件排除格式检查，源码继续 TypeScript/Biome。生成检查固定 builtin、无动态/外部分块及跨 checkout 字节一致。
 
@@ -16,7 +16,11 @@ stdio 只信固定 Host，safety 只信固定 Supervisor。逐请求校验 Ed255
 
 固定监督更新先通过身份、时钟及已有 operation/lease 的完整输入幂等校验，再同步采用新 authority_epoch 并永久封旧 grant；普通历史容量不足或随后的新 lease 准入拒绝不能回滚该栅栏。冲突或无效入口不推进，supervision_epoch 独立核验，不从 authority_epoch 推断。
 
+实例账本跨固定 Host 与监督连接共享，普通/安全/查询各保留至多128条操作，实际序列化留存各不超过 `4 * max_message_bytes`；变更前预留一份最大结果，提交按实际字节计费，不删旧记录换额度。相同操作身份跨类别或完整业务摘要冲突即拒绝；重试先验证本次身份、scope、实例、当前映射/原期限及代次，才返回最初结果，不靠新连接延长原命令。握手与 clock.sample 的结果另绑定原连接，不能换连接重放。
+
 lease 核验完整 grant/admission 的事务摘要并固定 writer；执行还核验同 writer 的完整 registration、完整动作摘要、目标/能力、预算和队列。原 grant 映射上限首次固定，同 lease/operation 不可变，旧 lease 不覆盖后来租约；新 lease 可传递监督已验证的显式人工续租。实际宿主 W6 前不生成成功 receipt，正向 receipt 只用于受控模块测试。
+
+通过固定身份和时钟核验的 lease_id 完整输入即使后续准入失败也被预留，不能换内容再试；lease 身份预留满时端点进入最终隔离并显式拒绝。合法安全动作遇安全账本容量满仍先同步 fence，随后端点进入最终隔离并报告 QUEUE_LIMIT_EXCEEDED；这会清除 Host 连接期限，不等于已关闭监督 safety UDS。停止请求、实际端点停止与清理证明仍分别判断，无证明的范围保持 UNKNOWN/隔离。
 
 每单位效果前检查当前 grant、代次、Host 连接、本地/人工/grant/原命令期限和已预留余量。重复 operation 不增加水位/效果，冲突拒绝，完成事实不被后来的 stop 改写。撤权或普通租约失效封旧 grant、清实际队列，但保持仍有效的 Host 连接事实；新 grant 必须由 W5 完整守卫显式批准。
 
@@ -26,7 +30,7 @@ stdio EOF/TTL、监督健康超时或最终实例期限进入不可延长的查�
 
 ## 背压、故障和观察
 
-历史最多1024条，接纳前还按实际序列化大小预留最终事实、两份最坏未执行/未知 ID 数组、每条数值增长及消息封装余量；满时拒绝新效果，不截断历史。grant/lease/幂等记录有界，普通与安全 mutation 分开；安全自身记录满时仍先完成合法 fence/清理，禁新权后报告登记失败。
+效果历史最多1024条，接纳前还按实际序列化大小预留最终事实、两份最坏未执行/未知 ID 数组、每条数值增长及消息封装余量；满时拒绝新效果，不截断历史。grant/lease 记录有界；实例账本的独立容量与安全满时行为见上文。
 
 固定监督才能下发封闭 endpoint 故障。queue_full/budget_exhausted 拒绝新效果；cancel_never_returns 只挂起 stop 回包，栅栏与安全通道继续；ack_delay/ack_reverse_order 延迟原事实事件，不改业务结果；event_loop_block 是有限同步故障，结束先查期限；disconnect 封锁并断开；process_exit 实际退出，保留 UNKNOWN 边界。初始 fault 必须 none。
 
@@ -46,4 +50,6 @@ p0-loader.test.ts 实际验证预检后且私有配置未发送时替换入口�
 
 观测专项 p0-observation.test.ts 实际捕获 Supervisor/Host/Endpoint/CLI 的原始流，核验来源、跨连接序号、丢失和正常尾部，覆盖鉴权 Host 缓存查询、外来事件和畸形帧拒绝；端点原始事实与 Host/监督各自投影交叉核对。该覆盖不是完整 SUT 验收。
 
-复跑 `node --test tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts`、`node --test tests/p0-observation.test.ts tests/p0-loader.test.ts` 与 `pnpm check`。报告在 reports/p0/w4/、reports/p0/w4f/、reports/p0/w5o/、reports/p0/w5of/ 和 reports/p0/w5st/；完整检查和原始捕获索引见 [入口说明](../../apps/host/README.md)。这些是中间包覆盖，14 个 sut.* 与 exit.P0 仍 PENDING；真实授权、SQLite 故障、状态机实际入口归约和组合故障须 W5S–W7 验证。
+p0-endpoint-ledger.test.ts 的三项受控账本测试核验跨类别冲突、完整业务摘要、每类128条与实际 `4 * max_message_bytes` 留存；两项端点测试核验真实进程跨认证连接撤权/查询/clock.sample，以及安全账本满时先 fence。与原端点和通道测试最终合跑23/23，L2 锁定 Node 24.21.0、pnpm 11.11.0 的完整检查为55/55一致性、189/189测试；报告与早期失败原始索引见 reports/p0/w5sep1b/l3/evidence-index.json，L2 输出见 reports/p0/w5sep1b/l2-integration-check.log。真实跨连接 simulation.execute 效果去重仍待 W6 持久化授权链，受控 lease/receipt 不替代此项。
+
+复跑 `node --test tests/p0-endpoint.test.ts tests/p0-loader.test.ts tests/p0-generation.test.ts`、`node --test tests/p0-observation.test.ts tests/p0-loader.test.ts`、`node --test --test-concurrency=1 tests/p0-endpoint-ledger.test.ts tests/p0-endpoint.test.ts tests/p0-endpoint-channels.test.ts` 与 `pnpm check`。报告在 reports/p0/w4/、reports/p0/w4f/、reports/p0/w5o/、reports/p0/w5of/、reports/p0/w5st/ 和 reports/p0/w5sep1b/；完整检查和原始捕获索引见 [入口说明](../../apps/host/README.md)。这些是中间包覆盖，14 个 sut.* 与 exit.P0 仍 PENDING；P1c 分类输出、E-P2 fault 生命周期/compact Work、W5S-I 监督协调及 W6–W7 的真实授权/SQLite 故障/完整状态机入口/组合故障仍待交付。

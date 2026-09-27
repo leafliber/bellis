@@ -1,6 +1,6 @@
 # P0 运行时
 
-本包负责真实本机身份、安装、时钟、有界协议、进程接线、只读观测和 P0 三状态机同步归约，不实现媒体、供应商、自动恢复或通用结算。当前运行入口具备零授权启动与查询，端点固定 Host 与监督 control/cancel 通道已接通；归约器已完成模块覆盖，尚未接入运行协调器，独立监督的完整协调和真实持久化链仍 unsupported。可运行入口见 [apps/host](../../apps/host/README.md)，端点模型见 [fake-device](../../plugins/fake-device/README.md)。
+本包负责真实本机身份、安装、时钟、有界协议、进程接线、只读观测和 P0 三状态机同步归约，不实现媒体、供应商、自动恢复或通用结算。当前运行入口具备零授权启动与查询，端点固定 Host 与监督 control/cancel 通道、端点实例级账本已接通；归约器已完成模块覆盖，尚未接入运行协调器，独立监督的完整协调和真实持久化链仍 unsupported。可运行入口见 [apps/host](../../apps/host/README.md)，端点模型与账本见 [fake-device](../../plugins/fake-device/README.md)。
 
 ## 模块和 Schema
 
@@ -97,7 +97,7 @@ JsonChannel.send(value, completion?) 接收上层按命令/事件 Schema 核验�
 
 JsonChannel 独占每连接最多 maxPending 个写单元，沿用调用入口配置的输出额度，不扩大服务业务容量。同步 write callback 先暂存，write 正常返回且 queued 观察完成后才公布成功；callback 后 throw 只失败一次，首个实际传输错误保留。完成先释放写单元再通知；回调可能在 send 返回前执行，调用方须先预留自己的额度，不能又按布尔返回和 completion 重复释放。错误或 close 先固定全部未决失败，再销毁流、回收并通知；迟到或重复 callback 不重判，completion 抛错受控关闭且其余单元仍结清。正常 end 允许已接纳写在原有限排空期内完成，超时则失败；没有自动重发或恢复。P1c 尚须用该接点实现端点响应/事件的分类输出额度。
 
-终止 stream 只保留不捕获 channel/timer 的静态 error 吸收器，处理 Node stdio 在 close 后仍发出的 EPIPE 等迟到错误，不继续 I/O；活动通道的首个传输错误仍输出观察并关闭。真实 Node PIPE 已复现 stdout close→error:EPIPE→close 顺序。W5S-E-P1a 已将端点固定 Host stdio 与监督 control/cancel 两条安全连接分离，候选沿接入绝对期限关闭，N=1 的普通在途和挂起 cancel 不共用查询连接。实例级幂等账本、分类响应/事件容量与完整监督协调仍待 P1b/P1c/I；P1a 的连接隔离不证明这些路径已接通。
+终止 stream 只保留不捕获 channel/timer 的静态 error 吸收器，处理 Node stdio 在 close 后仍发出的 EPIPE 等迟到错误，不继续 I/O；活动通道的首个传输错误仍输出观察并关闭。真实 Node PIPE 已复现 stdout close→error:EPIPE→close 顺序。W5S-E-P1a 已将端点固定 Host stdio 与监督 control/cancel 两条安全连接分离，候选沿接入绝对期限关闭，N=1 的普通在途和挂起 cancel 不共用查询连接。W5S-E-P1b 的 operation-ledger.ts 由端点实例唯一写入，普通/安全/查询各保留至多128条且实际留存字节各不超过 `4 * max_message_bytes`；跨连接固定业务重试先核验当前身份、映射、期限、scope 与代次，才取原结果，连接绑定的握手/clock.sample 不跨连接复用。安全账本满时合法动作先 fence 再显式拒绝，未证明清理的范围仍 UNKNOWN/隔离。P1c 分类响应/事件容量与 I 的完整监督协调仍待接入，端点账本不替代监督唯一业务账本。
 
 私有 bootstrap 最多 16 MiB、5 秒。监督等待 Host 健康和独立端点握手事实最多 5 秒。terminateChild 先发 SIGTERM，在传入宽限后升级 SIGKILL，再等待最多1000ms确认实际退出，否则报 CHILD_STOP_UNCONFIRMED。Supervisor、Host 和 launchEndpoint 的启动异常清理均显式使用已验证配置的 stop_timeout_ms 作子进程软停止宽限；正常监督收尾仍沿用既有配置宽限、服务清理和有界 dispose。这些是配置与等待界限，不是实测 SLO。退出不是端点清理证明，Host 健康丢失后的完整自身寿命仍待 W5。
 
@@ -113,7 +113,7 @@ p0-transport.test.ts 的17项覆盖共享帧/字节批次、最大帧与分片 U
 
 p0-transport-write.test.ts 的15项验证真实 Node Writable 低 highWaterMark、受控延后底层完成、有限 pending、callback 错误、destroy(error)、正常/超时排空，以及关闭和错误观察器重入旧写的边界。同步 callback 后 throw、重复 callback 和回调/观察器抛错使用明确的受控异常 sink；这些不是物理 I/O 故障证据。专项与完整串行检查、修前反例和并发失败原始记录统一见入口说明的 reports/p0/w5set/ 索引；本地写完成测试不关闭 SUT 项。
 
-p0-clock.test.ts 使用真实签名公告和受控单调时钟核验当前 simulation 测试上限内的保守映射、超界拒绝及重试不延期；P0ClockMapping 的规则仍以第22.6节为准。p0-endpoint-channels.test.ts 的三项真实进程组件测试覆盖 N=1 时固定 Host/control/cancel 隔离、cancel 无回包、候选淘汰和分片期限；与原端点测试合跑16/16。测试配置依据、复跑命令及 CF/P1a 原始失败和通过报告见入口说明；均不关闭阶段 SUT 项。
+p0-clock.test.ts 使用真实签名公告和受控单调时钟核验当前 simulation 测试上限内的保守映射、超界拒绝及重试不延期；P0ClockMapping 的规则仍以第22.6节为准。p0-endpoint-channels.test.ts 的三项真实进程组件测试覆盖 N=1 时固定 Host/control/cancel 隔离、cancel 无回包、候选淘汰和分片期限；与原端点测试合跑16/16。p0-endpoint-ledger.test.ts 的三项受控账本测试与两项端点测试覆盖实例账本、容量/完整业务摘要、安全满时 fence 和真实跨连接撤权/查询/clock.sample；三文件最终专项23/23。测试配置依据、复跑命令及 CF/P1a/P1b 原始失败和通过报告见入口说明；均不关闭阶段 SUT 项。
 
 p0-startup-stop.test.ts 通过真实 Host SIGSTOP 验证启动取消期间按配置升级终止：监督记录实际 Host SIGKILL 退出与 connect 阶段 startup_rejected 后，以 code 0、signal null 退出；该断言定位启动异常路径，不以已就绪后的正常 close 代替。Host 自有路径清理以及未经认证查询的端点清理仍为 UNKNOWN，保留故障 fixture 和 raw 供复核。原始失败分类及证据索引见入口说明。
 
@@ -129,4 +129,4 @@ p0-service.test.ts 的16项受控模块测试覆盖 N=1 普通任务饱和时独
 
 p0-client.test.ts 的13项受控模块测试覆盖 Prepared 身份/深冻结、原业务与期限绑定、重连反例、独立权威代次、逐请求乱序回包/保留码、迟到成功拒绝，以及原事件归档、投影去重/旧代次/失效映射和冲突。p0-operator.test.ts 的4项包含封闭参数/构造模块测试，以及九动作真实 CLI 鉴权和真实 UDS 断连无伪造回包测试；共新增17项。复跑命令、30/30专项及161/161完整结果和失败记录索引见 [入口说明](../../apps/host/README.md)。
 
-有效 lease/receipt、有限效果及竞争正例目前是同生产模型和归约器的受控模块测试，不是 SQLite 或真实操作员授权。九动作 CLI 已可发出真实请求，但 authorize/execute 仍 PERSISTENCE_NOT_READY，renew/revoke/stop 仍 CONTROLLER_NOT_READY，fault 仍 SERVICE_NOT_READY。W5S-E-T 本地 write completion 与 P1a 固定通道/候选期限已交付；P1b 实例账本、P1c 分类响应事件出口、E-P2 fault 生命周期/compact Work、W5S-I 生产协调/关闭归约、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported。F 的本机清理修复不改变这些边界；14 个 sut.* 与 exit.P0 保持 PENDING。
+有效 lease/receipt、有限效果及竞争正例目前是同生产模型和归约器的受控模块测试，不是 SQLite 或真实操作员授权。九动作 CLI 已可发出真实请求，但 authorize/execute 仍 PERSISTENCE_NOT_READY，renew/revoke/stop 仍 CONTROLLER_NOT_READY，fault 仍 SERVICE_NOT_READY。W5S-E-T 本地 write completion、P1a 固定通道/候选期限与 P1b 端点实例账本已交付；P1c 分类响应事件出口、E-P2 fault 生命周期/compact Work、W5S-I 生产协调/关闭归约、W6 Worker/事务/Outbox/完整授权闭环、W7 组合故障仍 unsupported。真实 simulation.execute 跨连接效果去重须等 W6 完整授权链验证。F 的本机清理修复不改变这些边界；14 个 sut.* 与 exit.P0 保持 PENDING。
