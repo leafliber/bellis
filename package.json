@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "format": "biome check --write",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test --test-concurrency=1 tests/*.test.ts",
     "gate": "node tools/gate.ts",
     "spike:sqlite": "node tools/spikes/sqlite.mjs",
     "spike:browser": "node tools/spikes/browser.mjs",
