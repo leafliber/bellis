@@ -14,11 +14,15 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "format": "biome check --write",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test --test-concurrency=1 tests/*.test.ts",
     "gate": "node tools/gate.ts",
     "spike:sqlite": "node tools/spikes/sqlite.mjs",
     "spike:browser": "node tools/spikes/browser.mjs",
-    "spike:serve": "node tools/spikes/probe-server.mjs"
+    "spike:serve": "node tools/spikes/probe-server.mjs",
+    "acceptance:p0:tools": "node tools/acceptance/run.ts",
+    "p0:supervisor": "node apps/host/supervisor.ts",
+    "p0:operator": "node apps/host/operator.ts",
+    "p0:install": "node tools/p0-install.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

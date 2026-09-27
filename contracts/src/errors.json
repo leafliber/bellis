@@ -588,6 +588,69 @@
       "meaning": "命令未映射到当前端点明确声明的目标时钟域，不能直接比较或猜测换算。",
       "retry_disposition": "never",
       "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "P0_MODE_DENIED",
+      "meaning": "P0 只接受受信 simulation；test_only/public/unattended 或真实效果拒绝。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "INSTALLATION_IDENTITY_DENIED",
+      "meaning": "实际安装入口、制品、Manifest、实例或能力不匹配受信清单。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "PEER_IDENTITY_DENIED",
+      "meaning": "连接角色/凭据/签名或声明实例与受信通道不符。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "UNAUTHORIZED",
+      "reason_code": "SIMULATION_SCOPE_DENIED",
+      "meaning": "目标/能力/会话不在当前有限 simulation grant 范围。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "PERSISTENCE_NOT_READY",
+      "meaning": "必要可靠登记尚未完成或 Worker 阻塞/失败，新增效果关闭；安全撤权不等待。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "STATE_CONFLICT",
+      "reason_code": "INSTANCE_STALE",
+      "meaning": "会话、宿主、监督或端点实例已过期。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "DEPENDENCY_STALE",
+      "reason_code": "CLOCK_MAPPING_INVALID",
+      "meaning": "时钟映射绑定、误差或有效期失效；禁止猜换算或重试延期。",
+      "retry_disposition": "after_state_change",
+      "phase": "P0"
+    },
+    {
+      "category": "FORMAT_UNSUPPORTED",
+      "reason_code": "CAPABILITY_UNSUPPORTED",
+      "meaning": "未声明或本阶段未实现的能力，静态不支持。",
+      "retry_disposition": "never",
+      "phase": "P0"
+    },
+    {
+      "category": "SCHEMA_INVALID",
+      "reason_code": "FAULT_SELECTION_INVALID",
+      "meaning": "故障选择不属于当前封闭 target/fault 组合。",
+      "retry_disposition": "never",
+      "phase": "P0"
     }
   ]
 }

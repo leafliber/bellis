@@ -34,7 +34,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -94,7 +98,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -109,7 +117,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -124,7 +136,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -259,7 +275,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -289,7 +309,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -304,7 +328,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -319,7 +347,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -334,7 +366,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -379,7 +415,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -394,7 +434,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -409,7 +453,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -439,7 +487,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -454,7 +506,11 @@
         "environment",
         "seed_or_trace",
         "expected_and_observed",
-        "effect_and_cleanup_evidence"
+        "effect_and_cleanup_evidence",
+        "runner_dependency_digest",
+        "build_manifests",
+        "raw_artifact_hashes",
+        "scenario_coverage"
       ]
     },
     {
@@ -543,12 +599,17 @@
         "enabled_profile_digest",
         "dependency_gates",
         "fault_trace",
-        "acceptance_report"
+        "acceptance_report",
+        "sut_build_digest",
+        "runner_dependency_digest",
+        "environment",
+        "state_guard_coverage",
+        "raw_artifact_hashes"
       ],
       "label": "P0：基础约束与安全骨架",
-      "deliverables": "严格消息/错误/作用域/时限；契约生成/检查；SupervisionMode、ExecutionGrant、StopOperation及假端点安全撤权；基础不变量子集。",
+      "deliverables": "真实 Bellis 宿主、独立监督与受信假设备，实际鉴权/有限 stdio/时钟映射；SupervisionMode、ExecutionGrant、StopOperation；SQLite Worker 事务/Outbox、独立撤权停止清理和可复跑受信验收。",
       "not_required": "后续阶段的状态机、游戏C0、Iris、完整DSL、模型或OBS真机。",
-      "criterion": "结构/基础安全参考轨迹通过，所有未启用效果禁用。"
+      "criterion": "当前 macOS 真实多进程与实际存储路径的全部必需场景通过；端点计数/水位和宿主投影交叉核验；构建、runner依赖和原始证据匹配；未启用效果继续禁用。"
     },
     {
       "phase": "P1",

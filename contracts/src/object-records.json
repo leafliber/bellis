@@ -52,6 +52,18 @@
       "state_field": "state"
     }
   ],
-  "support_types": [],
-  "artifact_types": []
+  "support_types": [
+    "P0AdmissionRecord",
+    "P0EffectRegistration",
+    "P0EffectFact",
+    "P0EndpointSnapshot",
+    "P0CleanupRecord",
+    "P0IsolationRecord",
+    "P0PersistenceReceipt",
+    "P0OutboxRecord"
+  ],
+  "artifact_types": [
+    "P0BuildManifest",
+    "P0TestRunEvidence"
+  ]
 }

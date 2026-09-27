@@ -24,10 +24,12 @@
 
 | 用途 | 选型与接入时机 |
 | --- | --- |
-| 生产存储 | P0 授权和停止事实开始持久化时接入 SQLite 事务、Outbox、顺序迁移与版本表；不引入 ORM。 |
+| 生产存储 | P0 使用已锁定 better-sqlite3；独立 Node 持久化 Worker、单一写入者、SQLite 事务与 Outbox、顺序迁移及版本表。不引入 ORM 或双驱动；安全栅栏不等待数据库。 |
 | HTTP/WS | 首个网络宿主使用 Fastify + ws 时安装并锁定；本地插件先用 stdio JSON-RPC。 |
 | 遥测 | 宿主有实际采集需求时接入 OpenTelemetry SDK 和结构化日志。 |
 | 属性/浏览器测试 | 真实调度器或 Stage 开始实现时引入 fast-check／所需 Playwright 测试能力。 |
 | 本地配置 | 首次引入本地配置时提供脱敏的 `.env.example`；`.env`、`.env.*` 已被忽略。 |
 
 选型依据：[Node 官方发布状态](https://nodejs.org/en/about/previous-releases)、[Ajv 独立校验器](https://ajv.js.org/standalone.html)。本地通过只对应实际运行版本；Linux/Windows 由 CI 与目标真机另行验证。
+
+P0/P1 开发、运行器和验收只需要 Node 与 pnpm，不增加 Python 运行器或交叉语言校验前置。每次运行先核验 Node 24.21.0 与 pnpm 11.11.0；不得以默认 shell 的其它 Node 或临时目录中的历史二进制替代实际环境记录。P0 受测系统为当前 macOS，S-4 适用场景需在锁定版本重跑，物理故障和其它系统未覆盖范围继续 PENDING。

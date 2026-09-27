@@ -25,7 +25,144 @@
       "owner": "Bellis simulation",
       "phase": "P0",
       "semantic_rules": "仅协议联调；不提供真实效果、审核或设备清理证明。"
+    },
+    {
+      "ref": "p0-runtime-configuration@1",
+      "kind": "configuration",
+      "schema": "P0RuntimeConfig",
+      "owner": "Bellis operator",
+      "phase": "P0",
+      "semantic_rules": "仅 P0/simulation；具体准入语义见第20.2节。",
+      "admission_guards": [
+        "p0_simulation_admission_valid"
+      ]
+    },
+    {
+      "ref": "p0-simulation-input@1",
+      "kind": "simulation_input",
+      "schema": "P0ExecuteInput",
+      "owner": "Bellis host",
+      "phase": "P0",
+      "semantic_rules": "有限自身计数效果，真实鉴权、实例、期限、白名单、持久化与幂等全部复核。",
+      "admission_guards": [
+        "p0_simulation_execution_valid"
+      ]
+    },
+    {
+      "ref": "p0-simulation-result@1",
+      "kind": "simulation_fact",
+      "schema": "P0SimulationResult",
+      "owner": "受信假设备",
+      "phase": "P0",
+      "semantic_rules": "结果必须来自当前受信端点实例；计数水位与宿主投影交叉核验。"
+    },
+    {
+      "ref": "p0-simulation-permission@1",
+      "kind": "permission",
+      "schema": "P0EndpointLease",
+      "owner": "独立监督组件",
+      "phase": "P0",
+      "semantic_rules": "仅监督安全通道安装，空白名单无权限；连接健康不延长人工/grant期限。 固定监督的endpoint.lease/revoke按epochs登记传播authority_epoch，合法前进不代替任何lease守卫。",
+      "admission_guards": [
+        "p0_endpoint_lease_valid"
+      ]
+    },
+    {
+      "ref": "p0-simulation-cleanup@1",
+      "kind": "cleanup_fact",
+      "schema": "P0CleanupRecord",
+      "owner": "独立监督组件",
+      "phase": "P0",
+      "semantic_rules": "监督持有独立清理责任，端点事实保留来源；UNKNOWN 仍隔离。"
+    },
+    {
+      "ref": "p0-installation@1",
+      "kind": "installation",
+      "schema": "P0TrustedInstallation",
+      "owner": "Bellis operator",
+      "phase": "P0",
+      "semantic_rules": "精确安装、入口和实际加载制品核验，不信任自报 simulation。"
+    },
+    {
+      "ref": "p0-build-manifest@1",
+      "kind": "acceptance_artifact",
+      "schema": "P0BuildManifest",
+      "owner": "受信验收运行器",
+      "phase": "P0",
+      "semantic_rules": "gate 重算清单覆盖和当前实际内容摘要，报告不得缩减运行依赖。"
+    },
+    {
+      "ref": "p0-test-run@1",
+      "kind": "acceptance_artifact",
+      "schema": "P0TestRunEvidence",
+      "owner": "受信验收运行器",
+      "phase": "P0",
+      "semantic_rules": "运行器启动实际 SUT、驱动真实入口并断言；不是人工 PASS 清单。"
+    },
+    {
+      "ref": "p0-endpoint-configuration@1",
+      "kind": "configuration",
+      "schema": "P0EndpointConfig",
+      "owner": "受信启动器",
+      "phase": "P0",
+      "semantic_rules": "假设备专用受限配置；只有自身实例私钥和受信host/supervisor公钥，不授予管理/存储凭据。 entry_artifact绑定已核验单一endpoint.mjs制品，受信launcher验证并执行同一Buffer。"
+    },
+    {
+      "ref": "p0-host-bootstrap@1",
+      "kind": "configuration",
+      "schema": "P0HostBootstrap",
+      "owner": "独立监督的受信启动器",
+      "phase": "P0",
+      "semantic_rules": "仅私有继承描述符传入宿主。自身临时身份与端点配置中的host公钥一致，固定supervisor身份/会话/安装/profile/limits与监督启动材料一致；不包含监督私钥或数据库路径。"
+    },
+    {
+      "ref": "p0-reduction-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ReductionObservation",
+      "owner": "实际运行P0归约器的进程",
+      "phase": "P0",
+      "semantic_rules": "只读stderr结构化观测；真实输入与守卫结果由归约器产生，runner事后关联，不接受外部scenario/指令，不构成新增RPC或守卫授权。"
+    },
+    {
+      "ref": "p0-endpoint-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0EndpointObservation",
+      "owner": "受信假设备当前实例",
+      "phase": "P0",
+      "semantic_rules": "端点 stderr 只读去敏日志，原始描述符直接交验收 runner；序号/丢失数用于证据完整性，不替代认证端点事实或授予清理/执行权限。"
+    },
+    {
+      "ref": "p0-process-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ProcessObservation",
+      "owner": "实际受信parent或记录自身启动失败的进程",
+      "phase": "P0",
+      "semantic_rules": "真实spawn/退出事实的有限stderr观测；预期实例/实际PID分开，EOF或kill成功不是退出证明，父进程先死保留未知。"
+    },
+    {
+      "ref": "p0-protocol-observation@1",
+      "kind": "read_only_observation",
+      "schema": "P0ProtocolObservation",
+      "owner": "实际传输发送/接收进程",
+      "phase": "P0",
+      "semantic_rules": "完整真实请求/响应经精确去敏并绑定登记方法；本地失败不伪造远端结果，排队/接收不等于鉴权或执行。"
+    },
+    {
+      "ref": "p0-observation-stream-end@1",
+      "kind": "read_only_observation",
+      "schema": "P0ObservationStreamEnd",
+      "owner": "各只读观测流的唯一写入进程",
+      "phase": "P0",
+      "semantic_rules": "只读有限流末尾计数，配合原始EOF证明完整性；异常结束保留不完整，不能补零、补尾或作为生产安全证明。"
     }
   ],
-  "capabilities": []
+  "capabilities": [
+    {
+      "capability": "simulation.execute",
+      "capability_version": "0.8.0",
+      "input_schema_ref": "p0-simulation-input@1",
+      "result_contract": "p0-simulation-result@1",
+      "permission_scope_ref": "p0-simulation-permission@1"
+    }
+  ]
 }

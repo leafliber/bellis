@@ -12,9 +12,10 @@ import {
   validatorDeclarations,
   validatorsModule,
 } from "./lib/codegen.ts";
+import { fakeDeviceFiles } from "./lib/fake-device.ts";
 import { loadRegistry, ROOT } from "./lib/registry.ts";
 
-const GENERATED_DIRS = ["contracts/generated", "docs/generated"];
+const GENERATED_DIRS = ["contracts/generated", "docs/generated", "plugins/fake-device/generated"];
 
 async function generatedFiles(): Promise<Map<string, string>> {
   const registry = loadRegistry();
@@ -29,6 +30,7 @@ async function generatedFiles(): Promise<Map<string, string>> {
   for (const [phase, text] of Object.entries(phaseBriefs(registry, bundle))) {
     files.set(`docs/generated/${phase}.md`, text);
   }
+  for (const [path, content] of await fakeDeviceFiles(files, bundle)) files.set(path, content);
   return files;
 }
 

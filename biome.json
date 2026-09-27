@@ -1,5 +1,25 @@
 {
-  "files": { "includes": ["packages/**", "tests/**", "tools/**/*.ts", "tools/**/*.mjs"] },
-  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
-  "linter": { "enabled": true, "rules": { "recommended": true } }
+  "files": {
+    "includes": [
+      "apps/**",
+      "plugins/**",
+      "!plugins/fake-device/generated/endpoint.mjs",
+      "!plugins/fake-device/generated/manifest.json",
+      "packages/**",
+      "tests/**",
+      "tools/**/*.ts",
+      "tools/**/*.mjs"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  }
 }

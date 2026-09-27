@@ -33,6 +33,8 @@
 | `<状态机>State`，如 `SegmentState` | `state-machines.json` |
 | `ResourceKind` | `resources.json` |
 | `RpcRequest` | `commands.json`（每个命令一个 JSON-RPC 请求形状） |
+| `P0ObservedRpcRequest`、`P0ObservedRpcResponse` | `commands.json` 的输入/结果登记；请求保留普通字段和真实 context，仅替换已知 proof 为去敏形状。响应形如 `{method,response}`，成功结果按 method 绑定；无合法已登记关联方法时仅允许 `method=null` 的真实 RpcFailure，不能编造成功结果。 |
+| `P0ObservedOperatorProof`、`P0ObservedPeerProof` | 原证明 Schema 去掉 `proof_hmac` / `signature`，增加固定 `redaction=proof_hmac_removed` / `signature_removed` 及 `authenticator_sha256`（原认证器字符串 UTF-8 字节的 SHA256）；未知证明形状生成失败，不影响生产认证 Schema。 |
 
 ## `fixtures/`
 
