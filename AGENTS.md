@@ -2,7 +2,14 @@
 
 本文件是 agent 的唯一规则入口；其它 README 只做介绍和索引。
 
-仓库目前只有文档，没有代码。当前阶段是 [P0 内核与安全核](docs/plan/P0.md)。
+当前阶段是 [P0 内核与安全核](docs/plan/P0.md)。
+
+## 常用命令
+
+- `pnpm install`：安装依赖（Node 版本见 `.node-version`，pnpm 版本见 `package.json` 的 `packageManager`）。
+- `pnpm run check`：CI 运行的完整检查，依次为格式与 lint、类型检查、生成物核对、测试。提交前必须通过。
+- `pnpm run gen`：协议类型（`packages/protocol`）改动后重新生成 JSON Schema，生成物与源一起提交。
+- `pnpm run format`：自动修正格式。
 
 ## 从哪里开始
 

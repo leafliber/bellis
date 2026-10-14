@@ -83,4 +83,4 @@ Game Runtime 的采集、OCR、VLM、输入代理与 VLA 路线在其仓库登�
 
 ## 工具链现状
 
-仓库目前只有文档，没有代码、依赖或 CI。工具链由 [P0 任务卡](P0.md) 第一步按 R-01–R-03 建立。
+工具链按 R-01–R-03 建立，各工具的确切版本以根目录的 `.node-version`、`package.json` 与 `pnpm-lock.yaml` 为准，不在本文重复。三平台 CI 见 `.github/workflows/ci.yml`。
