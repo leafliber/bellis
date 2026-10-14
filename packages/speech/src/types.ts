@@ -102,6 +102,8 @@ export const PreCheck = defineExtension<'serial', PreCheckInput, PreCheckVerdict
 
 export interface Synthesis {
   sampleRate: number;
+  /** 这一句合成后的总采样数；流式合成时未知则为 undefined。 */
+  totalSamples: number | undefined;
   /** 采样偏移 → 朗读文本码点下标，按采样偏移递增；没有映射时为 undefined。 */
   timing: ReadonlyArray<{ sample: number; char: number }> | undefined;
   frames: AsyncIterable<Int16Array>;

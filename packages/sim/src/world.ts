@@ -79,7 +79,9 @@ export class World {
     });
     kernel = this.kernel;
     this.kernel.provideCore(ClockService, this.clock);
-    this.kernel.provideCore(SafetyService, safetyFacade(this.safety));
+    this.kernel.provideScoped(SafetyService, ({ instanceId }) =>
+      safetyFacade(this.safety, instanceId),
+    );
     this.safety.setModeration(options.moderationEnabled);
     this.kernel.add(options.entries, options.plugins ?? builtinPlugins);
   }

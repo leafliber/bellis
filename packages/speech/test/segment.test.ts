@@ -71,3 +71,10 @@ test('按播放游标算已听到的前缀：只计入完整播出的码点；�
   assert.equal(heardPrefix(sentence, 400, timing, 400), '第3关！');
   assert.equal(heardPrefix(sentence, 200, undefined, 400), undefined);
 });
+
+test('合成总长未知时，最后一个码点不计入已听到的部分', () => {
+  const sentence = { index: 0, subtitle: '你好', ...speakable('你好') };
+  const timing = [...sentence.spoken].map((_, i) => ({ sample: i * 100, char: i }));
+  assert.equal(heardPrefix(sentence, 200, timing, undefined), '你');
+  assert.equal(heardPrefix(sentence, 200, timing, 200), '你好');
+});

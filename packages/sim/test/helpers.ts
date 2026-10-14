@@ -1,4 +1,5 @@
 import type { ResolvedEntry } from '@bellis/kernel';
+import type { SafetyConfig } from '@bellis/safety';
 import { World } from '../src/index.ts';
 
 export function entry(
@@ -19,9 +20,11 @@ export interface ChainOptions {
     blocked?: string[];
     failOn?: string[];
     hangOn?: string[];
+    delayMs?: number;
     onError?: 'skip' | 'pass';
   };
   tts?: Record<string, unknown>;
+  safety?: Partial<SafetyConfig>;
   withoutModerationModel?: boolean;
 }
 
@@ -41,6 +44,7 @@ export function chain(options: ChainOptions = {}): ResolvedEntry[] {
               blocked: moderationConfig.blocked ?? [],
               failOn: moderationConfig.failOn ?? [],
               hangOn: moderationConfig.hangOn ?? [],
+              delayMs: moderationConfig.delayMs ?? 0,
             },
           }),
         ]),
@@ -66,6 +70,7 @@ export async function startChain(options: ChainOptions = {}) {
   const world = new World({
     entries: chain(options),
     moderationEnabled: options.moderation?.enabled ?? true,
+    ...(options.safety ? { safety: options.safety } : {}),
   });
   await world.kernel.settled();
   const mode = world.safety.requestMode('M0');
@@ -78,6 +83,7 @@ export interface Played {
   source: string;
   heard: string;
   end: string;
+  reason?: string;
   interruptedMidSentence: boolean;
   skipped: Array<{ index: number; reason: string }>;
 }

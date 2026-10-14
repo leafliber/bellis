@@ -33,6 +33,8 @@ interface Provision {
   major: number;
   impl: unknown;
   provider: string;
+  /** 为 true 时 impl 是按插件实例生成实现的工厂。 */
+  scoped: boolean;
 }
 
 export interface ServiceInfo {
@@ -45,12 +47,12 @@ export class ServiceRegistry {
   readonly #services = new Map<string, Provision>();
 
   /** 注册服务，返回撤销函数。名字已被占用时抛错。 */
-  add(name: string, major: number, impl: unknown, provider: string): () => void {
+  add(name: string, major: number, impl: unknown, provider: string, scoped = false): () => void {
     const existing = this.#services.get(name);
     if (existing) {
       throw new Error(`服务 ${name} 已由 ${existing.provider} 提供`);
     }
-    const provision: Provision = { major, impl, provider };
+    const provision: Provision = { major, impl, provider, scoped };
     this.#services.set(name, provision);
     return () => {
       if (this.#services.get(name) === provision) this.#services.delete(name);
@@ -58,13 +60,13 @@ export class ServiceRegistry {
   }
 
   /** 按名字与主版本查找；不存在或主版本不同时返回原因。 */
-  resolve(name: string, major: number): { impl: unknown } | { missing: string } {
+  resolve(name: string, major: number): { impl: unknown; scoped: boolean } | { missing: string } {
     const provision = this.#services.get(name);
     if (!provision) return { missing: `缺少服务 ${name}@${major}` };
     if (provision.major !== major) {
       return { missing: `服务 ${name} 版本不兼容：需要 @${major}，现有 @${provision.major}` };
     }
-    return { impl: provision.impl };
+    return { impl: provision.impl, scoped: provision.scoped };
   }
 
   providedBy(provider: string): string[] {

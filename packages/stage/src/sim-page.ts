@@ -117,7 +117,16 @@ export const simStagePage = definePlugin({
           }
           return;
         case 'begin':
-          if (message.token !== token || muted) return;
+          if (message.token !== token || muted) {
+            // 不接受的句子也要回报，Stage 服务据此结束等待。
+            emit({
+              kind: 'truncated',
+              sentenceId: message.sentenceId,
+              played: 0,
+              reason: muted ? '页面已静音' : '令牌无效',
+            });
+            return;
+          }
           queue.push({
             id: message.sentenceId,
             token: message.token,

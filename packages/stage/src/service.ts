@@ -135,15 +135,35 @@ export const stageService = definePlugin({
           subtitle: sentence.subtitle,
           sampleRate: sentence.sampleRate,
         });
-        for await (const pcm of audio) {
-          if (!playing.has(sentence.id)) break;
-          if (!safety.isValid(STAGE_AUDIO, token)) {
+        // 转发音频与等待结果分开：结果一旦确定（播完、截断、停用）就返回，不被卡住的音频流拖住；
+        // 音频流出错时截断这一句并结束等待。
+        void (async () => {
+          const iterator = audio[Symbol.asyncIterator]();
+          try {
+            for (;;) {
+              const next = await Promise.race([iterator.next(), result.then(() => undefined)]);
+              if (next === undefined || next.done || !playing.has(sentence.id)) break;
+              if (!safety.isValid(STAGE_AUDIO, token)) {
+                page.send({ kind: 'truncate', sentenceId: sentence.id });
+                break;
+              }
+              page.send({ kind: 'audio', sentenceId: sentence.id, token, pcm: next.value });
+            }
+            if (playing.has(sentence.id))
+              page.send({ kind: 'end', sentenceId: sentence.id, token });
+          } catch (error) {
+            const entry = playing.get(sentence.id);
+            finish(sentence.id, {
+              sentenceId: sentence.id,
+              played: entry?.played ?? 0,
+              complete: false,
+              reason: `音频流出错：${error instanceof Error ? error.message : String(error)}`,
+            });
             page.send({ kind: 'truncate', sentenceId: sentence.id });
-            break;
+          } finally {
+            void iterator.return?.();
           }
-          page.send({ kind: 'audio', sentenceId: sentence.id, token, pcm });
-        }
-        if (playing.has(sentence.id)) page.send({ kind: 'end', sentenceId: sentence.id, token });
+        })();
         return result;
       },
       truncate(sentenceId) {

@@ -84,7 +84,7 @@ export const simModerationModel = definePlugin({
     version: '0.1.0',
     tier: 'ordinary',
     provides: [ModerationModelService.ref],
-    inject: [],
+    inject: [ClockService.ref],
     permissions: [],
     process: 'in-process',
     config: Type.Object({
@@ -94,15 +94,20 @@ export const simModerationModel = definePlugin({
       failOn: Type.Array(Type.String({ minLength: 1 }), { default: [] }),
       /** 含这些片段时判定永不返回（模拟超时）。 */
       hangOn: Type.Array(Type.String({ minLength: 1 }), { default: [] }),
+      /** 每次判定的耗时。 */
+      delayMs: Type.Integer({ minimum: 0, default: 0 }),
     }),
   },
   activate(ctx) {
-    const { blocked, failOn, hangOn } = ctx.config;
+    const { blocked, failOn, hangOn, delayMs } = ctx.config;
+    const clock = ctx.service(ClockService);
     const has = (list: readonly string[], input: ModerationInput) =>
       list.find((word) => input.subtitle.includes(word) || input.spoken.includes(word));
     ctx.provide(ModerationModelService, {
       async judge(input) {
         if (has(hangOn, input)) return new Promise<never>(() => {});
+        if (delayMs > 0)
+          await new Promise((resolve) => clock.setTimeout(() => resolve(undefined), delayMs));
         const failing = has(failOn, input);
         if (failing) throw new Error(`模拟审核模型出错：${failing}`);
         const hit = has(blocked, input);

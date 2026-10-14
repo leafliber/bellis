@@ -101,6 +101,7 @@ export function speakable(subtitle: string): { spoken: string; align: number[] }
 
 /**
  * 按播放游标算出观众实际听到的字幕前缀：只计入已完整播出的朗读码点。
+ * 最后一个码点的结束位置是合成的总采样数；总数未知时最后一个码点不计入。
  * 没有时间映射时返回 undefined（只能按整句计）。
  */
 export function heardPrefix(

@@ -13,6 +13,7 @@ import {
   type SpeechRequest,
   SpeechService,
   type SpeechSource,
+  type Synthesis,
   TtsService,
   type UtteranceOutcome,
 } from './types.ts';
@@ -30,33 +31,42 @@ interface Active {
   preemptedBy: SpeechSource | undefined;
   stopped: string | undefined;
   softStopped: string | undefined;
+  /** 停止、软收尾或被抢占时 resolve，用来打断等待中的文本流。 */
+  interrupted: PromiseWithResolvers<void>;
 }
 
 /** 静止中需要用到的实例状态，按插件上下文索引。 */
 const instances = new WeakMap<object, { hardStop(reason: string): void; idle(): Promise<void> }>();
 
-async function* sentencesOf(text: string | AsyncIterable<string>): AsyncGenerator<Sentence> {
+/** 逐句读出文本流；一旦被打断就不再等待流的下一段。 */
+async function* sentencesOf(
+  text: string | AsyncIterable<string>,
+  interrupted: Promise<void>,
+): AsyncGenerator<Sentence> {
   const segmenter = new Segmenter();
   if (typeof text === 'string') {
     yield* segmenter.push(text);
   } else {
-    for await (const chunk of text) yield* segmenter.push(chunk);
+    const iterator = text[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        const next = await Promise.race([iterator.next(), interrupted.then(() => undefined)]);
+        if (next === undefined || next.done) break;
+        yield* segmenter.push(next.value);
+      }
+    } finally {
+      void iterator.return?.();
+    }
   }
   yield* segmenter.flush();
-}
-
-async function* counting(frames: AsyncIterable<Int16Array>, add: (n: number) => void) {
-  for await (const frame of frames) {
-    add(frame.length);
-    yield frame;
-  }
 }
 
 /**
  * 发声仲裁（关键平面）：任何时刻只有一张嘴。
  * - 按来源定优先级（D-33），过期丢弃，按去重键去重；
  * - 更高优先级、且属于可抢占来源的请求，在当前发言声明的可抢占点打断它（句边界或立即）；
- * - 每句先经发声前检查（审核插件），再经安全核授权，持有 Stage 音频输出许可才合成与播放；
+ * - 每句先经发声前检查（审核插件），持有 Stage 音频输出许可、经安全核授权后才合成与播放；
+ *   每次等待之后都重新检查停止、软收尾与抢占；
  * - 被打断的发言按 Stage 回报的播放游标截断，只把观众实际听到的部分写回。
  */
 export const speechArbiter = definePlugin({
@@ -75,7 +85,6 @@ export const speechArbiter = definePlugin({
     permissions: ['speech.output'],
     process: 'in-process',
     config: Type.Object({
-      renewEveryMs: Type.Integer({ minimum: 1, default: 800 }),
       historySize: Type.Integer({ minimum: 1, default: 20 }),
       maxQueue: Type.Integer({ minimum: 1, default: 16 }),
     }),
@@ -107,27 +116,32 @@ export const speechArbiter = definePlugin({
       ...fields,
     });
 
-    const ensureLease = (): { ok: true } | { ok: false; reason: string } => {
-      if (lease && safety.isValid(STAGE_AUDIO, lease.token)) return { ok: true };
-      const granted = safety.grant(ctx.instanceId, STAGE_AUDIO);
+    const ensureLease = (): { ok: true; lease: Lease } | { ok: false; reason: string } => {
+      if (lease && safety.isValid(STAGE_AUDIO, lease.token)) return { ok: true, lease };
+      const granted = safety.grant(STAGE_AUDIO);
       if (!granted.ok) return granted;
       lease = granted.lease;
       scheduleRenew();
-      return { ok: true };
+      return { ok: true, lease };
     };
+    // 续约间隔由许可时长决定：每个时长内续约三次。
     const scheduleRenew = () => {
       if (renewTimer) clock.clearTimeout(renewTimer);
-      renewTimer = clock.setTimeout(() => {
-        renewTimer = undefined;
-        if (!lease) return;
-        const renewed = safety.renew(lease);
-        if (renewed.ok) {
-          lease = renewed.lease;
-          scheduleRenew();
-        } else {
-          lease = undefined;
-        }
-      }, ctx.config.renewEveryMs);
+      if (!lease) return;
+      renewTimer = clock.setTimeout(
+        () => {
+          renewTimer = undefined;
+          if (!lease) return;
+          const renewed = safety.renew(lease);
+          if (renewed.ok) {
+            lease = renewed.lease;
+            scheduleRenew();
+          } else {
+            lease = undefined;
+          }
+        },
+        Math.max(1, Math.floor(lease.ttlMs / 3)),
+      );
     };
     const releaseLease = () => {
       if (renewTimer) clock.clearTimeout(renewTimer);
@@ -136,11 +150,15 @@ export const speechArbiter = definePlugin({
       lease = undefined;
     };
 
+    const interrupt = (current: Active, field: 'stopped' | 'softStopped', reason: string) => {
+      current[field] ??= reason;
+      current.interrupted.resolve();
+    };
     const hardStop = (reason: string) => {
       for (const item of queue.splice(0))
         item.resolve(outcome(item.request, { end: 'stopped', reason }));
       if (!active) return;
-      active.stopped ??= reason;
+      interrupt(active, 'stopped', reason);
       active.abort.abort(new Error(reason));
       if (active.sentenceId) stage.truncate(active.sentenceId);
     };
@@ -177,17 +195,25 @@ export const speechArbiter = definePlugin({
       const { request } = current.item;
       const result = outcome(request, {});
       const finish = (fields: Partial<UtteranceOutcome>) => Object.assign(result, fields);
+      /** 停止、软收尾或被抢占时返回结束方式；每次等待之后都要检查。 */
+      const halted = (): Partial<UtteranceOutcome> | undefined => {
+        if (current.stopped) return { end: 'stopped', reason: current.stopped };
+        if (current.softStopped) return { end: 'stopped', reason: current.softStopped };
+        if (current.preemptedBy)
+          return { end: 'preempted', reason: `被 ${current.preemptedBy} 抢占` };
+        return undefined;
+      };
       let previous: string | undefined;
       try {
-        for await (const sentence of sentencesOf(request.text)) {
-          if (current.stopped) return finish({ end: 'stopped', reason: current.stopped });
-          if (current.softStopped) return finish({ end: 'stopped', reason: current.softStopped });
-          if (current.preemptedBy)
-            return finish({ end: 'preempted', reason: `被 ${current.preemptedBy} 抢占` });
+        for await (const sentence of sentencesOf(request.text, current.interrupted.promise)) {
+          const before = halted();
+          if (before) return finish(before);
           if (sentence.index === 0 && request.expiresAt <= clock.now())
             return finish({ end: 'expired' });
 
           const blocked = await preCheck(request, sentence, previous);
+          const afterCheck = halted();
+          if (afterCheck) return finish(afterCheck);
           if (blocked !== undefined) {
             result.skipped.push({ index: sentence.index, reason: blocked });
             safety.record('sentence.skipped', {
@@ -197,8 +223,11 @@ export const speechArbiter = definePlugin({
             });
             continue;
           }
-          if (current.stopped) return finish({ end: 'stopped', reason: current.stopped });
 
+          // 先取得许可再授权：授权之后到执行之间不再有等待，意图不会停在待执行。
+          const leased = ensureLease();
+          if (!leased.ok) return finish({ end: 'denied', reason: leased.reason });
+          const token = leased.lease.token;
           const payload = {
             utteranceId: request.id,
             index: sentence.index,
@@ -206,7 +235,6 @@ export const speechArbiter = definePlugin({
             spoken: sentence.spoken,
           };
           const decision = await safety.authorize({
-            holder: ctx.instanceId,
             key: `${request.id}#${sentence.index}`,
             type: 'speech.play',
             target: 'stage',
@@ -224,24 +252,19 @@ export const speechArbiter = definePlugin({
             result.skipped.push({ index: sentence.index, reason: '同一句已经授权过' });
             continue;
           }
-          const leased = ensureLease();
-          if (!leased.ok || !lease)
-            return finish({ end: 'denied', reason: leased.ok ? '没有许可' : leased.reason });
-          const token = lease.token;
 
           let playback: PlaybackResult | undefined;
-          let total = 0;
-          let timing: Awaited<ReturnType<typeof tts.synthesize>>['timing'];
+          let synthesis: Synthesis | undefined;
           await safety.execute(decision.intent, payload, async (p) => {
-            const synthesis = await tts.synthesize(p.spoken, current.abort.signal);
-            timing = synthesis.timing;
+            // 授权的等待期间可能已被打断：此时这一句一个采样都没有播出，按失败记录。
+            if (halted()) throw new Error('播出前被打断');
+            synthesis = await tts.synthesize(p.spoken, current.abort.signal);
+            if (halted()) throw new Error('播出前被打断');
             const sentenceId = `${p.utteranceId}#${p.index}`;
             current.sentenceId = sentenceId;
             playback = await stage.play(
               { id: sentenceId, subtitle: p.subtitle, sampleRate: synthesis.sampleRate },
-              counting(synthesis.frames, (n) => {
-                total += n;
-              }),
+              synthesis.frames,
               token,
             );
             current.sentenceId = undefined;
@@ -254,15 +277,12 @@ export const speechArbiter = definePlugin({
             continue;
           }
           const played = playback?.played ?? 0;
-          const prefix = heardPrefix(sentence, played, timing, total);
+          const prefix = heardPrefix(sentence, played, synthesis?.timing, synthesis?.totalSamples);
           if (prefix === undefined) result.interruptedMidSentence = played > 0;
           else result.heard += prefix;
-          if (current.stopped) return finish({ end: 'stopped', reason: current.stopped });
-          if (current.preemptedBy)
-            return finish({ end: 'preempted', reason: `被 ${current.preemptedBy} 抢占` });
-          return finish({ end: 'stopped', reason: playback?.reason ?? 'Stage 未完成播放' });
+          return finish(halted() ?? { end: 'stopped', reason: playback?.reason ?? '没有播出' });
         }
-        return result;
+        return finish(halted() ?? {});
       } catch (error) {
         return finish({
           end: 'unavailable',
@@ -285,6 +305,7 @@ export const speechArbiter = definePlugin({
           preemptedBy: undefined,
           stopped: undefined,
           softStopped: undefined,
+          interrupted: Promise.withResolvers<void>(),
         };
         active = current;
         const result = await speak(current);
@@ -307,8 +328,9 @@ export const speechArbiter = definePlugin({
 
     const speech: Speech = {
       request(request) {
-        if (ctx.signal.aborted)
+        if (ctx.signal.aborted) {
           return Promise.resolve(outcome(request, { end: 'unavailable', reason: '仲裁停用' }));
+        }
         if (seen.has(request.id)) return Promise.resolve(outcome(request, { end: 'duplicate' }));
         seen.add(request.id);
         if (request.expiresAt <= clock.now())
@@ -324,12 +346,15 @@ export const speechArbiter = definePlugin({
           }
           if (
             active &&
+            !active.preemptedBy &&
             PREEMPTING.has(request.source) &&
             PRIORITY[request.source] > PRIORITY[active.item.request.source]
           ) {
-            active.preemptedBy ??= request.source;
-            if (active.item.request.preempt === 'immediate' && active.sentenceId)
+            active.preemptedBy = request.source;
+            active.interrupted.resolve();
+            if (active.item.request.preempt === 'immediate' && active.sentenceId) {
               stage.truncate(active.sentenceId);
+            }
           }
           pump();
         });
@@ -337,7 +362,7 @@ export const speechArbiter = definePlugin({
       softStop(reason) {
         for (const item of queue.splice(0))
           item.resolve(outcome(item.request, { end: 'stopped', reason }));
-        if (active) active.softStopped ??= reason;
+        if (active) interrupt(active, 'softStopped', reason);
       },
       heard: () => [...history],
     };

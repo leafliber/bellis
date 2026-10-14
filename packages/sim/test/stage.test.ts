@@ -63,7 +63,11 @@ test('令牌变化时丢弃旧令牌的缓冲，之后带旧令牌的音频也�
     p.link.send({ kind: 'begin', sentenceId: 's2', token: 1, subtitle: 'b', sampleRate: 16_000 });
     p.link.send({ kind: 'audio', sentenceId: 's2', token: 1, pcm: frame(320) });
     await p.world.run(100);
-    assert.ok(!p.events.some((e) => 'sentenceId' in e && e.sentenceId === 's2'));
+    // 旧令牌的句子被拒收并回报截断，从未开始播放。
+    assert.deepEqual(
+      p.events.filter((e) => 'sentenceId' in e && e.sentenceId === 's2'),
+      [{ kind: 'truncated', sentenceId: 's2', played: 0, reason: '令牌无效' }],
+    );
   } finally {
     await p.world.close();
   }
@@ -96,10 +100,13 @@ test('收不到宿主心跳时自行静音并清空缓冲，再次收到心跳�
     await p.world.run(300);
     assert.ok(p.events.some((e) => e.kind === 'muted'));
     assert.ok(p.events.some((e) => e.kind === 'truncated' && e.reason === '宿主心跳丢失'));
-    const count = p.events.length;
     p.link.send({ kind: 'begin', sentenceId: 's2', token: 1, subtitle: 'b', sampleRate: 16_000 });
     await p.world.run(100);
-    assert.equal(p.events.length, count, '静音期间不接受新的句子');
+    assert.deepEqual(
+      p.events.filter((e) => 'sentenceId' in e && e.sentenceId === 's2'),
+      [{ kind: 'truncated', sentenceId: 's2', played: 0, reason: '页面已静音' }],
+      '静音期间不接受新的句子，并回报截断',
+    );
     p.beat();
     p.link.send({ kind: 'begin', sentenceId: 's3', token: 1, subtitle: 'c', sampleRate: 16_000 });
     p.link.send({ kind: 'audio', sentenceId: 's3', token: 1, pcm: frame(320) });

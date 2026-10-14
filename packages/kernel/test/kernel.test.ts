@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Type from 'typebox';
-import { defineExtension, definePlugin, Kernel, sleep, systemClock } from '../src/index.ts';
+import {
+  defineExtension,
+  definePlugin,
+  defineService,
+  Kernel,
+  sleep,
+  systemClock,
+} from '../src/index.ts';
 import { base, catalog, consumer, entry, Greeter, harness, provider } from './helpers.ts';
 
 test('按依赖激活：消费方排在提供方前面也会等提供方就绪', async () => {
@@ -494,4 +501,21 @@ test('配置按 Schema 补齐缺省值后交给插件，不改动 profile 中的
   await h.kernel.settled();
   assert.deepEqual(received, { rate: 5, name: 'given' });
   assert.deepEqual(raw, { name: 'given' });
+});
+
+test('按实例提供的服务：每个实例拿到为它生成的实现', async () => {
+  const h = harness();
+  const Identity = defineService<{ who: string }>('identity', 1);
+  h.kernel.provideScoped(Identity, ({ instanceId }) => ({ who: instanceId }));
+  const seen: string[] = [];
+  const asker = (id: string) =>
+    definePlugin({
+      manifest: { ...base, id, inject: [Identity.ref] },
+      activate(ctx) {
+        seen.push(`${ctx.instanceId}=${ctx.service(Identity).who}`);
+      },
+    });
+  h.kernel.add([entry('a'), entry('b')], catalog(asker('a'), asker('b')));
+  await h.kernel.settled();
+  assert.deepEqual(seen, ['a#1=a#1', 'b#2=b#2']);
 });

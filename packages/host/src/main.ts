@@ -116,7 +116,7 @@ kernel = host;
 const hub = new ChannelHub();
 host.provideCore(SidecarHostService, { credentials, hub });
 host.provideCore(ClockService, clock);
-host.provideCore(SafetyService, safetyFacade(core));
+host.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(core, instanceId));
 core.setModeration(!moderationEntry.disabled);
 host.add(entries, builtinPlugins);
 await host.settled();
@@ -133,7 +133,17 @@ const server = await listen(credentials.path, {
     }
     const rpc = new RpcPeer(connection, { timeoutMs: RPC_TIMEOUT_MS });
     peers.add(rpc);
-    connection.on('close', () => peers.delete(rpc));
+    connection.on('close', () => {
+      peers.delete(rpc);
+      // 看门狗断开：它可能已经静音并切了安全场景，也可能自己崩溃了。真实输出模式下都不能继续。
+      if (
+        connection.role === Role.Watchdog &&
+        !stopping &&
+        ['M1', 'M2', 'M3'].includes(core.mode)
+      ) {
+        void core.emergencyStop('外部看门狗连接断开');
+      }
+    });
     if (connection.role === Role.Launcher) {
       handleShutdown(rpc, (reason) => void stop(reason ?? Role.Launcher));
       rpc.handle(HostStatus, () => ({ watchdogConnected: watchdogs().length > 0 }));

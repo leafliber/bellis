@@ -24,12 +24,21 @@ export const simTts = definePlugin({
       slowness: Type.Number({ minimum: 0, default: 0 }),
       /** 不给时间映射，模拟只能按整句计的 TTS。 */
       withoutTiming: Type.Boolean({ default: false }),
+      /** 朗读文本含这些片段时，合成在第一帧之后出错（模拟 TTS 中途失败）。 */
+      failOn: Type.Array(Type.String({ minLength: 1 }), { default: [] }),
     }),
   },
   activate(ctx) {
     const clock = ctx.service(ClockService);
-    const { sampleRate, samplesPerChar, frameSamples, firstChunkDelayMs, slowness, withoutTiming } =
-      ctx.config;
+    const {
+      sampleRate,
+      samplesPerChar,
+      frameSamples,
+      firstChunkDelayMs,
+      slowness,
+      withoutTiming,
+      failOn,
+    } = ctx.config;
     ctx.provide(TtsService, {
       async synthesize(spoken, signal): Promise<Synthesis> {
         const chars = [...spoken];
@@ -41,10 +50,12 @@ export const simTts = definePlugin({
             if (signal.aborted) return;
             if (slowness > 0) await sleep(clock, frameMs * slowness);
             yield new Int16Array(Math.min(frameSamples, total - offset));
+            if (failOn.some((word) => spoken.includes(word))) throw new Error('模拟 TTS 中途出错');
           }
         }
         return {
           sampleRate,
+          totalSamples: total,
           timing: withoutTiming
             ? undefined
             : chars.map((_, i) => ({ sample: i * samplesPerChar, char: i })),
