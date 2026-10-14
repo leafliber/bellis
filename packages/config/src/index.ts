@@ -20,7 +20,13 @@ export function loadConfig(path: string): HostConfig {
   const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
   if (!isHostConfig.Check(value))
     throw new Error(`配置文件 ${path} 不合法：${describe(isHostConfig, value)}`);
-  return { ...value, storePath: resolve(dirname(path), value.storePath) };
+  const base = dirname(path);
+  return {
+    ...value,
+    storePath: resolve(base, value.storePath),
+    profile: resolve(base, value.profile),
+    patches: value.patches.map((patch) => resolve(base, patch)),
+  };
 }
 
 export async function readObsSecret(store: SecretStore): Promise<ObsSecret> {

@@ -8,6 +8,8 @@
         "v",
         "storePath",
         "simulation",
+        "profile",
+        "patches",
         "heartbeatIntervalMs",
         "watchdog",
         "safety"
@@ -23,6 +25,17 @@
         },
         "simulation": {
           "type": "boolean"
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "patches": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "heartbeatIntervalMs": {
           "type": "integer",

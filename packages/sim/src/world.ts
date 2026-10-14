@@ -6,9 +6,9 @@ import {
   type ResolvedEntry,
   type ServiceToken,
 } from '@bellis/kernel';
+import { builtinPlugins } from '@bellis/plugins';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
-import { builtinPlugins } from './catalog.ts';
 import { MemoryObs } from './memory-obs.ts';
 
 export const simSafety: SafetyConfig = {

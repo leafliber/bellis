@@ -21,6 +21,8 @@ export interface ResolvedEntry {
   plugin: string;
   config: unknown;
   disabled: boolean;
+  /** 启用或禁用是否在 profile 或 patch 中显式写明（审核插件的开关必须显式，D-18）。 */
+  explicitSwitch: boolean;
   grant: readonly string[];
 }
 

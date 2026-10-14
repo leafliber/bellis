@@ -50,7 +50,7 @@ export function harness(options: Partial<KernelOptions> = {}) {
 }
 
 export function entry(id: string, plugin = id, extra: Partial<ResolvedEntry> = {}): ResolvedEntry {
-  return { id, plugin, config: {}, disabled: false, grant: [], ...extra };
+  return { id, plugin, config: {}, disabled: false, explicitSwitch: false, grant: [], ...extra };
 }
 
 const base = {

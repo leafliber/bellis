@@ -20,6 +20,8 @@ import {
   HostHeartbeatParams,
   HostStatusResult,
   HostStoppingParams,
+  OperatorEmergencyParams,
+  OperatorModeParams,
   ProcessShutdownParams,
   ProcessShutdownResult,
   SessionInfo,
@@ -55,5 +57,7 @@ export const schemaModules = {
     HostStoppingParams,
     HostStatusResult,
     HostHeartbeatParams,
+    OperatorModeParams,
+    OperatorEmergencyParams,
   },
 } as const;

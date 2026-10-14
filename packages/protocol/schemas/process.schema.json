@@ -108,6 +108,53 @@
         }
       },
       "additionalProperties": false
+    },
+    "OperatorModeParams": {
+      "type": "object",
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "target": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "M0"
+            },
+            {
+              "type": "string",
+              "const": "M1"
+            },
+            {
+              "type": "string",
+              "const": "M2"
+            },
+            {
+              "type": "string",
+              "const": "M3"
+            },
+            {
+              "type": "string",
+              "const": "safe-stop"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorEmergencyParams": {
+      "type": "object",
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

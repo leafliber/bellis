@@ -6,7 +6,7 @@ export function entry(
   plugin: string,
   extra: Partial<ResolvedEntry> = {},
 ): ResolvedEntry {
-  return { id, plugin, config: {}, disabled: false, grant: [], ...extra };
+  return { id, plugin, config: {}, disabled: false, explicitSwitch: false, grant: [], ...extra };
 }
 
 export interface ChainOptions {
@@ -46,6 +46,7 @@ export function chain(options: ChainOptions = {}): ResolvedEntry[] {
         ]),
     entry('moderation', 'moderation', {
       disabled: !moderationConfig.enabled,
+      explicitSwitch: true,
       config: { onError: moderationConfig.onError ?? 'skip', timeoutMs: 500 },
     }),
     entry('danmaku', 'danmaku-replay', { config: { messages: options.messages ?? [] } }),

@@ -47,6 +47,7 @@ export function resolveProfile(
     plugin: entry.plugin,
     config: entry.config ?? {},
     disabled: entry.disabled ?? false,
+    explicitSwitch: entry.disabled !== undefined,
     grant: entry.grant ?? [],
   }));
 }

@@ -1,0 +1,81 @@
+{
+  "name": "sim",
+  "packs": [
+    {
+      "name": "stage",
+      "entries": [
+        { "id": "stage-page", "plugin": "stage-page-sim" },
+        { "id": "stage", "plugin": "stage-service" }
+      ]
+    },
+    {
+      "name": "speech",
+      "entries": [
+        { "id": "tts", "plugin": "tts-sim" },
+        { "id": "speech", "plugin": "speech-arbiter", "grant": ["speech.output"] },
+        {
+          "id": "schedule",
+          "plugin": "speech-schedule",
+          "config": {
+            "announcements": [
+              { "id": "welcome", "atMs": 1000, "text": "欢迎来到直播间，这里是模拟环境。" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "moderation",
+      "entries": [
+        {
+          "id": "moderation-model",
+          "plugin": "moderation-model-sim",
+          "config": { "blocked": ["禁词"] }
+        },
+        {
+          "id": "moderation",
+          "plugin": "moderation",
+          "disabled": false,
+          "config": { "onError": "skip" }
+        }
+      ]
+    },
+    {
+      "name": "audience",
+      "entries": [
+        {
+          "id": "danmaku",
+          "plugin": "danmaku-replay",
+          "config": {
+            "messages": [
+              { "atMs": 3000, "id": "d1", "viewer": "v1", "nickname": "小明", "text": "主播你好" },
+              { "atMs": 4000, "id": "d2", "viewer": "v2", "nickname": "小红", "text": "今天玩什么" }
+            ]
+          }
+        },
+        { "id": "triage", "plugin": "audience-triage" }
+      ]
+    },
+    {
+      "name": "director",
+      "entries": [
+        {
+          "id": "llm",
+          "plugin": "llm-replay",
+          "config": {
+            "latencyMs": 300,
+            "outputs": [
+              "{\"action\":\"speak\",\"text\":\"你好呀，欢迎！今天我们来玩魔女审判。\",\"replyTo\":\"c-d1\"}",
+              "{\"action\":\"silence\",\"reason\":\"回放结束\"}"
+            ]
+          }
+        },
+        {
+          "id": "director",
+          "plugin": "director",
+          "config": { "persona": "贝莉：温和、好奇的虚拟主播。" }
+        }
+      ]
+    }
+  ]
+}

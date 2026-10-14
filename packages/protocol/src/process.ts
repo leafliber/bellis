@@ -78,4 +78,26 @@ export type HostStatusResult = Static<typeof HostStatusResult>;
 export const Role = {
   Launcher: 'launcher',
   Watchdog: 'watchdog',
+  /** 操作员入口（P0 为命令行，操作台待 R-20）。 */
+  Operator: 'operator',
 } as const;
+
+/** 操作员命令。模式升级只能经这里由操作员显式发起。 */
+export const OperatorMethod = {
+  Status: 'operator.status',
+  Mode: 'operator.mode',
+  Presence: 'operator.presence',
+  EmergencyStop: 'operator.emergency_stop',
+} as const;
+
+export const OperatorModeParams = Type.Object(
+  { target: Type.Union(['M0', 'M1', 'M2', 'M3', 'safe-stop'].map((m) => Type.Literal(m))) },
+  closed,
+);
+export type OperatorModeParams = Static<typeof OperatorModeParams>;
+
+export const OperatorEmergencyParams = Type.Object(
+  { reason: Type.String({ minLength: 1, maxLength: 200 }) },
+  closed,
+);
+export type OperatorEmergencyParams = Static<typeof OperatorEmergencyParams>;
