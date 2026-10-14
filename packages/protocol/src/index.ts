@@ -8,9 +8,16 @@ import {
   RpcRequest,
   RpcSuccess,
 } from './jsonrpc.ts';
+import {
+  HostStoppingParams,
+  ProcessShutdownParams,
+  ProcessShutdownResult,
+  SessionInfo,
+} from './process.ts';
 
 export * from './channel.ts';
 export * from './jsonrpc.ts';
+export * from './process.ts';
 
 /**
  * 需要生成 JSON Schema 文件的类型，按模块分组。
@@ -27,4 +34,5 @@ export const schemaModules = {
     RpcMessage,
     RpcCancelParams,
   },
+  process: { SessionInfo, ProcessShutdownParams, ProcessShutdownResult, HostStoppingParams },
 } as const;

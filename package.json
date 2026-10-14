@@ -7,13 +7,14 @@
     "node": ">=26"
   },
   "scripts": {
+    "start": "node packages/launcher/src/main.ts",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run gen:check && pnpm run test",
     "lint": "biome ci .",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json",
     "gen": "node packages/protocol/scripts/gen.ts",
     "gen:check": "node packages/protocol/scripts/gen.ts --check",
-    "test": "node --test \"packages/*/test/**/*.test.ts\""
+    "test": "node --test --test-timeout=60000 \"packages/*/test/**/*.test.ts\""
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

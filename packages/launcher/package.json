@@ -1,0 +1,17 @@
+{
+  "name": "@bellis/launcher",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/launch.ts"
+  },
+  "dependencies": {
+    "@bellis/channel": "workspace:*",
+    "@bellis/host": "workspace:*",
+    "@bellis/process": "workspace:*",
+    "@bellis/protocol": "workspace:*",
+    "@bellis/secret-store": "workspace:*",
+    "@bellis/watchdog": "workspace:*"
+  }
+}
