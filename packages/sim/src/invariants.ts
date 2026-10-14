@@ -20,15 +20,21 @@ export interface History {
  */
 export function checkHistory(history: History): string[] {
   const violations: string[] = [];
-  const begun = new Map<string, string>();
-  const ended = new Set<string>();
-  const truncated = new Map<string, number>();
+  /** 全部世界里开始过的句子：同一句不能开始两次（含跨重启）。 */
+  const everBegun = new Set<string>();
+  /** 当前世界里开始过、播完、被截断的句子：一段发言只会在一个世界里播出。 */
+  let begun = new Map<string, string>();
+  let ended = new Set<string>();
+  let truncated = new Map<string, number>();
   let mode = 'safe-stop';
 
   for (const entry of history.trace) {
     switch (entry.kind) {
       case 'world.start':
         mode = 'safe-stop';
+        begun = new Map();
+        ended = new Set();
+        truncated = new Map();
         break;
       case 'control.mode':
         mode = String(entry.data.mode);
@@ -36,8 +42,9 @@ export function checkHistory(history: History): string[] {
       case 'page.begin': {
         const id = String(entry.data.sentenceId);
         const subtitle = String(entry.data.subtitle);
-        if (begun.has(id))
+        if (everBegun.has(id))
           violations.push(`句子 ${id} 在 Stage 上开始了两次（第 ${entry.seq} 条追踪）`);
+        everBegun.add(id);
         begun.set(id, subtitle);
         if (history.moderationEnabled && subtitle.includes(BLOCKED)) {
           violations.push(`审核启用时含禁词的句子 ${id} 在 Stage 上开始：${subtitle}`);
@@ -57,30 +64,16 @@ export function checkHistory(history: History): string[] {
       case 'page.truncated':
         truncated.set(String(entry.data.sentenceId), Number(entry.data.played));
         break;
-    }
-  }
-
-  for (const event of history.events.filter((e) => e.type === 'utterance.played')) {
-    const { id, heard } = event.data as { id: string; heard: string };
-    const sentences = [...begun.keys()]
-      .filter((key) => key.startsWith(`${id}#`))
-      .sort((a, b) => Number(a.split('#').at(-1)) - Number(b.split('#').at(-1)));
-    let expected = '';
-    for (const key of sentences) {
-      const subtitle = begun.get(key) as string;
-      if (ended.has(key)) {
-        expected += subtitle;
-        continue;
+      case 'fact.utterance': {
+        const expected = expectedHeard(String(entry.data.id), begun, ended, truncated);
+        const heard = String(entry.data.heard);
+        if (heard !== expected) {
+          violations.push(
+            `发言 ${String(entry.data.id)} 写回“${heard}”，但 Stage 回报观众听到的是“${expected}”`,
+          );
+        }
+        break;
       }
-      // 只计入完整播出的朗读码点，再按对齐表换回字幕位置。
-      const played = truncated.get(key) ?? 0;
-      const chars = Math.floor(played / SAMPLES_PER_CHAR);
-      const { align } = speakable(subtitle);
-      if (chars > 0) expected += [...subtitle].slice(0, (align[chars - 1] as number) + 1).join('');
-      break;
-    }
-    if (heard !== expected) {
-      violations.push(`发言 ${id} 写回“${heard}”，但 Stage 回报观众听到的是“${expected}”`);
     }
   }
 
@@ -93,4 +86,30 @@ export function checkHistory(history: History): string[] {
     if (times > 1) violations.push(`意图 ${intentId} 执行了 ${times} 次`);
   }
   return violations;
+}
+
+/** 按 Stage 的回报独立推出一段发言观众听到了什么：播完的句子全算，截断的句子只算完整播出的码点。 */
+function expectedHeard(
+  utteranceId: string,
+  begun: ReadonlyMap<string, string>,
+  ended: ReadonlySet<string>,
+  truncated: ReadonlyMap<string, number>,
+): string {
+  const sentences = [...begun.keys()]
+    .filter((key) => key.startsWith(`${utteranceId}#`))
+    .sort((a, b) => Number(a.split('#').at(-1)) - Number(b.split('#').at(-1)));
+  let expected = '';
+  for (const key of sentences) {
+    const subtitle = begun.get(key) as string;
+    if (ended.has(key)) {
+      expected += subtitle;
+      continue;
+    }
+    const played = truncated.get(key) ?? 0;
+    const chars = Math.floor(played / SAMPLES_PER_CHAR);
+    const { align } = speakable(subtitle);
+    if (chars > 0) expected += [...subtitle].slice(0, (align[chars - 1] as number) + 1).join('');
+    break;
+  }
+  return expected;
 }

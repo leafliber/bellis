@@ -76,6 +76,35 @@ const regressions: Array<[string, Scenario]> = [
       durationMs: 20_000,
     },
   ],
+  [
+    '急停后在同一时刻重启：被拒的定时播报在新进程里重新播出，写回按各自的进程核对',
+    {
+      seed: 0,
+      moderation: { enabled: false, onError: 'skip', delayMs: 0 },
+      ttsSlow: false,
+      danmaku: [],
+      outputs: [],
+      announcements: [{ atMs: 19210, sentences: [0], immediate: false }],
+      operator: [
+        { atMs: 19210, action: 'restart' },
+        { atMs: 0, action: 'estop' },
+      ],
+      durationMs: 20_000,
+    },
+  ],
+  [
+    'TTS 在句中出错：这一句截断，意图结案，不卡住',
+    {
+      seed: 0,
+      moderation: { enabled: false, onError: 'skip', delayMs: 0 },
+      ttsSlow: false,
+      danmaku: [],
+      outputs: [],
+      announcements: [{ atMs: 0, sentences: [7], immediate: false }],
+      operator: [],
+      durationMs: 20_000,
+    },
+  ],
 ];
 
 for (const [name, scenario] of regressions) {

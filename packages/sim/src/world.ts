@@ -83,6 +83,11 @@ export class World {
       now: () => epoch + Math.floor(this.clock.now()),
     });
     this.store.recover();
+    // 发言结果同时写进追踪，与 Stage 的回报排在同一条时间线上。
+    this.store.subscribe((event) => {
+      if (event.type === 'utterance.played')
+        this.record('fact.utterance', { ...(event.data as object) });
+    });
     let kernel: Kernel | undefined;
     this.safety = new SafetyCore({
       store: this.store,
@@ -165,8 +170,17 @@ export class World {
     return type ? all.filter((event) => event.type === type) : all;
   }
 
+  /** 停止：卸载插件期间继续推进时钟，收尾的截止时间才会到期。 */
   async close(): Promise<void> {
-    await this.kernel.shutdown();
+    let done = false;
+    const shutdown = this.kernel.shutdown().finally(() => {
+      done = true;
+    });
+    for (let waited = 0; !done && waited < 600_000; waited += 10) {
+      this.clock.advance(10);
+      await this.flush();
+    }
+    await shutdown;
     this.store.close();
   }
 }
