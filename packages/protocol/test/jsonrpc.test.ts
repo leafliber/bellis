@@ -9,7 +9,7 @@ const notification = Compile(RpcNotification);
 const failure = Compile(RpcFailure);
 const message = Compile(RpcMessage);
 
-const method = fc.stringMatching(/^[a-z][a-z0-9_]{0,8}(\.[a-z][a-z0-9_]{0,8}){0,2}$/);
+const method = fc.stringMatching(/^[a-z][a-z0-9_]{0,8}(\.[a-z][a-z0-9_]{0,8}){1,2}$/);
 const id = fc.oneof(fc.string({ minLength: 1, maxLength: 128 }), fc.integer());
 const params = fc.dictionary(fc.string(), fc.jsonValue());
 
@@ -34,6 +34,8 @@ test('拒绝多余字段、按位置传参、错误版本与非法方法名', ()
   assert.equal(request.Check({ ...base, jsonrpc: '1.0' }), false);
   assert.equal(request.Check({ ...base, method: 'Speech.Request' }), false);
   assert.equal(request.Check({ ...base, method: '' }), false);
+  assert.equal(request.Check({ ...base, method: 'speech' }), false);
+  assert.equal(request.Check({ ...base, id: Number.MAX_SAFE_INTEGER + 2 }), false);
   assert.equal(request.Check({ ...base, id: 1.5 }), false);
 });
 

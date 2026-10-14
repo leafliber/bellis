@@ -9,11 +9,15 @@ const closed = { additionalProperties: false } as const;
 
 export const RpcVersion = Type.Literal('2.0');
 
-export const RpcId = Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Integer()]);
+/** 数字 id 限定在安全整数范围内，避免解析后不同 id 相撞。 */
+export const RpcId = Type.Union([
+  Type.String({ minLength: 1, maxLength: 128 }),
+  Type.Integer({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+]);
 export type RpcId = Static<typeof RpcId>;
 
-/** 方法名形如 `对象.动作`，例如 `speech.request`。 */
-export const RpcMethod = Type.String({ pattern: '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$' });
+/** 方法名形如 `对象.动作`，例如 `speech.request`；至少有一段动作。 */
+export const RpcMethod = Type.String({ pattern: '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$' });
 
 export const RpcParams = Type.Record(Type.String(), Type.Unknown());
 export type RpcParams = Static<typeof RpcParams>;

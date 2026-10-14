@@ -22,13 +22,15 @@
               "maxLength": 128
             },
             {
-              "type": "integer"
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           ]
         },
         "method": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
         },
         "params": {
           "type": "object",
@@ -52,7 +54,7 @@
         },
         "method": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
         },
         "params": {
           "type": "object",
@@ -83,7 +85,9 @@
               "maxLength": 128
             },
             {
-              "type": "integer"
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           ]
         },
@@ -113,7 +117,9 @@
                   "maxLength": 128
                 },
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 }
               ]
             },
@@ -181,13 +187,15 @@
                   "maxLength": 128
                 },
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 }
               ]
             },
             "method": {
               "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
             },
             "params": {
               "type": "object",
@@ -211,7 +219,7 @@
             },
             "method": {
               "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
             },
             "params": {
               "type": "object",
@@ -242,7 +250,9 @@
                   "maxLength": 128
                 },
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
                 }
               ]
             },
@@ -272,7 +282,9 @@
                       "maxLength": 128
                     },
                     {
-                      "type": "integer"
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     }
                   ]
                 },
