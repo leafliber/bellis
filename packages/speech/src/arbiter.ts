@@ -211,7 +211,11 @@ export const speechArbiter = definePlugin({
           if (sentence.index === 0 && request.expiresAt <= clock.now())
             return finish({ end: 'expired' });
 
-          const blocked = await preCheck(request, sentence, previous);
+          // 审核可能很慢：被停止、软收尾或抢占时不再等它。
+          const blocked = await Promise.race([
+            preCheck(request, sentence, previous),
+            current.interrupted.promise.then(() => undefined),
+          ]);
           const afterCheck = halted();
           if (afterCheck) return finish(afterCheck);
           if (blocked !== undefined) {
