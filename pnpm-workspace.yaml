@@ -1,0 +1,5 @@
+packages:
+  - packages/*
+
+# 新发布的版本至少放置一天再安装，降低供应链投毒风险
+minimumReleaseAge: 1440
