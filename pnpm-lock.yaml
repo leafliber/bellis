@@ -245,6 +245,9 @@ importers:
       '@bellis/watchdog':
         specifier: workspace:*
         version: link:../watchdog
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
 
   packages/process:
     dependencies:

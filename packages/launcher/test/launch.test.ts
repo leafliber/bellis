@@ -43,7 +43,6 @@ async function start() {
   const service = `bellis-test-${randomBytes(4).toString('hex')}`;
   const store = new KeyringSecretStore(service);
   const session = await launch({
-    store,
     secretService: service,
     host: { command: process.execPath, args: [script('@bellis/host/main')] },
     watchdog: { command: process.execPath, args: [script('@bellis/watchdog/main')] },
@@ -87,6 +86,24 @@ test('宿主崩溃后看门狗仍在运行，并报告宿主丢失', async () =>
   } finally {
     const result = await s.session.stop();
     assert.equal(result.host.stage, 'already-exited');
+    assert.equal(result.watchdog.stage, 'stdin-eof');
+  }
+});
+
+test('看门狗意外退出后由启动器重启，并重新连上宿主', async () => {
+  const s = await start();
+  try {
+    const first = s.session.watchdog;
+    first.kill();
+    await first.exited;
+    for (let i = 0; i < 200 && s.session.watchdog === first; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.notEqual(s.session.watchdog.pid, first.pid);
+    const restarted = new EventLog(s.session.watchdog.stdout);
+    await restarted.wait('watchdog.connected');
+  } finally {
+    const result = await s.session.stop();
     assert.equal(result.watchdog.stage, 'stdin-eof');
   }
 });

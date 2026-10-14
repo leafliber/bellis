@@ -51,6 +51,12 @@ export const HostStopping = 'host.stopping';
 export const HostStoppingParams = Type.Object({ reason: Type.String({ maxLength: 200 }) }, closed);
 export type HostStoppingParams = Static<typeof HostStoppingParams>;
 
+/** 启动器查询宿主状态，用于判断会话是否就绪（看门狗已连上宿主）。 */
+export const HostStatus = 'host.status';
+
+export const HostStatusResult = Type.Object({ watchdogConnected: Type.Boolean() }, closed);
+export type HostStatusResult = Static<typeof HostStatusResult>;
+
 /** 连接宿主时使用的固定角色。 */
 export const Role = {
   Launcher: 'launcher',

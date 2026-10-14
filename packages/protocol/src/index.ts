@@ -9,6 +9,7 @@ import {
   RpcSuccess,
 } from './jsonrpc.ts';
 import {
+  HostStatusResult,
   HostStoppingParams,
   ProcessShutdownParams,
   ProcessShutdownResult,
@@ -34,5 +35,11 @@ export const schemaModules = {
     RpcMessage,
     RpcCancelParams,
   },
-  process: { SessionInfo, ProcessShutdownParams, ProcessShutdownResult, HostStoppingParams },
+  process: {
+    SessionInfo,
+    ProcessShutdownParams,
+    ProcessShutdownResult,
+    HostStoppingParams,
+    HostStatusResult,
+  },
 } as const;

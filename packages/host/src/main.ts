@@ -9,12 +9,14 @@ import {
   logEvent,
   watchLifeline,
 } from '@bellis/process';
-import { HostStopping, Role } from '@bellis/protocol';
+import { HostStatus, HostStopping, Role } from '@bellis/protocol';
 
 const RPC_TIMEOUT_MS = 2000;
 
 const credentials = channelCredentialsFromEnv();
 const peers = new Set<RpcPeer>();
+const watchdogConnected = () =>
+  [...peers].some((peer) => peer.connection.role === Role.Watchdog && peer.connection.isOpen);
 let stopping = false;
 
 const server = await listen(credentials.path, {
@@ -25,6 +27,7 @@ const server = await listen(credentials.path, {
     connection.on('close', () => peers.delete(rpc));
     if (connection.role === Role.Launcher) {
       handleShutdown(rpc, (reason) => void stop(reason ?? Role.Launcher));
+      rpc.handle(HostStatus, () => ({ watchdogConnected: watchdogConnected() }));
     }
     logEvent('host.connection-accepted', { role: connection.role });
   },

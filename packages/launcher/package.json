@@ -12,6 +12,7 @@
     "@bellis/process": "workspace:*",
     "@bellis/protocol": "workspace:*",
     "@bellis/secret-store": "workspace:*",
-    "@bellis/watchdog": "workspace:*"
+    "@bellis/watchdog": "workspace:*",
+    "typebox": "1.3.37"
   }
 }

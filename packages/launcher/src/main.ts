@@ -1,18 +1,17 @@
 /**
  * 启动器入口（R-23）。Windows 上由“登录时运行”的计划任务启动（P1 注册）；macOS 开发机直接运行。
- * 宿主退出后不自动重启：看门狗接管现场，等待操作员处理。
+ * 宿主退出后不自动重启：看门狗接管现场，等待操作员处理。看门狗意外退出则由启动器重启。
  */
 import { fileURLToPath } from 'node:url';
 import { logEvent } from '@bellis/process';
-import { KeyringSecretStore } from '@bellis/secret-store';
 import { launch } from './launch.ts';
 
 const SECRET_SERVICE = 'bellis';
 const script = (specifier: string) => fileURLToPath(import.meta.resolve(specifier));
 
 const session = await launch({
-  store: new KeyringSecretStore(SECRET_SERVICE),
   secretService: SECRET_SERVICE,
+  log: logEvent,
   host: { command: process.execPath, args: [script('@bellis/host/main')] },
   watchdog: { command: process.execPath, args: [script('@bellis/watchdog/main')] },
 });

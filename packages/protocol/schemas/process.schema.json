@@ -75,6 +75,18 @@
         }
       },
       "additionalProperties": false
+    },
+    "HostStatusResult": {
+      "type": "object",
+      "required": [
+        "watchdogConnected"
+      ],
+      "properties": {
+        "watchdogConnected": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }
