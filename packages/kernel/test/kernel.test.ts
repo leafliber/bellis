@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Type from 'typebox';
-import { defineExtension, definePlugin, sleep, systemClock } from '../src/index.ts';
+import { defineExtension, definePlugin, Kernel, sleep, systemClock } from '../src/index.ts';
 import { base, catalog, consumer, entry, Greeter, harness, provider } from './helpers.ts';
 
 test('按依赖激活：消费方排在提供方前面也会等提供方就绪', async () => {
@@ -344,4 +344,131 @@ test('状态变化逐一通知', async () => {
     'provider:quiescing->unloading',
     'provider:unloading->disposed',
   ]);
+});
+
+test('吊销执行许可失败时不当作已吊销，按收尾超时升级给安全核', async () => {
+  const h = harness();
+  const kernel = new Kernel({
+    clock: systemClock(),
+    safety: {
+      revokeLeases: () => {
+        throw new Error('安全核拒绝');
+      },
+      quiesceTimedOut: (event) => h.timeouts.push(event),
+      inMaintenance: () => false,
+    },
+  });
+  kernel.add([entry('provider')], catalog(provider('provider', h.log)));
+  await kernel.settled();
+  await kernel.disable('provider');
+  assert.equal(h.timeouts.length, 1);
+  assert.match(h.timeouts[0]?.error ?? '', /吊销执行许可失败：安全核拒绝/);
+});
+
+test('插件自己声明提供的服务不能顶替必需依赖', async () => {
+  const h = harness();
+  const selfish = definePlugin({
+    manifest: { ...base, id: 'selfish', provides: [Greeter.ref], inject: [Greeter.ref] },
+    activate(ctx) {
+      ctx.provide(Greeter, { greet: () => 'me' });
+    },
+  });
+  h.kernel.add([entry('selfish')], catalog(selfish));
+  await h.kernel.settled();
+  assert.equal(h.state('selfish').state, 'waiting');
+  assert.match(h.state('selfish').reason ?? '', /缺少服务 greeter@1/);
+});
+
+test('热替换前检查新版本的依赖，不满足时不动旧实例', async () => {
+  const h = harness();
+  h.kernel.add([entry('provider')], catalog(provider('provider', h.log)));
+  await h.kernel.settled();
+  const before = h.kernel.snapshot();
+  const needy = definePlugin({
+    manifest: { ...base, id: 'provider', provides: [Greeter.ref], inject: ['missing@1'] },
+    activate: () => assert.fail('不应激活'),
+  });
+  assert.deepEqual(await h.kernel.replace('provider', needy), {
+    ok: false,
+    error: '缺少服务 missing@1',
+  });
+  assert.deepEqual(h.kernel.snapshot(), before);
+});
+
+test('替换停在 FAILED 的条目会启动新实现', async () => {
+  const h = harness({ retryDelaysMs: [] });
+  const broken = definePlugin({
+    manifest: { ...base, id: 'provider', provides: [Greeter.ref] },
+    activate: () => {
+      throw new Error('坏了');
+    },
+  });
+  h.kernel.add([entry('provider')], catalog(broken));
+  await h.kernel.settled();
+  assert.equal(h.state('provider').state, 'failed');
+  assert.deepEqual(await h.kernel.replace('provider', provider('provider', h.log)), { ok: true });
+  await h.kernel.settled();
+  assert.equal(h.state('provider').state, 'active');
+});
+
+test('激活期间注册的监听者在发布前收不到分发；替换失败的实例永远收不到', async () => {
+  const h = harness();
+  const ping = defineExtension<'observe', string>('test.staged', 'observe');
+  const gate = Promise.withResolvers<void>();
+  const slow = definePlugin({
+    manifest: { ...base, id: 'slow' },
+    async activate(ctx) {
+      ctx.on(ping, (value) => {
+        h.log.push(`slow ${value}`);
+      });
+      await gate.promise;
+    },
+  });
+  h.kernel.add([entry('slow')], catalog(slow));
+  await new Promise((resolve) => setImmediate(resolve));
+  h.kernel.extensions.observe(ping, 'early');
+  gate.resolve();
+  await h.kernel.settled();
+  h.kernel.extensions.observe(ping, 'late');
+  assert.deepEqual(h.log, ['slow late']);
+
+  const failing = definePlugin({
+    manifest: { ...base, id: 'slow' },
+    async activate(ctx) {
+      ctx.on(ping, (value) => {
+        h.log.push(`failing ${value}`);
+      });
+      throw new Error('新版本坏了');
+    },
+  });
+  assert.equal((await h.kernel.replace('slow', failing)).ok, false);
+  h.kernel.extensions.observe(ping, 'after');
+  assert.deepEqual(h.log, ['slow late', 'slow after']);
+});
+
+test('清单中同名服务重复、批量加入中有错误时整批不写入', () => {
+  const h = harness();
+  const twice = definePlugin({
+    manifest: { ...base, id: 'twice', provides: ['greeter@1', 'greeter@2'] },
+    activate() {},
+  });
+  assert.throws(() => h.kernel.add([entry('twice')], catalog(twice)), /greeter 重复/);
+  assert.throws(
+    () => h.kernel.add([entry('provider'), entry('ghost')], catalog(provider('provider', h.log))),
+    /未知插件 ghost/,
+  );
+  assert.deepEqual(h.kernel.snapshot(), []);
+});
+
+test('宿主停止后不再接受插件变更', async () => {
+  const h = harness();
+  h.kernel.add([entry('provider')], catalog(provider('provider', h.log)));
+  await h.kernel.settled();
+  await h.kernel.shutdown();
+  await assert.rejects(h.kernel.enable('provider'), /不再接受插件变更/);
+  assert.throws(
+    () => h.kernel.add([entry('x', 'provider')], catalog(provider('provider', h.log))),
+    /不再接受/,
+  );
+  assert.equal(h.state('provider').state, 'disposed');
 });

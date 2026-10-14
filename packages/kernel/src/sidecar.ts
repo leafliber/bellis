@@ -85,8 +85,16 @@ export interface SidecarSpec {
 const isDescription = Compile(SidecarDescription);
 const isHealth = Compile(SidecarHealthResult);
 
+/** 两个列表含有相同的元素，且各自没有重复。 */
 function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((item) => b.includes(item));
+  const left = new Set(a);
+  const right = new Set(b);
+  return (
+    left.size === a.length &&
+    right.size === b.length &&
+    left.size === right.size &&
+    a.every((item) => right.has(item))
+  );
 }
 
 /**

@@ -87,6 +87,8 @@ interface Instance {
   readonly disposers: Disposer[];
   /** 激活期间提供的服务，激活成功后才发布。 */
   readonly staged: Map<string, { major: number; impl: unknown }>;
+  /** 激活期间注册的扩展点监听者，与服务一同发布，发布前不会收到分发。 */
+  readonly stagedHandlers: Array<() => () => void>;
   context: PluginContext;
   published: boolean;
   closed: boolean;
@@ -128,6 +130,16 @@ function configError(definition: PluginDefinition, config: unknown): string | un
   return `配置不合法：${first ? `${first.instancePath || '/'} ${first.message}` : '未知错误'}`;
 }
 
+/** 清单中同一个服务名只能出现一次（提供与依赖分别检查）。 */
+function manifestError(definition: PluginDefinition): string | undefined {
+  for (const field of ['provides', 'inject'] as const) {
+    const names = definition.manifest[field].map((ref) => parseRef(ref).name);
+    const duplicate = names.find((name, index) => names.indexOf(name) !== index);
+    if (duplicate) return `插件 ${definition.manifest.id} 的 ${field} 中 ${duplicate} 重复`;
+  }
+  return undefined;
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -157,6 +169,8 @@ export class Kernel {
   #loop: Promise<void> | undefined;
   #dirty = false;
   #nextInstance = 1;
+  /** 宿主停止后不再接受任何生命周期变更。 */
+  #closed = false;
 
   constructor(options: KernelOptions) {
     this.#clock = options.clock;
@@ -184,10 +198,20 @@ export class Kernel {
 
   /** 按顺序加入 profile 条目。加入后调用 `settled()` 等待调和完成。 */
   add(entries: readonly ResolvedEntry[], plugins: PluginCatalog): void {
-    for (const resolved of entries) {
-      if (this.#entries.has(resolved.id)) throw new Error(`条目 ${resolved.id} 重复`);
+    this.#admit();
+    // 先校验整批，全部合格才写入，失败不留下半批条目。
+    const ids = new Set(this.#entries.keys());
+    const definitions = entries.map((resolved) => {
+      if (ids.has(resolved.id)) throw new Error(`条目 ${resolved.id} 重复`);
+      ids.add(resolved.id);
       const definition = plugins.get(resolved.plugin);
       if (!definition) throw new Error(`条目 ${resolved.id} 引用了未知插件 ${resolved.plugin}`);
+      const invalid = manifestError(definition);
+      if (invalid) throw new Error(invalid);
+      return definition;
+    });
+    entries.forEach((resolved, index) => {
+      const definition = definitions[index] as PluginDefinition;
       this.#entries.set(resolved.id, {
         id: resolved.id,
         definition,
@@ -201,11 +225,12 @@ export class Kernel {
         retry: undefined,
         failure: undefined,
       });
-    }
+    });
     this.#requestReconcile();
   }
 
   async enable(id: string): Promise<void> {
+    this.#admit();
     const entry = this.#entry(id);
     entry.enabled = true;
     this.#requestReconcile();
@@ -213,6 +238,7 @@ export class Kernel {
   }
 
   async disable(id: string): Promise<void> {
+    this.#admit();
     const entry = this.#entry(id);
     entry.enabled = false;
     this.#requestReconcile();
@@ -221,6 +247,7 @@ export class Kernel {
 
   /** 操作员处理后重新尝试一个 FAILED 条目，重试计数清零。 */
   async retry(id: string): Promise<void> {
+    this.#admit();
     const entry = this.#entry(id);
     if (entry.state !== 'failed') return;
     this.#cancelRetry(entry);
@@ -237,7 +264,9 @@ export class Kernel {
    * 关键平面只能在维护态替换（D-19）。
    */
   replace(id: string, definition: PluginDefinition, config?: unknown): Promise<ReplaceResult> {
+    this.#admit();
     return this.#exclusive(async () => {
+      if (this.#closed) return { ok: false, error: '宿主正在停止' };
       const entry = this.#entry(id);
       const critical =
         entry.definition.manifest.tier === 'critical' || definition.manifest.tier === 'critical';
@@ -245,15 +274,24 @@ export class Kernel {
         return { ok: false, error: '关键平面只能在维护态替换' };
       }
       const nextConfig = config ?? entry.config;
-      const invalid = configError(definition, nextConfig);
+      const invalid = manifestError(definition) ?? configError(definition, nextConfig);
       if (invalid) return { ok: false, error: invalid };
 
       if (entry.state !== 'active') {
         entry.definition = definition;
         entry.config = nextConfig;
+        if (entry.state === 'failed') {
+          this.#cancelRetry(entry);
+          entry.attempts = 0;
+          this.#set(entry, 'waiting', undefined);
+        }
         this.#requestReconcile();
         return { ok: true };
       }
+
+      // 新版本的依赖与权限此刻必须齐全，否则不动旧实例。
+      const blockers = this.#blockersOf(definition, entry.grant);
+      if (blockers.length > 0) return { ok: false, error: blockers.join('；') };
 
       const staged = this.#newInstance(entry, definition, nextConfig);
       try {
@@ -300,6 +338,7 @@ export class Kernel {
 
   /** 按 profile 逆序卸载全部插件。 */
   async shutdown(): Promise<void> {
+    this.#closed = true;
     await this.settled();
     await this.#exclusive(async () => {
       for (const entry of [...this.#entries.values()].reverse()) {
@@ -339,6 +378,10 @@ export class Kernel {
     return entry;
   }
 
+  #admit(): void {
+    if (this.#closed) throw new Error('宿主正在停止，不再接受插件变更');
+  }
+
   #exclusive<T>(work: () => Promise<T>): Promise<T> {
     const run = this.#lock.then(work);
     this.#lock = run.catch(() => {});
@@ -360,6 +403,7 @@ export class Kernel {
   }
 
   async #pass(): Promise<void> {
+    if (this.#closed) return;
     for (const entry of [...this.#entries.values()].reverse()) {
       if (entry.state !== 'active') continue;
       if (!entry.enabled) {
@@ -401,16 +445,19 @@ export class Kernel {
 
   /** WAITING 的原因：缺少的服务、不兼容的版本、未授予的权限。 */
   #blockers(entry: Entry): string[] {
+    return this.#blockersOf(entry.definition, entry.grant);
+  }
+
+  #blockersOf(definition: PluginDefinition, grant: ReadonlySet<string>): string[] {
     const reasons: string[] = [];
-    const provided = new Set(entry.definition.manifest.provides.map((ref) => parseRef(ref).name));
-    for (const ref of entry.definition.manifest.inject) {
+    for (const ref of definition.manifest.inject) {
       const dependency = parseRef(ref);
-      if (dependency.optional || provided.has(dependency.name)) continue;
+      if (dependency.optional) continue;
       const found = this.services.resolve(dependency.name, dependency.major);
       if ('missing' in found) reasons.push(found.missing);
     }
-    for (const permission of entry.definition.manifest.permissions) {
-      if (!entry.grant.has(permission)) reasons.push(`未授予权限 ${permission}`);
+    for (const permission of definition.manifest.permissions) {
+      if (!grant.has(permission)) reasons.push(`未授予权限 ${permission}`);
     }
     return reasons;
   }
@@ -441,8 +488,9 @@ export class Kernel {
     );
     for (const ref of definition.manifest.provides) {
       const { name, major } = parseRef(ref);
-      if (!instance.staged.has(name))
+      if (instance.staged.get(name)?.major !== major) {
         throw new Error(`${entry.id} 激活后没有提供 ${name}@${major}`);
+      }
     }
   }
 
@@ -456,7 +504,8 @@ export class Kernel {
       for (const remove of added.reverse()) remove();
       throw error;
     }
-    // 服务最后注册，卸载时最先撤回。
+    // 监听者与服务最后注册，卸载时最先撤回。
+    for (const attach of instance.stagedHandlers.splice(0)) instance.disposers.push(attach());
     instance.disposers.push(...added);
     instance.published = true;
   }
@@ -478,9 +527,15 @@ export class Kernel {
     await this.#unloadConsumers(entry, instance);
 
     try {
-      await this.#safety.revokeLeases(instance.id);
+      await withDeadline(
+        this.#clock,
+        Promise.resolve().then(() => this.#safety.revokeLeases(instance.id)),
+        this.#disposerTimeoutMs,
+        `${entry.id} 吊销执行许可`,
+      );
     } catch (error) {
-      this.#log('plugin.revoke-failed', { entry: entry.id, error: message(error) });
+      // 吊销失败不能当作已吊销：按收尾超时升级给安全核（关键平面会急停）。
+      this.#forced(entry, instance, `吊销执行许可失败：${message(error)}`);
     }
 
     const { quiesce } = instance.definition;
@@ -597,6 +652,7 @@ export class Kernel {
       controller: new AbortController(),
       disposers: [],
       staged: new Map(),
+      stagedHandlers: [],
       context: undefined as unknown as PluginContext,
       published: false,
       closed: false,
@@ -656,7 +712,9 @@ export class Kernel {
       },
       on: (extension, handler) => {
         alive();
-        instance.disposers.push(this.extensions.add(extension, handler));
+        const attach = () => this.extensions.add(extension, handler);
+        if (instance.published) instance.disposers.push(attach());
+        else instance.stagedHandlers.push(attach);
       },
       register: (disposer) => {
         if (instance.closed) {
