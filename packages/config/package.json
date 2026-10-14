@@ -1,0 +1,14 @@
+{
+  "name": "@bellis/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/protocol": "workspace:*",
+    "@bellis/secret-store": "workspace:*",
+    "typebox": "1.3.37"
+  }
+}

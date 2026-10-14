@@ -1,4 +1,5 @@
 import { ChannelAccept, ChannelChallenge, ChannelHello, ChannelProof } from './channel.ts';
+import { HostConfig, ObsSecret } from './config.ts';
 import {
   RpcCancelParams,
   RpcErrorObject,
@@ -16,6 +17,7 @@ import {
   SidecarHealthResult,
 } from './plugin.ts';
 import {
+  HostHeartbeatParams,
   HostStatusResult,
   HostStoppingParams,
   ProcessShutdownParams,
@@ -24,6 +26,7 @@ import {
 } from './process.ts';
 
 export * from './channel.ts';
+export * from './config.ts';
 export * from './jsonrpc.ts';
 export * from './plugin.ts';
 export * from './process.ts';
@@ -33,6 +36,7 @@ export * from './process.ts';
  * 每个模块生成 `schemas/<模块>.schema.json`，类型放在 `$defs` 下。
  */
 export const schemaModules = {
+  config: { HostConfig, ObsSecret },
   channel: { ChannelHello, ChannelChallenge, ChannelProof, ChannelAccept },
   jsonrpc: {
     RpcRequest,
@@ -50,5 +54,6 @@ export const schemaModules = {
     ProcessShutdownResult,
     HostStoppingParams,
     HostStatusResult,
+    HostHeartbeatParams,
   },
 } as const;

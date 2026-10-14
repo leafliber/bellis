@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { rmSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   executeIntent,
@@ -348,6 +349,19 @@ test('投影状态冻结，调用方不能原地修改', () => {
     assert.deepEqual(store.view(counts), { 'a.done': 1 });
   } finally {
     store.close();
+    db.cleanup();
+  }
+});
+
+test('数据库所在目录不存在时自动创建', () => {
+  const db = tempDb();
+  const nested = db.path.replace(/\.db$/, '/nested/state.db');
+  try {
+    const store = StateStore.open({ path: nested });
+    store.append('a.done', {});
+    store.close();
+  } finally {
+    rmSync(nested.replace(/\/nested\/state\.db$/, ''), { recursive: true, force: true });
     db.cleanup();
   }
 });

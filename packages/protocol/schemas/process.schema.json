@@ -87,6 +87,27 @@
         }
       },
       "additionalProperties": false
+    },
+    "HostHeartbeatParams": {
+      "type": "object",
+      "required": [
+        "seq",
+        "mode",
+        "maintenance"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string"
+        },
+        "maintenance": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

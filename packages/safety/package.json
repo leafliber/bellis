@@ -1,0 +1,17 @@
+{
+  "name": "@bellis/safety",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/kernel": "workspace:*",
+    "@bellis/obs": "workspace:*",
+    "@bellis/store": "workspace:*"
+  },
+  "devDependencies": {
+    "@bellis/obs": "workspace:*"
+  }
+}

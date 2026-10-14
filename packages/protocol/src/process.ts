@@ -12,6 +12,8 @@ export const ChildEnv = {
   SessionId: 'BELLIS_SESSION_ID',
   ChannelPath: 'BELLIS_CHANNEL_PATH',
   ChannelKey: 'BELLIS_CHANNEL_KEY',
+  /** 宿主与看门狗共用的配置文件路径。 */
+  Config: 'BELLIS_CONFIG',
   /** sidecar 连接宿主时使用的角色，由代理插件分配。 */
   Role: 'BELLIS_ROLE',
   /** SecretStore 的服务名，缺省为 `bellis`；测试用独立的服务名互不干扰。 */
@@ -52,6 +54,19 @@ export const HostStopping = 'host.stopping';
 
 export const HostStoppingParams = Type.Object({ reason: Type.String({ maxLength: 200 }) }, closed);
 export type HostStoppingParams = Static<typeof HostStoppingParams>;
+
+/** 宿主发给看门狗的心跳通知；看门狗在超时内收不到即执行静音与切安全场景（R-14）。 */
+export const HostHeartbeat = 'host.heartbeat';
+
+export const HostHeartbeatParams = Type.Object(
+  {
+    seq: Type.Integer({ minimum: 0 }),
+    mode: Type.String(),
+    maintenance: Type.Boolean(),
+  },
+  closed,
+);
+export type HostHeartbeatParams = Static<typeof HostHeartbeatParams>;
 
 /** 启动器查询宿主状态，用于判断会话是否就绪（看门狗已连上宿主）。 */
 export const HostStatus = 'host.status';

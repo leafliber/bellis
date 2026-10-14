@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { type Driver, openSqlite, type Row } from './driver.ts';
 import { SCHEMA, SCHEMA_VERSION } from './schema.ts';
 
@@ -156,7 +158,9 @@ export class StateStore {
   #pending: { views: Map<string, unknown>; events: StoredEvent[] } | undefined;
   #healthy = true;
 
+  /** 打开（必要时创建）数据库文件及其所在目录。 */
   static open(options: StoreOptions): StateStore {
+    mkdirSync(dirname(options.path), { recursive: true });
     const db = openSqlite(options.path);
     try {
       return new StateStore(db, options);

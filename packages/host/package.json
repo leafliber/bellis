@@ -8,7 +8,13 @@
   },
   "dependencies": {
     "@bellis/channel": "workspace:*",
+    "@bellis/config": "workspace:*",
+    "@bellis/kernel": "workspace:*",
+    "@bellis/obs": "workspace:*",
     "@bellis/process": "workspace:*",
-    "@bellis/protocol": "workspace:*"
+    "@bellis/protocol": "workspace:*",
+    "@bellis/safety": "workspace:*",
+    "@bellis/secret-store": "workspace:*",
+    "@bellis/store": "workspace:*"
   }
 }
