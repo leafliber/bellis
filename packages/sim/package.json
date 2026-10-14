@@ -1,0 +1,23 @@
+{
+  "name": "@bellis/sim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/audience": "workspace:*",
+    "@bellis/director": "workspace:*",
+    "@bellis/kernel": "workspace:*",
+    "@bellis/moderation": "workspace:*",
+    "@bellis/obs": "workspace:*",
+    "@bellis/safety": "workspace:*",
+    "@bellis/speech": "workspace:*",
+    "@bellis/stage": "workspace:*",
+    "@bellis/store": "workspace:*"
+  },
+  "devDependencies": {
+    "fast-check": "4.10.2"
+  }
+}

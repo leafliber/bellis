@@ -1,5 +1,6 @@
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
+import Value from 'typebox/value';
 import { type Clock, type TimerHandle, withDeadline } from './clock.ts';
 import { Extensions } from './extension.ts';
 import type { Disposer, PluginCatalog, PluginContext, PluginDefinition } from './plugin.ts';
@@ -123,11 +124,24 @@ function validator(schema: TSchema) {
   return compiled;
 }
 
-function configError(definition: PluginDefinition, config: unknown): string | undefined {
-  const check = validator(definition.manifest.config);
-  if (check.Check(config)) return undefined;
+/** 按清单的 Schema 补齐缺省值（不改动传入的配置），再校验。 */
+function prepareConfig(
+  definition: PluginDefinition,
+  raw: unknown,
+): { config: unknown } | { error: string } {
+  const schema = definition.manifest.config;
+  const config = Value.Default(schema, structuredClone(raw ?? {}));
+  const check = validator(schema);
+  if (check.Check(config)) return { config };
   const first = [...check.Errors(config)][0];
-  return `配置不合法：${first ? `${first.instancePath || '/'} ${first.message}` : '未知错误'}`;
+  return {
+    error: `配置不合法：${first ? `${first.instancePath || '/'} ${first.message}` : '未知错误'}`,
+  };
+}
+
+function configError(definition: PluginDefinition, raw: unknown): string | undefined {
+  const prepared = prepareConfig(definition, raw);
+  return 'error' in prepared ? prepared.error : undefined;
 }
 
 /** 清单中同一个服务名只能出现一次（提供与依赖分别检查）。 */
@@ -644,7 +658,9 @@ export class Kernel {
     this.#requestReconcile();
   }
 
-  #newInstance(entry: Entry, definition: PluginDefinition, config: unknown): Instance {
+  #newInstance(entry: Entry, definition: PluginDefinition, raw: unknown): Instance {
+    const prepared = prepareConfig(definition, raw);
+    const config = 'config' in prepared ? prepared.config : raw;
     const instance: Instance = {
       id: `${entry.id}#${this.#nextInstance++}`,
       definition,
@@ -687,6 +703,7 @@ export class Kernel {
       get forced() {
         return instance.forced;
       },
+      extensions: this.extensions,
       service: <T>(token: ServiceToken<T>): T => {
         alive();
         declared(token, false);

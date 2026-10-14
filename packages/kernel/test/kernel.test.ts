@@ -472,3 +472,26 @@ test('宿主停止后不再接受插件变更', async () => {
   );
   assert.equal(h.state('provider').state, 'disposed');
 });
+
+test('配置按 Schema 补齐缺省值后交给插件，不改动 profile 中的原值', async () => {
+  const h = harness();
+  let received: unknown;
+  const withDefaults = definePlugin({
+    manifest: {
+      ...base,
+      id: 'defaults',
+      config: Type.Object({
+        rate: Type.Number({ default: 5 }),
+        name: Type.String({ default: 'x' }),
+      }),
+    },
+    activate(ctx) {
+      received = ctx.config;
+    },
+  });
+  const raw = { name: 'given' };
+  h.kernel.add([entry('defaults', 'defaults', { config: raw })], catalog(withDefaults));
+  await h.kernel.settled();
+  assert.deepEqual(received, { rate: 5, name: 'given' });
+  assert.deepEqual(raw, { name: 'given' });
+});
