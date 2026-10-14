@@ -38,7 +38,7 @@
 | `inject` | 依赖，形如 `stage@1`；可选依赖加 `?`（如 `memory@1?`），不阻塞激活，在用到时探测 |
 | `permissions` | 申请的能力，例如 `speech.output`、`obs.scene`、`game.goal`、`game.input`、`net.egress:<主机>` |
 | `process` | `in-process` 或 `sidecar` |
-| `config` | 配置的 Schema |
+| `config` | 配置的 Schema；加载时先按 Schema 补齐缺省值再校验 |
 
 服务按 `名字@主版本` 匹配，主版本不兼容时消费方停在 WAITING，并给出原因。
 
