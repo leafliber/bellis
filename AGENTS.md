@@ -12,6 +12,7 @@
 - `pnpm run format`：自动修正格式。
 - `pnpm start`：在本机运行启动器（拉起宿主与看门狗，缺省用 `config/sim.json`），Ctrl+C 停止。
 - `pnpm operator <status | mode 目标 | presence | estop>`：操作员命令，例如 `pnpm operator mode M0`。
+- `pnpm sim [--seed N] [--runs N]`：确定性仿真的大规模探索；失败时给出复现命令。
 
 ## 从哪里开始
 
