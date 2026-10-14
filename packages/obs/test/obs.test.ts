@@ -70,3 +70,12 @@ test('连接断开时未完成的请求失败，客户端得到关闭通知', as
   await assert.rejects(client.request('GetStreamStatus'), /已关闭/);
   await obs.close();
 });
+
+test('批量结果缺失或对不上时，应急结果为失败', async () => {
+  const fake = {
+    batch: async () => [{ requestType: 'SetInputMute', ok: true, code: 100 }],
+  } as unknown as Parameters<typeof runEmergency>[0];
+  assert.equal((await runEmergency(fake, policy)).ok, false);
+  const empty = { batch: async () => [] } as unknown as Parameters<typeof runEmergency>[0];
+  assert.equal((await runEmergency(empty, policy)).ok, false);
+});

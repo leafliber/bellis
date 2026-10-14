@@ -35,9 +35,18 @@ export async function runEmergency(
   policy: EmergencyPolicy,
   timeoutMs = 1000,
 ): Promise<EmergencyOutcome> {
-  const results = await client.batch(emergencyRequests(policy), { timeoutMs });
-  const ok = results.every(
-    (r) => r.ok || (r.requestType === 'StopStream' && r.code === RequestStatus.OutputNotRunning),
-  );
+  const requests = emergencyRequests(policy);
+  const results = await client.batch(requests, { timeoutMs });
+  // 每个请求都要有对应的成功结果；结果缺失或对不上一律算失败。
+  const ok =
+    results.length === requests.length &&
+    requests.every((request, index) => {
+      const result = results[index];
+      if (!result || result.requestType !== request.requestType) return false;
+      return (
+        result.ok ||
+        (result.requestType === 'StopStream' && result.code === RequestStatus.OutputNotRunning)
+      );
+    });
   return { ok, results };
 }

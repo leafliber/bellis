@@ -3,7 +3,8 @@
  */
 export type Mode = 'M0' | 'M1' | 'M2' | 'M3' | 'safe-stop';
 
-const RANK: Record<Mode, number> = { 'safe-stop': 0, M0: 1, M1: 1, M2: 2, M3: 3 };
+/** M0 只在仿真中出现，与真实输出模式不可互换：不在同一条升降序列上。 */
+const RANK: Record<Mode, number> = { 'safe-stop': 0, M0: 0.5, M1: 1, M2: 2, M3: 3 };
 
 export function producesOutput(mode: Mode): boolean {
   return mode !== 'safe-stop';
@@ -30,10 +31,12 @@ export function upgradeBlocker(
   ctx: UpgradeContext,
 ): string | undefined {
   if (target === current) return '已经处于该模式';
-  if (target === 'safe-stop' || RANK[target] < RANK[current]) return undefined;
-  if (ctx.maintenance) return '维护态中不能进入输出模式';
+  if (target === 'safe-stop') return undefined;
+  // 仿真与真实输出互不相通：先检查，再看是不是降级。
   if (ctx.simulation && target !== 'M0') return 'sim profile 下只允许 M0';
   if (!ctx.simulation && target === 'M0') return 'M0 只在 sim profile 下可用';
+  if (RANK[target] < RANK[current]) return undefined;
+  if (ctx.maintenance) return '维护态中不能进入输出模式';
   if (!ctx.storeHealthy) return '状态存储不可用';
   if (!ctx.emergencyReady) return 'OBS 应急连接不可用';
   if (target === 'M0') return undefined;

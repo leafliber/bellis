@@ -126,3 +126,18 @@ test('维护态只能从安全停止进入，期间不能进入输出模式', as
     await s.close();
   }
 });
+
+test('真实输出模式不能降到 M0', async () => {
+  const s = await setup();
+  try {
+    s.safety.confirmPresence();
+    s.safety.requestMode('M2');
+    assert.deepEqual(s.safety.requestMode('M0'), {
+      ok: false,
+      reason: 'M0 只在 sim profile 下可用',
+    });
+    assert.equal(s.safety.mode, 'M2');
+  } finally {
+    await s.close();
+  }
+});
