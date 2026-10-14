@@ -4,8 +4,8 @@ import { readFileSync, rmSync } from 'node:fs';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import fc from 'fast-check';
-import { executeOnce, SimulatedCrash, StateStore } from '../src/index.ts';
-import { counter, counts, fold, intent, tempDb } from './helpers.ts';
+import { executeOnce, ResourceIsolated, SimulatedCrash, StateStore } from '../src/index.ts';
+import { base, counter, counts, fold, tempDb } from './helpers.ts';
 
 type Command =
   | { kind: 'append'; type: string }
@@ -30,6 +30,7 @@ interface World {
   tokens: Map<string, number>;
 }
 
+/** 执行一串命令。目标因结果未知被隔离时不执行，这是预期行为。 */
 async function run(store: StateStore, commands: readonly Command[], world: World): Promise<void> {
   for (const c of commands) {
     if (c.kind === 'append') {
@@ -38,42 +39,73 @@ async function run(store: StateStore, commands: readonly Command[], world: World
       const value = store.nextToken(c.resource);
       world.tokens.set(c.resource, Math.max(world.tokens.get(c.resource) ?? 0, value));
     } else {
-      await executeOnce(store, intent(c.key), async () => {
-        world.effects.set(c.key, (world.effects.get(c.key) ?? 0) + 1);
-        if (c.fails) throw new Error('设备拒绝');
-        return { ok: true };
-      });
+      try {
+        await executeOnce(store, base(c.key), { key: c.key }, async () => {
+          world.effects.set(c.key, (world.effects.get(c.key) ?? 0) + 1);
+          if (c.fails) throw new Error('设备拒绝');
+          return { ok: true };
+        });
+      } catch (error) {
+        if (!(error instanceof ResourceIsolated)) throw error;
+      }
     }
   }
+}
+
+function open(path: string, fault?: (point: string) => void): StateStore {
+  return StateStore.open({
+    path,
+    projections: [counts],
+    now: counter(),
+    ...(fault ? { fault } : {}),
+  });
+}
+
+/** 空跑一遍，数出打开数据库并执行这串命令会经过多少个写入点（含读取点）。 */
+async function countPoints(commands: readonly Command[]): Promise<number> {
+  const db = tempDb();
+  let points = 0;
+  const store = open(db.path, () => {
+    points += 1;
+  });
+  try {
+    await run(store, commands, { effects: new Map(), tokens: new Map() });
+  } finally {
+    store.close();
+    db.cleanup();
+  }
+  return points;
 }
 
 test('在任一写入点崩溃后重启：状态一致，副作用不重做，执行中的意图标为 unknown，令牌不回退', async () => {
   await fc.assert(
     fc.asyncProperty(
       fc.array(command, { minLength: 1, maxLength: 12 }),
-      fc.nat(60),
-      async (commands, crashAt) => {
+      fc.nat(),
+      async (commands, pick) => {
+        // 保证每一轮都真的在某个点崩溃（包括打开数据库时）。
+        const points = await countPoints(commands);
+        const crashAt = 1 + (pick % points);
         const db = tempDb();
         const world: World = { effects: new Map(), tokens: new Map() };
         try {
           let hits = 0;
-          const first = StateStore.open({
-            path: db.path,
-            projections: [counts],
-            now: counter(),
-            fault: (point) => {
+          let crashed = false;
+          let first: StateStore | undefined;
+          try {
+            first = open(db.path, (point) => {
               hits += 1;
               if (hits === crashAt) throw new SimulatedCrash(point);
-            },
-          });
-          try {
+            });
             await run(first, commands, world);
           } catch (error) {
             if (!(error instanceof SimulatedCrash)) throw error;
+            crashed = true;
           }
-          first.close();
+          first?.close();
+          assert.ok(crashed, `应在第 ${crashAt}/${points} 个点崩溃`);
 
-          const second = StateStore.open({ path: db.path, projections: [counts], now: counter() });
+          const second = open(db.path);
           try {
             const report = second.recover();
             assert.equal(second.intentsIn('pending').length, 0);
@@ -129,7 +161,9 @@ for (const [point, expected] of [
         assert.equal(store.intentByKey('k')?.state, expected.state);
         const ran = () => readFileSync(effectsLog, { encoding: 'utf8', flag: 'a+' }).length;
         assert.equal(ran(), expected.effects);
-        const again = await executeOnce(store, intent('k'), async () => assert.fail('不应重做'));
+        const again = await executeOnce(store, base('k'), { key: 'k' }, async () =>
+          assert.fail('不应重做'),
+        );
         assert.equal(again.executed, false);
       } finally {
         store.close();

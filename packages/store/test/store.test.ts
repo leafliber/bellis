@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { executeOnce, openSqlite, StateStore, StoreUnavailable } from '../src/index.ts';
-import { counter, counts, fold, intent, tempDb } from './helpers.ts';
+import {
+  executeIntent,
+  executeOnce,
+  openSqlite,
+  payloadHash,
+  ResourceIsolated,
+  StateStore,
+  StoreUnavailable,
+} from '../src/index.ts';
+import { base, counter, counts, fold, intent, tempDb } from './helpers.ts';
 
 test('事件只追加，投影与事件同事务更新，重启后从事件重建', () => {
   const db = tempDb();
@@ -59,8 +67,8 @@ test('同一幂等键只执行一次；载荷不同则拒绝', async () => {
       runs += 1;
       return { played: true };
     };
-    const first = await executeOnce(store, intent('k1'), effect);
-    const second = await executeOnce(store, intent('k1'), effect);
+    const first = await executeOnce(store, base('k1'), { key: 'k1' }, effect);
+    const second = await executeOnce(store, base('k1'), { key: 'k1' }, effect);
     assert.equal(runs, 1);
     assert.equal(first.executed, true);
     assert.equal(second.executed, false);
@@ -80,12 +88,14 @@ test('副作用失败时记为失败，不重试', async () => {
   const db = tempDb();
   const store = StateStore.open({ path: db.path });
   try {
-    const { intent: failed } = await executeOnce(store, intent('k'), async () => {
+    const { intent: failed } = await executeOnce(store, base('k'), { key: 'k' }, async () => {
       throw new Error('设备拒绝');
     });
     assert.equal(failed.state, 'failed');
     assert.equal(failed.error, '设备拒绝');
-    const again = await executeOnce(store, intent('k'), async () => assert.fail('不应重做'));
+    const again = await executeOnce(store, base('k'), { key: 'k' }, async () =>
+      assert.fail('不应重做'),
+    );
     assert.equal(again.executed, false);
   } finally {
     store.close();
@@ -214,6 +224,128 @@ test('投影与库中事件始终一致', () => {
   try {
     for (let i = 0; i < 20; i += 1) store.append(`t${i % 3}.done`, { i });
     assert.deepEqual(store.view(counts), fold(counts, store.events()));
+  } finally {
+    store.close();
+    db.cleanup();
+  }
+});
+
+test('执行前核对载荷：与授权时不一致则拒绝执行', async () => {
+  const db = tempDb();
+  const store = StateStore.open({ path: db.path });
+  try {
+    const { intent: authorized } = store.authorize({
+      ...base('k'),
+      payloadHash: payloadHash({ text: 'A' }),
+    });
+    await assert.rejects(
+      executeIntent(store, authorized, { text: 'B' }, async () => assert.fail('不应执行')),
+      /载荷与授权时不一致/,
+    );
+    assert.equal(store.intent(authorized.id)?.state, 'pending');
+    let seen: unknown;
+    await executeIntent(store, authorized, { text: 'A' }, async (payload) => {
+      seen = payload;
+    });
+    assert.deepEqual(seen, { text: 'A' });
+  } finally {
+    store.close();
+    db.cleanup();
+  }
+});
+
+test('同一幂等键但目标等任何授权字段不同都视为篡改', () => {
+  const db = tempDb();
+  const store = StateStore.open({ path: db.path });
+  try {
+    store.authorize(intent('k'));
+    assert.throws(() => store.authorize(intent('k', { target: 'elsewhere' })), /已用于不同的意图/);
+    assert.throws(
+      () => store.authorize(intent('k', { capabilities: ['obs.scene'] })),
+      /已用于不同的意图/,
+    );
+    assert.throws(() => store.authorize(intent('k', { timeSensitive: false })), /已用于不同的意图/);
+    assert.equal(store.authorize(intent('k')).duplicate, true);
+  } finally {
+    store.close();
+    db.cleanup();
+  }
+});
+
+test('目标上有结果未知的意图时，存储层同样拒绝新的意图', () => {
+  const db = tempDb();
+  const store = StateStore.open({ path: db.path });
+  try {
+    const { intent: first } = store.authorize(intent('a'));
+    store.start(first.id);
+    store.recover();
+    assert.throws(() => store.authorize(intent('b')), ResourceIsolated);
+    assert.equal(store.authorize(intent('c', { target: 'chat' })).duplicate, false);
+    store.resolve(first.id, { ok: false, error: '操作员确认未播出' }, 'operator');
+    assert.equal(store.authorize(intent('b')).duplicate, false);
+  } finally {
+    store.close();
+    db.cleanup();
+  }
+});
+
+test('有时效的意图只能由操作员结案', () => {
+  const db = tempDb();
+  const store = StateStore.open({ path: db.path });
+  try {
+    const { intent: spoken } = store.authorize(intent('speech'));
+    store.start(spoken.id);
+    store.recover();
+    assert.throws(
+      () => store.resolve(spoken.id, { ok: true, result: null }, 'reconcile'),
+      /只能由操作员结案/,
+    );
+    assert.equal(
+      store.resolve(spoken.id, { ok: true, result: null }, 'operator').state,
+      'succeeded',
+    );
+  } finally {
+    store.close();
+    db.cleanup();
+  }
+});
+
+test('读取时遇到存储故障同样进入不可用状态', () => {
+  const db = tempDb();
+  let broken = false;
+  const store = StateStore.open({
+    path: db.path,
+    fault: (point) => {
+      if (broken && point === 'read') {
+        throw Object.assign(new Error('disk I/O error'), {
+          code: 'ERR_SQLITE_ERROR',
+          errcode: 266,
+        });
+      }
+    },
+  });
+  try {
+    broken = true;
+    assert.throws(() => store.events(), StoreUnavailable);
+    broken = false;
+    assert.equal(store.healthy, false);
+    assert.throws(() => store.append('a.done', {}), StoreUnavailable);
+  } finally {
+    store.close();
+    db.cleanup();
+  }
+});
+
+test('投影状态冻结，调用方不能原地修改', () => {
+  const db = tempDb();
+  const store = StateStore.open({ path: db.path, projections: [counts] });
+  try {
+    store.append('a.done', {});
+    const view = store.view(counts);
+    assert.throws(() => {
+      (view as Record<string, number>)['a.done'] = 99;
+    }, TypeError);
+    assert.deepEqual(store.view(counts), { 'a.done': 1 });
   } finally {
     store.close();
     db.cleanup();

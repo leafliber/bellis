@@ -88,6 +88,34 @@ export class StoreUnavailable extends Error {
   }
 }
 
+/** 目标上有结果未知的意图：在对账或人工结案前隔离该目标。 */
+export class ResourceIsolated extends Error {
+  constructor(target: string, key: string) {
+    super(`目标 ${target} 有结果未知的意图 ${key}，已隔离`);
+    this.name = 'ResourceIsolated';
+  }
+}
+
+/** 投影状态冻结后交出，调用方与归约函数都不能原地修改。 */
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+}
+
+function sameRequest(existing: Intent, input: IntentInput): boolean {
+  return (
+    existing.type === input.type &&
+    existing.target === input.target &&
+    existing.payloadHash === input.payloadHash &&
+    existing.timeSensitive === input.timeSensitive &&
+    JSON.stringify(existing.capabilities) === JSON.stringify(input.capabilities) &&
+    JSON.stringify(existing.source) === JSON.stringify(input.source)
+  );
+}
+
 /** 存储层面的故障（I/O、磁盘满、损坏、只读），区别于约束或逻辑错误。 */
 const STORAGE_FAULTS = new Set([8, 10, 11, 13, 14, 26]);
 
@@ -129,7 +157,13 @@ export class StateStore {
   #healthy = true;
 
   static open(options: StoreOptions): StateStore {
-    return new StateStore(openSqlite(options.path), options);
+    const db = openSqlite(options.path);
+    try {
+      return new StateStore(db, options);
+    } catch (error) {
+      db.close();
+      throw error;
+    }
   }
 
   private constructor(db: Driver, options: StoreOptions) {
@@ -176,13 +210,27 @@ export class StateStore {
     } catch (error) {
       this.#pending = undefined;
       if (!committed && this.#db.inTransaction) this.#db.exec('ROLLBACK');
-      if (isStorageFault(error)) {
-        this.#healthy = false;
-        this.#onFault(error as Error);
-        throw new StoreUnavailable(error);
-      }
-      throw error;
+      throw this.#classify(error);
     }
+  }
+
+  /** 读取同样经过故障分类：存储故障使状态存储进入不可用状态。 */
+  #read<T>(work: () => T): T {
+    try {
+      this.#fault('read');
+      return work();
+    } catch (error) {
+      throw this.#classify(error);
+    }
+  }
+
+  #classify(error: unknown): unknown {
+    if (!isStorageFault(error)) return error;
+    if (this.#healthy) {
+      this.#healthy = false;
+      this.#onFault(error as Error);
+    }
+    return new StoreUnavailable(error);
   }
 
   append<T>(
@@ -199,7 +247,9 @@ export class StateStore {
 
   /** 资源当前的执行许可令牌；从未授予过时为 0。 */
   token(resource: string): number {
-    const row = this.#db.prepare('SELECT token FROM lease_tokens WHERE resource = ?').get(resource);
+    const row = this.#read(() =>
+      this.#db.prepare('SELECT token FROM lease_tokens WHERE resource = ?').get(resource),
+    );
     return row ? Number(row.token) : 0;
   }
 
@@ -209,10 +259,12 @@ export class StateStore {
   }
 
   events(afterSeq = 0): StoredEvent[] {
-    return this.#db
-      .prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq')
-      .all(afterSeq)
-      .map(toEvent);
+    return this.#read(() =>
+      this.#db
+        .prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq')
+        .all(afterSeq)
+        .map(toEvent),
+    );
   }
 
   /** 订阅提交后的新事件；重放历史事件时不通知。 */
@@ -228,16 +280,22 @@ export class StateStore {
 
   /**
    * 写入意图，同事务记录授权事件。幂等键已存在时返回已有意图，不再写入；
-   * 同一幂等键但载荷不同视为篡改，抛错。
+   * 同一幂等键但任何授权字段不同都视为篡改，抛错。目标上有结果未知的意图时抛 ResourceIsolated。
    */
   authorize(input: IntentInput): { intent: Intent; duplicate: boolean } {
     const existing = this.intentByKey(input.key);
     if (existing) {
-      if (existing.payloadHash !== input.payloadHash || existing.type !== input.type) {
-        throw new Error(`幂等键 ${input.key} 已用于不同的意图`);
-      }
+      if (!sameRequest(existing, input)) throw new Error(`幂等键 ${input.key} 已用于不同的意图`);
       return { intent: existing, duplicate: true };
     }
+    const isolated = this.#read(() =>
+      this.#db
+        .prepare(
+          "SELECT key FROM intents WHERE state = 'unknown' AND target = ? ORDER BY id LIMIT 1",
+        )
+        .get(input.target),
+    );
+    if (isolated) throw new ResourceIsolated(input.target, String(isolated.key));
     const intent = this.transaction((tx) => {
       const now = this.#now();
       const row = this.#db
@@ -284,10 +342,13 @@ export class StateStore {
     return this.#move(id, 'failed', 'intent.failed', { error }, 'complete');
   }
 
-  /** 对账或人工结案：结果未知的意图补记结果。 */
+  /** 对账或人工结案：结果未知的意图补记结果。有时效的意图只能由操作员结案。 */
   resolve(id: number, outcome: Outcome, by: 'reconcile' | 'operator'): Intent {
     const current = this.intent(id);
     if (current?.state !== 'unknown') throw new Error(`意图 ${id} 不是 unknown，不能结案`);
+    if (by === 'reconcile' && current.timeSensitive) {
+      throw new Error(`意图 ${id} 有时效，只能由操作员结案`);
+    }
     return outcome.ok
       ? this.#move(
           id,
@@ -300,20 +361,22 @@ export class StateStore {
   }
 
   intent(id: number): Intent | undefined {
-    const row = this.#db.prepare('SELECT * FROM intents WHERE id = ?').get(id);
+    const row = this.#read(() => this.#db.prepare('SELECT * FROM intents WHERE id = ?').get(id));
     return row ? toIntent(row) : undefined;
   }
 
   intentByKey(key: string): Intent | undefined {
-    const row = this.#db.prepare('SELECT * FROM intents WHERE key = ?').get(key);
+    const row = this.#read(() => this.#db.prepare('SELECT * FROM intents WHERE key = ?').get(key));
     return row ? toIntent(row) : undefined;
   }
 
   intentsIn(state: IntentState): Intent[] {
-    return this.#db
-      .prepare('SELECT * FROM intents WHERE state = ? ORDER BY id')
-      .all(state)
-      .map(toIntent);
+    return this.#read(() =>
+      this.#db
+        .prepare('SELECT * FROM intents WHERE state = ? ORDER BY id')
+        .all(state)
+        .map(toIntent),
+    );
   }
 
   /**
@@ -400,7 +463,7 @@ export class StateStore {
       data,
     };
     for (const projection of this.#projections) {
-      const next = projection.reduce(pending.views.get(projection.name), event);
+      const next = deepFreeze(projection.reduce(pending.views.get(projection.name), event));
       pending.views.set(projection.name, next);
       this.#db
         .prepare(
@@ -436,11 +499,16 @@ export class StateStore {
 
   /** 从事件完整重放投影，覆盖库中保存的投影；重放期间不通知订阅者。 */
   #rebuild(): void {
-    const views = new Map<string, unknown>(this.#projections.map((p) => [p.name, p.initial]));
+    const views = new Map<string, unknown>(
+      this.#projections.map((p) => [p.name, deepFreeze(p.initial)]),
+    );
     const events = this.events();
     for (const event of events) {
       for (const projection of this.#projections) {
-        views.set(projection.name, projection.reduce(views.get(projection.name), event));
+        views.set(
+          projection.name,
+          deepFreeze(projection.reduce(views.get(projection.name), event)),
+        );
       }
     }
     const last = events.at(-1)?.seq ?? 0;

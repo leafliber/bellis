@@ -4,7 +4,7 @@
  */
 import { appendFileSync } from 'node:fs';
 import { executeOnce, StateStore } from '../../src/index.ts';
-import { intent } from '../helpers.ts';
+import { base } from '../helpers.ts';
 
 const [path, effects, crashPoint] = process.argv.slice(2) as [string, string, string];
 const store = StateStore.open({
@@ -13,7 +13,7 @@ const store = StateStore.open({
     if (point === crashPoint) process.kill(process.pid, 'SIGKILL');
   },
 });
-await executeOnce(store, intent('k'), async () => {
+await executeOnce(store, base('k'), { key: 'k' }, async () => {
   appendFileSync(effects, 'x');
   return null;
 });

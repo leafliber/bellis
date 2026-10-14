@@ -38,6 +38,16 @@ export function intent(key: string, overrides: Partial<IntentInput> = {}): Inten
   };
 }
 
+/** executeOnce 的输入：载荷另传，摘要由 executeOnce 计算。 */
+export function base(
+  key: string,
+  overrides: Partial<IntentInput> = {},
+): Omit<IntentInput, 'payloadHash'> {
+  const full: Partial<IntentInput> = intent(key, overrides);
+  delete full.payloadHash;
+  return full as Omit<IntentInput, 'payloadHash'>;
+}
+
 export function counter(): () => number {
   let t = 1_000;
   return () => (t += 1);
