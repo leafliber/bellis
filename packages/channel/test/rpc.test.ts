@@ -5,10 +5,13 @@ import { RpcErrorCode } from '@bellis/protocol';
 import { ChannelError, RpcError, RpcPeer } from '../src/index.ts';
 import { connectedPair } from './helpers.ts';
 
-async function rpcPair() {
+async function rpcPair(maxInflight?: number) {
   const pair = await connectedPair();
   const client = new RpcPeer(pair.client, { timeoutMs: 1000 });
-  const server = new RpcPeer(pair.server, { timeoutMs: 1000 });
+  const server = new RpcPeer(pair.server, {
+    timeoutMs: 1000,
+    ...(maxInflight ? { maxInflight } : {}),
+  });
   return { ...pair, clientRpc: client, serverRpc: server };
 }
 
@@ -140,6 +143,45 @@ test('同名方法只能有一个处理函数，撤销后可以重新注册', as
     dispose();
     p.serverRpc.handle('a.b', () => 2);
     assert.equal(await p.clientRpc.request('a.b'), 2);
+  } finally {
+    await p.close();
+  }
+});
+
+test('请求方超时后，对端的处理收到取消', async () => {
+  const p = await rpcPair();
+  try {
+    const cancelled = Promise.withResolvers<void>();
+    p.serverRpc.handle('a.hang', (_params, { signal }) => {
+      signal.addEventListener('abort', () => cancelled.resolve());
+      return new Promise(() => {});
+    });
+    await assert.rejects(p.clientRpc.request('a.hang', {}, { timeoutMs: 50 }));
+    await cancelled.promise;
+  } finally {
+    await p.close();
+  }
+});
+
+test('正在处理的请求达到上限时以 ServerBusy 拒绝', async () => {
+  const p = await rpcPair(1);
+  try {
+    p.serverRpc.handle('a.hang', () => new Promise(() => {}));
+    void p.clientRpc.request('a.hang').catch(() => {});
+    await assert.rejects(
+      p.clientRpc.request('a.hang'),
+      (error) => error instanceof RpcError && error.code === RpcErrorCode.ServerBusy,
+    );
+  } finally {
+    await p.close();
+  }
+});
+
+test('rpc. 前缀保留给协议自身', async () => {
+  const p = await rpcPair();
+  try {
+    assert.throws(() => p.serverRpc.handle('rpc.cancel', () => null));
+    assert.throws(() => p.serverRpc.onNotification('rpc.cancel', () => {}));
   } finally {
     await p.close();
   }

@@ -3,6 +3,10 @@ export type ChannelErrorCode =
   | 'address-in-use'
   /** 地址超出平台限制（UDS 路径长度）。 */
   | 'address-invalid'
+  /** 会话密钥长度不对。 */
+  | 'invalid-key'
+  /** 同时进行的未认证握手已达上限。 */
+  | 'busy'
   /** 连接不到对端。 */
   | 'connect-failed'
   /** 对端未能证明持有会话密钥。 */

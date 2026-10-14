@@ -56,11 +56,22 @@ export type RpcFailure = Static<typeof RpcFailure>;
 export const RpcMessage = Type.Union([RpcRequest, RpcNotification, RpcSuccess, RpcFailure]);
 export type RpcMessage = Static<typeof RpcMessage>;
 
-/** JSON-RPC 2.0 预定义错误码。 */
+/** JSON-RPC 2.0 预定义错误码，以及本项目在保留区间内定义的错误码。 */
 export const RpcErrorCode = {
   ParseError: -32700,
   InvalidRequest: -32600,
   MethodNotFound: -32601,
   InvalidParams: -32602,
   InternalError: -32603,
+  /** 正在处理的请求已达上限。 */
+  ServerBusy: -32000,
 } as const;
+
+/**
+ * 请求方超时或中止后发出的取消通知（`rpc.` 前缀为 JSON-RPC 保留给协议自身的方法）。
+ * 对端据此中止对应请求的处理；应答照常发送，请求方会忽略。
+ */
+export const RpcCancel = 'rpc.cancel';
+
+export const RpcCancelParams = Type.Object({ id: RpcId }, closed);
+export type RpcCancelParams = Static<typeof RpcCancelParams>;

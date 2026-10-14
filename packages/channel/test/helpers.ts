@@ -15,6 +15,14 @@ import {
   listen,
 } from '../src/index.ts';
 
+/** 不关心握手拒绝的测试用这一组回调；服务端错误直接抛出让测试失败。 */
+export const quiet = {
+  onRejected: () => {},
+  onError: (error: Error) => {
+    throw error;
+  },
+};
+
 export function testCredentials(): ChannelCredentials & { key: Buffer } {
   return { path: createChannelPath(`t${randomBytes(4).toString('hex')}`), key: createSessionKey() };
 }
@@ -23,7 +31,7 @@ export function testCredentials(): ChannelCredentials & { key: Buffer } {
 export async function connectedPair(options: Partial<ConnectionOptions> = {}) {
   const { path, key } = testCredentials();
   const accepted = Promise.withResolvers<Connection>();
-  const server = await listen(path, { key, ...options, onConnection: accepted.resolve });
+  const server = await listen(path, { key, ...quiet, ...options, onConnection: accepted.resolve });
   const client = await connect(path, 'test.client', { key, ...options });
   const serverSide = await accepted.promise;
   return { client, server: serverSide, close: () => server.close() };

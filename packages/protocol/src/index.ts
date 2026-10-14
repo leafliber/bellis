@@ -1,5 +1,6 @@
 import { ChannelAccept, ChannelChallenge, ChannelHello, ChannelProof } from './channel.ts';
 import {
+  RpcCancelParams,
   RpcErrorObject,
   RpcFailure,
   RpcMessage,
@@ -17,5 +18,13 @@ export * from './jsonrpc.ts';
  */
 export const schemaModules = {
   channel: { ChannelHello, ChannelChallenge, ChannelProof, ChannelAccept },
-  jsonrpc: { RpcRequest, RpcNotification, RpcSuccess, RpcFailure, RpcErrorObject, RpcMessage },
+  jsonrpc: {
+    RpcRequest,
+    RpcNotification,
+    RpcSuccess,
+    RpcFailure,
+    RpcErrorObject,
+    RpcMessage,
+    RpcCancelParams,
+  },
 } as const;

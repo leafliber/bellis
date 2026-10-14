@@ -31,7 +31,9 @@ export function encodeFrame(kind: FrameKind, payload: Uint8Array): Buffer {
  * （认证前用很小的上限，避免未认证的对端占用内存）。
  */
 export class FrameDecoder {
-  #buffer: Buffer = Buffer.alloc(0);
+  /** 收到的块按序排队，只在凑齐帧头或整帧时合并一次，避免分片到达时反复复制已缓冲的前缀。 */
+  #chunks: Buffer[] = [];
+  #buffered = 0;
   #maxPayloadBytes: number;
 
   constructor(maxPayloadBytes: number) {
@@ -43,18 +45,21 @@ export class FrameDecoder {
   }
 
   get bufferedBytes(): number {
-    return this.#buffer.length;
+    return this.#buffered;
   }
 
   push(chunk: Buffer): void {
-    this.#buffer = this.#buffer.length === 0 ? chunk : Buffer.concat([this.#buffer, chunk]);
+    if (chunk.length === 0) return;
+    this.#chunks.push(chunk);
+    this.#buffered += chunk.length;
   }
 
   /** 取出下一帧；数据不足时返回 undefined，帧头非法时抛出 ChannelError。 */
   read(): Frame | undefined {
-    if (this.#buffer.length < FRAME_HEADER_BYTES) return undefined;
-    const length = this.#buffer.readUInt32BE(0);
-    const kind = this.#buffer.readUInt8(4);
+    if (this.#buffered < FRAME_HEADER_BYTES) return undefined;
+    const head = this.#coalesce(FRAME_HEADER_BYTES);
+    const length = head.readUInt32BE(0);
+    const kind = head.readUInt8(4);
     if (!isFrameKind(kind)) {
       throw new ChannelError('protocol-error', `未知的帧类型 ${kind}`);
     }
@@ -62,9 +67,27 @@ export class FrameDecoder {
       throw new ChannelError('frame-too-large', `帧长 ${length} 超过上限 ${this.#maxPayloadBytes}`);
     }
     const end = FRAME_HEADER_BYTES + length;
-    if (this.#buffer.length < end) return undefined;
-    const payload = this.#buffer.subarray(FRAME_HEADER_BYTES, end);
-    this.#buffer = this.#buffer.subarray(end);
+    if (this.#buffered < end) return undefined;
+    const block = this.#coalesce(end);
+    const payload = block.subarray(FRAME_HEADER_BYTES, end);
+    if (block.length === end) this.#chunks.shift();
+    else this.#chunks[0] = block.subarray(end);
+    this.#buffered -= end;
     return { kind, payload };
+  }
+
+  /** 让第一个块至少包含 n 个字节（调用方保证已缓冲的字节数不少于 n），返回第一个块。 */
+  #coalesce(n: number): Buffer {
+    const first = this.#chunks[0] as Buffer;
+    if (first.length >= n) return first;
+    let count = 0;
+    let total = 0;
+    while (total < n) {
+      total += (this.#chunks[count] as Buffer).length;
+      count += 1;
+    }
+    const merged = Buffer.concat(this.#chunks.slice(0, count), total);
+    this.#chunks.splice(0, count, merged);
+    return merged;
   }
 }

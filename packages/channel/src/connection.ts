@@ -9,6 +9,7 @@ import {
   ChannelRole,
 } from '@bellis/protocol';
 import { Compile } from 'typebox/compile';
+import { SESSION_KEY_BYTES } from './address.ts';
 import { ChannelError } from './errors.ts';
 import { encodeFrame, type Frame, FrameDecoder, FrameKind } from './frame.ts';
 
@@ -60,6 +61,13 @@ function randomNonce(): string {
   return randomBytes(32).toString('base64url');
 }
 
+/** 会话密钥必须是完整的 32 字节随机数（R-05）。 */
+export function checkSessionKey(key: Uint8Array): void {
+  if (key.byteLength !== SESSION_KEY_BYTES) {
+    throw new ChannelError('invalid-key', `会话密钥须为 ${SESSION_KEY_BYTES} 字节`);
+  }
+}
+
 function asChannelError(error: unknown): ChannelError {
   if (error instanceof ChannelError) return error;
   return new ChannelError('protocol-error', String(error), { cause: error });
@@ -92,11 +100,13 @@ export class Connection extends EventEmitter<ConnectionEvents> {
 
   /** 服务端：等待客户端完成握手。 */
   static accept(socket: Socket, options: ConnectionOptions): Promise<Connection> {
+    checkSessionKey(options.key);
     return new Connection(socket, options, { name: 'await-hello' }).#ready.promise;
   }
 
   /** 客户端：以给定角色发起握手。 */
   static open(socket: Socket, role: string, options: ConnectionOptions): Promise<Connection> {
+    checkSessionKey(options.key);
     if (!isRole.Check(role)) {
       socket.destroy();
       return Promise.reject(new ChannelError('protocol-error', `角色名不合法：${role}`));

@@ -64,3 +64,17 @@ test('两次读取之间可以放宽上限', () => {
   decoder.maxPayloadBytes = 10;
   assert.equal(decoder.read()?.payload.length, 10);
 });
+
+test('大帧逐字节到达也能正确还原', () => {
+  const payload = Buffer.alloc(256 * 1024, 7);
+  const bytes = encodeFrame(FrameKind.Binary, payload);
+  const decoder = new FrameDecoder(payload.length);
+  let frame: ReturnType<FrameDecoder['read']>;
+  for (let i = 0; i < bytes.length; i += 1) {
+    decoder.push(bytes.subarray(i, i + 1));
+    frame = decoder.read() ?? frame;
+  }
+  assert.ok(frame);
+  assert.equal(Buffer.compare(frame.payload, payload), 0);
+  assert.equal(decoder.bufferedBytes, 0);
+});

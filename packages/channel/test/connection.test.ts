@@ -13,14 +13,14 @@ import {
   FrameKind,
   listen,
 } from '../src/index.ts';
-import { connectedPair, nonce, RawPeer, testCredentials } from './helpers.ts';
+import { connectedPair, nonce, quiet, RawPeer, testCredentials } from './helpers.ts';
 
 function hasCode(code: ChannelErrorCode) {
   return (error: unknown) => error instanceof ChannelError && error.code === code;
 }
 
 /** 启动服务端，记录被拒绝的握手。 */
-async function serve(options: { handshakeTimeoutMs?: number } = {}) {
+async function serve(options: { handshakeTimeoutMs?: number; maxPendingHandshakes?: number } = {}) {
   const { path, key } = testCredentials();
   const accepted: Connection[] = [];
   const rejected = Promise.withResolvers<ChannelError>();
@@ -29,6 +29,7 @@ async function serve(options: { handshakeTimeoutMs?: number } = {}) {
     ...options,
     onConnection: (connection) => accepted.push(connection),
     onRejected: rejected.resolve,
+    onError: quiet.onError,
   });
   return { path, key, server, accepted, rejected: rejected.promise };
 }
@@ -161,6 +162,7 @@ test('紧跟在握手之后到达的数据不会丢', async () => {
   const accepted = Promise.withResolvers<unknown>();
   const server = await listen(path, {
     key,
+    ...quiet,
     onConnection: (connection) => connection.once('message', accepted.resolve),
   });
   try {
@@ -193,7 +195,7 @@ test('地址已被占用时按可能被抢注报错', async () => {
   const s = await serve();
   try {
     await assert.rejects(
-      listen(s.path, { key: s.key, onConnection: () => {} }),
+      listen(s.path, { key: s.key, ...quiet, onConnection: () => {} }),
       hasCode('address-in-use'),
     );
     const client = await connect(s.path, 'test.client', { key: s.key });
@@ -241,7 +243,12 @@ test('服务端关闭时断开全部连接', async () => {
 test('接收方收到超过上限的帧时断开', async () => {
   const { path, key } = testCredentials();
   const accepted = Promise.withResolvers<Connection>();
-  const server = await listen(path, { key, maxFrameBytes: 16, onConnection: accepted.resolve });
+  const server = await listen(path, {
+    key,
+    ...quiet,
+    maxFrameBytes: 16,
+    onConnection: accepted.resolve,
+  });
   try {
     const client = await connect(path, 'test.client', { key });
     const serverSide = await accepted.promise;
@@ -249,6 +256,56 @@ test('接收方收到超过上限的帧时断开', async () => {
     client.send({ text: randomBytes(32).toString('hex') });
     const [error] = await closed;
     assert.ok(hasCode('frame-too-large')(error));
+  } finally {
+    await server.close();
+  }
+});
+
+test('会话密钥长度不对时拒绝监听与连接', async () => {
+  const { path } = testCredentials();
+  await assert.rejects(
+    listen(path, { key: Buffer.alloc(16), ...quiet, onConnection: () => {} }),
+    hasCode('invalid-key'),
+  );
+  await assert.rejects(
+    connect(path, 'test.client', { key: Buffer.alloc(31) }),
+    hasCode('invalid-key'),
+  );
+});
+
+test('未认证的握手超过上限时，多出的连接被立即断开', async () => {
+  const s = await serve({ maxPendingHandshakes: 2 });
+  try {
+    const idle = [await RawPeer.connect(s.path), await RawPeer.connect(s.path)];
+    const third = await RawPeer.connect(s.path);
+    assert.ok(hasCode('busy')(await s.rejected));
+    await third.closed;
+    for (const peer of idle) peer.socket.destroy();
+    // 握手位置释放后，正常客户端可以连上。
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const client = await connect(s.path, 'test.client', { key: s.key });
+    client.close();
+  } finally {
+    await s.server.close();
+  }
+});
+
+test('onConnection 抛错时断开连接，并交给 onError', async () => {
+  const { path, key } = testCredentials();
+  const reported = Promise.withResolvers<Error>();
+  const server = await listen(path, {
+    key,
+    onRejected: () => {},
+    onError: reported.resolve,
+    onConnection: () => {
+      throw new Error('装配失败');
+    },
+  });
+  try {
+    const client = await connect(path, 'test.client', { key });
+    const closed = once(client, 'close');
+    assert.match((await reported.promise).message, /装配失败/);
+    await closed;
   } finally {
     await server.close();
   }
