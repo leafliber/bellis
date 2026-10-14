@@ -17,6 +17,7 @@
 | [安全核](modules/safety-core.md) | 安全核 | P0 |
 | [状态存储](modules/state-store.md) | 安全核 | P0 |
 | [发声](modules/speech.md) | 关键平面 / 普通插件 | P0 模拟，P1 真实 |
+| [审核插件](modules/moderation.md) | 普通插件（可关闭） | P0 模拟，P2 真实 |
 | [Stage、OBS 与形象](modules/stage.md) | 关键平面 / 普通插件 | P0 模拟，P1 真实 |
 | [决策模型](modules/director.md) | 普通插件 | P0 回放，P2 真实 |
 | [观众接入与投票](modules/audience.md) | 普通插件 | P0 回放，P2 真实 |

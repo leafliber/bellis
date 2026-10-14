@@ -4,9 +4,9 @@ Windows 10/11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 
 
 ## 进程
 
-- **宿主运行在用户的交互会话里。** 不做成 Windows 服务（启动方式推荐见 R-23）：服务运行在 Session 0，不能和桌面交互，而采集、输入、OBS、VTube Studio 都需要交互桌面。[来源](https://learn.microsoft.com/en-us/windows/win32/services/interactive-services)
+- **宿主运行在用户的交互会话里。** 不做成 Windows 服务，由启动器拉起（R-23）：服务运行在 Session 0，不能和桌面交互，而采集、输入、OBS、VTube Studio 都需要交互桌面。[来源](https://learn.microsoft.com/en-us/windows/win32/services/interactive-services)
 - **启动子进程**：一律 `spawn`，不用 `shell`，不用 `detached`，设 `windowsHide`，显式传入环境变量。
-- **没有 POSIX 信号。** Node 在 Windows 上对子进程调用 `kill()`，无论传什么信号都是强制终止、没有宽限期；SIGTERM 处理函数不会被触发。[来源](https://nodejs.org/api/child_process.html#subprocesskillsignal) 推荐的停止流程（R-06）：
+- **没有 POSIX 信号。** Node 在 Windows 上对子进程调用 `kill()`，无论传什么信号都是强制终止、没有宽限期；SIGTERM 处理函数不会被触发。[来源](https://nodejs.org/api/child_process.html#subprocesskillsignal) 停止流程（R-06）：
   1. 发 RPC `shutdown`；
   2. 关闭子进程的 stdin，子进程读到 EOF 后自行退出；
   3. 超过截止时间再 `kill()`。
@@ -15,7 +15,7 @@ Windows 10/11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 
 
 ## 本机通信
 
-- **命名管道**（D-12）：推荐路径形如 `\\.\pipe\bellis-<会话>-<128 位随机数>`，每次启动重新生成；子进程经环境变量获得，非子进程按 R-23 获得；认证方式见 R-05。
+- **命名管道**（D-12）：路径形如 `\\.\pipe\bellis-<会话>-<128 位随机数>`，每次启动重新生成；子进程经环境变量获得，非子进程从 SecretStore 读取（R-23）；用会话密钥做 HMAC 双向认证（R-05）。
 - **宿主永远做服务端。** 宿主不提权；需要提权的 Game Runtime 做客户端。
 - **认证先于数据。** libuv 创建管道时使用默认安全描述符，Everyone 和匿名用户有读权限；管道命名空间全机共享，任何本地用户都可能抢先注册同名管道。所以双方先完成双向认证，认证前不发送任何数据；帧长有上限，每一步有超时。[来源](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
 - 不用 `readableAll`、`writableAll`，它们只会给 Everyone 加权限。
@@ -65,7 +65,7 @@ Windows 10/11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 
 
 ## 打包
 
-暂不定（R-22）。已知约束：Node 单可执行文件在 Node 24 中仍在活跃开发；个人开发者的代码签名渠道受地区限制，签名后的 SmartScreen 信誉需要逐步积累。
+暂不定（R-22）。已知约束：Node 单可执行文件功能仍在活跃开发；个人开发者的代码签名渠道受地区限制，签名后的 SmartScreen 信誉需要逐步积累。
 
 ## CI
 

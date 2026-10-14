@@ -47,7 +47,7 @@ Bellis 与独立的 Game Runtime 之间的桥接插件（普通插件）。Belli
 
 - 游戏输入许可与 Stage 音频输出许可是两份独立的执行许可，急停时一起吊销。
 - Game Runtime 的输入代理是受信组件：键位白名单、速率与长按上限、前台窗口校验；急停时主动发出全部按键抬起并核验，而不只是停止发送（SendInput 不会自动重置键盘状态）。
-- Game Runtime 在游戏需要时以管理员权限运行，由其自身方式启动，并按 R-23 获取连接信息；Bellis 宿主始终不提权，并作为本机通道的服务端（见 [Windows 平台](../platform/windows.md)）。
+- Game Runtime 在游戏需要时以管理员权限运行，由其自身方式启动，从 SecretStore 读取本次会话的连接信息（R-23）；Bellis 宿主始终不提权，并作为本机通道的服务端（见 [Windows 平台](../platform/windows.md)）。
 - 风险分超过阈值时，Game Runtime 停止注入并上报，Bellis 让角色口播过渡并通知操作员。
 
 ## 验收
@@ -59,4 +59,4 @@ Bellis 与独立的 Game Runtime 之间的桥接插件（普通插件）。Belli
 
 ## 技术路线
 
-已批准：D-04、D-07、D-08、D-27。待审核：R-23。Game Runtime 侧的路线在其仓库审核。
+已批准：D-04、D-07、D-08、D-27、R-23。Game Runtime 侧的路线在其仓库审核。
