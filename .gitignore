@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# 检查、探针与运行输出：每次运行重写，不入库
+/reports/
+
+# 本地配置与凭据（示例文件用 .env.example，只放脱敏占位值）
+.env
+.env.*
+!.env.example
+
+# Node / Python 工具
+node_modules/
+dist/
+.cache/
+.pnpm-store/
+__pycache__/
+.venv/
