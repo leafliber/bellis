@@ -225,6 +225,21 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/kernel:
+    dependencies:
+      '@bellis/channel':
+        specifier: workspace:*
+        version: link:../channel
+      '@bellis/process':
+        specifier: workspace:*
+        version: link:../process
+      '@bellis/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/launcher:
     dependencies:
       '@bellis/channel':

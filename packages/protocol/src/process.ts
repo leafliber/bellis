@@ -12,6 +12,8 @@ export const ChildEnv = {
   SessionId: 'BELLIS_SESSION_ID',
   ChannelPath: 'BELLIS_CHANNEL_PATH',
   ChannelKey: 'BELLIS_CHANNEL_KEY',
+  /** sidecar 连接宿主时使用的角色，由代理插件分配。 */
+  Role: 'BELLIS_ROLE',
   /** SecretStore 的服务名，缺省为 `bellis`；测试用独立的服务名互不干扰。 */
   SecretService: 'BELLIS_SECRET_SERVICE',
 } as const;
