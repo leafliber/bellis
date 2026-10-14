@@ -1,4 +1,4 @@
-import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
+import { ClockService, definePlugin, type TimerHandle, TraceService } from '@bellis/kernel';
 import Type from 'typebox';
 import { type FromPage, type PageLink, StagePageService, type ToPage } from './types.ts';
 
@@ -26,7 +26,7 @@ export const simStagePage = definePlugin({
     version: '0.1.0',
     tier: 'ordinary',
     provides: [StagePageService.ref],
-    inject: [ClockService.ref],
+    inject: [ClockService.ref, `${TraceService.ref}?`],
     permissions: [],
     process: 'in-process',
     config: Type.Object({
@@ -36,6 +36,7 @@ export const simStagePage = definePlugin({
   },
   activate(ctx) {
     const clock = ctx.service(ClockService);
+    const trace = ctx.optional(TraceService);
     const { tickMs, heartbeatTimeoutMs } = ctx.config;
     const listeners = new Set<(message: FromPage) => void>();
     const queue: Buffered[] = [];
@@ -46,6 +47,7 @@ export const simStagePage = definePlugin({
     let timer: TimerHandle | undefined;
 
     const emit = (message: FromPage) => {
+      trace?.record(`page.${message.kind}`, { ...message });
       for (const listener of [...listeners]) listener(message);
     };
     const drop = (predicate: (b: Buffered) => boolean, reason: string) => {
@@ -83,6 +85,7 @@ export const simStagePage = definePlugin({
         }
       }
       if (consumed > 0) {
+        trace?.record('page.played', { sentenceId: head.id, token: head.token, samples: consumed });
         if (!head.started) {
           head.started = true;
           emit({ kind: 'started', sentenceId: head.id });
@@ -127,6 +130,11 @@ export const simStagePage = definePlugin({
             });
             return;
           }
+          trace?.record('page.begin', {
+            sentenceId: message.sentenceId,
+            token: message.token,
+            subtitle: message.subtitle,
+          });
           queue.push({
             id: message.sentenceId,
             token: message.token,

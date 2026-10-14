@@ -66,6 +66,11 @@ export interface KernelOptions {
   retryDelaysMs?: readonly number[];
   /** 活动满这么久才清零重试计数，避免崩溃循环无限重试，默认 60 秒。 */
   stableAfterMs?: number;
+  /**
+   * 本次启动的标识，写进插件实例编号。重启后实例编号不会与上次重复，
+   * 由实例编号派生的幂等键（例如发言编号）也就不会跨重启相撞。宿主用会话编号。
+   */
+  bootId?: string;
 }
 
 export interface EntrySnapshot {
@@ -193,6 +198,7 @@ export class Kernel {
   #loop: Promise<void> | undefined;
   #dirty = false;
   #nextInstance = 1;
+  readonly #bootId: string | undefined;
   /** 宿主停止后不再接受任何生命周期变更。 */
   #closed = false;
 
@@ -206,6 +212,7 @@ export class Kernel {
     this.#disposerTimeoutMs = options.disposerTimeoutMs ?? 2_000;
     this.#retryDelaysMs = options.retryDelaysMs ?? [1_000, 2_000, 4_000];
     this.#stableAfterMs = options.stableAfterMs ?? 60_000;
+    this.#bootId = options.bootId;
     this.extensions = new Extensions((name, error) =>
       this.#log('extension.observer-failed', { extension: name, error: message(error) }),
     );
@@ -684,7 +691,9 @@ export class Kernel {
     const prepared = prepareConfig(definition, raw);
     const config = 'config' in prepared ? prepared.config : raw;
     const instance: Instance = {
-      id: `${entry.id}#${this.#nextInstance++}`,
+      id: this.#bootId
+        ? `${entry.id}#${this.#bootId}.${this.#nextInstance++}`
+        : `${entry.id}#${this.#nextInstance++}`,
       definition,
       config,
       controller: new AbortController(),

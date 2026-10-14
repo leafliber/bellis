@@ -78,9 +78,19 @@ export class DeadlineError extends Error {
  * 包括推进过程中新设的定时器。
  */
 export class ManualClock implements Clock {
-  #now = 0;
+  #now: number;
   #next = 1;
   readonly #timers = new Map<number, { at: number; callback: () => void }>();
+  readonly #shuffle: ((count: number) => number) | undefined;
+
+  /**
+   * @param start 起始时刻。
+   * @param shuffle 同时到期的多个定时器的选择方式（返回下标）；缺省按设定顺序。确定性仿真用它探索交错。
+   */
+  constructor(start = 0, shuffle?: (count: number) => number) {
+    this.#now = start;
+    this.#shuffle = shuffle;
+  }
 
   now(): number {
     return this.#now;
@@ -108,14 +118,15 @@ export class ManualClock implements Clock {
   advance(ms: number): void {
     const target = this.#now + ms;
     for (;;) {
-      let due: [number, { at: number; callback: () => void }] | undefined;
-      for (const entry of this.#timers) {
-        if (entry[1].at <= target && (!due || entry[1].at < due[1].at)) due = entry;
-      }
-      if (!due) break;
-      this.#timers.delete(due[0]);
-      this.#now = due[1].at;
-      due[1].callback();
+      let earliest = Number.POSITIVE_INFINITY;
+      for (const timer of this.#timers.values()) earliest = Math.min(earliest, timer.at);
+      if (earliest > target) break;
+      const due = [...this.#timers].filter(([, timer]) => timer.at === earliest);
+      const pick = due[this.#shuffle && due.length > 1 ? this.#shuffle(due.length) : 0] ?? due[0];
+      if (!pick) break;
+      this.#timers.delete(pick[0]);
+      this.#now = pick[1].at;
+      pick[1].callback();
     }
     this.#now = target;
   }

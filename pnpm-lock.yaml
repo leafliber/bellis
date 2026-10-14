@@ -418,6 +418,9 @@ importers:
 
   packages/sim:
     dependencies:
+      '@bellis/director':
+        specifier: workspace:*
+        version: link:../director
       '@bellis/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -430,25 +433,22 @@ importers:
       '@bellis/safety':
         specifier: workspace:*
         version: link:../safety
+      '@bellis/speech':
+        specifier: workspace:*
+        version: link:../speech
       '@bellis/store':
         specifier: workspace:*
         version: link:../store
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
     devDependencies:
       '@bellis/audience':
         specifier: workspace:*
         version: link:../audience
-      '@bellis/director':
-        specifier: workspace:*
-        version: link:../director
-      '@bellis/speech':
-        specifier: workspace:*
-        version: link:../speech
       '@bellis/stage':
         specifier: workspace:*
         version: link:../stage
-      fast-check:
-        specifier: 4.10.2
-        version: 4.10.2
 
   packages/speech:
     dependencies:
