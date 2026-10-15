@@ -72,3 +72,51 @@ export class DeadlineError extends Error {
     this.name = 'DeadlineError';
   }
 }
+
+/**
+ * 手动推进的时钟：测试与确定性仿真用。`advance` 按到期先后（同时到期按设定顺序）触发定时器，
+ * 包括推进过程中新设的定时器。
+ */
+export class ManualClock implements Clock {
+  #now = 0;
+  #next = 1;
+  readonly #timers = new Map<number, { at: number; callback: () => void }>();
+
+  now(): number {
+    return this.#now;
+  }
+
+  setTimeout(callback: () => void, ms: number): TimerHandle {
+    const id = this.#next++;
+    this.#timers.set(id, { at: this.#now + Math.max(0, ms), callback });
+    return { id };
+  }
+
+  clearTimeout(handle: TimerHandle): void {
+    this.#timers.delete(handle.id);
+  }
+
+  /** 距下一个定时器到期的时间；没有定时器时为 undefined。 */
+  nextDue(): number | undefined {
+    let earliest: number | undefined;
+    for (const timer of this.#timers.values()) {
+      if (earliest === undefined || timer.at < earliest) earliest = timer.at;
+    }
+    return earliest === undefined ? undefined : earliest - this.#now;
+  }
+
+  advance(ms: number): void {
+    const target = this.#now + ms;
+    for (;;) {
+      let due: [number, { at: number; callback: () => void }] | undefined;
+      for (const entry of this.#timers) {
+        if (entry[1].at <= target && (!due || entry[1].at < due[1].at)) due = entry;
+      }
+      if (!due) break;
+      this.#timers.delete(due[0]);
+      this.#now = due[1].at;
+      due[1].callback();
+    }
+    this.#now = target;
+  }
+}

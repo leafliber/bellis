@@ -8,7 +8,9 @@
   },
   "dependencies": {
     "@bellis/channel": "workspace:*",
+    "@bellis/config": "workspace:*",
     "@bellis/host": "workspace:*",
+    "@bellis/obs": "workspace:*",
     "@bellis/process": "workspace:*",
     "@bellis/protocol": "workspace:*",
     "@bellis/secret-store": "workspace:*",

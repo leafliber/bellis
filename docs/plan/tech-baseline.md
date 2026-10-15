@@ -66,7 +66,7 @@
 
 | 编号 | 模块 | 候选（首项为推荐） | 依据与取舍 | 何时需要 |
 | --- | --- | --- | --- | --- |
-| R-08 | Stage 连接与认证 | 宿主经 loopback HTTP 提供页面，localhost WebSocket + 一次性会话令牌；页面 URL 不带长期凭据 | 浏览器源不能用命名管道；须在安全上下文中运行 | P1 |
+| R-08 | Stage 连接与认证 | 宿主经 loopback HTTP 提供页面，localhost WebSocket + 一次性会话令牌；页面 URL 不带长期凭据 | 浏览器源不能用命名管道；须在安全上下文中运行。WebSocket 服务端库随本路线一并选定（P0 的模拟 OBS 用自写的最小实现，只在模拟中使用） | P1 |
 | R-09 | Stage 音频路由 | OBS 浏览器源 + “Control audio via OBS” + AudioWorklet / 虚拟声卡 | 只有前者能被 OBS 静音和切场景直接控制；Win11 最小化或遮挡时有音频失真报告，需探针 S-01。按 D-24 不写 OBS 插件 | P1 |
 | R-10 | TTS 引擎 | CosyVoice 3 / Qwen3-TTS / GPT-SoVITS / MiniMax 或豆包云端 | 据各项目自述：前两者 Apache-2.0、支持中日文与流式；GPT-SoVITS 适合角色音色但只到句级；云端带字级时间戳，需外发许可。首包与取消以探针 S-07 为准 | P1 |
 | R-11 | 字幕时间对齐 | TTS 自带时间戳 / Qwen3-ForcedAligner / 退化为整句字幕 | 本地开源 TTS 普遍不出时间戳 | P1 |

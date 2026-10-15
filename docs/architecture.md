@@ -62,7 +62,7 @@
 | Iris | 独立服务 | 长期记忆，HTTP + SSE |
 | Game Runtime | 独立进程，游戏需要时提权 | 无法由非提权宿主拉起；宿主始终不提权，并作为本机通道的服务端 |
 
-非子进程（看门狗、Game Runtime）从 SecretStore 读取本次会话的连接信息（R-23）。是否增加独立推理机，在真机测出 GPU 争用后再定（[探针](plan/spikes.md) S-02）。
+非子进程（看门狗、Game Runtime）从 SecretStore 读取本次会话的连接信息（R-23）。宿主与看门狗共用一份配置文件（存储位置、心跳、安全核参数、应急目标），不含凭据；OBS 的地址与密码也在 SecretStore 中。仓库自带 `config/sim.json`，`sim` 配置下由启动器运行模拟 OBS。是否增加独立推理机，在真机测出 GPU 争用后再定（[探针](plan/spikes.md) S-02）。
 
 ## 三条通道
 

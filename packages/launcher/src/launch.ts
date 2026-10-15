@@ -26,7 +26,9 @@ export interface CommandSpec {
 }
 
 export interface LaunchOptions {
-  /** 系统凭据库中的服务名。启动器与看门狗打开同一个凭据库，保证看门狗读得到会话信息。 */
+  /** 宿主与看门狗共用的配置文件。 */
+  configPath: string;
+  /** 系统凭据库中的服务名。启动器、宿主与看门狗打开同一个凭据库。 */
   secretService: string;
   host: CommandSpec;
   watchdog: CommandSpec;
@@ -138,6 +140,8 @@ export async function launch(options: LaunchOptions): Promise<Session> {
         [ChildEnv.SessionId]: sessionId,
         [ChildEnv.ChannelPath]: info.channelPath,
         [ChildEnv.ChannelKey]: info.channelKey,
+        [ChildEnv.Config]: options.configPath,
+        [ChildEnv.SecretService]: options.secretService,
       },
       stdout: options.stdout ?? 'inherit',
     });
@@ -160,6 +164,7 @@ function startWatchdog(info: SessionInfo, options: LaunchOptions): Promise<Manag
     env: {
       ...baseEnvironment(),
       [ChildEnv.SessionId]: info.sessionId,
+      [ChildEnv.Config]: options.configPath,
       [ChildEnv.SecretService]: options.secretService,
     },
     stdout: options.stdout ?? 'inherit',

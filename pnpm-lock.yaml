@@ -213,17 +213,47 @@ importers:
         specifier: 1.3.37
         version: 1.3.37
 
+  packages/config:
+    dependencies:
+      '@bellis/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@bellis/secret-store':
+        specifier: workspace:*
+        version: link:../secret-store
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/host:
     dependencies:
       '@bellis/channel':
         specifier: workspace:*
         version: link:../channel
+      '@bellis/config':
+        specifier: workspace:*
+        version: link:../config
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/obs':
+        specifier: workspace:*
+        version: link:../obs
       '@bellis/process':
         specifier: workspace:*
         version: link:../process
       '@bellis/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@bellis/secret-store':
+        specifier: workspace:*
+        version: link:../secret-store
+      '@bellis/store':
+        specifier: workspace:*
+        version: link:../store
 
   packages/kernel:
     dependencies:
@@ -245,9 +275,15 @@ importers:
       '@bellis/channel':
         specifier: workspace:*
         version: link:../channel
+      '@bellis/config':
+        specifier: workspace:*
+        version: link:../config
       '@bellis/host':
         specifier: workspace:*
         version: link:../host
+      '@bellis/obs':
+        specifier: workspace:*
+        version: link:../obs
       '@bellis/process':
         specifier: workspace:*
         version: link:../process
@@ -263,6 +299,8 @@ importers:
       typebox:
         specifier: 1.3.37
         version: 1.3.37
+
+  packages/obs: {}
 
   packages/process:
     dependencies:
@@ -281,6 +319,18 @@ importers:
       typebox:
         specifier: 1.3.37
         version: 1.3.37
+
+  packages/safety:
+    dependencies:
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/obs':
+        specifier: workspace:*
+        version: link:../obs
+      '@bellis/store':
+        specifier: workspace:*
+        version: link:../store
 
   packages/secret-store:
     dependencies:
@@ -305,6 +355,12 @@ importers:
       '@bellis/channel':
         specifier: workspace:*
         version: link:../channel
+      '@bellis/config':
+        specifier: workspace:*
+        version: link:../config
+      '@bellis/obs':
+        specifier: workspace:*
+        version: link:../obs
       '@bellis/process':
         specifier: workspace:*
         version: link:../process

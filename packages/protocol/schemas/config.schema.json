@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bellis:schema:config",
+  "$defs": {
+    "HostConfig": {
+      "type": "object",
+      "required": [
+        "v",
+        "storePath",
+        "simulation",
+        "heartbeatIntervalMs",
+        "watchdog",
+        "safety"
+      ],
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "storePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "simulation": {
+          "type": "boolean"
+        },
+        "heartbeatIntervalMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "watchdog": {
+          "type": "object",
+          "required": [
+            "heartbeatTimeoutMs"
+          ],
+          "properties": {
+            "heartbeatTimeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "safety": {
+          "type": "object",
+          "required": [
+            "leaseTtlMs",
+            "leaseCapabilities",
+            "presenceTtlMs",
+            "rateLimits",
+            "guardTimeoutMs",
+            "emergency",
+            "unattendedGatesSatisfied"
+          ],
+          "properties": {
+            "leaseTtlMs": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "leaseCapabilities": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*(:[A-Za-z0-9.-]+)?$"
+                }
+              }
+            },
+            "presenceTtlMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "rateLimits": {
+              "type": "object",
+              "patternProperties": {
+                "^.*$": {
+                  "type": "object",
+                  "required": [
+                    "max",
+                    "windowMs"
+                  ],
+                  "properties": {
+                    "max": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "windowMs": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "guardTimeoutMs": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "emergency": {
+              "type": "object",
+              "required": [
+                "stageSource",
+                "safeScene",
+                "stopStream"
+              ],
+              "properties": {
+                "stageSource": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "safeScene": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "stopStream": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "unattendedGatesSatisfied": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "ObsSecret": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^wss?://"
+        },
+        "password": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
