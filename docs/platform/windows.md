@@ -1,6 +1,6 @@
 # Windows 平台
 
-Windows 10/11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Windows；三平台 CI 始终运行完整检查并必须通过，但 CI 通过不构成阶段验收（D-11）。本文记录写代码时必须遵守的 Windows 事实与约束。
+Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Windows；三平台 CI 始终运行完整检查并必须通过，但 CI 通过不构成阶段验收（D-11）。本文记录写代码时必须遵守的 Windows 事实与约束。
 
 ## 进程
 
@@ -25,7 +25,7 @@ Windows 10/11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 
 
 ## 凭据
 
-统一的 SecretStore 接口（D-28）：小令牌存凭据管理器，大块数据用 DPAPI 加密成文件；macOS 用 Keychain。DPAPI 能防其他用户，不能防同一用户下的其他程序，与威胁模型一致。[来源](https://www.electronjs.org/docs/latest/api/safe-storage)
+统一的 SecretStore 接口（D-28）：小令牌存凭据管理器，大块数据用 DPAPI 加密成文件（出现超出凭据管理器单条上限的条目时再实现，R-16）；macOS 用 Keychain。DPAPI 能防其他用户，不能防同一用户下的其他程序，与威胁模型一致。[来源](https://www.electronjs.org/docs/latest/api/safe-storage)
 
 ## 定时与调度
 
