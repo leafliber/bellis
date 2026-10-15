@@ -147,4 +147,4 @@
 
 ## 平台
 
-Windows 10/11 x64 是唯一的生产平台；P0 在 macOS 验收，P1 起只认 Windows（D-11）。工程约束见 [Windows 平台](platform/windows.md)。
+Windows 11 x64 是唯一的生产平台；P0 在 macOS 验收，P1 起只认 Windows（D-11）。工程约束见 [Windows 平台](platform/windows.md)。
