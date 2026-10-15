@@ -3,8 +3,11 @@ import {
   Kernel,
   ManualClock,
   type PluginCatalog,
+  RandomService,
   type ResolvedEntry,
   type ServiceToken,
+  seededRandom,
+  TraceService,
 } from '@bellis/kernel';
 import { builtinPlugins } from '@bellis/plugins';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
@@ -30,6 +33,22 @@ export interface WorldOptions {
   plugins?: PluginCatalog;
   /** 墙钟起点，用于事件时间戳。 */
   epochMs?: number;
+  /** 种子：驱动随机数服务与同时到期定时器的先后。缺省为 0。 */
+  seed?: number;
+  /** 状态存储文件；缺省为内存数据库。模拟重启时需要文件。 */
+  storePath?: string;
+  /** 手动时钟的起始时刻（重启时接上之前的时间）。 */
+  startAt?: number;
+  /** 本次启动的标识，写进插件实例编号。 */
+  bootId?: string;
+}
+
+/** 追踪中的一条记录：各部分按发生顺序写入，时间为手动时钟的时刻。 */
+export interface TraceEntry {
+  seq: number;
+  at: number;
+  kind: string;
+  data: Record<string, unknown>;
 }
 
 export interface LogEntry {
@@ -38,12 +57,14 @@ export interface LogEntry {
 }
 
 /**
- * 进程内的完整世界：状态存储（内存 SQLite）、安全核、插件内核与核心服务，全部由同一个手动时钟驱动。
+ * 进程内的完整世界：状态存储、安全核、插件内核与核心服务，全部由同一个手动时钟与种子驱动。
  * 用于全模拟链路测试与确定性仿真（R-07）。
  */
 export class World {
-  readonly clock = new ManualClock();
+  readonly clock: ManualClock;
   readonly store: StateStore;
+  readonly storePath: string;
+  readonly trace: TraceEntry[] = [];
   readonly obs = new MemoryObs();
   readonly safety: SafetyCore;
   readonly kernel: Kernel;
@@ -51,11 +72,21 @@ export class World {
 
   constructor(options: WorldOptions) {
     const epoch = options.epochMs ?? Date.UTC(2026, 9, 14);
+    const random = seededRandom(options.seed ?? 0);
+    const shuffle = seededRandom((options.seed ?? 0) ^ 0x5bd1e995);
+    this.clock = new ManualClock(options.startAt ?? 0, (count) => shuffle.int(0, count - 1));
     const log = (event: string, fields: Record<string, unknown> = {}) =>
       this.logs.push({ event, fields });
+    this.storePath = options.storePath ?? ':memory:';
     this.store = StateStore.open({
-      path: ':memory:',
+      path: this.storePath,
       now: () => epoch + Math.floor(this.clock.now()),
+    });
+    this.store.recover();
+    // 发言结果同时写进追踪，与 Stage 的回报排在同一条时间线上。
+    this.store.subscribe((event) => {
+      if (event.type === 'utterance.played')
+        this.record('fact.utterance', { ...(event.data as object) });
     });
     let kernel: Kernel | undefined;
     this.safety = new SafetyCore({
@@ -69,6 +100,7 @@ export class World {
     });
     this.kernel = new Kernel({
       clock: this.clock,
+      bootId: options.bootId ?? `s${options.seed ?? 0}`,
       safety: this.safety.kernelHooks(),
       log,
       onTransition: (transition) => {
@@ -78,12 +110,28 @@ export class World {
       },
     });
     kernel = this.kernel;
+    this.safety.control.subscribe((signal) => this.record(`control.${signal.kind}`, { ...signal }));
     this.kernel.provideCore(ClockService, this.clock);
+    this.kernel.provideCore(RandomService, random);
+    this.kernel.provideCore(TraceService, { record: (kind, data) => this.record(kind, data) });
     this.kernel.provideScoped(SafetyService, ({ instanceId }) =>
       safetyFacade(this.safety, instanceId),
     );
     this.safety.setModeration(options.moderationEnabled);
     this.kernel.add(options.entries, options.plugins ?? builtinPlugins);
+  }
+
+  record(kind: string, data: Record<string, unknown>): void {
+    this.trace.push({ seq: this.trace.length, at: this.clock.now(), kind, data });
+  }
+
+  /**
+   * 模拟进程崩溃：不做任何收尾，直接放弃这个世界（旧时钟不再推进，旧插件不再运行）。
+   * 返回在同一个状态存储上重启所需的信息。
+   */
+  crash(): { storePath: string; now: number } {
+    this.store.close();
+    return { storePath: this.storePath, now: this.clock.now() };
   }
 
   /** 取得某个服务的实现（测试用）。 */
@@ -122,8 +170,17 @@ export class World {
     return type ? all.filter((event) => event.type === type) : all;
   }
 
+  /** 停止：卸载插件期间继续推进时钟，收尾的截止时间才会到期。 */
   async close(): Promise<void> {
-    await this.kernel.shutdown();
+    let done = false;
+    const shutdown = this.kernel.shutdown().finally(() => {
+      done = true;
+    });
+    for (let waited = 0; !done && waited < 600_000; waited += 10) {
+      this.clock.advance(10);
+      await this.flush();
+    }
+    await shutdown;
     this.store.close();
   }
 }

@@ -104,6 +104,7 @@ safety = core;
 
 const host = new Kernel({
   clock,
+  bootId: process.env[ChildEnv.SessionId] ?? 'local',
   safety: core.kernelHooks(),
   log: logEvent,
   onTransition: (transition) => {

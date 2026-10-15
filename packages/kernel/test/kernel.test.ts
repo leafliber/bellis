@@ -519,3 +519,15 @@ test('按实例提供的服务：每个实例拿到为它生成的实现', async
   await h.kernel.settled();
   assert.deepEqual(seen, ['a#1=a#1', 'b#2=b#2']);
 });
+
+test('实例编号带启动标识，重启后不与上次重复', async () => {
+  const log: string[] = [];
+  const first = new Kernel({
+    clock: systemClock(),
+    safety: { revokeLeases: () => {}, quiesceTimedOut: () => {}, inMaintenance: () => false },
+    bootId: 'a1',
+  });
+  first.add([entry('provider')], catalog(provider('provider', log)));
+  await first.settled();
+  assert.equal(first.snapshot()[0]?.instanceId, 'provider#a1.1');
+});
