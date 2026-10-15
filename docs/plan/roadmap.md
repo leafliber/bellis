@@ -21,7 +21,7 @@ Game Runtime：  VLA 研究（离线，与 P0–P3 并行）       魔女审判�
 ## P1 真实媒体
 
 - **验收平台**：Windows 10/11 x64；P0 的全部测试在 Windows 上重跑通过。
-- **内容**：OBS 32.2.x 中的 Stage、TTS sidecar、VTube Studio 形象、真实 OBS 控制与看门狗、DPAPI 加密存储；固定文本可以真实发声、出字幕、驱动口型。
+- **内容**：OBS 32.2.x 中的 Stage、云端 TTS 与本地降级 TTS sidecar、VTube Studio 形象、真实 OBS 控制与看门狗、DPAPI 加密存储；固定文本可以真实发声、出字幕、驱动口型。
 - **前置**：R-08–R-11、R-15 已批准；[探针](spikes.md) S-01、S-02、S-03、S-05、S-06、S-07、S-10 有结果。
 - **出口**：停止到静音、急停到安全场景的时延实测；字幕与口型偏差实测；OBS 最小化或遮挡下长时间播放无失真；sidecar 崩溃与恢复演练。
 

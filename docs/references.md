@@ -23,7 +23,10 @@
 - [LiveKit 轮次调优](https://docs.livekit.io/agents/logic/turns/tuning/)、[LLM 内容过滤示例](https://docs.livekit.io/reference/recipes/llm_powered_content_filter)。
 - [W3C Web Audio](https://www.w3.org/TR/webaudio-1.1/)、[W3C Secure Contexts](https://www.w3.org/TR/secure-contexts/)。
 - [OBS 浏览器源](https://obsproject.com/kb/browser-source)、[obs-websocket 协议](https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md)、[obs-browser #406（Win11 定时器节流导致的音频问题）](https://github.com/obsproject/obs-browser/issues/406)。
-- [VTube Studio API](https://github.com/DenchiSoft/VTubeStudio)。
+- [VTube Studio API](https://github.com/DenchiSoft/VTubeStudio)、[VTS 录制与推流设置](https://github.com/DenchiSoft/VTubeStudio/wiki/Recording-Streaming-with-OBS)。
+- [ws](https://github.com/websockets/ws)、[OWASP WebSocket 安全](https://cheatsheetseries.owasp.org/cheatsheets/WebSocket_Security_Cheat_Sheet.html)、[Chrome 定时器节流](https://developer.chrome.com/blog/timer-throttling-in-chrome-88)。
+- [MiniMax 双向流式 TTS](https://platform.minimax.io/docs/api-reference/speech-t2a-websocket-bidi.md)、[火山引擎双向流式 TTS](https://docs.volcengine.com/docs/DoubaoVoice/bidirectional-streaming-text-to-speech-websocket?lang=zh)、[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS)。
+- [Qwen3-ForcedAligner](https://arxiv.org/abs/2601.21337)：非自回归强制对齐，中日文字级时间戳。
 
 ## VLA 与游戏控制
 
