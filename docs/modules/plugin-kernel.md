@@ -38,7 +38,7 @@
 | `inject` | 依赖，形如 `stage@1`；可选依赖加 `?`（如 `memory@1?`），不阻塞激活，在用到时探测 |
 | `permissions` | 申请的能力，例如 `speech.output`、`obs.scene`、`game.goal`、`game.input`、`net.egress:<主机>` |
 | `process` | `in-process` 或 `sidecar` |
-| `config` | 配置的 Schema |
+| `config` | 配置的 Schema；加载时先按 Schema 补齐缺省值再校验 |
 
 服务按 `名字@主版本` 匹配，主版本不兼容时消费方停在 WAITING，并给出原因。
 
@@ -114,6 +114,8 @@ WAITING ──依赖齐全──► LOADING ──► ACTIVE ──停用或依�
 - 停止方式：先发 RPC 关闭，再关 stdin 让子进程读到 EOF 后退出，超时再强制终止（R-06）。
 
 ## 权限
+
+宿主提供的核心服务可以按插件实例生成实现：每个实例拿到的安全核门面都绑定了它自己的实例编号，不能冒用其他实例的身份申请授权或持有许可。实例编号带本次启动的标识，重启后不与上次重复。
 
 插件在清单里申请权限，安全核按 profile 授予；申请而未授予的权限使插件停在 WAITING 并说明原因。插件拿到的是收窄过的上下文，只能看到被授予的服务。这一层只防误用，不防恶意代码，所以第三方代码一律以 sidecar 接入。
 

@@ -1,0 +1,17 @@
+{
+  "name": "@bellis/plugins",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/audience": "workspace:*",
+    "@bellis/director": "workspace:*",
+    "@bellis/kernel": "workspace:*",
+    "@bellis/moderation": "workspace:*",
+    "@bellis/speech": "workspace:*",
+    "@bellis/stage": "workspace:*"
+  }
+}

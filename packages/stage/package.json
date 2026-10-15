@@ -1,0 +1,14 @@
+{
+  "name": "@bellis/stage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/kernel": "workspace:*",
+    "@bellis/safety": "workspace:*",
+    "typebox": "1.3.37"
+  }
+}

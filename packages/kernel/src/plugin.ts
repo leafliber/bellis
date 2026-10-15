@@ -1,6 +1,6 @@
 import type { PluginManifest } from '@bellis/protocol';
 import type { Static, TSchema } from 'typebox';
-import type { DispatchMode, Extension, Handler } from './extension.ts';
+import type { DispatchMode, Extension, Extensions, Handler } from './extension.ts';
 import type { ServiceToken } from './service.ts';
 
 export type Disposer = () => void | Promise<void>;
@@ -45,6 +45,8 @@ export interface PluginContext<Config = unknown> {
   optional<T>(token: ServiceToken<T>): T | undefined;
   /** 提供清单中声明的服务；只能在激活期间调用。 */
   provide<T>(token: ServiceToken<T>, impl: T): void;
+  /** 在扩展点上分发（只能按扩展点声明的模式）。 */
+  readonly extensions: Dispatcher;
   /** 在扩展点上注册监听者，卸载时自动撤销。 */
   on<E extends Extension<DispatchMode, never, unknown>>(extension: E, handler: Handler<E>): void;
   /** 注册撤销函数；卸载时按后注册先撤销的顺序运行。 */
@@ -53,6 +55,8 @@ export interface PluginContext<Config = unknown> {
   fail(error: Error): void;
   log(event: string, fields?: Record<string, unknown>): void;
 }
+
+export type Dispatcher = Pick<Extensions, 'observe' | 'wrap' | 'parallel' | 'serial' | 'first'>;
 
 export type PluginCatalog = ReadonlyMap<string, PluginDefinition>;
 

@@ -1,5 +1,6 @@
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
+import Value from 'typebox/value';
 import { type Clock, type TimerHandle, withDeadline } from './clock.ts';
 import { Extensions } from './extension.ts';
 import type { Disposer, PluginCatalog, PluginContext, PluginDefinition } from './plugin.ts';
@@ -20,6 +21,8 @@ export interface ResolvedEntry {
   plugin: string;
   config: unknown;
   disabled: boolean;
+  /** 启用或禁用是否在 profile 或 patch 中显式写明（审核插件的开关必须显式，D-18）。 */
+  explicitSwitch: boolean;
   grant: readonly string[];
 }
 
@@ -79,6 +82,12 @@ export interface EntrySnapshot {
 
 export type ReplaceResult = { ok: true } | { ok: false; error: string };
 
+/** 按实例提供的服务据此生成实现。 */
+export interface ServiceOwner {
+  entryId: string;
+  instanceId: string;
+}
+
 interface Instance {
   readonly id: string;
   readonly definition: PluginDefinition;
@@ -89,6 +98,8 @@ interface Instance {
   readonly staged: Map<string, { major: number; impl: unknown }>;
   /** 激活期间注册的扩展点监听者，与服务一同发布，发布前不会收到分发。 */
   readonly stagedHandlers: Array<() => () => void>;
+  /** 按实例生成的服务实现。 */
+  readonly scoped: Map<string, unknown>;
   context: PluginContext;
   published: boolean;
   closed: boolean;
@@ -123,11 +134,24 @@ function validator(schema: TSchema) {
   return compiled;
 }
 
-function configError(definition: PluginDefinition, config: unknown): string | undefined {
-  const check = validator(definition.manifest.config);
-  if (check.Check(config)) return undefined;
+/** 按清单的 Schema 补齐缺省值（不改动传入的配置），再校验。 */
+function prepareConfig(
+  definition: PluginDefinition,
+  raw: unknown,
+): { config: unknown } | { error: string } {
+  const schema = definition.manifest.config;
+  const config = Value.Default(schema, structuredClone(raw ?? {}));
+  const check = validator(schema);
+  if (check.Check(config)) return { config };
   const first = [...check.Errors(config)][0];
-  return `配置不合法：${first ? `${first.instancePath || '/'} ${first.message}` : '未知错误'}`;
+  return {
+    error: `配置不合法：${first ? `${first.instancePath || '/'} ${first.message}` : '未知错误'}`,
+  };
+}
+
+function configError(definition: PluginDefinition, raw: unknown): string | undefined {
+  const prepared = prepareConfig(definition, raw);
+  return 'error' in prepared ? prepared.error : undefined;
 }
 
 /** 清单中同一个服务名只能出现一次（提供与依赖分别检查）。 */
@@ -190,6 +214,18 @@ export class Kernel {
   /** 由宿主直接提供的基础服务（时钟、通道等），不属于任何插件。 */
   provideCore<T>(token: ServiceToken<T>, impl: T): () => void {
     const dispose = this.services.add(token.name, token.major, impl, CORE_PROVIDER);
+    return () => {
+      dispose();
+      this.#requestReconcile();
+    };
+  }
+
+  /**
+   * 按插件实例提供的基础服务：每个实例拿到由工厂为它生成的实现（例如绑定了实例编号的安全核门面），
+   * 插件无法冒用其他实例的身份。
+   */
+  provideScoped<T>(token: ServiceToken<T>, factory: (owner: ServiceOwner) => T): () => void {
+    const dispose = this.services.add(token.name, token.major, factory, CORE_PROVIDER, true);
     return () => {
       dispose();
       this.#requestReconcile();
@@ -644,7 +680,9 @@ export class Kernel {
     this.#requestReconcile();
   }
 
-  #newInstance(entry: Entry, definition: PluginDefinition, config: unknown): Instance {
+  #newInstance(entry: Entry, definition: PluginDefinition, raw: unknown): Instance {
+    const prepared = prepareConfig(definition, raw);
+    const config = 'config' in prepared ? prepared.config : raw;
     const instance: Instance = {
       id: `${entry.id}#${this.#nextInstance++}`,
       definition,
@@ -653,6 +691,7 @@ export class Kernel {
       disposers: [],
       staged: new Map(),
       stagedHandlers: [],
+      scoped: new Map(),
       context: undefined as unknown as PluginContext,
       published: false,
       closed: false,
@@ -669,6 +708,14 @@ export class Kernel {
     const provides = new Map(manifest.provides.map((ref) => [parseRef(ref).name, parseRef(ref)]));
     const alive = () => {
       if (instance.closed) throw new Error(`${instance.id} 已卸载`);
+    };
+    const implFor = (token: ServiceToken<unknown>, found: { impl: unknown; scoped: boolean }) => {
+      if (!found.scoped) return found.impl;
+      if (!instance.scoped.has(token.name)) {
+        const factory = found.impl as (owner: ServiceOwner) => unknown;
+        instance.scoped.set(token.name, factory({ entryId: entry.id, instanceId: instance.id }));
+      }
+      return instance.scoped.get(token.name);
     };
     const declared = (token: ServiceToken<unknown>, optional: boolean) => {
       const dependency = injects.get(token.name);
@@ -687,18 +734,19 @@ export class Kernel {
       get forced() {
         return instance.forced;
       },
+      extensions: this.extensions,
       service: <T>(token: ServiceToken<T>): T => {
         alive();
         declared(token, false);
         const found = this.services.resolve(token.name, token.major);
         if ('missing' in found) throw new Error(found.missing);
-        return found.impl as T;
+        return implFor(token, found) as T;
       },
       optional: <T>(token: ServiceToken<T>): T | undefined => {
         alive();
         declared(token, true);
         const found = this.services.resolve(token.name, token.major);
-        return 'impl' in found ? (found.impl as T) : undefined;
+        return 'impl' in found ? (implFor(token, found) as T) : undefined;
       },
       provide: (token, impl) => {
         alive();

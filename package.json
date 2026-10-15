@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node packages/launcher/src/main.ts",
     "profile": "node packages/kernel/src/show-profile.ts",
+    "operator": "node packages/launcher/src/operator.ts",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run gen:check && pnpm run test",
     "lint": "biome ci .",
     "format": "biome check --write .",

@@ -16,6 +16,18 @@ const profile = {
   ],
 };
 
+test('记录启用或禁用是否显式写明', () => {
+  const entries = resolveProfile(profile, [{ name: 'p', ops: [{ op: 'disable', id: 'clock' }] }]);
+  assert.deepEqual(
+    entries.map((e) => [e.id, e.explicitSwitch]),
+    [
+      ['clock', true],
+      ['tts', false],
+      ['moderation', true],
+    ],
+  );
+});
+
 test('按包的顺序展开', () => {
   assert.deepEqual(
     resolveProfile(profile).map((e) => e.id),

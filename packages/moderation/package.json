@@ -1,0 +1,15 @@
+{
+  "name": "@bellis/moderation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/kernel": "workspace:*",
+    "@bellis/safety": "workspace:*",
+    "@bellis/speech": "workspace:*",
+    "typebox": "1.3.37"
+  }
+}

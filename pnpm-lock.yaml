@@ -204,6 +204,18 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  packages/audience:
+    dependencies:
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/channel:
     dependencies:
       '@bellis/protocol':
@@ -225,6 +237,24 @@ importers:
         specifier: 1.3.37
         version: 1.3.37
 
+  packages/director:
+    dependencies:
+      '@bellis/audience':
+        specifier: workspace:*
+        version: link:../audience
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@bellis/speech':
+        specifier: workspace:*
+        version: link:../speech
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/host:
     dependencies:
       '@bellis/channel':
@@ -239,6 +269,9 @@ importers:
       '@bellis/obs':
         specifier: workspace:*
         version: link:../obs
+      '@bellis/plugins':
+        specifier: workspace:*
+        version: link:../plugins
       '@bellis/process':
         specifier: workspace:*
         version: link:../process
@@ -254,6 +287,9 @@ importers:
       '@bellis/store':
         specifier: workspace:*
         version: link:../store
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
 
   packages/kernel:
     dependencies:
@@ -300,7 +336,43 @@ importers:
         specifier: 1.3.37
         version: 1.3.37
 
+  packages/moderation:
+    dependencies:
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@bellis/speech':
+        specifier: workspace:*
+        version: link:../speech
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/obs: {}
+
+  packages/plugins:
+    dependencies:
+      '@bellis/audience':
+        specifier: workspace:*
+        version: link:../audience
+      '@bellis/director':
+        specifier: workspace:*
+        version: link:../director
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/moderation':
+        specifier: workspace:*
+        version: link:../moderation
+      '@bellis/speech':
+        specifier: workspace:*
+        version: link:../speech
+      '@bellis/stage':
+        specifier: workspace:*
+        version: link:../stage
 
   packages/process:
     dependencies:
@@ -340,6 +412,67 @@ importers:
       '@napi-rs/keyring':
         specifier: 2.1.1
         version: 2.1.1
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
+  packages/sim:
+    dependencies:
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/obs':
+        specifier: workspace:*
+        version: link:../obs
+      '@bellis/plugins':
+        specifier: workspace:*
+        version: link:../plugins
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@bellis/store':
+        specifier: workspace:*
+        version: link:../store
+    devDependencies:
+      '@bellis/audience':
+        specifier: workspace:*
+        version: link:../audience
+      '@bellis/director':
+        specifier: workspace:*
+        version: link:../director
+      '@bellis/speech':
+        specifier: workspace:*
+        version: link:../speech
+      '@bellis/stage':
+        specifier: workspace:*
+        version: link:../stage
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
+
+  packages/speech:
+    dependencies:
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@bellis/stage':
+        specifier: workspace:*
+        version: link:../stage
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
+  packages/stage:
+    dependencies:
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
       typebox:
         specifier: 1.3.37
         version: 1.3.37

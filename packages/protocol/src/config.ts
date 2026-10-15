@@ -26,6 +26,9 @@ export const HostConfig = Type.Object(
     storePath: Type.String({ minLength: 1 }),
     /** `sim` profile：只允许 M0，外部服务全部换成模拟实现。 */
     simulation: Type.Boolean(),
+    /** 插件 profile 文件与依次应用的 patch 文件；相对路径以配置文件所在目录为基准。 */
+    profile: Type.String({ minLength: 1 }),
+    patches: Type.Array(Type.String({ minLength: 1 })),
     heartbeatIntervalMs: Positive,
     watchdog: Type.Object({ heartbeatTimeoutMs: Positive }, closed),
     safety: Type.Object(

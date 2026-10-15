@@ -94,6 +94,8 @@ function message(error: unknown): string {
 export class SafetyCore {
   readonly control: ControlChannel;
   readonly leases: Leases;
+  /** 状态存储；只给宿主装配与执行意图用，不交给插件。 */
+  readonly store: StateStore;
   readonly #store: StateStore;
   readonly #clock: Clock;
   readonly #config: SafetyConfig;
@@ -112,6 +114,7 @@ export class SafetyCore {
 
   constructor(options: SafetyOptions) {
     this.#store = options.store;
+    this.store = options.store;
     this.#clock = options.clock;
     this.#config = options.config;
     this.#obs = options.obs;
@@ -405,7 +408,11 @@ export class SafetyCore {
     );
   }
 
-  /** 尽力写入事件：写不进只记日志，不影响安全动作。 */
+  /** 尽力写入事件：写不进只记日志，不影响调用方。 */
+  record(type: string, data: Record<string, unknown>): void {
+    this.#record(type, data);
+  }
+
   #record(type: string, data: Record<string, unknown>): void {
     try {
       this.#store.append(type, data, { source: 'safety' });
