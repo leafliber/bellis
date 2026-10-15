@@ -43,9 +43,18 @@ export class KeyringSecretStore implements SecretStore {
     return this.#entry(name).deleteCredential();
   }
 
+  /**
+   * Windows 与 macOS 支持。Linux 上只有 Secret Service 支持列出；没有它时（如 CI）读写回落到内核密钥环，
+   * 列出则明确报不支持。
+   */
   async names(): Promise<string[]> {
     // 查询结果里带着值，这里只取名字，值不离开本函数。
-    const found = await findCredentialsAsync(this.service);
+    let found: Awaited<ReturnType<typeof findCredentialsAsync>>;
+    try {
+      found = await findCredentialsAsync(this.service);
+    } catch (error) {
+      throw new Error('当前系统凭据库不支持列出条目', { cause: error });
+    }
     return found
       .map((credential) => credential.account)
       .filter((name) => SECRET_NAME.test(name))
