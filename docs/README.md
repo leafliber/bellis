@@ -32,5 +32,6 @@
 | [Windows 平台](platform/windows.md) | 进程、通信、凭据、定时、GPU、OBS、路径、CI 的约束 |
 | [技术基线与路线审核](plan/tech-baseline.md) | 已批准的决策与待审核的技术路线 |
 | [路线图](plan/roadmap.md) | 阶段、内容与出口 |
-| [P0 任务卡](plan/P0.md) | 当前阶段 |
+| [P1 任务卡](plan/P1.md) | 当前阶段 |
+| [P0 任务卡](plan/P0.md) | 已完成的阶段 |
 | [真机探针](plan/spikes.md) | 需要在 Windows 真机上验证的假设 |
