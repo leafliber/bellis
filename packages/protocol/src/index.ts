@@ -9,6 +9,13 @@ import {
   RpcSuccess,
 } from './jsonrpc.ts';
 import {
+  PluginManifest,
+  Profile,
+  ProfilePatch,
+  SidecarDescription,
+  SidecarHealthResult,
+} from './plugin.ts';
+import {
   HostStatusResult,
   HostStoppingParams,
   ProcessShutdownParams,
@@ -18,6 +25,7 @@ import {
 
 export * from './channel.ts';
 export * from './jsonrpc.ts';
+export * from './plugin.ts';
 export * from './process.ts';
 
 /**
@@ -35,6 +43,7 @@ export const schemaModules = {
     RpcMessage,
     RpcCancelParams,
   },
+  plugin: { PluginManifest, Profile, ProfilePatch, SidecarDescription, SidecarHealthResult },
   process: {
     SessionInfo,
     ProcessShutdownParams,
