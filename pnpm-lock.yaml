@@ -504,6 +504,12 @@ importers:
         specifier: workspace:*
         version: link:../secret-store
 
+  spikes:
+    dependencies:
+      '@bellis/store':
+        specifier: workspace:*
+        version: link:../packages/store
+
 packages:
 
   '@biomejs/biome@2.5.15':

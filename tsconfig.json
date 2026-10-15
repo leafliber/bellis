@@ -18,5 +18,5 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
-  "include": ["packages/*/src", "packages/*/test", "packages/*/scripts"]
+  "include": ["packages/*/src", "packages/*/test", "packages/*/scripts", "spikes"]
 }
