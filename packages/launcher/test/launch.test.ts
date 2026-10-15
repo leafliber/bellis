@@ -8,7 +8,7 @@ import type { Readable } from 'node:stream';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { connect, decodeSessionKey, RpcPeer } from '@bellis/channel';
-import { OBS_SECRET, writeObsSecret } from '@bellis/config';
+import { SIM_OBS_SECRET, writeObsSecret } from '@bellis/config';
 import { SimObs } from '@bellis/obs';
 import { OperatorMethod, Role } from '@bellis/protocol';
 import { KeyringSecretStore, readSessionInfo } from '@bellis/secret-store';
@@ -101,7 +101,7 @@ async function start(
   const service = `bellis-test-${id}`;
   const store = new KeyringSecretStore(service);
   const obs = await SimObs.start();
-  await writeObsSecret(store, { url: obs.url });
+  await writeObsSecret(store, { url: obs.url }, SIM_OBS_SECRET);
   const dbPath = join(tmpdir(), `bellis-launch-${id}.db`);
   const configPath = join(tmpdir(), `bellis-launch-${id}.json`);
   const profilePath = join(tmpdir(), `bellis-launch-${id}.profile.json`);
@@ -109,7 +109,7 @@ async function start(
   writeFileSync(profilePath, JSON.stringify(fastProfile(options.moderationDisabled)));
   writeFileSync(configPath, JSON.stringify({ ...config, storePath: dbPath, profile: profilePath }));
   const cleanup = async () => {
-    await store.delete(OBS_SECRET);
+    await store.delete(SIM_OBS_SECRET);
     await obs.close();
     for (const path of [configPath, profilePath, dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
       rmSync(path, { force: true });

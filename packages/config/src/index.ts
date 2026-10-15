@@ -7,8 +7,15 @@ import { Compile } from 'typebox/compile';
 const isHostConfig = Compile(HostConfig);
 const isObsSecret = Compile(ObsSecret);
 
-/** OBS 凭据在 SecretStore 中的名字。 */
+/** 真实 OBS 的凭据在 SecretStore 中的名字，由维护者用 `pnpm secret set obs` 录入。 */
 export const OBS_SECRET = 'obs';
+/** 模拟 OBS 的凭据名，由 sim 启动器写入与删除；与真实凭据分开，跑仿真不会覆盖或删掉真实凭据。 */
+export const SIM_OBS_SECRET = 'obs-sim';
+
+/** 宿主与看门狗按配置决定读哪一份 OBS 凭据。 */
+export function obsSecretName(config: Pick<HostConfig, 'simulation'>): string {
+  return config.simulation ? SIM_OBS_SECRET : OBS_SECRET;
+}
 
 function describe(check: ReturnType<typeof Compile>, value: unknown): string {
   const first = [...check.Errors(value)][0];
@@ -29,16 +36,20 @@ export function loadConfig(path: string): HostConfig {
   };
 }
 
-export async function readObsSecret(store: SecretStore): Promise<ObsSecret> {
-  const text = await store.get(OBS_SECRET);
-  if (text === undefined) throw new Error('SecretStore 中没有 OBS 凭据');
+export async function readObsSecret(store: SecretStore, name: string): Promise<ObsSecret> {
+  const text = await store.get(name);
+  if (text === undefined) throw new Error(`SecretStore 中没有 OBS 凭据（${name}）`);
   const value: unknown = JSON.parse(text);
   if (!isObsSecret.Check(value)) throw new Error(`OBS 凭据不合法：${describe(isObsSecret, value)}`);
   return value;
 }
 
-export async function writeObsSecret(store: SecretStore, secret: ObsSecret): Promise<void> {
+export async function writeObsSecret(
+  store: SecretStore,
+  secret: ObsSecret,
+  name: string,
+): Promise<void> {
   if (!isObsSecret.Check(secret))
     throw new Error(`OBS 凭据不合法：${describe(isObsSecret, secret)}`);
-  await store.set(OBS_SECRET, JSON.stringify(secret));
+  await store.set(name, JSON.stringify(secret));
 }

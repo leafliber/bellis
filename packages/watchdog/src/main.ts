@@ -3,7 +3,7 @@
  * 从 SecretStore 读取本次会话的连接信息与 OBS 凭据（R-23），从配置文件读取应急目标与超时。
  */
 import { decodeSessionKey } from '@bellis/channel';
-import { loadConfig, readObsSecret } from '@bellis/config';
+import { loadConfig, obsSecretName, readObsSecret } from '@bellis/config';
 import { logEvent, watchLifeline } from '@bellis/process';
 import { ChildEnv } from '@bellis/protocol';
 import { KeyringSecretStore, readSessionInfo } from '@bellis/secret-store';
@@ -32,7 +32,7 @@ logEvent('watchdog.ready', { pid: process.pid, ppid: process.ppid, sessionId: in
 watchdog = new Watchdog({
   channelPath: info.channelPath,
   key: decodeSessionKey(info.channelKey),
-  obs: await readObsSecret(store),
+  obs: await readObsSecret(store, obsSecretName(config)),
   policy: config.safety.emergency,
   heartbeatTimeoutMs: config.watchdog.heartbeatTimeoutMs,
   log: logEvent,
