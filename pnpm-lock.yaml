@@ -204,6 +204,15 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
+  packages/channel:
+    dependencies:
+      '@bellis/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/protocol:
     dependencies:
       typebox:
