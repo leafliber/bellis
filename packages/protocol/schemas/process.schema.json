@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bellis:schema:process",
+  "$defs": {
+    "SessionInfo": {
+      "type": "object",
+      "required": [
+        "v",
+        "sessionId",
+        "channelPath",
+        "channelKey",
+        "launcherPid",
+        "startedAt"
+      ],
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[a-z0-9]{1,16}$"
+        },
+        "channelPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 260
+        },
+        "channelKey": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "launcherPid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProcessShutdownParams": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProcessShutdownResult": {
+      "type": "object",
+      "required": [
+        "accepted"
+      ],
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostStoppingParams": {
+      "type": "object",
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostStatusResult": {
+      "type": "object",
+      "required": [
+        "watchdogConnected"
+      ],
+      "properties": {
+        "watchdogConnected": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

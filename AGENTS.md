@@ -10,6 +10,7 @@
 - `pnpm run check`：CI 运行的完整检查，依次为格式与 lint、类型检查、生成物核对、测试。提交前必须通过。
 - `pnpm run gen`：协议类型（`packages/protocol`）改动后重新生成 JSON Schema，生成物与源一起提交。
 - `pnpm run format`：自动修正格式。
+- `pnpm start`：在本机运行启动器（拉起宿主与看门狗），Ctrl+C 停止。
 
 ## 从哪里开始
 
