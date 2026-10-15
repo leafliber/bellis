@@ -20,6 +20,12 @@ const info = {
 
 async function exercise(store: SecretStore) {
   assert.equal(await store.get('missing'), undefined);
+  assert.deepEqual(await store.names(), []);
+  await store.set('b.token', 'secret-b');
+  await store.set('a.token', 'secret-a');
+  assert.deepEqual(await store.names(), ['a.token', 'b.token']);
+  await store.delete('a.token');
+  await store.delete('b.token');
   await store.set('token', 'v1');
   await store.set('token', 'v2');
   assert.equal(await store.get('token'), 'v2');
