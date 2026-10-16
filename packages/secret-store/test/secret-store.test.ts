@@ -18,6 +18,19 @@ const info = {
   startedAt: new Date().toISOString(),
 };
 
+/** 只返回名字、按字典序。 */
+async function exerciseNames(store: SecretStore) {
+  assert.deepEqual(await store.names(), []);
+  await store.set('b.token', 'secret-b');
+  await store.set('a.token', 'secret-a');
+  try {
+    assert.deepEqual(await store.names(), ['a.token', 'b.token']);
+  } finally {
+    await store.delete('a.token');
+    await store.delete('b.token');
+  }
+}
+
 async function exercise(store: SecretStore) {
   assert.equal(await store.get('missing'), undefined);
   await store.set('token', 'v1');
@@ -38,11 +51,30 @@ async function exercise(store: SecretStore) {
 
 test('内存存储', async () => {
   await exercise(new MemorySecretStore());
+  await exerciseNames(new MemorySecretStore());
 });
 
 test('系统凭据库', async () => {
   // 每次用独立的服务名，测试互不干扰，也不碰真实的 bellis 条目。
   await exercise(new KeyringSecretStore(`bellis-test-${randomBytes(4).toString('hex')}`));
+});
+
+test('系统凭据库列出条目：Windows 与 macOS 支持，Linux 没有 Secret Service 时明确报不支持', async () => {
+  const store = new KeyringSecretStore(`bellis-test-${randomBytes(4).toString('hex')}`);
+  if (process.platform !== 'linux') {
+    await exerciseNames(store);
+    return;
+  }
+  await store.set('a.token', 'secret-a');
+  try {
+    const names = await store.names().catch((error: Error) => {
+      assert.match(error.message, /不支持列出/);
+      return undefined;
+    });
+    if (names !== undefined) assert.deepEqual(names, ['a.token']);
+  } finally {
+    await store.delete('a.token');
+  }
 });
 
 test('写入前校验会话信息', async () => {

@@ -1,10 +1,10 @@
 import { SessionInfo } from '@bellis/protocol';
-import { AsyncEntry } from '@napi-rs/keyring';
+import { AsyncEntry, findCredentialsAsync } from '@napi-rs/keyring';
 import { Compile } from 'typebox/compile';
 
 /**
  * 统一的凭据存储接口（D-28）。
- * Windows 存凭据管理器、macOS 存 Keychain（R-16）；大块数据的 DPAPI 加密文件在 P1 加入。
+ * Windows 存凭据管理器、macOS 存 Keychain（R-16）；大块数据的 DPAPI 加密文件在出现超出凭据管理器上限的条目时再加入。
  * 只防其他用户，不防同一用户下的其他程序，与威胁模型一致（D-12）。
  */
 export interface SecretStore {
@@ -12,6 +12,8 @@ export interface SecretStore {
   set(name: string, value: string): Promise<void>;
   /** 返回是否确实删除了一项。 */
   delete(name: string): Promise<boolean>;
+  /** 已存条目的名字，按字典序；不返回任何值。 */
+  names(): Promise<string[]>;
 }
 
 const SECRET_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -41,6 +43,24 @@ export class KeyringSecretStore implements SecretStore {
     return this.#entry(name).deleteCredential();
   }
 
+  /**
+   * Windows 与 macOS 支持。Linux 上只有 Secret Service 支持列出；没有它时（如 CI）读写回落到内核密钥环，
+   * 列出则明确报不支持。
+   */
+  async names(): Promise<string[]> {
+    // 查询结果里带着值，这里只取名字，值不离开本函数。
+    let found: Awaited<ReturnType<typeof findCredentialsAsync>>;
+    try {
+      found = await findCredentialsAsync(this.service);
+    } catch (error) {
+      throw new Error('当前系统凭据库不支持列出条目', { cause: error });
+    }
+    return found
+      .map((credential) => credential.account)
+      .filter((name) => SECRET_NAME.test(name))
+      .sort();
+  }
+
   #entry(name: string): AsyncEntry {
     return new AsyncEntry(this.service, checkName(name));
   }
@@ -60,6 +80,10 @@ export class MemorySecretStore implements SecretStore {
 
   async delete(name: string): Promise<boolean> {
     return this.#values.delete(checkName(name));
+  }
+
+  async names(): Promise<string[]> {
+    return [...this.#values.keys()].sort();
   }
 }
 

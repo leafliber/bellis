@@ -9,6 +9,14 @@
 .env.*
 !.env.example
 
+# 真实配置：从 *.example.json 复制，不入库；仓库只带 sim 配置与样例
+/config/*.json
+!/config/sim.json
+!/config/*.example.json
+/config/profiles/*.json
+!/config/profiles/sim.json
+!/config/profiles/*.example.json
+
 # Node / Python 工具
 node_modules/
 dist/

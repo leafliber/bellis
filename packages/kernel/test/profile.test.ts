@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { formatEntries, resolveProfile } from '../src/index.ts';
+import { fileURLToPath } from 'node:url';
+import { formatEntries, readJsonFile, resolveProfile } from '../src/index.ts';
 
 const profile = {
   name: 'sim',
@@ -110,4 +111,14 @@ test('引用不存在的条目、重复条目、格式错误都报错', () => {
     /重复/,
   );
   assert.throws(() => resolveProfile({ name: 'Bad Name', packs: [] }), /profile 不合法/);
+});
+
+test('仓库自带的 profile 都显式设置了审核插件的开关', () => {
+  for (const name of ['sim.json', 'live.example.json']) {
+    const path = fileURLToPath(new URL(`../../../config/profiles/${name}`, import.meta.url));
+    const moderation = resolveProfile(readJsonFile(path), []).find(
+      (entry) => entry.id === 'moderation',
+    );
+    assert.equal(moderation?.explicitSwitch, true, name);
+  }
 });

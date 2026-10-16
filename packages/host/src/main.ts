@@ -4,7 +4,7 @@
  * 启动后总处于安全停止，由操作员显式切换模式。
  */
 import { listen, RpcPeer } from '@bellis/channel';
-import { loadConfig, readObsSecret } from '@bellis/config';
+import { loadConfig, obsSecretName, readObsSecret } from '@bellis/config';
 import {
   ChannelHub,
   ClockService,
@@ -83,7 +83,11 @@ logEvent('host.recovered', {
   orphaned: recovery.orphaned.map((i) => i.key),
 });
 
-const emergency = new ObsEmergencyConnection(await readObsSecret(secrets), clock, logEvent);
+const emergency = new ObsEmergencyConnection(
+  await readObsSecret(secrets, obsSecretName(config)),
+  clock,
+  logEvent,
+);
 await emergency.start();
 
 const peers = new Set<RpcPeer>();

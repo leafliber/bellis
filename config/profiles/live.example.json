@@ -1,0 +1,15 @@
+{
+  "name": "live",
+  "packs": [
+    {
+      "name": "moderation",
+      "entries": [
+        {
+          "id": "moderation",
+          "plugin": "moderation",
+          "disabled": true
+        }
+      ]
+    }
+  ]
+}

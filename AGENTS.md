@@ -10,7 +10,8 @@
 - `pnpm run check`：CI 运行的完整检查，依次为格式与 lint、类型检查、生成物核对、测试。提交前必须通过。
 - `pnpm run gen`：协议类型（`packages/protocol`）改动后重新生成 JSON Schema，生成物与源一起提交。
 - `pnpm run format`：自动修正格式。
-- `pnpm start`：在本机运行启动器（拉起宿主与看门狗，缺省用 `config/sim.json`），Ctrl+C 停止。
+- `pnpm start [配置文件]`：在本机运行启动器（拉起宿主与看门狗，缺省用 `config/sim.json`），Ctrl+C 停止。接真实 OBS 用 `pnpm start config/live.json`；真实配置与 profile 从对应的 `*.example.json` 复制，不入库。
+- `pnpm secret <list | set 名字 | delete 名字>`：维护者录入凭据，例如 `pnpm secret set obs`；值不回显、不打印，列出时只显示名字。Agent 不代为录入。
 - `pnpm operator <status | mode 目标 | presence | estop>`：操作员命令，例如 `pnpm operator mode M0`。
 - `pnpm sim [--seed N] [--runs N]`：确定性仿真的大规模探索；失败时给出复现命令。
 
