@@ -19,7 +19,9 @@ Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Win
 - **宿主永远做服务端。** 宿主不提权；需要提权的 Game Runtime 做客户端。
 - **认证先于数据。** libuv 创建管道时使用默认安全描述符，Everyone 和匿名用户有读权限；管道命名空间全机共享，任何本地用户都可能抢先注册同名管道。所以双方先完成双向认证，认证前不发送任何数据；帧长有上限，每一步有超时。[来源](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
 - 不用 `readableAll`、`writableAll`，它们只会给 Everyone 加权限。
-- 监听时收到 `EADDRINUSE`，按“可能被抢注”告警处理，不要用同名重试。
+- 监听时收到 `EADDRINUSE`，按“可能被抢注”告警处理，不要用同名重试。客户端握手以 `auth-failed` 失败时同样告警。
+- **已知问题（S-03）**：libuv 建的管道不带 `PIPE_REJECT_REMOTE_CLIENTS`，Node 也没有设置它的接口，所以经 SMB 的远程客户端能连上（本机回环已实测，跨机 PENDING）。远程客户端和其他用户只有读权限：发不出 hello，拿不到任何数据，但能占用未认证的握手名额（上限 16 个，各自 2s 超时）。目前不另做处理，依靠握手认证，以及防火墙不放行入站 SMB。
+- 同一用户的进程能给宿主的管道再加实例；客户端落到这些实例上会以 `auth-failed` 失败，宿主侧察觉不到。同一用户的恶意进程不在威胁模型内（D-12）。
 - 游戏画面帧不走管道（1080p 30fps 约 240MB/s），在 Game Runtime 内部处理。
 - 开发机（macOS/Linux）用 UDS，走同一抽象。
 
