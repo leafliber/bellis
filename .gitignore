@@ -24,6 +24,8 @@ dist/
 .pnpm-store/
 __pycache__/
 .venv/
+.ruff_cache/
+.pytest_cache/
 
 # 本机运行数据（状态存储等）
 /.bellis/
