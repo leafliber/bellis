@@ -13,6 +13,8 @@ import type { Mode } from './supervision.ts';
 export interface SafetyFacade {
   readonly mode: Mode;
   readonly moderationEnabled: boolean | undefined;
+  /** 急停时静音的 Stage 源，也是写 Stage URL 唯一允许的目标。 */
+  readonly stageSource: string;
   /** 以本实例的身份申请授权。 */
   authorize(request: Omit<IntentRequest, 'holder'>): Promise<Decision>;
   /** 执行已授权的意图：核对载荷后标为执行中 → 执行 → 写入结果。 */
@@ -41,6 +43,9 @@ export function safetyFacade(core: SafetyCore, holder: string): SafetyFacade {
     },
     get moderationEnabled() {
       return core.moderationEnabled;
+    },
+    get stageSource() {
+      return core.stageSource;
     },
     authorize: (request) => core.authorize({ ...request, holder }),
     execute: (intent, payload, effect) =>

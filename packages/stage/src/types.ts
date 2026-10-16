@@ -30,6 +30,10 @@ export type FromPage =
 
 /** Stage 服务与页面之间的链路。 */
 export interface PageLink {
+  /**
+   * 页面是否已连上并认证。真实页面在 OBS 加载 URL 之前为 false；模拟页面不提供，视为一直就绪。
+   */
+  readonly ready?: boolean;
   send(message: ToPage): void;
   onMessage(listener: (message: FromPage) => void): () => void;
 }

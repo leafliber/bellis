@@ -12,6 +12,20 @@
       ]
     },
     {
+      "name": "stage",
+      "entries": [
+        {
+          "id": "stage-page",
+          "plugin": "stage-page-obs",
+          "grant": ["obs.stage-url"]
+        },
+        {
+          "id": "stage",
+          "plugin": "stage-service"
+        }
+      ]
+    },
+    {
       "name": "moderation",
       "entries": [
         {
