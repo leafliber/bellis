@@ -520,6 +520,26 @@ test('按实例提供的服务：每个实例拿到为它生成的实现', async
   assert.deepEqual(seen, ['a#1=a#1', 'b#2=b#2']);
 });
 
+test('按实例提供的服务：工厂在激活期间就能拿到条目被授予的权限', async () => {
+  const h = harness();
+  const Gate = defineService<{ allowed: boolean }>('gate', 1);
+  h.kernel.provideScoped(Gate, ({ permissions }) => ({ allowed: permissions.has('obs.control') }));
+  const seen: string[] = [];
+  const asker = (id: string) =>
+    definePlugin({
+      manifest: { ...base, id, inject: [Gate.ref] },
+      activate(ctx) {
+        seen.push(`${id}=${ctx.service(Gate).allowed}`);
+      },
+    });
+  h.kernel.add(
+    [entry('a', 'a', { grant: ['obs.control'] }), entry('b')],
+    catalog(asker('a'), asker('b')),
+  );
+  await h.kernel.settled();
+  assert.deepEqual(seen, ['a=true', 'b=false']);
+});
+
 test('实例编号带启动标识，重启后不与上次重复', async () => {
   const log: string[] = [];
   const first = new Kernel({

@@ -25,6 +25,7 @@ import {
   ProcessShutdownParams,
   ProcessShutdownResult,
   SessionInfo,
+  WatchdogActedParams,
 } from './process.ts';
 
 export * from './channel.ts';
@@ -59,5 +60,6 @@ export const schemaModules = {
     HostHeartbeatParams,
     OperatorModeParams,
     OperatorEmergencyParams,
+    WatchdogActedParams,
   },
 } as const;

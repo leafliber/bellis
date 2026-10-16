@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
+import { type WebSocket, WebSocketServer } from 'ws';
 import {
   AuthenticationFailed,
   authenticationString,
@@ -8,7 +10,6 @@ import {
   RequestStatus,
   SUBPROTOCOL,
 } from './protocol.ts';
-import { createWsServer, type WsConnection } from './websocket-server.ts';
 
 export interface SimObsOptions {
   password?: string;
@@ -16,6 +17,9 @@ export interface SimObsOptions {
   inputs?: readonly string[];
   initialScene?: string;
 }
+
+/** 单条消息上限；模拟 OBS 只收很小的请求。 */
+const MAX_PAYLOAD_BYTES = 64 * 1024;
 
 interface Handled {
   code: number;
@@ -30,6 +34,8 @@ interface Handled {
 export class SimObs {
   readonly scenes: readonly string[];
   readonly muted = new Map<string, boolean>();
+  /** 各输入的设置（例如浏览器源的 url）。 */
+  readonly inputSettings = new Map<string, Record<string, unknown>>();
   currentScene: string;
   streaming = false;
   /** 收到的全部请求，按顺序记录。 */
@@ -37,28 +43,35 @@ export class SimObs {
   /** 为 true 时所有请求都以失败应答，模拟 OBS 出错。 */
   failing = false;
   readonly #password: string | undefined;
-  readonly #connections = new Set<WsConnection>();
-  readonly #server: ReturnType<typeof createWsServer>;
-  #url = '';
+  readonly #connections = new Set<WebSocket>();
+  readonly #server: WebSocketServer;
 
   private constructor(options: SimObsOptions) {
     this.scenes = options.scenes ?? ['Live', 'Safe'];
     this.currentScene = options.initialScene ?? this.scenes[0] ?? '';
-    for (const input of options.inputs ?? ['Stage']) this.muted.set(input, false);
+    for (const input of options.inputs ?? ['Stage']) {
+      this.muted.set(input, false);
+      this.inputSettings.set(input, {});
+    }
     this.#password = options.password;
-    this.#server = createWsServer([SUBPROTOCOL], (connection) => this.#accept(connection));
+    this.#server = new WebSocketServer({
+      host: '127.0.0.1',
+      port: 0,
+      maxPayload: MAX_PAYLOAD_BYTES,
+      handleProtocols: (protocols) => (protocols.has(SUBPROTOCOL) ? SUBPROTOCOL : false),
+    });
+    this.#server.on('connection', (connection) => this.#accept(connection));
   }
 
   static async start(options: SimObsOptions = {}): Promise<SimObs> {
     const obs = new SimObs(options);
-    await new Promise<void>((resolve) => obs.#server.listen(0, '127.0.0.1', resolve));
-    const { port } = obs.#server.address() as AddressInfo;
-    obs.#url = `ws://127.0.0.1:${port}`;
+    await once(obs.#server, 'listening');
     return obs;
   }
 
   get url(): string {
-    return this.#url;
+    const { port } = this.#server.address() as AddressInfo;
+    return `ws://127.0.0.1:${port}`;
   }
 
   /** 断开所有客户端，模拟 OBS 重启或网络中断。 */
@@ -71,7 +84,7 @@ export class SimObs {
     await new Promise<void>((resolve) => this.#server.close(() => resolve()));
   }
 
-  #accept(connection: WsConnection): void {
+  #accept(connection: WebSocket): void {
     this.#connections.add(connection);
     connection.on('close', () => this.#connections.delete(connection));
     const challenge = randomBytes(32).toString('base64');
@@ -87,8 +100,9 @@ export class SimObs {
         },
       }),
     );
-    connection.on('message', (text) => {
-      const message = JSON.parse(text) as Message;
+    connection.on('message', (data, isBinary) => {
+      if (isBinary) return;
+      const message = JSON.parse(String(data)) as Message;
       if (!identified) {
         if (message.op !== OpCode.Identify) return;
         const expected =
@@ -166,6 +180,28 @@ export class SimObs {
         if (!this.muted.has(input))
           return { code: RequestStatus.ResourceNotFound, comment: `没有输入 ${input}` };
         this.muted.set(input, data.inputMuted === true);
+        return { code: RequestStatus.Success };
+      }
+      case 'GetInputSettings': {
+        const input = String(data.inputName);
+        const settings = this.inputSettings.get(input);
+        if (!settings)
+          return { code: RequestStatus.ResourceNotFound, comment: `没有输入 ${input}` };
+        return {
+          code: RequestStatus.Success,
+          data: { inputSettings: { ...settings }, inputKind: 'browser_source' },
+        };
+      }
+      case 'SetInputSettings': {
+        const input = String(data.inputName);
+        const settings = this.inputSettings.get(input);
+        if (!settings)
+          return { code: RequestStatus.ResourceNotFound, comment: `没有输入 ${input}` };
+        const next = (data.inputSettings ?? {}) as Record<string, unknown>;
+        this.inputSettings.set(
+          input,
+          data.overlay === false ? { ...next } : { ...settings, ...next },
+        );
         return { code: RequestStatus.Success };
       }
       case 'GetStreamStatus':

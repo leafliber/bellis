@@ -5,7 +5,8 @@
       "name": "stage",
       "entries": [
         { "id": "stage-page", "plugin": "stage-page-sim" },
-        { "id": "stage", "plugin": "stage-service" }
+        { "id": "stage", "plugin": "stage-service" },
+        { "id": "obs", "plugin": "obs-control", "grant": ["obs.control"] }
       ]
     },
     {

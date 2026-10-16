@@ -67,6 +67,7 @@ function fastProfile(moderationDisabled: boolean | undefined) {
         entries: [
           { id: 'stage-page', plugin: 'stage-page-sim' },
           { id: 'stage', plugin: 'stage-service' },
+          { id: 'obs', plugin: 'obs-control', grant: ['obs.control'] },
           { id: 'tts', plugin: 'tts-sim', config: { samplesPerChar: 320 } },
           { id: 'speech', plugin: 'speech-arbiter', grant: ['speech.output'] },
           { id: 'moderation-model', plugin: 'moderation-model-sim' },
@@ -221,6 +222,12 @@ test('操作员切到 M0 后，录制弹幕经全模拟链路得到回应', asyn
       reason: 'sim profile 下只允许 M0',
     });
     assert.deepEqual(await operator.request(OperatorMethod.Mode, { target: 'M0' }), { ok: true });
+    // OBS 控制经宿主交出的连接连上了模拟 OBS。
+    await s.host.waitFor((line) => line.event === 'obs-control.connected', 5000);
+    const status = (await operator.request(OperatorMethod.Status)) as {
+      plugins: Array<{ id: string; state: string }>;
+    };
+    assert.equal(status.plugins.find((plugin) => plugin.id === 'obs')?.state, 'active');
     const fact = await s.host.waitFor(
       (line) => line.event === 'fact' && line.type === 'utterance.played',
       15_000,

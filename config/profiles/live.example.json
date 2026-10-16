@@ -2,6 +2,16 @@
   "name": "live",
   "packs": [
     {
+      "name": "obs",
+      "entries": [
+        {
+          "id": "obs",
+          "plugin": "obs-control",
+          "grant": ["obs.control"]
+        }
+      ]
+    },
+    {
       "name": "moderation",
       "entries": [
         {
