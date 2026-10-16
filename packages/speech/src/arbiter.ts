@@ -8,6 +8,7 @@ import {
   PREEMPTING,
   PRIORITY,
   PreCheck,
+  ReviewService,
   type Sentence,
   type Speech,
   type SpeechRequest,
@@ -81,6 +82,7 @@ export const speechArbiter = definePlugin({
       StageService.ref,
       TtsService.ref,
       `${ModerationService.ref}?`,
+      `${ReviewService.ref}?`,
     ],
     permissions: ['speech.output'],
     process: 'in-process',
@@ -166,7 +168,7 @@ export const speechArbiter = definePlugin({
     ctx.register(
       safety.onControl((signal) => {
         if (signal.kind === 'stop') hardStop(signal.reason);
-        else if (signal.mode === 'safe-stop') hardStop(signal.reason);
+        else if (signal.kind === 'mode' && signal.mode === 'safe-stop') hardStop(signal.reason);
       }),
     );
     ctx.register(() => {
@@ -178,6 +180,7 @@ export const speechArbiter = definePlugin({
       request: SpeechRequest,
       sentence: Sentence,
       previous: string | undefined,
+      signal: AbortSignal,
     ) => {
       if (safety.moderationEnabled === true && ctx.optional(ModerationService) === undefined) {
         return '审核已启用但审核插件不可用';
@@ -188,7 +191,21 @@ export const speechArbiter = definePlugin({
         sentence,
         previous,
       });
-      return verdict?.block;
+      if (verdict) return verdict.block;
+      // M1：逐句等待放行，期间操作员可以否决；没有放行环节就一句也不播。
+      if (safety.mode !== 'M1') return undefined;
+      const review = ctx.optional(ReviewService);
+      if (!review) return 'M1 需要逐句放行环节（speech-review），但它不在场';
+      return review.hold(
+        {
+          key: `${request.id}#${sentence.index}`,
+          utteranceId: request.id,
+          index: sentence.index,
+          source: request.source,
+          subtitle: sentence.subtitle,
+        },
+        signal,
+      );
     };
 
     const speak = async (current: Active): Promise<UtteranceOutcome> => {
@@ -213,7 +230,7 @@ export const speechArbiter = definePlugin({
 
           // 审核可能很慢：被停止、软收尾或抢占时不再等它。
           const blocked = await Promise.race([
-            preCheck(request, sentence, previous),
+            preCheck(request, sentence, previous, current.abort.signal),
             current.interrupted.promise.then(() => undefined),
           ]);
           const afterCheck = halted();

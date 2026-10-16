@@ -105,6 +105,10 @@ export const OperatorMethod = {
   Mode: 'operator.mode',
   Presence: 'operator.presence',
   EmergencyStop: 'operator.emergency_stop',
+  /** M1 中否决等待放行的句子。 */
+  Veto: 'operator.veto',
+  /** 只跑开播预检，不切换模式。 */
+  Preflight: 'operator.preflight',
 } as const;
 
 export const OperatorModeParams = Type.Object(
@@ -118,3 +122,16 @@ export const OperatorEmergencyParams = Type.Object(
   closed,
 );
 export type OperatorEmergencyParams = Static<typeof OperatorEmergencyParams>;
+
+/** 否决指定的句子（`发言编号#句序号`）；不给 key 时否决全部等待中的句子。 */
+export const OperatorVetoParams = Type.Object(
+  { key: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) },
+  closed,
+);
+export type OperatorVetoParams = Static<typeof OperatorVetoParams>;
+
+export const OperatorPreflightParams = Type.Object(
+  { target: Type.Optional(Type.Union(['M1', 'M2', 'M3'].map((m) => Type.Literal(m)))) },
+  closed,
+);
+export type OperatorPreflightParams = Static<typeof OperatorPreflightParams>;

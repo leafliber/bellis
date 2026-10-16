@@ -30,15 +30,19 @@ import {
   OperatorEmergencyParams,
   OperatorMethod,
   OperatorModeParams,
+  OperatorPreflightParams,
+  OperatorVetoParams,
   Role,
   WatchdogActed,
   WatchdogActedParams,
 } from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { KeyringSecretStore } from '@bellis/secret-store';
-import { OBS_CONTROL, ObsConnectorService } from '@bellis/stage';
+import { type HeldSentence, ReviewService } from '@bellis/speech';
+import { OBS_CONTROL, ObsConnectorService, type Stage, StageService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
+import { preflight } from './preflight.ts';
 
 const RPC_TIMEOUT_MS = 2000;
 /** 写进日志的事实类型，便于运维观察。 */
@@ -52,10 +56,14 @@ const LOGGED_FACTS = new Set([
   'safety.emergency-completed',
   'watchdog.acted',
   'stage.connected',
+  'speech.held',
+  'speech.vetoed',
 ]);
 const isModeParams = Compile(OperatorModeParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
 const isWatchdogActed = Compile(WatchdogActedParams);
+const isVetoParams = Compile(OperatorVetoParams);
+const isPreflightParams = Compile(OperatorPreflightParams);
 
 const configPath = process.env[ChildEnv.Config];
 if (!configPath) throw new Error(`缺少环境变量 ${ChildEnv.Config}`);
@@ -81,8 +89,15 @@ const store = StateStore.open({
     safety?.downgrade('状态存储不可用');
   },
 });
+/** M1 中等待放行的句子，供操作员查看与否决。 */
+const held = new Map<string, HeldSentence & { delayMs: number; heldAt: string }>();
 store.subscribe((event) => {
   if (LOGGED_FACTS.has(event.type)) logEvent('fact', { type: event.type, data: event.data });
+  const data = event.data as HeldSentence & { delayMs: number };
+  if (event.type === 'speech.held')
+    held.set(data.key, { ...data, heldAt: new Date().toISOString() });
+  else if (['speech.released', 'speech.vetoed', 'speech.withdrawn'].includes(event.type))
+    held.delete(data.key);
 });
 const recovery = store.recover();
 logEvent('host.recovered', {
@@ -194,9 +209,24 @@ process.on('SIGINT', () => {});
 logEvent('host.ready', { pid: process.pid, ppid: process.ppid, mode: core.mode });
 
 /** 操作员命令：查看状态、切换模式（升级只能经这里显式发起）、确认在场、急停。 */
+/** 开播预检（见 preflight.ts）。 */
+function runPreflight(target: 'M1' | 'M2' | 'M3'): Promise<string[]> {
+  const stage = host.services.resolve(StageService.name, StageService.major);
+  const review = host.services.resolve(ReviewService.name, ReviewService.major);
+  return preflight({
+    target,
+    plugins: host.snapshot(),
+    stageReady: 'missing' in stage ? undefined : (stage.impl as Stage).ready,
+    moderationEnabled: core.moderationEnabled,
+    reviewPresent: !('missing' in review),
+    inspectObs: () => emergency.inspect(config.safety.emergency),
+  });
+}
+
 function serveOperator(rpc: RpcPeer): void {
   rpc.handle(OperatorMethod.Status, () => ({
     mode: core.mode,
+    held: [...held.values()],
     maintenance: core.maintenance,
     moderationEnabled: core.moderationEnabled ?? null,
     presenceValid: core.presenceValid(),
@@ -204,9 +234,34 @@ function serveOperator(rpc: RpcPeer): void {
       .snapshot()
       .map((e) => ({ id: e.id, plugin: e.plugin, state: e.state, reason: e.reason ?? null })),
   }));
-  rpc.handle(OperatorMethod.Mode, (params) => {
+  rpc.handle(OperatorMethod.Mode, async (params) => {
     if (!isModeParams.Check(params)) return { ok: false, reason: '参数不合法' };
-    return core.requestMode(params.target);
+    const { target } = params;
+    // 进入真实输出模式前先过开播预检，任一项未通过都不切换（降级与安全停止不受影响）。
+    // 安全核的前置条件先核对（未满足时由 requestMode 记录并拒绝），满足后再过开播预检。
+    if ((target === 'M1' || target === 'M2' || target === 'M3') && !core.modeBlocker(target)) {
+      const failures = await runPreflight(target);
+      if (failures.length > 0) {
+        core.record('supervision.refused', {
+          from: core.mode,
+          to: target,
+          reason: '开播预检未通过',
+          failures,
+        });
+        return { ok: false, reason: '开播预检未通过', failures };
+      }
+    }
+    return core.requestMode(target);
+  });
+  rpc.handle(OperatorMethod.Preflight, async (params) => {
+    const target = isPreflightParams.Check(params) ? (params.target ?? 'M1') : 'M1';
+    return { target, failures: await runPreflight(target) };
+  });
+  rpc.handle(OperatorMethod.Veto, (params) => {
+    if (!isVetoParams.Check(params)) return { ok: false, reason: '参数不合法' };
+    const keys = params.key === undefined ? [...held.keys()] : [params.key];
+    core.veto(params.key);
+    return { ok: true, vetoed: keys.filter((key) => !held.has(key)) };
   });
   rpc.handle(OperatorMethod.Presence, () => {
     core.confirmPresence();

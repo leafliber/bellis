@@ -335,11 +335,17 @@ export class SafetyCore {
     }
   }
 
+  /** 操作员否决 M1 中等待放行的句子（key 为空时否决全部），经控制通道送到持有它们的插件。 */
+  veto(key: string | undefined): void {
+    this.control.broadcast({ kind: 'veto', key, reason: '操作员否决' });
+  }
+
   // ---------------------------------------------------------------- 监督模式
 
   /** 操作员切换模式。升级须满足目标模式的前置条件；切到安全停止走急停路径。 */
-  requestMode(target: Mode): { ok: true } | { ok: false; reason: string } {
-    const blocker = upgradeBlocker(this.#mode, target, {
+  /** 切换到目标模式的前置条件是否满足（不切换、不记录）；满足时返回 undefined。 */
+  modeBlocker(target: Mode): string | undefined {
+    return upgradeBlocker(this.#mode, target, {
       simulation: this.#config.simulation,
       maintenance: this.#maintenance,
       storeHealthy: this.#store.healthy,
@@ -349,6 +355,10 @@ export class SafetyCore {
       moderationEnabled: this.#moderation,
       unattendedGatesSatisfied: this.#config.unattendedGatesSatisfied,
     });
+  }
+
+  requestMode(target: Mode): { ok: true } | { ok: false; reason: string } {
+    const blocker = this.modeBlocker(target);
     if (blocker) {
       this.#record('supervision.refused', { from: this.#mode, to: target, reason: blocker });
       return { ok: false, reason: blocker };

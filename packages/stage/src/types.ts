@@ -55,6 +55,8 @@ export interface PlaybackResult {
 }
 
 export interface Stage {
+  /** 页面是否已连上并认证（开播预检用）。模拟页面一直就绪。 */
+  readonly ready: boolean;
   /**
    * 播放一句：只在许可令牌有效时转发音频，令牌失效即停止转发并要求页面截断。
    * 结果来自页面的回报；页面无响应时以 Stage 不可用结束。
