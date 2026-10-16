@@ -29,7 +29,7 @@ Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Win
 
 ## 定时与调度
 
-- libuv 在 Windows 上不调用 `timeBeginPeriod`，Node 定时器的粒度预计约为系统默认的 15.6ms（实际分布待 S-05）。不要依赖小于 16ms 的 `setTimeout` 精度，调度一律用单调时钟加截止时间。
+- libuv 在 Windows 上不调用 `timeBeginPeriod`，Node 定时器的粒度约为系统默认的 15.6ms（S-05 已在 Windows 11 真机上确认）：短于一个时钟周期的 `setTimeout` 也要等满一个周期，略长于整周期的要等两个。不要依赖小于 16ms 的 `setTimeout` 精度，调度一律用单调时钟加截止时间。事件循环延迟的测量值同样包含这一粒度，设异常阈值时要计入。
 - 音频播放时钟交给 Stage 的 AudioWorklet 和 OBS，宿主不逐样本定时。
 - Win11 起，进程的窗口被完全遮挡或最小化时，系统不再保证高分辨率定时器；后台进程还可能被系统归为 EcoQoS 降低调度优先级。[来源](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod) 对 OBS 浏览器源音频和 sidecar 推理的影响由探针 S-01、S-05 实测。
 - 不使用 REALTIME 优先级类，它可能让鼠标和磁盘缓存失去响应。
