@@ -6,15 +6,17 @@
  *
  *   node spikes/s01-stage/server.ts [--minutes N] [--obs-source 名字] [--stop-heartbeat-after 秒] [--strict-origin]
  *     在 127.0.0.1 的随机端口提供探针页面，持续送出 440Hz 正弦 PCM，记录页面自检、请求头、游标、欠载与心跳。
- *     --obs-source           用 SecretStore 中的 obs 凭据，把带一次性令牌的 URL 写进这个已有的浏览器源
- *                            （只改 URL，并读回它的设置核对“Control audio via OBS”等）；不给时只打印 URL。
+ *     --obs-source           用 SecretStore 中的 obs 凭据，把带一次性令牌的 URL 写进这个已有的浏览器源，
+ *                            同时按 Stage 文档设好“Control audio via OBS”等，并读回核对；不给时只打印 URL。
  *     --stop-heartbeat-after 从第 N 秒起停发心跳、继续送音频，检验页面按已渲染样本帧自静音。
  *     --strict-origin        按 R-08 字面要求，所有请求缺少 Origin 都拒绝（缺省只放行顶层文档导航）。
+ *     --record               全程让 OBS 录制，结束后用 ffmpeg 分析录音（断流、异常峰值、音高）；录制文件保留在 OBS 的录制目录。
+ *     --hide-at、--show-at、--stop-heartbeat-after、--resume-heartbeat-at、--refresh-at：时间线动作，见 PlayOptions。
  *
  * 浏览器对顶层导航的 GET 通常不带 Origin，所以探针记录每个请求实际带的头，供判断 R-08 的校验能否照字面执行。
  */
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import {
   createServer,
   request as httpRequest,
@@ -32,6 +34,8 @@ import { OBS_SECRET, readObsSecret } from '@bellis/config';
 import { ObsClient, type ObsResult } from '@bellis/obs';
 import { KeyringSecretStore } from '@bellis/secret-store';
 import { WebSocket, WebSocketServer } from 'ws';
+import { analyzeRecording } from './analyze-recording.ts';
+import { ObsMeters } from './meters.ts';
 
 const PAGE_DIR = fileURLToPath(new URL('./page/', import.meta.url));
 const STATIC: Record<string, [file: string, type: string]> = {
@@ -62,12 +66,13 @@ interface RequestRecord {
 type PageMessage = { type: string; [field: string]: unknown };
 
 class ProbeServer {
-  readonly token = randomBytes(16).toString('base64url');
   readonly requests: RequestRecord[] = [];
   readonly strictOrigin: boolean;
   onSession: ((ws: WebSocket, hello: PageMessage) => void) | undefined;
+  onHelloRejected: (() => void) | undefined;
   #server: Server | undefined;
   #wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
+  #token = randomBytes(16).toString('base64url');
   #tokenUsed = false;
   #session: WebSocket | undefined;
   #port = 0;
@@ -90,6 +95,16 @@ class ProbeServer {
 
   get port(): number {
     return this.#port;
+  }
+
+  get token(): string {
+    return this.#token;
+  }
+
+  /** 重新下发：换一个新的一次性令牌，旧令牌作废。 */
+  rotateToken(): void {
+    this.#token = randomBytes(16).toString('base64url');
+    this.#tokenUsed = false;
   }
 
   async start(): Promise<void> {
@@ -182,8 +197,9 @@ class ProbeServer {
       } catch {
         hello = undefined;
       }
-      if (hello?.type !== 'hello' || hello.token !== this.token || this.#tokenUsed) {
+      if (hello?.type !== 'hello' || hello.token !== this.#token || this.#tokenUsed) {
         ws.close(4401, 'token rejected');
+        this.onHelloRejected?.();
         return;
       }
       this.#tokenUsed = true;
@@ -310,127 +326,294 @@ function summarize(values: readonly number[]) {
   return { n: sorted.length, p50: at(0.5), p95: at(0.95), p99: at(0.99), max: sorted.at(-1) ?? 0 };
 }
 
-async function pointObsAt(sourceName: string, url: string) {
-  const secret = await readObsSecret(new KeyringSecretStore('bellis'), OBS_SECRET);
-  const obs = await ObsClient.connect(secret.url, secret.password);
-  try {
-    const ok = (result: ObsResult) => {
-      if (!result.ok)
-        throw new Error(`${result.requestType} 失败：${result.code} ${result.comment ?? ''}`);
-      return result.data ?? {};
-    };
-    const version = ok(await obs.request('GetVersion'));
-    ok(await obs.request('SetInputSettings', { inputName: sourceName, inputSettings: { url } }));
-    const settings = ok(await obs.request('GetInputSettings', { inputName: sourceName }));
-    // 读回的设置里有带令牌的 URL，记录前去掉。
-    const { url: _url, ...rest } = (settings.inputSettings ?? {}) as Record<string, unknown>;
-    return { version, inputKind: settings.inputKind, inputSettings: rest };
-  } finally {
-    obs.close();
-  }
+function okData(result: ObsResult): Record<string, unknown> {
+  if (!result.ok)
+    throw new Error(`${result.requestType} 失败：${result.code} ${result.comment ?? ''}`);
+  return result.data ?? {};
 }
 
-async function play(options: {
+/** 按 Stage 文档设好浏览器源并写入 URL：声音只经 OBS，不可见时不关停、激活时不刷新，不授予页面任何 OBS 权限。 */
+async function pointSourceAt(obs: ObsClient, sourceName: string, url: string) {
+  okData(
+    await obs.request('SetInputSettings', {
+      inputName: sourceName,
+      inputSettings: {
+        url,
+        reroute_audio: true,
+        shutdown: false,
+        restart_when_active: false,
+        webpage_control_level: 0,
+      },
+    }),
+  );
+  const settings = okData(await obs.request('GetInputSettings', { inputName: sourceName }));
+  // 读回的设置里有带令牌的 URL，记录前去掉。
+  const { url: _url, ...rest } = (settings.inputSettings ?? {}) as Record<string, unknown>;
+  return { inputKind: settings.inputKind, inputSettings: rest };
+}
+
+/** 找到包含该来源的第一个场景及其场景项编号。 */
+async function findSceneItem(obs: ObsClient, sourceName: string) {
+  const scenes = okData(await obs.request('GetSceneList')).scenes as Array<{ sceneName: string }>;
+  for (const { sceneName } of scenes) {
+    const found = await obs.request('GetSceneItemId', { sceneName, sourceName });
+    if (found.ok) return { sceneName, sceneItemId: found.data?.sceneItemId as number };
+  }
+  throw new Error(`没有场景包含来源「${sourceName}」`);
+}
+
+interface PlayOptions {
   minutes: number;
   obsSource: string | undefined;
-  stopHeartbeatAfter: number | undefined;
   strictOrigin: boolean;
+  /** 以下都是从探针开始算起的秒数。 */
+  stopHeartbeatAfter: number | undefined;
+  resumeHeartbeatAt: number | undefined;
+  hideAt: number | undefined;
+  showAt: number | undefined;
+  refreshAt: number | undefined;
+  record: boolean;
   log: (entry: Record<string, unknown>) => void;
-}) {
+}
+
+interface Session {
+  index: number;
+  selfCheck: unknown;
+  sampleRate: number;
+  cursors: Array<{ t: number; rendered: number }>;
+  last: PageMessage | undefined;
+}
+
+async function play(options: PlayOptions) {
   const server = new ProbeServer({ strictOrigin: options.strictOrigin });
   await server.start();
-  const result: Record<string, unknown> = { strictOrigin: options.strictOrigin };
-  const cursors: Array<{ t: number; rendered: number }> = [];
+  const t0 = performance.now();
+  const seconds = () => Math.round(performance.now() - t0) / 1000;
+  const result: Record<string, unknown> = {
+    options: { ...options, log: undefined },
+  };
+  const timeline: Array<Record<string, unknown>> = [];
+  const note = (type: string, fields: Record<string, unknown> = {}) => {
+    const entry = { s: seconds(), type, ...fields };
+    timeline.push(entry);
+    options.log({ t: performance.now(), ...entry });
+    console.log(`${entry.s}s ${type} ${JSON.stringify(fields)}`);
+  };
+  const sessions: Session[] = [];
   const ackDelays: number[] = [];
-  const events: PageMessage[] = [];
-  let last: PageMessage | undefined;
-  const finished = new Promise<void>((done) => {
-    server.onSession = (ws, hello) => {
-      result.selfCheck = hello.selfCheck;
-      options.log({ t: performance.now(), type: 'session', selfCheck: hello.selfCheck });
-      const sampleRate = Number((hello.selfCheck as { sampleRate?: number }).sampleRate ?? 48000);
-      const chunk = Math.round(sampleRate * CHUNK_SECONDS);
-      const started = performance.now();
-      let sent = 0;
-      let consumed = 0;
-      let seq = 0;
-      const hbSent = new Map<number, number>();
-      const pump = setInterval(() => {
-        while (sent - consumed < sampleRate * AHEAD_SECONDS) {
-          const samples = new Float32Array(chunk);
-          for (let i = 0; i < chunk; i++) {
-            samples[i] = 0.2 * Math.sin((2 * Math.PI * TONE_HZ * (sent + i)) / sampleRate);
-          }
-          ws.send(samples.buffer);
-          sent += chunk;
-        }
-      }, CHUNK_SECONDS * 1000);
-      const heartbeat = setInterval(() => {
-        const elapsed = (performance.now() - started) / 1000;
-        if (options.stopHeartbeatAfter !== undefined && elapsed >= options.stopHeartbeatAfter) {
-          if (!result.heartbeatStoppedAt) {
-            result.heartbeatStoppedAt = performance.now() - started;
-            result.lastCursorBeforeStop = last;
-            options.log({ t: performance.now(), type: 'heartbeat-stopped' });
-          }
-          return;
-        }
-        hbSent.set(++seq, performance.now());
-        ws.send(JSON.stringify({ type: 'hb', seq }));
-      }, HEARTBEAT_MS);
-      ws.on('message', (data, isBinary) => {
-        if (isBinary) return;
-        const message = JSON.parse(String(data)) as PageMessage;
-        const t = performance.now();
-        options.log({ t, ...message });
-        if (message.type === 'cursor') {
-          last = message;
-          consumed = Number(message.played) + Number(message.dropped);
-          cursors.push({ t, rendered: Number(message.rendered) });
-        } else if (message.type === 'hb-ack') {
-          const at = hbSent.get(Number(message.seq));
-          if (at !== undefined) ackDelays.push(t - at);
-        } else {
-          events.push({ ...message, serverT: t - started });
-        }
-      });
-      const stop = () => {
-        clearInterval(pump);
-        clearInterval(heartbeat);
-        done();
-      };
-      ws.on('close', (code) => {
-        result.closedBy = `page ${code}`;
-        stop();
-      });
-      setTimeout(stop, options.minutes * 60_000);
+  let heartbeatOn = true;
+
+  server.onHelloRejected = () => note('hello-rejected');
+  server.onSession = (ws, hello) => {
+    const selfCheck = hello.selfCheck as { sampleRate?: number };
+    const session: Session = {
+      index: sessions.length + 1,
+      selfCheck,
+      sampleRate: Number(selfCheck.sampleRate ?? 48000),
+      cursors: [],
+      last: undefined,
     };
-  });
-  console.log(`探针页面：${server.url}`);
-  if (options.obsSource) {
-    result.obs = await pointObsAt(options.obsSource, server.url);
-    console.log(`已把 URL 写进浏览器源「${options.obsSource}」`);
+    sessions.push(session);
+    note('session-start', { session: session.index });
+    const chunk = Math.round(session.sampleRate * CHUNK_SECONDS);
+    let sent = 0;
+    let consumed = 0;
+    let seq = 0;
+    const hbSent = new Map<number, number>();
+    const pump = setInterval(() => {
+      while (sent - consumed < session.sampleRate * AHEAD_SECONDS) {
+        const samples = new Float32Array(chunk);
+        for (let i = 0; i < chunk; i++) {
+          samples[i] = 0.2 * Math.sin((2 * Math.PI * TONE_HZ * (sent + i)) / session.sampleRate);
+        }
+        ws.send(samples.buffer);
+        sent += chunk;
+      }
+    }, CHUNK_SECONDS * 1000);
+    const heartbeat = setInterval(() => {
+      if (!heartbeatOn) return;
+      hbSent.set(++seq, performance.now());
+      ws.send(JSON.stringify({ type: 'hb', seq }));
+    }, HEARTBEAT_MS);
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return;
+      const message = JSON.parse(String(data)) as PageMessage;
+      const t = performance.now();
+      options.log({ t, session: session.index, ...message });
+      if (message.type === 'cursor') {
+        session.last = message;
+        consumed = Number(message.played) + Number(message.dropped);
+        session.cursors.push({ t, rendered: Number(message.rendered) });
+      } else if (message.type === 'hb-ack') {
+        const at = hbSent.get(Number(message.seq));
+        if (at !== undefined) ackDelays.push(t - at);
+      } else {
+        note(`page-${message.type}`, {
+          session: session.index,
+          frame: message.frame,
+          visibility: message.visibility,
+        });
+      }
+    });
+    ws.on('close', (code) => {
+      clearInterval(pump);
+      clearInterval(heartbeat);
+      note('session-closed', { session: session.index, code });
+    });
+  };
+
+  let obs: ObsClient | undefined;
+  let meters: ObsMeters | undefined;
+  let item: { sceneName: string; sceneItemId: number } | undefined;
+  let hidden = false;
+  /** 每个输入每一秒的峰值（dBFS）。 */
+  const levels = new Map<string, number[]>();
+  const source = options.obsSource;
+  if (source) {
+    const secret = await readObsSecret(new KeyringSecretStore('bellis'), OBS_SECRET);
+    obs = await ObsClient.connect(secret.url, secret.password);
+    result.obsVersion = okData(await obs.request('GetVersion')).obsVersion;
+    meters = await ObsMeters.connect(secret.url, secret.password, (readings) => {
+      const second = Math.floor((performance.now() - t0) / 1000);
+      for (const reading of readings) {
+        const series = levels.get(reading.name) ?? [];
+        series[second] = Math.max(series[second] ?? -Infinity, reading.peakDb);
+        levels.set(reading.name, series);
+      }
+    });
+    item = await findSceneItem(obs, source);
+    result.source = await pointSourceAt(obs, source, server.url);
+    note('url-set');
+    if (options.record) {
+      if (okData(await obs.request('GetRecordStatus')).outputActive)
+        throw new Error('OBS 已在录制，拒绝接管');
+      okData(await obs.request('StartRecord'));
+      note('record-started');
+    }
   } else {
+    console.log(`探针页面：${server.url}`);
     console.log('请把上面的 URL 填进 OBS 浏览器源（开启“Control audio via OBS”）。');
   }
-  await finished;
+
+  const setVisible = async (enabled: boolean) => {
+    if (!obs || !item) throw new Error('隐藏与显示来源需要 --obs-source');
+    okData(await obs.request('SetSceneItemEnabled', { ...item, sceneItemEnabled: enabled }));
+    hidden = !enabled;
+  };
+  const actions: Array<[number | undefined, string, () => Promise<void>]> = [
+    [
+      options.stopHeartbeatAfter,
+      'heartbeat-stopped',
+      async () => {
+        heartbeatOn = false;
+      },
+    ],
+    [
+      options.resumeHeartbeatAt,
+      'heartbeat-resumed',
+      async () => {
+        heartbeatOn = true;
+      },
+    ],
+    [options.hideAt, 'source-hidden', () => setVisible(false)],
+    [options.showAt, 'source-shown', () => setVisible(true)],
+    [
+      options.refreshAt,
+      'refresh-pressed',
+      async () => {
+        if (!obs || !source) throw new Error('刷新需要 --obs-source');
+        // 刷新会让页面重放 OBS 设置里已用过的令牌；随后像宿主一样换新令牌重新下发 URL。
+        okData(
+          await obs.request('PressInputPropertiesButton', {
+            inputName: source,
+            propertyName: 'refreshnocache',
+          }),
+        );
+        setTimeout(() => {
+          server.rotateToken();
+          void pointSourceAt(obs as ObsClient, source, server.url).then(
+            () => note('url-reissued'),
+            (error: Error) => note('action-failed', { error: error.message }),
+          );
+        }, 3000);
+      },
+    ],
+  ];
+  const timers = actions
+    .filter(([at]) => at !== undefined)
+    .map(([at, name, action]) =>
+      setTimeout(
+        () =>
+          void action().then(
+            () => note(name),
+            (error: Error) => note('action-failed', { action: name, error: error.message }),
+          ),
+        (at as number) * 1000,
+      ),
+    );
+
+  await new Promise((wait) => setTimeout(wait, options.minutes * 60_000));
+  for (const timer of timers) clearTimeout(timer);
+  let recordingPath: string | undefined;
+  if (options.record && obs) {
+    recordingPath = okData(await obs.request('StopRecord')).outputPath as string;
+    note('record-stopped');
+    // StopRecord 返回时 OBS 可能还在写文件末尾：等录制确实停下、文件大小稳定后再分析。
+    for (let size = -1; ; ) {
+      await new Promise((wait) => setTimeout(wait, 1000));
+      const active = okData(await obs.request('GetRecordStatus')).outputActive;
+      const now = statSync(recordingPath).size;
+      if (!active && now === size) break;
+      size = now;
+    }
+    note('record-finalized');
+  }
+  if (hidden) await setVisible(true).catch(() => {});
+  meters?.close();
+  obs?.close();
   await server.close();
 
   result.requests = server.requests;
-  result.lastCursor = last;
-  result.events = events;
+  result.timeline = timeline;
   result.heartbeatAckMs = summarize(ackDelays);
-  const first = cursors[0];
-  const end = cursors.at(-1);
-  const sampleRate = Number((result.selfCheck as { sampleRate?: number } | undefined)?.sampleRate);
-  if (first && end && end.t > first.t && sampleRate) {
-    const audioSeconds = (end.rendered - first.rendered) / sampleRate;
-    const wallSeconds = (end.t - first.t) / 1000;
-    result.clock = {
-      audioSeconds,
-      wallSeconds,
-      driftPpm: Math.round((audioSeconds / wallSeconds - 1) * 1e6),
+  result.sessions = sessions.map((session) => {
+    const first = session.cursors[0];
+    const end = session.cursors.at(-1);
+    const clock =
+      first && end && end.t > first.t
+        ? {
+            audioSeconds: (end.rendered - first.rendered) / session.sampleRate,
+            wallSeconds: (end.t - first.t) / 1000,
+          }
+        : undefined;
+    return {
+      index: session.index,
+      selfCheck: session.selfCheck,
+      last: session.last,
+      clock: clock && {
+        ...clock,
+        driftPpm: Math.round((clock.audioSeconds / clock.wallSeconds - 1) * 1e6),
+      },
     };
+  });
+  result.levels = Object.fromEntries(
+    [...levels].map(([name, series]) => {
+      const observed = series.filter((db) => db !== undefined);
+      const audible = observed.filter((db) => db > -40);
+      return [
+        name,
+        {
+          seconds: observed.length,
+          audibleSeconds: audible.length,
+          maxDb: Math.max(...observed),
+          perSecondDb: series.map((db) => (Number.isFinite(db) ? Math.round(db * 10) / 10 : null)),
+        },
+      ];
+    }),
+  );
+  if (recordingPath) {
+    // 录制开始于探针时间线上的 record-started，分析结果里的时刻都相对录制开头。
+    result.recording = await analyzeRecording(recordingPath, TONE_HZ);
   }
   return result;
 }
@@ -441,8 +624,13 @@ async function main(): Promise<void> {
       negative: { type: 'boolean', default: false },
       minutes: { type: 'string', default: '1' },
       'obs-source': { type: 'string' },
-      'stop-heartbeat-after': { type: 'string' },
       'strict-origin': { type: 'boolean', default: false },
+      'stop-heartbeat-after': { type: 'string' },
+      'resume-heartbeat-at': { type: 'string' },
+      'hide-at': { type: 'string' },
+      'show-at': { type: 'string' },
+      'refresh-at': { type: 'string' },
+      record: { type: 'boolean', default: false },
       out: { type: 'string' },
     },
   });
@@ -465,15 +653,18 @@ async function main(): Promise<void> {
       );
     }
   } else {
+    const number = (value: string | undefined) => (value === undefined ? undefined : Number(value));
     const lines: string[] = [];
     report.play = await play({
       minutes: Number(values.minutes),
       obsSource: values['obs-source'],
-      stopHeartbeatAfter:
-        values['stop-heartbeat-after'] === undefined
-          ? undefined
-          : Number(values['stop-heartbeat-after']),
       strictOrigin: values['strict-origin'],
+      stopHeartbeatAfter: number(values['stop-heartbeat-after']),
+      resumeHeartbeatAt: number(values['resume-heartbeat-at']),
+      hideAt: number(values['hide-at']),
+      showAt: number(values['show-at']),
+      refreshAt: number(values['refresh-at']),
+      record: values.record,
       log: (entry) => lines.push(JSON.stringify(entry)),
     });
     writeFileSync(`${out}.jsonl`, `${lines.join('\n')}\n`);

@@ -506,12 +506,18 @@ importers:
 
   spikes:
     dependencies:
+      '@bellis/channel':
+        specifier: workspace:*
+        version: link:../packages/channel
       '@bellis/config':
         specifier: workspace:*
         version: link:../packages/config
       '@bellis/obs':
         specifier: workspace:*
         version: link:../packages/obs
+      '@bellis/protocol':
+        specifier: workspace:*
+        version: link:../packages/protocol
       '@bellis/secret-store':
         specifier: workspace:*
         version: link:../packages/secret-store
