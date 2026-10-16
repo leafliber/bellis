@@ -1,0 +1,10 @@
+[project]
+name = "bellis-spikes"
+version = "0.0.0"
+description = "Bellis 的 Python 探针：S-03 本机通道往返时延与抢注"
+requires-python = "==3.12.*"
+dependencies = []
+
+[tool.uv]
+# 只是一组脚本，不打包安装。
+package = false

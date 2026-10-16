@@ -13,17 +13,18 @@
     "secret": "node packages/launcher/src/secret.ts",
     "sim": "node packages/sim/src/cli.ts",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run gen:check && pnpm run test",
-    "lint": "biome ci .",
-    "format": "biome check --write .",
-    "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome ci . && uv run --locked ruff check && uv run --locked ruff format --check",
+    "format": "biome check --write . && uv run --locked ruff check --fix && uv run --locked ruff format",
+    "typecheck": "tsc -p tsconfig.json && pyright",
     "gen": "node packages/protocol/scripts/gen.ts",
     "gen:check": "node packages/protocol/scripts/gen.ts --check",
-    "test": "node --test --test-timeout=60000 \"packages/*/test/**/*.test.ts\""
+    "test": "node --test --test-timeout=60000 \"packages/*/test/**/*.test.ts\" && uv run --locked pytest"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@types/node": "26.6.5",
     "fast-check": "4.10.2",
+    "pyright": "1.1.414",
     "typescript": "7.0.2"
   }
 }

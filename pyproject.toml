@@ -1,0 +1,38 @@
+# Python sidecar 与探针的 uv 工作区（R-24）：解释器、虚拟环境与依赖都由 uv 管理，uv.lock 入库。
+# 这里只是工作区根，没有自己的包；成员各自声明依赖。
+
+[tool.uv]
+# 新发布的版本至少放置一天再安装，与 pnpm 的 minimumReleaseAge 一致。
+exclude-newer = "1 day"
+# 只用 uv 安装的解释器，不依赖系统 Python。
+python-preference = "only-managed"
+
+[tool.uv.workspace]
+members = ["spikes/python"]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "ruff==0.17.0"]
+
+[tool.ruff]
+# 只管 Python；Markdown 等由 Biome 与人工维护。
+include = ["*.py", "*.pyi", "**/pyproject.toml"]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+# 注释与字符串里的中文全角标点不是易混淆字符。
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.pyright]
+include = ["spikes/python"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+testpaths = ["spikes/python"]
