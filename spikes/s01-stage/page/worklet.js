@@ -56,6 +56,8 @@ class Probe extends AudioWorkletProcessor {
     this.sinceHeartbeat += frames;
     if (!this.muted && this.sinceHeartbeat > sampleRate * HEARTBEAT_TIMEOUT_SECONDS) {
       this.muted = true;
+      // 清空的缓冲也计入丢弃，宿主据此算出页面实际消耗了多少，取消静音后能补足缓冲。
+      this.dropped += this.size;
       this.size = 0;
       this.port.postMessage({ type: 'muted', frame: this.rendered });
     }
