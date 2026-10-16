@@ -15,6 +15,8 @@ const SILENCE = 0.005;
 const GAP_MIN_SAMPLES = SAMPLE_RATE / 1000;
 /** 测试音振幅 0.2，超过 0.5 视为异常峰值。 */
 const SPIKE = 0.5;
+/** 只在测试音确实存在时统计过零点：近期峰值低于这个值（静音、底噪）不计。 */
+const TONE_FLOOR = 0.05;
 const WINDOW_SECONDS = 10;
 const MAX_LISTED = 200;
 
@@ -23,6 +25,8 @@ export interface RecordingAnalysis {
   seconds: number;
   gaps: { count: number; totalMs: number; listed: Array<{ atSeconds: number; ms: number }> };
   spikes: { count: number; listed: Array<{ atSeconds: number; value: number }> };
+  /** 过零间隔偏离窗口中位数超过 1 个样本：相位跳变，断流或中途剪掉一段都会造成。 */
+  discontinuities: { count: number; listed: Array<{ atSeconds: number; samples: number }> };
   /** 每个窗口的估计频率；窗口内有断流时仍会给出，判读时对照断流列表。 */
   windows: Array<{ atSeconds: number; hz: number | null; rms: number }>;
   hz: { min: number; max: number; maxCentsOff: number } | null;
@@ -46,22 +50,36 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
   let n = 0;
   let previous = 0;
   let silentRun = 0;
+  /** 按样本衰减的近期峰值，半衰期约一个测试音周期。 */
+  let peak = 0;
   const gaps: RecordingAnalysis['gaps'] = { count: 0, totalMs: 0, listed: [] };
   const spikes: RecordingAnalysis['spikes'] = { count: 0, listed: [] };
+  const discontinuities: RecordingAnalysis['discontinuities'] = { count: 0, listed: [] };
   const windows: RecordingAnalysis['windows'] = [];
   let windowStart = 0;
   let lastCrossing: number | undefined;
-  /** 窗口内相邻上升过零点的间隔（样本数）；取中位数估计频率，不受断流影响。 */
-  let intervals: number[] = [];
+  /** 窗口内相邻上升过零点的间隔（样本数）与其位置；取中位数估计频率，不受断流影响。 */
+  let intervals: Array<[interval: number, at: number]> = [];
   let sumSquares = 0;
   let carry: Buffer = Buffer.alloc(0);
 
   const closeWindow = () => {
     const samples = n - windowStart;
     if (samples === 0) return;
-    const sorted = intervals.sort((a, b) => a - b);
+    const sorted = intervals.map(([interval]) => interval).sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
     const hz = median ? SAMPLE_RATE / median : null;
+    if (median) {
+      for (const [interval, at] of intervals) {
+        if (Math.abs(interval - median) <= 1) continue;
+        discontinuities.count += 1;
+        if (discontinuities.listed.length < MAX_LISTED)
+          discontinuities.listed.push({
+            atSeconds: Math.round((at / SAMPLE_RATE) * 1000) / 1000,
+            samples: Math.round(interval * 10) / 10,
+          });
+      }
+    }
     windows.push({
       atSeconds: windowStart / SAMPLE_RATE,
       hz: hz === null ? null : Math.round(hz * 1000) / 1000,
@@ -94,10 +112,11 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
         if (spikes.listed.length < MAX_LISTED)
           spikes.listed.push({ atSeconds: n / SAMPLE_RATE, value: Math.round(x * 1000) / 1000 });
       }
-      if (previous < 0 && x >= 0) {
+      peak = Math.max(Math.abs(x), peak * 0.995);
+      if (previous < 0 && x >= 0 && peak > TONE_FLOOR) {
         // 上升过零点，线性插值到样本之间。
         const at = n - 1 + previous / (previous - x);
-        if (lastCrossing !== undefined) intervals.push(at - lastCrossing);
+        if (lastCrossing !== undefined) intervals.push([at - lastCrossing, at]);
         lastCrossing = at;
       }
       sumSquares += x * x;
@@ -122,6 +141,7 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
     seconds: n / SAMPLE_RATE,
     gaps,
     spikes,
+    discontinuities,
     windows,
     hz:
       tonal.length === 0

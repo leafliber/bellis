@@ -16,7 +16,7 @@
  * 浏览器对顶层导航的 GET 通常不带 Origin，所以探针记录每个请求实际带的头，供判断 R-08 的校验能否照字面执行。
  */
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import {
   createServer,
   request as httpRequest,
@@ -558,6 +558,15 @@ async function play(options: PlayOptions) {
   if (options.record && obs) {
     recordingPath = okData(await obs.request('StopRecord')).outputPath as string;
     note('record-stopped');
+    // StopRecord 返回时 OBS 可能还在写文件末尾：等录制确实停下、文件大小稳定后再分析。
+    for (let size = -1; ; ) {
+      await new Promise((wait) => setTimeout(wait, 1000));
+      const active = okData(await obs.request('GetRecordStatus')).outputActive;
+      const now = statSync(recordingPath).size;
+      if (!active && now === size) break;
+      size = now;
+    }
+    note('record-finalized');
   }
   if (hidden) await setVisible(true).catch(() => {});
   meters?.close();
