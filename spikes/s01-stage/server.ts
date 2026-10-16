@@ -10,6 +10,8 @@
  *                            同时按 Stage 文档设好“Control audio via OBS”等，并读回核对；不给时只打印 URL。
  *     --stop-heartbeat-after 从第 N 秒起停发心跳、继续送音频，检验页面按已渲染样本帧自静音。
  *     --strict-origin        按 R-08 字面要求，所有请求缺少 Origin 都拒绝（缺省只放行顶层文档导航）。
+ *     --record               全程让 OBS 录制，结束后用 ffmpeg 分析录音（断流、异常峰值、音高）；录制文件保留在 OBS 的录制目录。
+ *     --hide-at、--show-at、--stop-heartbeat-after、--resume-heartbeat-at、--refresh-at：时间线动作，见 PlayOptions。
  *
  * 浏览器对顶层导航的 GET 通常不带 Origin，所以探针记录每个请求实际带的头，供判断 R-08 的校验能否照字面执行。
  */
@@ -32,6 +34,7 @@ import { OBS_SECRET, readObsSecret } from '@bellis/config';
 import { ObsClient, type ObsResult } from '@bellis/obs';
 import { KeyringSecretStore } from '@bellis/secret-store';
 import { WebSocket, WebSocketServer } from 'ws';
+import { analyzeRecording } from './analyze-recording.ts';
 import { ObsMeters } from './meters.ts';
 
 const PAGE_DIR = fileURLToPath(new URL('./page/', import.meta.url));
@@ -369,6 +372,7 @@ interface PlayOptions {
   hideAt: number | undefined;
   showAt: number | undefined;
   refreshAt: number | undefined;
+  record: boolean;
   log: (entry: Record<string, unknown>) => void;
 }
 
@@ -480,6 +484,12 @@ async function play(options: PlayOptions) {
     item = await findSceneItem(obs, source);
     result.source = await pointSourceAt(obs, source, server.url);
     note('url-set');
+    if (options.record) {
+      if (okData(await obs.request('GetRecordStatus')).outputActive)
+        throw new Error('OBS 已在录制，拒绝接管');
+      okData(await obs.request('StartRecord'));
+      note('record-started');
+    }
   } else {
     console.log(`探针页面：${server.url}`);
     console.log('请把上面的 URL 填进 OBS 浏览器源（开启“Control audio via OBS”）。');
@@ -544,6 +554,11 @@ async function play(options: PlayOptions) {
 
   await new Promise((wait) => setTimeout(wait, options.minutes * 60_000));
   for (const timer of timers) clearTimeout(timer);
+  let recordingPath: string | undefined;
+  if (options.record && obs) {
+    recordingPath = okData(await obs.request('StopRecord')).outputPath as string;
+    note('record-stopped');
+  }
   if (hidden) await setVisible(true).catch(() => {});
   meters?.close();
   obs?.close();
@@ -587,6 +602,10 @@ async function play(options: PlayOptions) {
       ];
     }),
   );
+  if (recordingPath) {
+    // 录制开始于探针时间线上的 record-started，分析结果里的时刻都相对录制开头。
+    result.recording = await analyzeRecording(recordingPath, TONE_HZ);
+  }
   return result;
 }
 
@@ -602,6 +621,7 @@ async function main(): Promise<void> {
       'hide-at': { type: 'string' },
       'show-at': { type: 'string' },
       'refresh-at': { type: 'string' },
+      record: { type: 'boolean', default: false },
       out: { type: 'string' },
     },
   });
@@ -635,6 +655,7 @@ async function main(): Promise<void> {
       hideAt: number(values['hide-at']),
       showAt: number(values['show-at']),
       refreshAt: number(values['refresh-at']),
+      record: values.record,
       log: (entry) => lines.push(JSON.stringify(entry)),
     });
     writeFileSync(`${out}.jsonl`, `${lines.join('\n')}\n`);
