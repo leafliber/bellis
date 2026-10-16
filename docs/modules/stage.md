@@ -23,7 +23,7 @@ Stage 是运行在 OBS 浏览器源里的页面，负责播放音频、显示字
   - 脚本、AudioWorklet 模块等子资源与 WebSocket 升级还要求 `Origin` 等于 `http://127.0.0.1:端口`，缺少即拒绝。
   - 页面文档本身是顶层导航，浏览器不为它带 `Origin`（OBS 32.2.x 中已确认，刷新时 `Sec-Fetch-Site` 为 `same-origin`，初次加载与改 URL 时为 `none`），只在 `Sec-Fetch-Mode` 为 `navigate` 且 `Sec-Fetch-Dest` 为 `document` 时放行。文档是静态的，不含任何秘密，令牌在 URL 片段里不随请求发出；别的网页把它嵌进 iframe 时 `Sec-Fetch-Dest` 为 `iframe`，仍被拒绝。
 - **会话令牌**：浏览器源的 URL 以明文存在场景集合里，`GetInputSettings` 也能读出，因此 URL 里只放一次性令牌：
-  - 宿主启动时以及每次重新下发时，生成 128 位、短时效的一次性令牌，经 obs-websocket 的 `SetInputSettings` 写进 URL 的片段（`#` 之后，不会出现在 HTTP 请求与日志里）。
+  - 宿主启动时以及每次重新下发时，生成 128 位、短时效的一次性令牌，经 OBS 控制写进 URL 的片段（`#` 之后，不会出现在 HTTP 请求与日志里）。宿主启动时处于安全停止，这一步是安全停止下唯一允许的动作（见[安全核](safety-core.md#监督模式)）。
   - 页面读出令牌后立即用 `history.replaceState` 从地址中去掉，以首条 WebSocket 消息出示，换取只存于内存的会话密钥。
   - 同时只允许一个已认证会话，第二个升级请求直接拒绝；心跳超时回收半开连接。
   - 页面刷新会重放已用过的令牌而被拒；宿主据此限频重新下发 URL。
@@ -38,7 +38,7 @@ Stage 是运行在 OBS 浏览器源里的页面，负责播放音频、显示字
 
 ## OBS 控制
 
-- 只执行别的插件已授权的意图，不自己决定做什么；意图的载荷就是动作。动作与意图须申请的能力：切场景 `obs.scene`，静音源 `obs.audio`，写来源设置 `obs.source`。三者都不允许来自不可信输入（见[安全核](safety-core.md#执行闸门)的 Rule of Two）；意图没有申请对应能力时不执行。
+- 只执行别的插件已授权的意图，不自己决定做什么；意图的载荷就是动作。动作与意图须申请的能力：切场景 `obs.scene`，静音源 `obs.audio`，写来源设置 `obs.source`，写 Stage URL `obs.stage-url`（只写急停时静音的那个 Stage 源的 `url`，安全停止下也能执行）。这些都不允许来自不可信输入（见[安全核](safety-core.md#执行闸门)的 Rule of Two）；意图没有申请对应能力时不执行。
 - 每个动作执行时取得 `obs.control` 资源的执行许可，发出请求前再核对一次令牌，完成后交还；动作逐个执行。安全停止与维护态下拿不到许可，因此什么都不做。
 - 用自己的 obs-websocket 连接，由宿主建立并交出已认证的连接：凭据不进插件，只有被授予 `obs.control` 权限的实例能连接。
 
