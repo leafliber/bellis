@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@bellis/channel": "workspace:*",
     "@bellis/config": "workspace:*",
     "@bellis/obs": "workspace:*",
+    "@bellis/protocol": "workspace:*",
     "@bellis/secret-store": "workspace:*",
     "@bellis/store": "workspace:*",
     "ws": "8.22.0"
