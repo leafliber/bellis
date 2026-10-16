@@ -18,7 +18,10 @@ Stage 是运行在 OBS 浏览器源里的页面，负责播放音频、显示字
 
 - **加载方式**：宿主用 `node:http` 只在 `127.0.0.1`（字面地址，不用 `localhost`）上提供页面，端口每次会话随机，作为 OBS 浏览器源的 URL 加载（R-08）。AudioWorklet 与 WebCrypto 都要求安全上下文；按规范 `http://127.0.0.1` 属于可信来源，而 OBS 的“本地文件”模式经 OBS 自定义的来源加载，不是安全上下文，因此不用。是否满足以探针 S-01 为准。
 - **连接**：WebSocket 服务端用 `ws`，以 `noServer` 方式在 HTTP 升级阶段认证（R-08）。音频用二进制消息，控制用文本消息；单条消息设上限，不用默认值。
-- **来源校验**：OBS 里的其他浏览器源和停靠面板也能访问本机端口，本机其他网页也可能经 DNS 重绑定找上门。因此每个 HTTP 请求与 WebSocket 升级都要求 `Host` 等于 `127.0.0.1:端口`、`Origin` 等于 `http://127.0.0.1:端口`，缺少 `Origin` 一律拒绝。
+- **来源校验**：OBS 里的其他浏览器源和停靠面板也能访问本机端口，本机其他网页也可能经 DNS 重绑定找上门。因此（R-08）：
+  - 每个 HTTP 请求与 WebSocket 升级都要求 `Host` 等于 `127.0.0.1:端口`。
+  - 脚本、AudioWorklet 模块等子资源与 WebSocket 升级还要求 `Origin` 等于 `http://127.0.0.1:端口`，缺少即拒绝。
+  - 页面文档本身是顶层导航，浏览器不为它带 `Origin`（OBS 32.2.x 中已确认，刷新时 `Sec-Fetch-Site` 为 `same-origin`，初次加载与改 URL 时为 `none`），只在 `Sec-Fetch-Mode` 为 `navigate` 且 `Sec-Fetch-Dest` 为 `document` 时放行。文档是静态的，不含任何秘密，令牌在 URL 片段里不随请求发出；别的网页把它嵌进 iframe 时 `Sec-Fetch-Dest` 为 `iframe`，仍被拒绝。
 - **会话令牌**：浏览器源的 URL 以明文存在场景集合里，`GetInputSettings` 也能读出，因此 URL 里只放一次性令牌：
   - 宿主启动时以及每次重新下发时，生成 128 位、短时效的一次性令牌，经 obs-websocket 的 `SetInputSettings` 写进 URL 的片段（`#` 之后，不会出现在 HTTP 请求与日志里）。
   - 页面读出令牌后立即用 `history.replaceState` 从地址中去掉，以首条 WebSocket 消息出示，换取只存于内存的会话密钥。
