@@ -10,7 +10,8 @@ Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Win
   1. 发 RPC `shutdown`；
   2. 关闭子进程的 stdin，子进程读到 EOF 后自行退出；
   3. 超过截止时间再 `kill()`。
-- **孙进程要自己管。** libuv 把 Node 和它的直接子进程放进一个“父进程退出即杀死”的 Job，但孙进程会脱离这个 Job。所以 sidecar 必须用 Job Object（KILL_ON_JOB_CLOSE）管住自己派生的进程。[来源](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
+- **孙进程要自己管。** libuv 把 Node 和它的直接子进程放进一个“父进程退出即杀死”的 Job，但孙进程会脱离这个 Job。所以 sidecar 必须用 Job Object（KILL_ON_JOB_CLOSE）管住自己派生的进程，做法见[插件内核](../modules/plugin-kernel.md#sidecar-代理)。[来源](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
+- **Python sidecar 不经 `uv run` 启动。** 本机实测（uv 0.11.11）：强制终止 `uv run` 时，它经虚拟环境的 `python.exe` 启动的解释器不随之退出；虚拟环境的 `python.exe` 是个启动器，被强制终止时它启动的解释器随之退出。所以宿主直接启动虚拟环境里的 `python.exe`；`uv run` 每次启动还会按锁文件同步环境，也不适合在直播中拉起进程。
 - **环境变量**：键不区分大小写；不要删掉 `SYSTEMROOT` 等系统必需变量，否则 Winsock 初始化会失败。
 
 ## 本机通信
