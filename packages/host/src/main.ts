@@ -46,7 +46,12 @@ import {
 } from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { KeyringSecretStore, SESSION_SECRET } from '@bellis/secret-store';
-import { type HeldSentence, ReviewService } from '@bellis/speech';
+import {
+  type HeldSentence,
+  ReviewService,
+  type TtsRouting,
+  TtsRoutingService,
+} from '@bellis/speech';
 import { OBS_CONTROL, ObsConnectorService, type Stage, StageService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
@@ -232,6 +237,7 @@ function runPreflight(target: 'M1' | 'M2' | 'M3'): Promise<string[]> {
   const stage = host.services.resolve(StageService.name, StageService.major);
   const review = host.services.resolve(ReviewService.name, ReviewService.major);
   const avatar = host.services.resolve(AvatarService.name, AvatarService.major);
+  const routing = host.services.resolve(TtsRoutingService.name, TtsRoutingService.major);
   return preflight({
     target,
     plugins: host.snapshot(),
@@ -242,6 +248,7 @@ function runPreflight(target: 'M1' | 'M2' | 'M3'): Promise<string[]> {
         : { ready: (avatar.impl as Avatar).ready, status: (avatar.impl as Avatar).status },
     moderationEnabled: core.moderationEnabled,
     reviewPresent: !('missing' in review),
+    ttsPrimary: 'missing' in routing ? undefined : (routing.impl as TtsRouting).primary(),
     inspectObs: () => emergency.inspect(config.safety.emergency),
   });
 }

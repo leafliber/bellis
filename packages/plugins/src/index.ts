@@ -9,6 +9,7 @@ import {
   simTts,
   speechArbiter,
   speechReview,
+  ttsRouter,
 } from '@bellis/speech';
 import { obsControl, obsStagePage, simStagePage, stageService } from '@bellis/stage';
 import { cloudTts } from '@bellis/tts-cloud';
@@ -25,6 +26,7 @@ export const builtinPlugins = catalog(
   simTts,
   cloudTts,
   localTts,
+  ttsRouter,
   moderation,
   simModerationModel,
   triage,

@@ -11,7 +11,7 @@ import {
 } from '@bellis/kernel';
 import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { MemorySecretStore } from '@bellis/secret-store';
-import { simTts, speechArbiter } from '@bellis/speech';
+import { simTts, speechArbiter, ttsRouter } from '@bellis/speech';
 import { simStagePage, stageService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import type { EngineEnv, EngineStream, EngineTimeouts, WireEvent } from '../src/index.ts';
@@ -131,7 +131,10 @@ export async function world(
     };
   });
   safety.setModeration(false);
-  host.add(entries, catalog(cloudTts, simTts, speechArbiter, stageService, simStagePage));
+  host.add(
+    entries,
+    catalog(cloudTts, ttsRouter, simTts, speechArbiter, stageService, simStagePage),
+  );
   await host.settled();
   return {
     kernel: host,

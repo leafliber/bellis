@@ -7,7 +7,18 @@ from typing import NoReturn
 
 import pytest
 
+from tts_local.backend import Loaded, Stamp
 from tts_local.fake import TONE_AMPLITUDE, FakeBackend, FakeConfig
+
+
+def test_load_and_align_simulate_a_model():
+    backend = FakeBackend(FakeConfig(sample_rate=8000, samples_per_char=80, aligned=True))
+    assert backend.load() == Loaded(8000)
+    stamps = asyncio.run(backend.align('你 好', b''))
+    assert stamps == [Stamp('你', 0.0, 10.0), Stamp('好', 20.0, 30.0)]
+    assert asyncio.run(FakeBackend(FakeConfig()).align('你好', b'')) is None
+    with pytest.raises(RuntimeError, match='显存不足'):
+        FakeBackend(FakeConfig(load_error='显存不足')).load()
 
 
 class Crashed(Exception):

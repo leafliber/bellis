@@ -44,22 +44,92 @@ class SidecarOptions:
     setup: Callable[[RpcPeer], None] | None = None
 
 
-def watch_lifeline(on_end: Callable[[], None], fd: int = 0) -> None:
-    """stdin 只作生命线，不传数据：读到 EOF（宿主要求停止或已经退出）时在事件循环里调用 on_end。
+def run_blocking[**P, T](fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> Awaitable[T]:
+    """在守护线程里运行阻塞调用（例如模型加载与推理），等待它的结果。
 
-    阻塞读放在守护线程里：Windows 上宿主给的 stdin 管道不支持重叠 I/O，事件循环读不了。
-    直接读文件描述符，不经 `sys.stdin` 的缓冲区，退出时不会因缓冲区的锁卡住。
+    不用 `asyncio.to_thread`：它的线程池在解释器退出时要等全部任务结束，按 R-06 停止时会被拖住。
+    等待方被取消时线程照常跑完，结果丢弃。
+    """
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[T] = loop.create_future()
+
+    def resolve(result: T) -> None:
+        if not future.done():
+            future.set_result(result)
+
+    def reject(error: BaseException) -> None:
+        if not future.done():
+            future.set_exception(error)
+
+    def work() -> None:
+        # 事件循环已关闭（进程正在退出）时 call_soon_threadsafe 抛 RuntimeError：结果丢弃。
+        try:
+            result = fn(*args, **kwargs)
+        except BaseException as error:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(reject, error)
+        else:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(resolve, result)
+
+    threading.Thread(target=work, name='blocking', daemon=True).start()
+    return future
+
+
+#: Windows 上查看 stdin 管道是否已断开的间隔（秒）。
+LIFELINE_POLL_S = 0.1
+
+
+def _wait_eof_posix(fd: int) -> None:
+    with contextlib.suppress(OSError):
+        while os.read(fd, 65536):
+            pass
+
+
+def watch_lifeline(on_end: Callable[[], None], fd: int = 0) -> None:
+    """stdin 只作生命线，不传数据：宿主关闭它（要求停止或已经退出）时在事件循环里调用 on_end。
+
+    放在守护线程里：Windows 上宿主给的 stdin 管道不支持重叠 I/O，事件循环读不了。
+    Windows 上不能让读一直挂着：同一文件对象上的同步 I/O 是串行的，挂着的 ReadFile 会让其它线程对
+    stdin 的查询（例如原生库加载时 C 运行时初始化标准流）一直等下去——实测 `import torch` 因此卡死。
+    所以 Windows 上用 PeekNamedPipe 轮询，管道断开即视为 EOF；其它平台照常阻塞读到 EOF。
     """
     loop = asyncio.get_running_loop()
 
     def watch() -> None:
-        with contextlib.suppress(OSError):
-            while os.read(fd, 65536):
-                pass
+        if sys.platform == 'win32':
+            _wait_eof_windows(fd)
+        else:
+            _wait_eof_posix(fd)
         with contextlib.suppress(RuntimeError):
             loop.call_soon_threadsafe(on_end)
 
     threading.Thread(target=watch, name='lifeline', daemon=True).start()
+
+
+if sys.platform == 'win32':
+    import _winapi
+    import msvcrt
+    import time
+
+    def _wait_eof_windows(fd: int) -> None:
+        handle = msvcrt.get_osfhandle(fd)
+        while True:
+            try:
+                peeked = _winapi.PeekNamedPipe(handle, 0)
+            except BrokenPipeError:
+                return
+            except OSError:
+                # 不是管道（例如手工在控制台里运行）：没有生命线可看，只靠 RPC 与连接断开退出。
+                log.warning('stdin 不是管道，不看生命线')
+                threading.Event().wait()
+                return
+            # size 为 0 时返回（可读字节数, 消息剩余字节数）。
+            available = peeked[0]
+            if isinstance(available, int) and available > 0:
+                # 宿主不往 stdin 写数据；有数据时读掉（此时不会阻塞）。
+                os.read(fd, available)
+            time.sleep(LIFELINE_POLL_S)
 
 
 async def serve_sidecar(

@@ -60,6 +60,24 @@
           }
         },
         {
+          "id": "tts",
+          "plugin": "tts-router",
+          "config": {
+            "order": ["local", "subtitles"]
+          }
+        },
+        {
+          "id": "tts-local",
+          "plugin": "tts-local",
+          "config": {
+            "backend": "qwen3",
+            "qwen3": {
+              "speaker": "vivian",
+              "language": "chinese"
+            }
+          }
+        },
+        {
           "id": "tts-cloud",
           "plugin": "tts-cloud",
           "disabled": true,
@@ -71,7 +89,7 @@
           ],
           "config": {
             "primary": "minimax",
-            "fallback": ["volcengine", "subtitles"],
+            "fallback": ["volcengine"],
             "minimax": {
               "egress": false,
               "endpoint": "wss://api.minimax.cn/ws/v1/t2a_v2_bidi",
@@ -87,17 +105,6 @@
               "speaker": "",
               "sampleRate": 24000,
               "timestamps": "subtitle"
-            }
-          }
-        },
-        {
-          "id": "tts-local",
-          "plugin": "tts-local",
-          "disabled": true,
-          "config": {
-            "backend": "fake",
-            "fake": {
-              "toneHz": 440
             }
           }
         }

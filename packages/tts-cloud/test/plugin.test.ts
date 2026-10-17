@@ -3,10 +3,12 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { readJsonFile, resolveProfile } from '@bellis/kernel';
 import {
+  CloudTtsService,
   heardPrefix,
   SpeechService,
   type Synthesis,
   speakable,
+  type TtsEngine,
   TtsService,
   type UtteranceOutcome,
 } from '@bellis/speech';
@@ -29,7 +31,7 @@ async function fakes(options: { samplesPerChar?: number; chunkDelayMs?: number }
     config(overrides: Record<string, unknown> = {}) {
       return {
         primary: 'minimax',
-        fallback: ['volcengine', 'subtitles'],
+        fallback: ['volcengine'],
         retryAfterMs: 60_000,
         connectTimeoutMs: 1000,
         firstAudioTimeoutMs: 1000,
@@ -66,46 +68,39 @@ async function drain(synthesis: Synthesis): Promise<number> {
 
 const secrets = { minimax: MINIMAX_KEY, volcengine: VOLC_KEY };
 
-test('外发未开启时不连接任何厂商，按 profile 只出字幕，切换记入事件', async () => {
+const ROUTER = entry('router', 'tts-router', { config: { order: ['cloud', 'subtitles'] } });
+
+test('外发未开启时云端引擎停在 FAILED、不连接任何厂商；路由按 profile 只出字幕，切换记入事件', async () => {
   const f = await fakes();
   const config = f.config({
     minimax: { egress: false, endpoint: f.minimax.url, model: 'm', voiceId: 'v' },
     volcengine: { egress: false, endpoint: f.volcengine.url, speaker: 's' },
   });
-  const w = await world([entry('tts', 'tts-cloud', { config, grant: CLOUD_GRANT })], secrets);
-  try {
-    assert.equal(w.state('tts')?.state, 'active');
-    const tts = w.service(TtsService);
-    const synthesis = await tts.synthesize('你好，世界。', new AbortController().signal);
-    const samples = await drain(synthesis);
-    // 只出字幕：静音帧按估计时长（220ms/字，句末标点 1.5 倍）铺开，映射完整。
-    assert.equal(synthesis.sampleRate, 16_000);
-    assert.equal(samples, Math.round(6.5 * 220 * 16));
-    assert.equal(synthesis.totalSamples, samples);
-    assert.equal(synthesis.timing?.length, 6);
-    assert.equal(f.minimax.connections + f.volcengine.connections, 0);
-    assert.equal(f.minimax.authorizations.length + f.volcengine.headers.length, 0);
-    const switched = w.events('tts.switched').map((e) => e.data);
-    assert.deepEqual(switched, [
-      { from: 'minimax', to: 'subtitles', reason: 'minimax 外发未开启' },
-    ]);
-    assert.ok(
-      w.logs.some((l) => l.event === 'tts.engine-unavailable' && l.fields.engine === 'volcengine'),
-    );
-  } finally {
-    await w.close();
-    await f.close();
-  }
-});
-
-test('没有任何可用的引擎时插件停在 FAILED，并说明原因', async () => {
-  const f = await fakes();
-  const config = f.config({ fallback: [], minimax: { egress: false } });
-  const w = await world([entry('tts', 'tts-cloud', { config, grant: CLOUD_GRANT })], secrets);
+  const w = await world(
+    [entry('tts', 'tts-cloud', { config, grant: CLOUD_GRANT }), ROUTER],
+    secrets,
+  );
   try {
     const state = w.state('tts');
     assert.equal(state?.state, 'failed');
-    assert.match(state?.reason ?? '', /没有可用的 TTS 引擎：minimax 外发未开启/);
+    assert.match(
+      state?.reason ?? '',
+      /没有可用的云端 TTS 引擎：minimax 外发未开启；volcengine 外发未开启/,
+    );
+    const synthesis = await w
+      .service(TtsService)
+      .synthesize('你好，世界。', new AbortController().signal);
+    await drain(synthesis);
+    assert.equal(synthesis.sampleRate, 16_000);
+    assert.equal(f.minimax.connections + f.volcengine.connections, 0);
+    assert.equal(f.minimax.authorizations.length + f.volcengine.headers.length, 0);
+    assert.deepEqual(
+      w.events('tts.switched').map((e) => e.data),
+      [{ from: 'cloud', to: 'subtitles', reason: 'cloud 不在' }],
+    );
+    assert.ok(
+      w.logs.some((l) => l.event === 'tts.engine-unavailable' && l.fields.engine === 'volcengine'),
+    );
   } finally {
     await w.close();
     await f.close();
@@ -121,7 +116,7 @@ test('外发主机与凭据权限：清单申请的未授予时停在 WAITING；
         grant: CLOUD_GRANT.filter((p) => p !== 'secret:volcengine'),
       }),
       entry('tts2', 'tts-cloud', {
-        config: f.config({ fallback: ['subtitles'] }),
+        config: f.config(),
         grant: CLOUD_GRANT.filter((p) => p !== 'net.egress:127.0.0.1'),
         disabled: true,
       }),
@@ -133,16 +128,9 @@ test('外发主机与凭据权限：清单申请的未授予时停在 WAITING；
     assert.match(w.state('tts')?.reason ?? '', /未授予权限 secret:volcengine/);
     await w.kernel.disable('tts');
     await w.kernel.enable('tts2');
-    assert.equal(w.state('tts2')?.state, 'active');
-    const synthesis = await w
-      .service(TtsService)
-      .synthesize('你好。', new AbortController().signal);
-    await drain(synthesis);
-    assert.equal(f.minimax.connections, 0);
-    assert.match(
-      String((w.events('tts.switched')[0]?.data as { reason?: string } | undefined)?.reason),
-      /未授予权限 net\.egress:127\.0\.0\.1/,
-    );
+    assert.equal(w.state('tts2')?.state, 'failed');
+    assert.match(w.state('tts2')?.reason ?? '', /未授予权限 net\.egress:127\.0\.0\.1/);
+    assert.equal(f.minimax.connections + f.volcengine.connections, 0);
   } finally {
     await w.close();
     await f.close();
@@ -156,7 +144,7 @@ test('主引擎鉴权失败时切到备用并记入事件；冷却期满后恢�
     { minimax: 'wrong-key-000', volcengine: VOLC_KEY },
   );
   try {
-    const tts = w.service(TtsService);
+    const tts = w.service(CloudTtsService);
     const first = await tts.synthesize('你好。', new AbortController().signal);
     assert.equal(await drain(first), 3 * 80);
     assert.equal(f.volcengine.connections, 1);
@@ -189,35 +177,33 @@ test('主引擎鉴权失败时切到备用并记入事件；冷却期满后恢�
   }
 });
 
-test('两家都不可用时按 profile 只出字幕；没有备选时合成以错误结束', async () => {
+test('两家都不可用时云端引擎报告未就绪，路由按 profile 只出字幕', async () => {
   const f = await fakes();
   const broken = { minimax: 'bad-key-1', volcengine: 'bad-key-2' };
   const w = await world(
-    [
-      entry('tts', 'tts-cloud', { config: f.config(), grant: CLOUD_GRANT }),
-      entry('tts2', 'tts-cloud', {
-        config: f.config({ fallback: [] }),
-        grant: CLOUD_GRANT,
-        disabled: true,
-      }),
-    ],
+    [entry('tts', 'tts-cloud', { config: f.config(), grant: CLOUD_GRANT }), ROUTER],
     broken,
   );
   try {
+    const engine = w.service<TtsEngine>(CloudTtsService);
+    assert.equal(engine.ready, true);
     const synthesis = await w
       .service(TtsService)
       .synthesize('你好。', new AbortController().signal);
     await drain(synthesis);
     assert.equal(synthesis.sampleRate, 16_000);
+    const switched = w.events('tts.switched').map((e) => e.data as Record<string, unknown>);
     assert.deepEqual(
-      w.events('tts.switched').map((e) => (e.data as { to: string }).to),
-      ['subtitles'],
+      switched.map((d) => [d.from, d.to]),
+      [['cloud', 'subtitles']],
     );
-    await w.kernel.disable('tts');
-    await w.kernel.enable('tts2');
+    assert.match(String(switched[0]?.reason), /没有可用的云端 TTS 引擎：minimax 鉴权失败/);
+    // 两家都在冷却中：引擎未就绪，直接合成以错误结束。
+    assert.equal(engine.ready, false);
+    assert.match(engine.status, /minimax 冷却中.*volcengine 冷却中/);
     await assert.rejects(
-      w.service(TtsService).synthesize('你好。', new AbortController().signal),
-      /没有可用的 TTS 引擎：minimax 鉴权失败/,
+      engine.synthesize('你好。', new AbortController().signal),
+      /没有可用的云端 TTS 引擎：minimax 冷却中/,
     );
   } finally {
     await w.close();
@@ -233,7 +219,7 @@ test('两段式对齐：句段一到即有插值映射，随音频到达的时�
   );
   try {
     const synthesis = await w
-      .service(TtsService)
+      .service(CloudTtsService)
       .synthesize('你好呀朋友', new AbortController().signal);
     // 插值：每字 100ms，8kHz 下 800 个采样。
     assert.deepEqual(
@@ -262,6 +248,7 @@ test('发声链路：急停截断后写回与 Stage 回报的已播采样数逐�
       entry('stage-page', 'stage-page-sim'),
       entry('stage', 'stage-service'),
       entry('tts', 'tts-cloud', { config: f.config(), grant: CLOUD_GRANT }),
+      entry('router', 'tts-router', { config: { order: ['cloud'] } }),
       entry('speech', 'speech-arbiter', { grant: ['speech.output'] }),
     ],
     secrets,
@@ -322,6 +309,7 @@ test('发声链路：没有可用的 TTS 引擎时这一句以“不可用”结
       entry('stage-page', 'stage-page-sim'),
       entry('stage', 'stage-service'),
       entry('tts', 'tts-cloud', { config: f.config({ fallback: [] }), grant: CLOUD_GRANT }),
+      entry('router', 'tts-router', { config: { order: ['cloud'] } }),
       entry('speech', 'speech-arbiter', { grant: ['speech.output'] }),
     ],
     { minimax: 'bad-key-1' },

@@ -1,6 +1,8 @@
 """假后端：不加载模型，按朗读文本的码点数产生固定采样率的正弦或静音。只用于测试与演练。
 
+- `load_delay`、`load_error`：模拟模型加载的耗时与失败；
 - `first_chunk_delay`、`chunk_delay`：模拟首包延迟与生成速度；
+- `aligned`：给出精确的逐码点时间戳，模拟强制对齐；
 - `crash_on`：朗读文本含这些片段时，送出一半音频后进程直接崩溃（不收尾，模拟原生库崩溃）；
 - `workers`：启动时派生若干空转的辅助进程（模拟模型库自己起的进程），用来核对它们随 sidecar 退出。
 """
@@ -12,12 +14,15 @@ import math
 import os
 import subprocess
 import sys
+import time
 from array import array
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from typing import NoReturn
 
 from bellis_sidecar.processes import spawn, stop
+
+from .backend import Loaded, Stamp
 
 #: 辅助进程只看 stdin 生命线：读到 EOF 即退出。
 WORKER_CODE = 'import sys\nwhile sys.stdin.buffer.read(65536):\n    pass\n'
@@ -38,6 +43,10 @@ class FakeConfig:
     tone_hz: float = 0.0
     crash_on: tuple[str, ...] = ()
     workers: int = 0
+    load_delay: float = 0.0
+    #: 非空时模型“加载失败”，原因为这段文本。
+    load_error: str = ''
+    aligned: bool = False
 
 
 def _crash() -> NoReturn:
@@ -63,6 +72,13 @@ class FakeBackend:
     def processes(self) -> list[int]:
         return [worker.pid for worker in self._workers]
 
+    def load(self) -> Loaded:
+        if self.config.load_delay > 0:
+            time.sleep(self.config.load_delay)
+        if self.config.load_error:
+            raise RuntimeError(self.config.load_error)
+        return Loaded(self.config.sample_rate)
+
     async def synthesize(self, text: str) -> AsyncGenerator[bytes]:
         config = self.config
         total = len(text) * config.samples_per_char
@@ -82,6 +98,12 @@ class FakeBackend:
             offset += count
             # 让出事件循环，取消能及时生效。
             await asyncio.sleep(0)
+
+    async def align(self, text: str, pcm: bytes) -> list[Stamp] | None:
+        if not self.config.aligned:
+            return None
+        ms = self.config.samples_per_char * 1000 / self.config.sample_rate
+        return [Stamp(c, i * ms, (i + 1) * ms) for i, c in enumerate(text) if not c.isspace()]
 
     def _pcm(self, offset: int, count: int) -> bytes:
         config = self.config

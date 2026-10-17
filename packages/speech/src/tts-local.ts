@@ -7,22 +7,28 @@ import {
   TTS_STREAM_HEADER_BYTES,
   TtsInfoResult,
   TtsMethod,
+  TtsStatus,
   TtsSynthesizeResult,
+  TtsWordsParams,
 } from '@bellis/protocol';
 import { SafetyService } from '@bellis/safety';
 import Type, { type Static } from 'typebox';
 import { Compile } from 'typebox/compile';
-import { type Synthesis, TtsService } from './types.ts';
+import { Alignment } from './timing.ts';
+import { LocalTtsService, type Synthesis, type TtsEngine } from './types.ts';
 
 const isInfo = Compile(TtsInfoResult);
+const isStatus = Compile(TtsStatus);
 const isResult = Compile(TtsSynthesizeResult);
+const isWords = Compile(TtsWordsParams);
 const MAX_STREAM = 0xffff_ffff;
 
 /** 仓库根：sidecar 的源码与 uv 管理的虚拟环境都在这里。 */
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
 /**
- * uv 工作区虚拟环境里的解释器（先 `uv sync --locked`）。直接启动它，不经 `uv run`：
+ * uv 工作区虚拟环境里的解释器（先 `uv sync --locked`；真实后端还要 `--group tts-local`）。
+ * 直接启动它，不经 `uv run`：
  * - Windows 上实测，强制终止 `uv run` 时真正的解释器不会随之退出（uv → venv 的 python.exe → 解释器），
  *   R-06 的第 3 步失效；venv 的 python.exe 被终止时，它启动的解释器随之退出（同样实测）；
  * - `uv run` 每次启动都会按锁文件同步环境，可能在直播中改动环境或访问网络。
@@ -55,29 +61,108 @@ const FakeBackend = Type.Object(
     crashOn: Type.Array(Type.String({ minLength: 1, maxLength: 50 }), { default: [] }),
     /** 启动时派生的空转辅助进程数（演练“派生的进程随之退出”）。 */
     workers: Type.Integer({ minimum: 0, maximum: 4, default: 0 }),
+    /** 模拟模型加载的耗时与失败。 */
+    loadDelayMs: Type.Integer({ minimum: 0, default: 0 }),
+    loadError: Type.String({ maxLength: 100, default: '' }),
+    /** 给出精确的逐码点时间戳，模拟强制对齐。 */
+    aligned: Type.Boolean({ default: false }),
   },
   { default: {} },
 );
 
-function fakeArgs(fake: Static<typeof FakeBackend>): string[] {
+/** 模型权重从 Hugging Face 的官方仓库按提交固定版本下载到仓库外的缓存；运行时只读本地缓存。 */
+const QwenBackend = Type.Object(
+  {
+    model: Type.String({ minLength: 1, default: 'Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice' }),
+    modelRevision: Type.String({
+      pattern: '^[0-9a-f]{40}$',
+      default: '85e237c12c027371202489a0ec509ded67b5e4b5',
+    }),
+    /** 空串表示不做强制对齐，只用插值。 */
+    aligner: Type.String({ default: 'Qwen/Qwen3-ForcedAligner-0.6B' }),
+    alignerRevision: Type.String({
+      pattern: '^([0-9a-f]{40})?$',
+      default: 'c7cbfc2048c462b0d63a45797104fc9db3ad62b7',
+    }),
+    /** CustomVoice 模型的预置音色，例如 `vivian`；须在 profile 中显式选择。 */
+    speaker: Type.String({ pattern: '^[a-z_]*$', maxLength: 32, default: '' }),
+    language: Type.String({ pattern: '^[a-z]+$', default: 'chinese' }),
+    device: Type.String({ pattern: '^(cuda(:[0-9]+)?|cpu)$', default: 'cuda:0' }),
+    dtype: Type.Union(
+      [Type.Literal('bfloat16'), Type.Literal('float16'), Type.Literal('float32')],
+      {
+        default: 'bfloat16',
+      },
+    ),
+    chunkMs: Type.Integer({ minimum: 10, maximum: 1000, default: 100 }),
+  },
+  { default: {} },
+);
+
+export const LocalTtsConfig = Type.Object({
+  /** 合成后端：`qwen3` 为 Qwen3-TTS（只在装了 tts-local 依赖组的 Windows 真机上可用）；`fake` 用于测试与演练。 */
+  backend: Type.Union([Type.Literal('fake'), Type.Literal('qwen3')]),
+  fake: FakeBackend,
+  qwen3: QwenBackend,
+  /** 两段式对齐的插值按这个语速估计：一个普通码点的毫秒数。 */
+  msPerChar: Type.Number({ exclusiveMinimum: 0, default: 220 }),
+  /** 一句合成的截止时间（含强制对齐）。 */
+  synthesizeTimeoutMs: Type.Integer({ minimum: 100, default: 60_000 }),
+});
+export type LocalTtsConfig = Static<typeof LocalTtsConfig>;
+
+/** 由配置得到 sidecar 的命令行参数；qwen3 没选音色时返回原因。 */
+export function sidecarArgs(config: LocalTtsConfig): string[] | { error: string } {
+  if (config.backend === 'qwen3') {
+    const q = config.qwen3;
+    if (!q.speaker) return { error: 'qwen3 后端未配置音色（speaker）' };
+    if (q.aligner && !q.alignerRevision) return { error: 'qwen3 后端的对齐模型未固定版本' };
+    return [
+      '--backend',
+      'qwen3',
+      '--model',
+      q.model,
+      '--model-revision',
+      q.modelRevision,
+      '--aligner',
+      q.aligner,
+      '--aligner-revision',
+      q.alignerRevision,
+      '--speaker',
+      q.speaker,
+      '--language',
+      q.language,
+      '--device',
+      q.device,
+      '--dtype',
+      q.dtype,
+      '--chunk-ms',
+      String(q.chunkMs),
+    ];
+  }
+  const f = config.fake;
   return [
     '--backend',
     'fake',
     '--sample-rate',
-    String(fake.sampleRate),
+    String(f.sampleRate),
     '--samples-per-char',
-    String(fake.samplesPerChar),
+    String(f.samplesPerChar),
     '--chunk-samples',
-    String(fake.chunkSamples),
+    String(f.chunkSamples),
     '--first-chunk-delay-ms',
-    String(fake.firstChunkDelayMs),
+    String(f.firstChunkDelayMs),
     '--chunk-delay-ms',
-    String(fake.chunkDelayMs),
+    String(f.chunkDelayMs),
     '--tone-hz',
-    String(fake.toneHz),
+    String(f.toneHz),
     '--workers',
-    String(fake.workers),
-    ...fake.crashOn.flatMap((part) => ['--crash-on', part]),
+    String(f.workers),
+    '--load-delay-ms',
+    String(f.loadDelayMs),
+    ...(f.loadError ? ['--load-error', f.loadError] : []),
+    ...(f.aligned ? ['--aligned'] : []),
+    ...f.crashOn.flatMap((part) => ['--crash-on', part]),
   ];
 }
 
@@ -159,44 +244,49 @@ class AudioStream implements AsyncIterableIterator<Int16Array> {
   }
 }
 
+function describe(status: TtsStatus): string {
+  if (status.state === 'loading') return '模型加载中';
+  if (status.state === 'failed') return status.detail ?? '模型加载失败';
+  return status.detail ? `就绪（${status.detail}）` : '就绪';
+}
+
 /**
  * 本地降级 TTS 的代理插件（R-10）：拉起 Python sidecar（`sidecars/tts_local`），
- * 把它的 `tts.synthesize` 与二进制音频帧适配成 `tts@1`。
+ * 把它的 `tts.synthesize`、二进制音频帧与字级时间戳适配成本地引擎 `tts.local@1`，由 `tts-router` 选用。
  *
+ * - 握手立即完成，插件随即激活；模型在 sidecar 里后台加载，加载完成前引擎报告未就绪（“模型加载中”），
+ *   加载失败报告原因。状态变化由 sidecar 的 `tts.status` 通知送来。
  * - 音频帧：4 字节大端流编号 + 16 位小端 PCM；按流编号归到对应的合成，已取消或已结束的流的帧丢弃。
- *   帧格式不对视为 sidecar 故障。`tts.synthesize` 的应答在全部音频帧之后到达，即流结束，
+ *   帧格式不对视为 sidecar 故障。`tts.synthesize` 的应答在全部音频帧与时间戳之后到达，即流结束，
  *   并核对采样总数。
- * - 取消：调用方的中止信号或消费方停止读取都会中止请求，经 `rpc.cancel` 停止 sidecar 中的生成。
- * - 本地 TTS 不出时间戳：`timing` 为 undefined，仲裁退化为整句粒度；Qwen3-ForcedAligner 的细化对齐
- *   待真实后端接入（R-11，PENDING）。
- * - sidecar 崩溃或连接断开：记入 `tts.degraded` 事件（降级目标现阶段只有“不可用”），
- *   内核撤回 `tts@1`，依赖方回到 WAITING，按退避重启后记 `tts.started`。
+ * - 两段式对齐（R-11）：句段一到即按字数插值；Qwen3-ForcedAligner 的字级时间戳（`tts.words`）到达后细化；
+ *   流结束后按实际采样数修正。`Synthesis` 的映射是活的。
+ * - 取消：调用方的中止信号或消费方停止读取都会中止请求，经 `rpc.cancel` 停止 sidecar 中的送出。
+ * - sidecar 崩溃或连接断开：记入 `tts.degraded`，内核撤回 `tts.local@1`（路由跳过它，`tts@1` 不消失），
+ *   按退避重启；模型就绪时记 `tts.started`。
  */
 export const localTts = definePlugin({
   manifest: {
     id: 'tts-local',
-    version: '0.1.0',
+    version: '0.2.0',
     tier: 'ordinary',
-    provides: [TtsService.ref],
+    provides: [LocalTtsService.ref],
     inject: [SidecarHostService.ref, SafetyService.ref],
     permissions: [],
     process: 'sidecar',
-    config: Type.Object({
-      /** 合成后端。现阶段只有 `fake`（测试与演练用）；Qwen3-TTS 待接入。 */
-      backend: Type.Literal('fake'),
-      fake: FakeBackend,
-      /** 一句合成的截止时间。 */
-      synthesizeTimeoutMs: Type.Integer({ minimum: 100, default: 30_000 }),
-    }),
+    config: LocalTtsConfig,
   },
   async activate(ctx) {
     if (endianness() !== 'LE') throw new Error('本地 TTS 的 PCM 为小端，宿主须运行在小端平台');
     const safety = ctx.service(SafetyService);
+    const config = ctx.config;
+    const args = sidecarArgs(config);
+    if ('error' in args) throw new Error(args.error);
     const python = venvPython();
     if (!existsSync(python)) {
       throw new Error(`缺少 Python 虚拟环境 ${python}，先在仓库根运行 uv sync --locked`);
     }
-    const config = ctx.config;
+
     let degraded = false;
     const degrade = (reason: string) => {
       if (degraded) return;
@@ -205,19 +295,27 @@ export const localTts = definePlugin({
         entry: ctx.entryId,
         engine: 'local',
         reason,
-        fallback: 'unavailable',
+        fallback: 'router',
       });
     };
 
-    const streams = new Map<number, AudioStream>();
+    const streams = new Map<number, { audio: AudioStream; alignment: Alignment }>();
+    const hfHome = process.env.HF_HOME;
     const sidecar = await startSidecar(
       ctx,
-      [TtsService.ref],
+      [LocalTtsService.ref],
       {
         command: python,
         // -P：不把当前目录加进模块搜索路径；模块只从 PYTHONPATH 与虚拟环境加载。
-        args: ['-P', '-m', 'tts_local', ...fakeArgs(config.fake)],
-        env: { PYTHONPATH: pythonPath(), PYTHONUTF8: '1' },
+        args: ['-P', '-m', 'tts_local', ...args],
+        env: {
+          PYTHONPATH: pythonPath(),
+          PYTHONUTF8: '1',
+          // 模型只从本地缓存读取，运行时不联网下载。
+          HF_HUB_OFFLINE: '1',
+          HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
+          ...(hfHome ? { HF_HOME: hfHome } : {}),
+        },
         cwd: ROOT,
       },
       degrade,
@@ -225,10 +323,35 @@ export const localTts = definePlugin({
     const { rpc } = sidecar;
     // 撤销时先结束在途的流，再停止子进程（后注册先撤销）。
     ctx.register(() => {
-      for (const audio of streams.values()) audio.fail(new Error('本地 TTS 已停用'));
+      for (const { audio } of streams.values()) audio.fail(new Error('本地 TTS 已停用'));
       streams.clear();
     });
 
+    let status: TtsStatus = { state: 'loading' };
+    const update = (next: TtsStatus) => {
+      const was = status.state;
+      status = next;
+      if (was === next.state) return;
+      ctx.log('tts-local.status', { ...next });
+      if (next.state === 'ready') {
+        safety.record('tts.started', {
+          entry: ctx.entryId,
+          engine: 'local',
+          backend: config.backend,
+          sampleRate: next.sampleRate ?? null,
+        });
+      } else if (next.state === 'failed') {
+        degrade(describe(next));
+      }
+    };
+    // 先挂上通知再查询状态：查询之后的变化都会收到，之前的已反映在查询结果里。
+    rpc.onNotification(TtsMethod.Status, (params) => {
+      if (isStatus.Check(params)) update(params);
+    });
+    rpc.onNotification(TtsMethod.Words, (params) => {
+      if (!isWords.Check(params)) return;
+      streams.get(params.stream)?.alignment.refine(params.words);
+    });
     rpc.connection.on('binary', (data: Buffer) => {
       const bytes = data.length - TTS_STREAM_HEADER_BYTES;
       if (bytes < 0 || bytes % 2 !== 0) {
@@ -237,27 +360,34 @@ export const localTts = definePlugin({
         ctx.fail(new Error(reason));
         return;
       }
-      const audio = streams.get(data.readUInt32BE(0));
-      if (!audio) return;
+      const entry = streams.get(data.readUInt32BE(0));
+      if (!entry) return;
       const pcm = new Int16Array(bytes / 2);
       new Uint8Array(pcm.buffer).set(data.subarray(TTS_STREAM_HEADER_BYTES));
-      audio.push(pcm);
+      entry.audio.push(pcm);
     });
 
     const info = await rpc.request(TtsMethod.Info);
     if (!isInfo.Check(info)) throw new Error('本地 TTS sidecar 的 tts.info 应答不合法');
-    ctx.log('tts-local.ready', { pid: sidecar.pid, ...info });
-    safety.record('tts.started', {
-      entry: ctx.entryId,
-      engine: 'local',
+    ctx.log('tts-local.ready', {
+      pid: sidecar.pid,
       backend: info.backend,
-      sampleRate: info.sampleRate,
+      processes: info.processes,
     });
+    update(info.status);
 
     let lastStream = 0;
-    ctx.provide(TtsService, {
+    const engine: TtsEngine = {
+      get ready() {
+        return status.state === 'ready' && !ctx.signal.aborted;
+      },
+      get status() {
+        return describe(status);
+      },
       async synthesize(spoken, signal): Promise<Synthesis> {
         if (ctx.signal.aborted) throw new Error('本地 TTS 已停用');
+        const sampleRate = status.sampleRate;
+        if (status.state !== 'ready' || sampleRate === undefined) throw new Error(describe(status));
         lastStream = lastStream >= MAX_STREAM ? 1 : lastStream + 1;
         const stream = lastStream;
         const abort = new AbortController();
@@ -265,7 +395,8 @@ export const localTts = definePlugin({
         if (signal.aborted) onAbort();
         else signal.addEventListener('abort', onAbort, { once: true });
         const audio = new AudioStream(() => abort.abort(new Error('消费方已停止读取')));
-        streams.set(stream, audio);
+        const alignment = new Alignment(spoken, sampleRate, { msPerChar: config.msPerChar });
+        streams.set(stream, { audio, alignment });
         rpc
           .request(
             TtsMethod.Synthesize,
@@ -281,6 +412,7 @@ export const localTts = definePlugin({
                   new Error(`采样数不一致：sidecar 送出 ${result.samples}，收到 ${audio.samples}`),
                 );
               } else {
+                alignment.complete(result.samples);
                 audio.end();
               }
             },
@@ -295,12 +427,17 @@ export const localTts = definePlugin({
             signal.removeEventListener('abort', onAbort);
           });
         return {
-          sampleRate: info.sampleRate,
-          totalSamples: undefined,
-          timing: undefined,
+          sampleRate,
+          get totalSamples() {
+            return alignment.totalSamples;
+          },
+          get timing() {
+            return alignment.timing;
+          },
           frames: audio,
         };
       },
-    });
+    };
+    ctx.provide(LocalTtsService, engine);
   },
 });

@@ -137,6 +137,44 @@ export interface Tts {
 
 export const TtsService = defineService<Tts>('tts', 1);
 
+/**
+ * 一个 TTS 引擎（本地、云端）：在 `Tts` 之上报告此刻能否合成。`tts@1` 由路由插件（`tts-router`）提供，
+ * 它按 profile 配置的顺序选第一个就绪的引擎；引擎崩溃、未就绪或不在时只降级，`tts@1` 不消失。
+ */
+export interface TtsEngine extends Tts {
+  /** 此刻能否合成，例如本地模型已加载、云端至少有一家厂商不在冷却中。 */
+  readonly ready: boolean;
+  /** 给操作员看的状态说明，例如“模型加载中”。 */
+  readonly status: string;
+}
+
+export const LocalTtsService = defineService<TtsEngine>('tts.local', 1);
+export const CloudTtsService = defineService<TtsEngine>('tts.cloud', 1);
+
+/**
+ * 这一句本身被拒绝（例如云端厂商以文本过长为由拒绝）：换引擎也无济于事，这一句合成失败，
+ * 路由不换引擎，引擎照常可用。其余错误按“引擎不可用”处理，路由改用下一个。
+ */
+export class TtsRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TtsRequestError';
+  }
+}
+
+/** 路由选用的一项：本地引擎、云端引擎，或只出字幕。 */
+export type TtsOption = 'local' | 'cloud' | 'subtitles';
+
+/** 路由插件的状态，供开播预检核对。 */
+export interface TtsRouting {
+  /** 配置中第一个音频引擎（只出字幕不算）此刻的状态；没有配置音频引擎时为 undefined。 */
+  primary():
+    | { engine: Exclude<TtsOption, 'subtitles'>; ready: boolean; status: string }
+    | undefined;
+}
+
+export const TtsRoutingService = defineService<TtsRouting>('tts.routing', 1);
+
 /** 审核插件在启用时提供的服务；仲裁据此确认审核确实在场。 */
 export interface ModerationStatus {
   readonly onError: 'skip' | 'pass';

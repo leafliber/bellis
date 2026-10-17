@@ -26,8 +26,10 @@ import {
   SidecarHealthResult,
   schemaModules,
   TtsInfoResult,
+  TtsStatus,
   TtsSynthesizeParams,
   TtsSynthesizeResult,
+  TtsWordsParams,
 } from '../src/index.ts';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -60,7 +62,7 @@ const pythonModules = [
   {
     name: 'tts-local',
     path: 'sidecars/tts_local/src/tts_local/protocol.py',
-    defs: { TtsInfoResult, TtsSynthesizeParams, TtsSynthesizeResult },
+    defs: { TtsInfoResult, TtsStatus, TtsSynthesizeParams, TtsSynthesizeResult, TtsWordsParams },
   },
 ];
 

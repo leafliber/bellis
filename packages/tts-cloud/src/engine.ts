@@ -1,5 +1,5 @@
 import type { Clock } from '@bellis/kernel';
-import type { WordStamp } from '@bellis/speech';
+import { TtsRequestError, type WordStamp } from '@bellis/speech';
 
 export type Vendor = 'minimax' | 'volcengine';
 
@@ -17,8 +17,11 @@ export class EngineError extends Error {
   }
 }
 
-/** 这一句本身被厂商拒绝（例如文本过长、非法字符过多）：换引擎也无济于事，这一句不播，引擎照常可用。 */
-export class RequestError extends Error {
+/**
+ * 这一句本身被厂商拒绝（例如文本过长、非法字符过多）：换引擎也无济于事，这一句不播，引擎照常可用。
+ * 是 `TtsRequestError`，路由也不因此换引擎。
+ */
+export class RequestError extends TtsRequestError {
   constructor(message: string) {
     super(message);
     this.name = 'RequestError';

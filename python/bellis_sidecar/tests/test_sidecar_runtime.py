@@ -85,6 +85,51 @@ asyncio.run(main())
 """
 
 
+#: 看着生命线的同时，另一个线程查询 stdin 的读写位置：Windows 上若有挂着的同步读，这一步会一直等下去
+#: （原生库加载时 C 运行时初始化标准流就会这样查询，实测 `import torch` 因此卡死）。
+LIFELINE_QUERY_SCRIPT = """
+import asyncio, os, threading
+from bellis_sidecar.runtime import watch_lifeline
+
+async def main():
+    ended = asyncio.Event()
+    watch_lifeline(ended.set)
+    await asyncio.sleep(0.3)
+    done = threading.Event()
+    def query():
+        try:
+            os.lseek(0, 0, os.SEEK_CUR)
+        except OSError:
+            pass
+        done.set()
+    threading.Thread(target=query, daemon=True).start()
+    print('returned' if done.wait(3) else 'blocked', flush=True)
+    await ended.wait()
+
+asyncio.run(main())
+"""
+
+
+def test_lifeline_does_not_block_other_stdin_queries():
+    env = {**os.environ, 'PYTHONPATH': str(SRC)}
+    child = subprocess.Popen(
+        [sys.executable, '-c', LIFELINE_QUERY_SCRIPT],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        env=env,
+    )
+    assert child.stdin is not None
+    assert child.stdout is not None
+    try:
+        assert child.stdout.readline().strip() == b'returned'
+        child.stdin.close()
+        assert child.wait(10) == 0
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
 def test_lifeline_ends_when_stdin_closes():
     env = {**os.environ, 'PYTHONPATH': str(SRC)}
     child = subprocess.Popen(

@@ -24,7 +24,20 @@ import { StateStore } from '@bellis/store';
 import Type from 'typebox';
 import { Compile } from 'typebox/compile';
 import Value from 'typebox/value';
-import { localTts, type Synthesis, type Tts, TtsService, venvPython } from '../src/index.ts';
+import {
+  LocalTtsConfig,
+  LocalTtsService,
+  localTts,
+  type Synthesis,
+  sidecarArgs,
+  type Tts,
+  type TtsEngine,
+  type TtsOption,
+  TtsRoutingService,
+  TtsService,
+  ttsRouter,
+  venvPython,
+} from '../src/index.ts';
 
 const safetyConfig: SafetyConfig = {
   simulation: true,
@@ -64,10 +77,13 @@ function entry(id: string, plugin: string, config: unknown = {}): ResolvedEntry 
 interface Ready {
   pid: number;
   processes: number[];
-  sampleRate: number;
 }
 
-async function setup(fake: Record<string, unknown> = {}) {
+/**
+ * 内核、安全核（内存存储）与本机通道，加上本地 TTS 条目。给出 `order` 时再加上 TTS 路由，
+ * 依赖方改为使用 `tts@1`；否则依赖方直接使用 `tts.local@1`。
+ */
+async function setup(fake: Record<string, unknown> = {}, order?: TtsOption[]) {
   const logs: Array<{ event: string; fields: Record<string, unknown> }> = [];
   const transitions: Transition[] = [];
   const store = StateStore.open({ path: ':memory:' });
@@ -109,35 +125,49 @@ async function setup(fake: Record<string, unknown> = {}) {
   });
   host.provideCore(SidecarHostService, { credentials, hub });
 
-  /** 依赖方：每次激活时记下拿到的 tts@1。 */
+  /** 依赖方：每次激活时记下拿到的服务。 */
   const users: Tts[] = [];
+  const token = order ? TtsService : LocalTtsService;
   const user = definePlugin({
     manifest: {
       id: 'tts-user',
       version: '1.0.0',
       tier: 'ordinary',
       provides: [],
-      inject: [TtsService.ref],
+      inject: [token.ref],
       permissions: [],
       process: 'in-process',
       config: Type.Object({}),
     },
     activate(ctx) {
-      users.push(ctx.service(TtsService));
+      users.push(ctx.service(token));
     },
   });
   const config = {
     backend: 'fake',
     fake: { samplesPerChar: SAMPLES_PER_CHAR, chunkSamples: CHUNK_SAMPLES, ...fake },
   };
-  host.add([entry('tts', 'tts-local', config), entry('user', 'tts-user')], catalog(localTts, user));
+  host.add(
+    [
+      entry('tts-local', 'tts-local', config),
+      ...(order ? [entry('tts', 'tts-router', { order })] : []),
+      entry('user', 'tts-user'),
+    ],
+    catalog(localTts, ttsRouter, user),
+  );
   await host.settled();
 
+  const resolve = <T>(t: { name: string; major: number }): T | undefined => {
+    const found = host.services.resolve(t.name, t.major);
+    return 'missing' in found ? undefined : (found.impl as T);
+  };
   return {
     kernel: host,
     users,
     transitions,
     logs,
+    engine: () => resolve<TtsEngine>(LocalTtsService),
+    routing: () => resolve<{ primary(): unknown }>(TtsRoutingService),
     state(id: string) {
       const found = host.snapshot().find((e) => e.id === id);
       if (!found) throw new Error(`没有条目 ${id}`);
@@ -160,15 +190,20 @@ async function samplesOf(synthesis: Synthesis): Promise<number> {
   return total;
 }
 
-test('sidecar 握手后提供 tts@1，音频经二进制帧按流送回', async () => {
-  const s = await setup({ sampleRate: 16_000, toneHz: 440 });
+test('握手后即激活、模型在后台加载；就绪后音频经二进制帧按流送回', async () => {
+  const s = await setup({ sampleRate: 16_000, toneHz: 440, loadDelayMs: 300 });
   try {
-    assert.equal(s.state('tts').state, 'active');
-    assert.equal(s.state('user').state, 'active');
-    const tts = s.users[0] as Tts;
-    const synthesis = await tts.synthesize('你好世界', new AbortController().signal);
+    assert.equal(s.state('tts-local').state, 'active');
+    const engine = s.engine() as TtsEngine;
+    assert.equal(engine.ready, false);
+    assert.equal(engine.status, '模型加载中');
+    await assert.rejects(engine.synthesize('你好', new AbortController().signal), /模型加载中/);
+    assert.equal(s.events('tts.started').length, 0);
+
+    await waitUntil(() => engine.ready);
+    assert.equal(engine.status, '就绪');
+    const synthesis = await engine.synthesize('你好世界', new AbortController().signal);
     assert.equal(synthesis.sampleRate, 16_000);
-    assert.equal(synthesis.timing, undefined);
     const frames: Int16Array[] = [];
     for await (const frame of synthesis.frames) frames.push(frame);
     assert.equal(frames.length, (4 * SAMPLES_PER_CHAR) / CHUNK_SAMPLES);
@@ -177,11 +212,12 @@ test('sidecar 握手后提供 tts@1，音频经二进制帧按流送回', async 
     const first = frames[0] as Int16Array;
     assert.ok(first.some((sample) => sample !== 0));
     assert.ok(first.every((sample) => Math.abs(sample) <= 6553));
+    assert.equal(synthesis.totalSamples, 4 * SAMPLES_PER_CHAR);
 
     // 两句并发：各自的帧按流编号归位。
     const [a, b] = await Promise.all([
-      tts.synthesize('一二', new AbortController().signal),
-      tts.synthesize('一二三', new AbortController().signal),
+      engine.synthesize('一二', new AbortController().signal),
+      engine.synthesize('一二三', new AbortController().signal),
     ]);
     assert.deepEqual(await Promise.all([samplesOf(a), samplesOf(b)]), [
       2 * SAMPLES_PER_CHAR,
@@ -190,7 +226,31 @@ test('sidecar 握手后提供 tts@1，音频经二进制帧按流送回', async 
 
     const started = s.events('tts.started');
     assert.equal(started.length, 1);
-    assert.equal((started[0]?.data as { backend?: string } | undefined)?.backend, 'fake');
+    assert.equal((started[0]?.data as { sampleRate?: number } | undefined)?.sampleRate, 16_000);
+  } finally {
+    await s.close();
+  }
+});
+
+test('两段式对齐：句段一到即插值，强制对齐的时间戳到达后细化，流结束后有实际总采样数', async () => {
+  const s = await setup({ sampleRate: 16_000, aligned: true });
+  try {
+    const engine = s.engine() as TtsEngine;
+    await waitUntil(() => engine.ready);
+    const synthesis = await engine.synthesize('你好呀朋友', new AbortController().signal);
+    // 插值：每字 220ms，16kHz 下 3520 个采样。
+    assert.deepEqual(
+      synthesis.timing?.map((t) => t.sample),
+      [0, 3520, 7040, 10_560, 14_080],
+    );
+    assert.equal(synthesis.totalSamples, undefined);
+    assert.equal(await samplesOf(synthesis), 5 * SAMPLES_PER_CHAR);
+    // 细化：假后端给出每字 1600 个采样的精确时间戳。
+    assert.deepEqual(
+      synthesis.timing?.map((t) => t.sample),
+      [0, 1600, 3200, 4800, 6400],
+    );
+    assert.equal(synthesis.totalSamples, 5 * SAMPLES_PER_CHAR);
   } finally {
     await s.close();
   }
@@ -199,46 +259,55 @@ test('sidecar 握手后提供 tts@1，音频经二进制帧按流送回', async 
 test('中止或停止读取时经 rpc.cancel 停止 sidecar 中的生成', async () => {
   const s = await setup({ chunkDelayMs: 50 });
   try {
-    const tts = s.users[0] as Tts;
+    const engine = s.engine() as TtsEngine;
+    await waitUntil(() => engine.ready);
     const text = '这是一句需要合成很久的比较长的测试句子';
     const full = [...text].length * SAMPLES_PER_CHAR;
 
     // 调用方中止：流安静结束，只拿到一部分音频。
     const abort = new AbortController();
-    const synthesis = await tts.synthesize(text, abort.signal);
+    const synthesis = await engine.synthesize(text, abort.signal);
     let received = 0;
     for await (const frame of synthesis.frames) {
       received += frame.length;
       if (received >= 2 * CHUNK_SAMPLES) abort.abort(new Error('测试中止'));
     }
     assert.ok(received < full);
+    assert.equal(synthesis.totalSamples, undefined);
 
     // sidecar 一次只合成一句：前一句若没有真正停止，下一句要排队约 2 秒。
     const started = performance.now();
-    const next = await tts.synthesize('好', new AbortController().signal);
+    const next = await engine.synthesize('好', new AbortController().signal);
     assert.equal(await samplesOf(next), SAMPLES_PER_CHAR);
     assert.ok(performance.now() - started < 1000, '取消没有停止 sidecar 中的生成');
 
     // 消费方停止读取（Stage 截断）：同样取消。
-    const dropped = await tts.synthesize(text, new AbortController().signal);
+    const dropped = await engine.synthesize(text, new AbortController().signal);
     for await (const _ of dropped.frames) break;
     const again = performance.now();
-    assert.equal(await samplesOf(await tts.synthesize('好', new AbortController().signal)), 1600);
+    assert.equal(
+      await samplesOf(await engine.synthesize('好', new AbortController().signal)),
+      SAMPLES_PER_CHAR,
+    );
     assert.ok(performance.now() - again < 1000, '停止读取没有取消合成');
-    assert.equal(s.state('tts').state, 'active');
+    assert.equal(s.state('tts-local').state, 'active');
   } finally {
     await s.close();
   }
 });
 
-test('sidecar 崩溃后服务被撤回、依赖方回到 WAITING、记入降级事件；重启后恢复，派生的进程随之退出', async () => {
-  const s = await setup({ crashOn: ['崩溃'], workers: 1, chunkDelayMs: 10 });
+test('sidecar 崩溃：本地引擎被撤回、记入降级事件，tts@1 不消失、路由改为只出字幕；重启后恢复，派生的进程随之退出', async () => {
+  const s = await setup({ crashOn: ['崩溃'], workers: 1, chunkDelayMs: 10 }, [
+    'local',
+    'subtitles',
+  ]);
   try {
     const [first] = s.ready();
     assert.ok(first);
     const worker = first.processes[0] as number;
     assert.equal(first.processes.length, 1);
     assert.ok(isAlive(worker));
+    await waitUntil(() => s.engine()?.ready === true);
 
     const tts = s.users[0] as Tts;
     const synthesis = await tts.synthesize('这句话会让它崩溃掉', new AbortController().signal);
@@ -248,26 +317,61 @@ test('sidecar 崩溃后服务被撤回、依赖方回到 WAITING、记入降级�
     });
     assert.ok(received > 0, '崩溃前送出的音频应已到达');
 
-    await waitUntil(() => s.ready().length >= 2 && s.state('user').state === 'active', 30_000);
-    const userStates = s.transitions.filter((t) => t.entryId === 'user').map((t) => t.to);
-    assert.ok(userStates.includes('waiting'), '依赖方应回到 WAITING');
-    const ttsStates = s.transitions.filter((t) => t.entryId === 'tts').map((t) => t.to);
-    assert.ok(ttsStates.includes('failed'));
+    // 本地引擎不在时，tts@1 仍在：这一句只出字幕（静音帧，按估计时长）。
+    await waitUntil(() => s.engine() === undefined);
+    assert.equal(s.state('tts').state, 'active');
+    assert.equal(s.state('user').state, 'active');
+    const subtitles = await tts.synthesize('先出字幕', new AbortController().signal);
+    assert.equal(subtitles.sampleRate, 16_000);
+    assert.ok((await samplesOf(subtitles)) > 0);
 
+    await waitUntil(() => s.ready().length >= 2 && s.engine()?.ready === true, 30_000);
+    assert.equal(
+      s.transitions.some((t) => t.entryId === 'user' && t.to === 'waiting'),
+      false,
+      '依赖 tts@1 的一方不因本地引擎崩溃而停用',
+    );
+    assert.ok(s.transitions.some((t) => t.entryId === 'tts-local' && t.to === 'failed'));
     const degraded = s.events('tts.degraded');
     assert.equal(degraded.length, 1);
-    assert.equal((degraded[0]?.data as { fallback?: string } | undefined)?.fallback, 'unavailable');
+    assert.match(String((degraded[0]?.data as { reason?: string } | undefined)?.reason), /sidecar/);
     assert.equal(s.events('tts.started').length, 2);
 
     const second = s.ready()[1] as Ready;
     assert.notEqual(second.pid, first.pid);
     await waitUntil(() => !isAlive(first.pid) && !isAlive(worker));
 
-    const recovered = s.users[1] as Tts;
     assert.equal(
-      await samplesOf(await recovered.synthesize('恢复了', new AbortController().signal)),
+      await samplesOf(await tts.synthesize('恢复了', new AbortController().signal)),
       3 * SAMPLES_PER_CHAR,
     );
+    const switched = s.events('tts.switched').map((e) => e.data as Record<string, unknown>);
+    assert.deepEqual(
+      switched.map((d) => [d.from, d.to]),
+      [
+        ['local', 'subtitles'],
+        ['subtitles', 'local'],
+      ],
+    );
+    assert.equal(switched[1]?.reason, 'local 恢复可用');
+  } finally {
+    await s.close();
+  }
+});
+
+test('模型加载失败：引擎报告原因并记入降级事件，路由的主引擎未就绪', async () => {
+  const s = await setup({ loadError: '显存不足' }, ['local', 'subtitles']);
+  try {
+    await waitUntil(() => s.events('tts.degraded').length > 0);
+    const engine = s.engine() as TtsEngine;
+    assert.equal(engine.ready, false);
+    assert.equal(engine.status, '模型加载失败：显存不足');
+    assert.deepEqual(s.routing()?.primary(), {
+      engine: 'local',
+      ready: false,
+      status: '模型加载失败：显存不足',
+    });
+    assert.equal(s.state('tts-local').state, 'active');
   } finally {
     await s.close();
   }
@@ -278,7 +382,7 @@ test('停用时按 R-06 的顺序停止 sidecar：应答 shutdown 后退出，�
   try {
     const [ready] = s.ready();
     assert.ok(ready);
-    await s.kernel.disable('tts');
+    await s.kernel.disable('tts-local');
     assert.equal(s.state('user').state, 'waiting');
     const stopped = s.logs.find((l) => l.event === 'sidecar.stopped');
     assert.equal(stopped?.fields.stage, 'shutdown');
@@ -291,18 +395,34 @@ test('停用时按 R-06 的顺序停止 sidecar：应答 shutdown 后退出，�
   }
 });
 
-test('示例 profile 中的本地 TTS 默认禁用，配置符合清单', () => {
+test('示例 profile：本地 TTS 用真实后端并选定音色，路由按 local、subtitles，配置符合清单', () => {
   const path = fileURLToPath(
     new URL('../../../config/profiles/live.example.json', import.meta.url),
   );
-  const found = resolveProfile(readJsonFile(path), []).find((e) => e.plugin === 'tts-local');
-  assert.ok(found);
-  assert.equal(found.disabled, true);
-  const schema = localTts.manifest.config;
-  assert.ok(Compile(schema).Check(Value.Default(schema, structuredClone(found.config))));
+  const entries = resolveProfile(readJsonFile(path), []);
+  const local = entries.find((e) => e.plugin === 'tts-local');
+  assert.ok(local);
+  assert.equal(local.disabled, false);
+  const config = Value.Default(LocalTtsConfig, structuredClone(local.config));
+  assert.ok(Compile(LocalTtsConfig).Check(config));
+  const args = sidecarArgs(config as LocalTtsConfig);
+  assert.ok(Array.isArray(args), JSON.stringify(args));
+  assert.equal((config as LocalTtsConfig).backend, 'qwen3');
+
+  const router = entries.find((e) => e.plugin === 'tts-router');
+  assert.ok(router);
+  assert.deepEqual((router.config as { order: string[] }).order, ['local', 'subtitles']);
+  assert.ok(
+    Compile(ttsRouter.manifest.config).Check(
+      Value.Default(ttsRouter.manifest.config, structuredClone(router.config)),
+    ),
+  );
+  assert.equal(entries.find((e) => e.plugin === 'tts-cloud')?.disabled, true);
 });
 
-test('按平台定位 uv 工作区虚拟环境里的解释器', () => {
+test('qwen3 后端须选定音色；按平台定位 uv 工作区虚拟环境里的解释器', () => {
+  const config = Value.Default(LocalTtsConfig, { backend: 'qwen3' }) as LocalTtsConfig;
+  assert.deepEqual(sidecarArgs(config), { error: 'qwen3 后端未配置音色（speaker）' });
   assert.match(venvPython('root', 'win32'), /\.venv[\\/]Scripts[\\/]python\.exe$/);
   assert.match(venvPython('root', 'linux'), /\.venv[\\/]bin[\\/]python$/);
 });

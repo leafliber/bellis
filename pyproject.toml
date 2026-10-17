@@ -6,9 +6,20 @@
 exclude-newer = "1 day"
 # 只用 uv 安装的解释器，不依赖系统 Python。
 python-preference = "only-managed"
+# qwen-tts 锁定 transformers 4.57.3、qwen-asr（Qwen3-ForcedAligner）锁定 4.57.6：统一到后者（R-24）。
+override-dependencies = ["transformers==4.57.6"]
 
 [tool.uv.workspace]
 members = ["spikes/python", "python/bellis_sidecar", "sidecars/tts_local"]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
+torchaudio = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
 
 [dependency-groups]
 # datamodel-code-generator 只在 `pnpm run gen` 中由 JSON Schema 生成 Pydantic 模型（R-24）。
@@ -16,6 +27,14 @@ dev = [
     "datamodel-code-generator==0.84.0",
     "pytest==9.1.1",
     "ruff==0.17.0",
+]
+# 本地 TTS 的真实后端（Qwen3-TTS 与 Qwen3-ForcedAligner，R-10、R-11、R-24）。只在 Windows 真机安装：
+# `uv sync --locked --group tts-local`；不在缺省组里，三平台 CI 的 `uv sync --locked` 不会下载它们。
+tts-local = [
+    "torch==2.11.0; sys_platform == 'win32'",
+    "torchaudio==2.11.0; sys_platform == 'win32'",
+    "qwen-tts==0.1.1; sys_platform == 'win32'",
+    "qwen-asr==0.0.6; sys_platform == 'win32'",
 ]
 
 [tool.ruff]

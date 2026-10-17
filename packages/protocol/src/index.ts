@@ -29,7 +29,13 @@ import {
   SessionInfo,
   WatchdogActedParams,
 } from './process.ts';
-import { TtsInfoResult, TtsSynthesizeParams, TtsSynthesizeResult } from './tts.ts';
+import {
+  TtsInfoResult,
+  TtsStatus,
+  TtsSynthesizeParams,
+  TtsSynthesizeResult,
+  TtsWordsParams,
+} from './tts.ts';
 
 export * from './channel.ts';
 export * from './config.ts';
@@ -68,5 +74,5 @@ export const schemaModules = {
     OperatorPreflightParams,
     WatchdogActedParams,
   },
-  tts: { TtsInfoResult, TtsSynthesizeParams, TtsSynthesizeResult },
+  tts: { TtsInfoResult, TtsStatus, TtsSynthesizeParams, TtsSynthesizeResult, TtsWordsParams },
 } as const;
