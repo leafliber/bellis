@@ -106,3 +106,27 @@ test('开播预检核对应急目标：安全场景与 Stage 源存在、浏览�
     await Promise.all([good, bad, missing].map((obs) => obs.close()));
   }
 });
+
+test('开播预检核对急停后的状态：节目场景是安全场景、Stage 源被静音都不通过', async () => {
+  const policy = { stageSource: 'Stage', safeScene: 'Safe', stopStream: false };
+  const obs = await SimObs.start({ inputSettings: { Stage: { reroute_audio: true } } });
+  const client = await ObsClient.connect(obs.url, undefined);
+  try {
+    // 急停：切到安全场景并静音 Stage 源。
+    assert.equal((await runEmergency(client, policy)).ok, true);
+    assert.deepEqual(await inspectObsTargets(client, policy), [
+      '节目场景是安全场景「Safe」，先切回直播场景',
+      'Stage 源「Stage」被静音，先取消静音',
+    ]);
+    // 操作员只切回场景：仍因静音不通过。
+    await client.request('SetCurrentProgramScene', { sceneName: 'Live' });
+    assert.deepEqual(await inspectObsTargets(client, policy), [
+      'Stage 源「Stage」被静音，先取消静音',
+    ]);
+    await client.request('SetInputMute', { inputName: 'Stage', inputMuted: false });
+    assert.deepEqual(await inspectObsTargets(client, policy), []);
+  } finally {
+    client.close();
+    await obs.close();
+  }
+});

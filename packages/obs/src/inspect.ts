@@ -4,7 +4,8 @@ import type { EmergencyPolicy } from './emergency.ts';
 /**
  * 开播预检中与 OBS 有关的项（只读）：安全场景与 Stage 源存在；Stage 是浏览器源时按 Stage 文档的
  * 要求开启“Control audio via OBS”、不在隐藏时关闭、不在场景激活时刷新；安全场景里不含 Stage 源
- * （安全停止下写 Stage URL 的例外以此为前提）。返回未通过的项，全部通过时为空。
+ * （安全停止下写 Stage URL 的例外以此为前提）；节目场景不是安全场景、Stage 源没有被静音（急停之后由操作员
+ * 先取消静音、切回直播场景，再进入输出模式，Bellis 不自动切回）。返回未通过的项，全部通过时为空。
  * obs-websocket 的 GetInputSettings 只返回改过默认值的设置，所以默认关闭的两项缺省即为通过。
  */
 export async function inspectObsTargets(
@@ -17,11 +18,19 @@ export async function inspectObsTargets(
     (scene) => scene.sceneName,
   );
   if (!names.includes(policy.safeScene)) failures.push(`OBS 中没有安全场景「${policy.safeScene}」`);
+  else if (scenes.data?.currentProgramSceneName === policy.safeScene)
+    failures.push(`节目场景是安全场景「${policy.safeScene}」，先切回直播场景`);
 
   const input = await client.request('GetInputSettings', { inputName: policy.stageSource });
   if (!input.ok) {
     failures.push(`OBS 中没有 Stage 源「${policy.stageSource}」`);
-  } else if (input.data?.inputKind === 'browser_source') {
+  } else {
+    const mute = await client.request('GetInputMute', { inputName: policy.stageSource });
+    if (!mute.ok) failures.push(`读不到 Stage 源「${policy.stageSource}」的静音状态`);
+    else if (mute.data?.inputMuted !== false)
+      failures.push(`Stage 源「${policy.stageSource}」被静音，先取消静音`);
+  }
+  if (input.ok && input.data?.inputKind === 'browser_source') {
     const settings = (input.data.inputSettings ?? {}) as Record<string, unknown>;
     if (settings.reroute_audio !== true)
       failures.push(`Stage 源「${policy.stageSource}」没有开启“Control audio via OBS”`);
