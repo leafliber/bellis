@@ -1,5 +1,6 @@
 /**
- * 启动器入口（R-23）。Windows 上由“登录时运行”的计划任务启动（P1 注册）；macOS 开发机直接运行。
+ * 启动器入口（R-23）。Windows 上由“登录时运行”的计划任务启动（`pnpm autostart register` 注册，
+ * 运行方式与停止见 docs/platform/windows.md 的“登录时运行”）；macOS 开发机直接运行。
  *   node packages/launcher/src/main.ts [配置文件]   缺省为 config/sim.json
  * 配置为 sim 时，启动器自己运行模拟 OBS 并把它的地址写入 SecretStore（与真实 OBS 的凭据分开存放），模拟 OBS 与真实 OBS 一样在宿主之外。
  * 宿主退出后不自动重启：看门狗接管现场，等待操作员处理。看门狗意外退出则由启动器重启。
