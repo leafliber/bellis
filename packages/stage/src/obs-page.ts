@@ -167,9 +167,9 @@ export const obsStagePage = definePlugin({
       }
       distributing = true;
       lastDistribution = clock.now();
+      // 新令牌给重新加载的页面用；旧页面的会话密钥只按重连时限过期，不在这里作废。
       token = randomBytes(16).toString('base64url');
       tokenUsed = false;
-      sessionKey = undefined;
       distributions += 1;
       const action: ObsAction = { kind: 'stage-url', url: `${origin}/#t=${token}` };
       try {
