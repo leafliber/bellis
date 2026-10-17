@@ -95,8 +95,9 @@ test('重新收到心跳后重新武装', async () => {
   try {
     await until(() => s.count('watchdog.acted') === 1);
     beat(s.peers[0] as RpcPeer, 1);
-    await until(() => s.count('watchdog.acted') === 2);
-    assert.equal(s.reports.length, 2);
+    // 报告在 watchdog.acted 之后才发出，经通道到达宿主：等报告本身，而不是日志。
+    await until(() => s.reports.length === 2);
+    assert.equal(s.count('watchdog.acted'), 2);
   } finally {
     await s.close();
   }
