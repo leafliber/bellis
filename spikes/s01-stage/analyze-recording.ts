@@ -8,9 +8,11 @@
  * 两种分析：
  * - 连续测试音（S-01 探针）：`analyzeRecording`，全程应当有声，任何无声段都是断流。
  * - 按句播出的测试音（真实宿主的模拟 TTS）：`analyzeSegments`，句与句之间本来就有空白，每句的相位从 0 开始。
- *   以不短于 1ms 的无声切分句段，逐段统计相位跳变（两端各 5ms 的编码振铃不计）与音高；时长与预期一句
+ *   以不短于 1ms 的无声（低于 0.05）切分句段，逐段统计相位跳变（两端各 5ms 不计，按持续的相位偏移判定）与音高；时长与预期一句
  *   不符的句段即句内断流（一句被断成两段）、截断或两句之间没有空白。录制开头与结尾的句段可能不完整，
- *   单独标出、不计入不符。
+ *   单独标出、不计入不符，其中的相位跳变也不计入。过零点在 2kHz 低通后的信号上找：句首前后经重采样与 AAC
+ *   编码会带出高频振铃与噪声，直接找过零点会把它们当成相位跳变、把句段起点提前（30 分钟长测实录约三成句首如此，
+ *   离线合成的同一条链路也能复现）。
  */
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +30,51 @@ const WINDOW_SECONDS = 10;
 const MAX_LISTED = 200;
 /** 句段两端不统计相位跳变的范围。 */
 const EDGE_SAMPLES = (5 * SAMPLE_RATE) / 1000;
+/**
+ * 按句段分析时的无声阈值：测试音录下来约 0.28，句首前的重采样振铃与 AAC 预回声、句前唤醒信号都在 0.011 以下
+ * （长测实录），取 0.05 不会把它们算进句段。
+ */
+const SEGMENT_SILENCE = 0.05;
+/** 统计过零点前先低通：去掉重采样镜像与编码噪声造成的过零抖动。 */
+const CROSSING_LOWPASS_HZ = 2000;
+/**
+ * 相位跳变按“持续的相位偏移”判定：每个过零点相对等间隔网格的偏差，取前后各这么多个过零点的中位数，两者相差
+ * 超过 STEP_SAMPLES 个样本即一次跳变。编码在突起突止处会让个别过零点偏 1–2 个样本、随后复原，中位数不受影响；
+ * 补零、掉帧或重复会让此后所有过零点一起偏移。
+ */
+const STEP_WINDOW = 5;
+const STEP_SAMPLES = 1;
+
+/** 二阶巴特沃斯低通（RBJ），返回逐样本滤波与某一频率上的群时延（样本数），用来补偿过零点的位置。 */
+function lowpass(cutoffHz: number) {
+  const w0 = (2 * Math.PI * cutoffHz) / SAMPLE_RATE;
+  const alpha = Math.sin(w0) / (2 * Math.SQRT1_2);
+  const cos = Math.cos(w0);
+  const a0 = 1 + alpha;
+  const b0 = (1 - cos) / 2 / a0;
+  const b1 = (1 - cos) / a0;
+  const b2 = b0;
+  const a1 = (-2 * cos) / a0;
+  const a2 = (1 - alpha) / a0;
+  let [x1, x2, y1, y2] = [0, 0, 0, 0];
+  return {
+    step(x: number): number {
+      const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      [x2, x1, y2, y1] = [x1, x, y1, y];
+      return y;
+    },
+    /** 频率 hz 处的相位时延（样本数）。 */
+    delayAt(hz: number): number {
+      const w = (2 * Math.PI * hz) / SAMPLE_RATE;
+      const phase = (c0: number, c1: number, c2: number) =>
+        Math.atan2(
+          -c1 * Math.sin(w) - c2 * Math.sin(2 * w),
+          c0 + c1 * Math.cos(w) + c2 * Math.cos(2 * w),
+        );
+      return -(phase(b0, b1, b2) - phase(1, a1, a2)) / w;
+    },
+  };
+}
 
 /** 把录制的第一条音轨解码成单声道 48kHz 浮点，逐块交给 onSamples。 */
 async function decode(file: string, onSamples: (samples: Float32Array) => void): Promise<void> {
@@ -172,12 +219,52 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
   };
 }
 
+/**
+ * 句段内的相位跳变：按相邻过零间隔折算出每个过零点在等间隔网格上的序号与偏差（样本数），
+ * 前后各 STEP_WINDOW 个偏差的中位数相差超过 STEP_SAMPLES 即一次跳变；相邻的候选合成一次，取偏移最大的。
+ * samples 是跳变的大小（样本数，正为延后，例如中间补了零）。
+ */
+function phaseSteps(
+  intervals: ReadonlyArray<readonly [interval: number, at: number]>,
+  period: number,
+): Array<{ atSeconds: number; samples: number }> {
+  const first = intervals[0];
+  if (!first) return [];
+  // 过零点位置：第一个间隔的起点，再逐个加上间隔。
+  const crossings = [first[1] - first[0], ...intervals.map(([, at]) => at)];
+  const residuals: number[] = [];
+  let index = 0;
+  for (const [k, at] of crossings.entries()) {
+    if (k > 0) index += Math.max(1, Math.round((at - (crossings[k - 1] ?? at)) / period));
+    residuals.push(at - (crossings[0] ?? at) - index * period);
+  }
+  const medianOf = (values: number[]) => {
+    const s = [...values].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)] ?? 0;
+  };
+  const steps: Array<{ atSeconds: number; samples: number }> = [];
+  let best: { at: number; step: number } | undefined;
+  for (let k = STEP_WINDOW; k + STEP_WINDOW <= residuals.length; k++) {
+    const step =
+      medianOf(residuals.slice(k, k + STEP_WINDOW)) - medianOf(residuals.slice(k - STEP_WINDOW, k));
+    if (Math.abs(step) > STEP_SAMPLES) {
+      if (!best || Math.abs(step) > Math.abs(best.step)) best = { at: crossings[k] ?? 0, step };
+    } else if (best) {
+      steps.push({ atSeconds: round(best.at / SAMPLE_RATE, 3), samples: round(best.step, 1) });
+      best = undefined;
+    }
+  }
+  if (best)
+    steps.push({ atSeconds: round(best.at / SAMPLE_RATE, 3), samples: round(best.step, 1) });
+  return steps;
+}
+
 export interface Segment {
   atSeconds: number;
   seconds: number;
   hz: number | null;
   rms: number;
-  /** 段内过零间隔偏离本段中位数超过 1 个样本的次数。 */
+  /** 段内相位跳变（持续偏移超过 1 个样本）的次数，见 phaseSteps。 */
   discontinuities: number;
   /**
    * 句段起点处测试音的相位（周期的小数，0–1），由段内的上升过零点按周期外推得出。测试音每句从相位 0 起，
@@ -201,7 +288,12 @@ export interface SegmentAnalysis {
   /** 时长与预期一句不符的句段（不含首尾）：句内断流、截断或两句之间没有空白都会造成。 */
   mismatched: { count: number; listed: Segment[] };
   spikes: { count: number; listed: Array<{ atSeconds: number; value: number }> };
-  discontinuities: { count: number; listed: Array<{ atSeconds: number; samples: number }> };
+  /** 不含首尾句段的相位跳变（samples 为跳变大小）；首尾句段里的另计在 inEdgeSegments。 */
+  discontinuities: {
+    count: number;
+    listed: Array<{ atSeconds: number; samples: number }>;
+    inEdgeSegments: number;
+  };
   /** 各句段的音高（只用频率在 ±5% 内的句段）。 */
   hz: { min: number; max: number; maxCentsOff: number; segments: number } | null;
 }
@@ -213,9 +305,7 @@ export interface SegmentOptions {
   toleranceMs?: number;
   /** 最后一段按不完整处理（录制以急停截断的一句收尾时）。 */
   trailingEdge?: boolean;
-  /**
-   * 低于这个振幅视为无声，默认 0.005。句前有唤醒信号（极低电平）时调高，例如 0.05，免得把它算进句段。
-   */
+  /** 低于这个振幅视为无声，默认 0.05（见 SEGMENT_SILENCE）。 */
   silence?: number;
 }
 
@@ -225,14 +315,18 @@ export async function analyzeSegments(
 ): Promise<SegmentAnalysis> {
   const toneHz = options.toneHz ?? 440;
   const toleranceMs = options.toleranceMs ?? 10;
-  const silence = options.silence ?? SILENCE;
+  const silence = options.silence ?? SEGMENT_SILENCE;
+  const filter = lowpass(CROSSING_LOWPASS_HZ);
+  const delay = filter.delayAt(toneHz);
   let n = 0;
+  /** 低通后的上一个样本，过零点在低通后的信号上找。 */
   let previous = 0;
   let silentRun = 0;
   const segments: Segment[] = [];
+  /** 每个句段的相位跳变（与 segments 一一对应），首尾句段定下来之后再汇总。 */
+  const jumpsOf: Array<Array<{ atSeconds: number; samples: number }>> = [];
   const gapMs: number[] = [];
   const spikes: SegmentAnalysis['spikes'] = { count: 0, listed: [] };
-  const discontinuities: SegmentAnalysis['discontinuities'] = { count: 0, listed: [] };
   /** 当前句段：起点、平方和与相邻上升过零点的间隔（样本数）及其位置；无声中为 undefined。 */
   let current:
     | {
@@ -254,19 +348,8 @@ export async function analyzeSegments(
     );
     const sorted = inner.map(([interval]) => interval).sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
-    let jumps = 0;
-    if (median) {
-      for (const [interval, at] of inner) {
-        if (Math.abs(interval - median) <= 1) continue;
-        jumps += 1;
-        discontinuities.count += 1;
-        if (discontinuities.listed.length < MAX_LISTED)
-          discontinuities.listed.push({
-            atSeconds: round(at / SAMPLE_RATE, 3),
-            samples: round(interval, 1),
-          });
-      }
-    }
+    const jumps = median ? phaseSteps(inner, median) : [];
+    jumpsOf.push(jumps);
     // 从第一个不在句首振铃范围内的上升过零点按周期外推到起点。
     const firstInner = inner[0]?.[1];
     const startPhase =
@@ -278,7 +361,7 @@ export async function analyzeSegments(
       seconds: round(samples / SAMPLE_RATE, 4),
       hz: median ? round(SAMPLE_RATE / median, 3) : null,
       rms: round(Math.sqrt(current.sumSquares / Math.max(1, samples)), 4),
-      discontinuities: jumps,
+      discontinuities: jumps.length,
       startPhase,
       edge: current.start === 0,
     });
@@ -304,16 +387,18 @@ export async function analyzeSegments(
         if (spikes.listed.length < MAX_LISTED)
           spikes.listed.push({ atSeconds: round(n / SAMPLE_RATE, 3), value: round(x, 3) });
       }
+      const y = filter.step(x);
       if (current) {
         current.sumSquares += x * x;
-        if (previous < 0 && x >= 0) {
-          const at = n - 1 + previous / (previous - x);
+        if (previous < 0 && y >= 0) {
+          // 低通后的上升过零点，插值到样本之间，再减去低通在测试音频率上的时延。
+          const at = n - 1 + previous / (previous - y) - delay;
           if (current.lastCrossing !== undefined)
             current.intervals.push([at - current.lastCrossing, at]);
           current.lastCrossing = at;
         }
       }
-      previous = x;
+      previous = y;
       n += 1;
     }
   });
@@ -322,6 +407,22 @@ export async function analyzeSegments(
   closeSegment(n - (current ? silentRun : 0));
   const last = segments.at(-1);
   if (last && cutAtEnd) last.edge = true;
+  // 首尾句段（录制截断、急停后 OBS 切场景）里的跳变不计入，单独报数。
+  const discontinuities: SegmentAnalysis['discontinuities'] = {
+    count: 0,
+    listed: [],
+    inEdgeSegments: 0,
+  };
+  for (const [k, segment] of segments.entries()) {
+    const jumps = jumpsOf[k] ?? [];
+    if (segment.edge) {
+      discontinuities.inEdgeSegments += jumps.length;
+      continue;
+    }
+    discontinuities.count += jumps.length;
+    for (const jump of jumps)
+      if (discontinuities.listed.length < MAX_LISTED) discontinuities.listed.push(jump);
+  }
 
   const expected = options.expectedSeconds;
   const mismatched =
