@@ -3,6 +3,12 @@ import type { EntrySnapshot } from '@bellis/kernel';
 /** 开播预检的输入：宿主从插件内核、Stage 服务、安全核与 OBS 应急连接收集。 */
 export interface PreflightInputs {
   target: 'M1' | 'M2' | 'M3';
+  /**
+   * 安全核核对的目标模式前置条件未满足的原因（`SafetyCore.preconditionBlocker`）：状态存储、OBS 应急连接、
+   * 看门狗、在场确认等；已处于目标模式不算未满足。没有时为 undefined。切换时安全核已先核对并拒绝过，
+   * 此处传 undefined，免得报两次。
+   */
+  safetyBlocker: string | undefined;
   /** profile 中的全部条目。 */
   plugins: readonly EntrySnapshot[];
   /** Stage 服务是否在场、页面是否已认证；没有 Stage 服务时为 undefined。 */
@@ -27,10 +33,11 @@ export interface PreflightInputs {
 
 /**
  * 开播预检中与 P1 相关的项（见运维“开播预检”）。返回未通过的项，全部通过时为空；任一未通过都不允许进入
- * 真实输出模式。监督模式本身的前置条件（状态存储、OBS 应急连接、看门狗、在场确认）由安全核在切换时核对。
+ * 真实输出模式。安全核的拒绝原因（监督模式本身的前置条件）列在最前。
  */
 export async function preflight(inputs: PreflightInputs): Promise<string[]> {
   const failures: string[] = [];
+  if (inputs.safetyBlocker !== undefined) failures.push(inputs.safetyBlocker);
   for (const entry of inputs.plugins) {
     if (!entry.enabled || entry.state === 'active') continue;
     failures.push(

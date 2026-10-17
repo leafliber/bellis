@@ -123,7 +123,11 @@ test('激活失败时撤销已注册的副作用，按退避重试，用尽后�
   h.kernel.add([entry('flaky')], catalog(flaky));
   await h.kernel.settled();
   assert.equal(h.state('flaky').state, 'failed');
-  await sleep(systemClock(), 100);
+  // 两次 20ms 的退避在 Windows 上各要一到两个时钟周期（约 16ms），机器忙时更久：按条件等，不按固定时长。
+  for (const deadline = Date.now() + 5000; !/重试已用尽/.test(h.state('flaky').reason ?? ''); ) {
+    if (Date.now() > deadline) break;
+    await sleep(systemClock(), 20);
+  }
   await h.kernel.settled();
   assert.equal(attempts, 3);
   assert.deepEqual(h.log, ['undo 1', 'undo 2', 'undo 3']);

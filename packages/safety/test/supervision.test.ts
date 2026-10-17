@@ -141,3 +141,32 @@ test('真实输出模式不能降到 M0', async () => {
     await s.close();
   }
 });
+
+test('预检用的前置条件核对：已处于目标模式不算未满足，其余前置条件照常核对', async () => {
+  const s = await setup();
+  const sim = await setup({ simulation: true });
+  try {
+    s.safety.confirmPresence();
+    assert.deepEqual(s.safety.requestMode('M2'), { ok: true });
+    // 切换会以“已经处于该模式”被拒，预检不报这一项。
+    assert.equal(s.safety.modeBlocker('M2'), '已经处于该模式');
+    assert.equal(s.safety.preconditionBlocker('M2'), undefined);
+    // M2 中看门狗断开：预检照样报出（按从安全停止进入核对）。
+    s.world.watchdog = false;
+    assert.equal(s.safety.preconditionBlocker('M2'), '外部看门狗未连接');
+    // 降级与切换一致，不核对前置条件。
+    assert.equal(s.safety.preconditionBlocker('M1'), undefined);
+    assert.equal(s.safety.modeBlocker('M1'), undefined);
+    assert.equal(s.safety.preconditionBlocker('safe-stop'), undefined);
+    // sim profile 下“只允许 M0”照常报；已处于 M0 时不报。
+    assert.equal(sim.safety.preconditionBlocker('M1'), 'sim profile 下只允许 M0');
+    assert.deepEqual(sim.safety.requestMode('M0'), { ok: true });
+    assert.equal(sim.safety.preconditionBlocker('M0'), undefined);
+    assert.equal(sim.safety.preconditionBlocker('M1'), 'sim profile 下只允许 M0');
+    // 只核对，不记录。
+    assert.equal(s.events('supervision.refused').length, 0);
+  } finally {
+    await s.close();
+    await sim.close();
+  }
+});

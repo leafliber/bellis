@@ -43,7 +43,7 @@ const until = async (condition: () => boolean, timeoutMs = 5000) => {
   }
 };
 
-async function setup() {
+async function setup(pageConfig: Record<string, unknown> = {}) {
   const path = join(tmpdir(), `bellis-stage-page-${randomBytes(6).toString('hex')}.db`);
   const store = StateStore.open({ path });
   const clock = systemClock();
@@ -119,6 +119,7 @@ async function setup() {
         resumeWindowMs: 400,
         helloTimeoutMs: 500,
         idleTimeoutMs: 1000,
+        ...pageConfig,
       }),
       entry('stage', 'stage-service', [], { heartbeatMs: 100, pageTimeoutMs: 2000 }),
       entry('speaker', 'test-speaker', ['speech.output']),
@@ -289,6 +290,25 @@ test('令牌：错误与重放都被拒并限频重新下发；同时只允许�
   }
 });
 
+test('会话断开后令牌又被拒：按最小间隔重新下发，不等到重连时限', async () => {
+  const s = await setup({ redistributeMinMs: 1000, resumeWindowMs: 10_000 });
+  try {
+    const token = s.token();
+    const page = await attempt(s, hello(token));
+    assert.equal(page.result, 'welcome');
+    // 会话断开：按重连时限（10 秒）排了一次重新下发。
+    page.ws?.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 距上次下发不到最小间隔时重放用过的令牌（OBS 重建浏览器后页面会这样）：被拒，按最小间隔重新下发。
+    const rejectedAt = Date.now();
+    assert.equal((await attempt(s, hello(token))).result, 'close-4401');
+    await until(() => s.token() !== token, 4000);
+    assert.ok(Date.now() - rejectedAt < 4000);
+  } finally {
+    await s.close();
+  }
+});
+
 test('首条消息超时或不合法、认证后发来不合法的消息，都断开连接', async () => {
   const s = await setup();
   try {
@@ -341,6 +361,49 @@ test('认证后的页面收到心跳、令牌、句子与带头的二进制音�
     assert.equal(frames[0]?.header.sentenceId, 's1');
     assert.equal(frames[0]?.pcm.length, 240);
     assert.equal(frames[1]?.pcm[5], 245 % 100);
+    ws.close();
+  } finally {
+    await s.close();
+  }
+});
+
+test('页面回报播完但采样数少于已转发的：按未完整播出处理，played 取页面回报的数', async () => {
+  const s = await setup();
+  try {
+    const page = await attempt(s, hello(s.token()));
+    assert.equal(page.result, 'welcome');
+    const ws = page.ws as WebSocket;
+    /** 每句回报的“播完”采样数：第一句只收到一半，第二句一点都没收到。 */
+    const reported = [240, 0, 480];
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return;
+      const message = JSON.parse(String(data)) as { kind: string; sentenceId?: string };
+      if (message.kind === 'heartbeat') ws.send(JSON.stringify({ kind: 'heartbeat-ack' }));
+      if (message.kind === 'end') {
+        const played = reported.shift() ?? 0;
+        ws.send(JSON.stringify({ kind: 'ended', sentenceId: message.sentenceId, played }));
+      }
+    });
+    await until(() => page.messages.some((m) => (m as { kind: string }).kind === 'heartbeat'));
+    assert.ok(s.core.requestMode('M1').ok);
+    assert.deepEqual(await s.speaker().play(480), {
+      sentenceId: 's1',
+      played: 240,
+      complete: false,
+      reason: '页面回报播完，但只播出已转发的 240/480 个采样',
+    });
+    assert.deepEqual(await s.speaker().play(480), {
+      sentenceId: 's2',
+      played: 0,
+      complete: false,
+      reason: '页面回报播完，但只播出已转发的 0/480 个采样',
+    });
+    // 收到的都播了：照常算完整。
+    assert.deepEqual(await s.speaker().play(480), {
+      sentenceId: 's3',
+      played: 480,
+      complete: true,
+    });
     ws.close();
   } finally {
     await s.close();

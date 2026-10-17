@@ -45,6 +45,8 @@ Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Win
 
 统一的 SecretStore 接口（D-28）：小令牌存凭据管理器，大块数据用 DPAPI 加密成文件（出现超出凭据管理器单条上限的条目时再实现，R-16）；macOS 用 Keychain。DPAPI 能防其他用户，不能防同一用户下的其他程序，与威胁模型一致。[来源](https://www.electronjs.org/docs/latest/api/safe-storage)
 
+`pnpm secret audit` 不解析文件格式，按字节查找每个条目的值（OBS 与会话这类 JSON 条目只查密码、会话密钥等秘密字段，会话密钥另查解码后的字节、hex 与标准 base64；短于 8 个字符的值不查，只列出），形式包括原文、按三种起始偏移截取的 base64 与 base64url、URL 编码、JSON 转义，以及它们的 UTF-16LE 字节（Windows PowerShell 5.1 缺省重定向写出的就是 UTF-16LE），不给路径时查 `reports/`、`config/`、`.bellis/` 与各配置中状态存储所在的目录。
+
 ## 定时与调度
 
 - libuv 在 Windows 上不调用 `timeBeginPeriod`，Node 定时器的粒度约为系统默认的 15.6ms（S-05 已在 Windows 11 真机上确认）：短于一个时钟周期的 `setTimeout` 也要等满一个周期，略长于整周期的要等两个。不要依赖小于 16ms 的 `setTimeout` 精度，调度一律用单调时钟加截止时间。事件循环延迟的测量值同样包含这一粒度，设异常阈值时要计入。

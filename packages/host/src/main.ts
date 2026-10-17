@@ -234,14 +234,18 @@ process.on('SIGINT', () => {});
 logEvent('host.ready', { pid: process.pid, ppid: process.ppid, mode: core.mode });
 
 /** 操作员命令：查看状态、切换模式（升级只能经这里显式发起）、确认在场、急停。 */
-/** 开播预检（见 preflight.ts）。 */
-function runPreflight(target: 'M1' | 'M2' | 'M3'): Promise<string[]> {
+/**
+ * 开播预检（见 preflight.ts）。withSafety 时先问安全核目标模式的前置条件（已处于该模式不算未通过），
+ * 把原因列为一项；切换时安全核已先核对过，不再重复。
+ */
+function runPreflight(target: 'M1' | 'M2' | 'M3', withSafety: boolean): Promise<string[]> {
   const stage = host.services.resolve(StageService.name, StageService.major);
   const review = host.services.resolve(ReviewService.name, ReviewService.major);
   const avatar = host.services.resolve(AvatarService.name, AvatarService.major);
   const routing = host.services.resolve(TtsRoutingService.name, TtsRoutingService.major);
   return preflight({
     target,
+    safetyBlocker: withSafety ? core.preconditionBlocker(target) : undefined,
     plugins: host.snapshot(),
     stageReady: 'missing' in stage ? undefined : (stage.impl as Stage).ready,
     avatar:
@@ -272,7 +276,7 @@ function serveOperator(rpc: RpcPeer): void {
     // 进入真实输出模式前先过开播预检，任一项未通过都不切换（降级与安全停止不受影响）。
     // 安全核的前置条件先核对（未满足时由 requestMode 记录并拒绝），满足后再过开播预检。
     if ((target === 'M1' || target === 'M2' || target === 'M3') && !core.modeBlocker(target)) {
-      const failures = await runPreflight(target);
+      const failures = await runPreflight(target, false);
       if (failures.length > 0) {
         core.record('supervision.refused', {
           from: core.mode,
@@ -287,7 +291,7 @@ function serveOperator(rpc: RpcPeer): void {
   });
   rpc.handle(OperatorMethod.Preflight, async (params) => {
     const target = isPreflightParams.Check(params) ? (params.target ?? 'M1') : 'M1';
-    return { target, failures: await runPreflight(target) };
+    return { target, failures: await runPreflight(target, true) };
   });
   rpc.handle(OperatorMethod.Veto, (params) => {
     if (!isVetoParams.Check(params)) return { ok: false, reason: '参数不合法' };

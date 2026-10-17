@@ -49,6 +49,20 @@ export function upgradeBlocker(
   return undefined;
 }
 
+/**
+ * 目标模式的前置条件是否满足，不计“已经处于该模式”（开播预检用）：已处于目标模式时按从安全停止进入核对，
+ * 例如 M2 中看门狗断开照样报出；其余情形与 upgradeBlocker 相同（降级不核对）。满足时返回 undefined。
+ */
+export function preconditionBlocker(
+  current: Mode,
+  target: Mode,
+  ctx: UpgradeContext,
+): string | undefined {
+  if (target !== current) return upgradeBlocker(current, target, ctx);
+  if (target === 'safe-stop') return undefined;
+  return upgradeBlocker('safe-stop', target, ctx);
+}
+
 /** 自动降级的目标：在场确认仍有效时从 M2/M3 降到 M1，否则进入安全停止。 */
 export function downgradeTarget(current: Mode, presenceValid: boolean): Mode {
   if ((current === 'M2' || current === 'M3') && presenceValid) return 'M1';

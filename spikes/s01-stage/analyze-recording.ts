@@ -1,9 +1,18 @@
 /**
  * S-01 的 OBS 录制分析：OBS 输出端是否断流、出现异常峰值或音高漂移。
- *   node spikes/s01-stage/analyze-recording.ts <录制文件> [--tone 440]
+ *   node spikes/s01-stage/analyze-recording.ts <录制文件> [--tone 440] [--segment-seconds 秒]
  * 用 ffmpeg 把第一条音轨解码成单声道 48kHz 浮点流，逐段处理，不整段读入内存。
  * 测试音是 0.2 振幅的正弦（约 -14dBFS）；录到的其他声音（系统提示音等）也会算进去，
  * 判读时对照探针时间线与桌面音频的音量表。
+ *
+ * 两种分析：
+ * - 连续测试音（S-01 探针）：`analyzeRecording`，全程应当有声，任何无声段都是断流。
+ * - 按句播出的测试音（真实宿主的模拟 TTS）：`analyzeSegments`，句与句之间本来就有空白，每句的相位从 0 开始。
+ *   以不短于 1ms 的无声（低于 0.05）切分句段，逐段统计相位跳变（两端各 5ms 不计，按持续的相位偏移判定）与音高；时长与预期一句
+ *   不符的句段即句内断流（一句被断成两段）、截断或两句之间没有空白。录制开头与结尾的句段可能不完整，
+ *   单独标出、不计入不符，其中的相位跳变也不计入。过零点在 2kHz 低通后的信号上找：句首前后经重采样与 AAC
+ *   编码会带出高频振铃与噪声，直接找过零点会把它们当成相位跳变、把句段起点提前（30 分钟长测实录约三成句首如此，
+ *   离线合成的同一条链路也能复现）。
  */
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +28,84 @@ const SPIKE = 0.5;
 const TONE_FLOOR = 0.05;
 const WINDOW_SECONDS = 10;
 const MAX_LISTED = 200;
+/** 句段两端不统计相位跳变的范围。 */
+const EDGE_SAMPLES = (5 * SAMPLE_RATE) / 1000;
+/**
+ * 按句段分析时的无声阈值：测试音录下来约 0.28，句首前的重采样振铃与 AAC 预回声、句前唤醒信号都在 0.011 以下
+ * （长测实录），取 0.05 不会把它们算进句段。
+ */
+const SEGMENT_SILENCE = 0.05;
+/** 统计过零点前先低通：去掉重采样镜像与编码噪声造成的过零抖动。 */
+const CROSSING_LOWPASS_HZ = 2000;
+/**
+ * 相位跳变按“持续的相位偏移”判定：每个过零点相对等间隔网格的偏差，取前后各这么多个过零点的中位数，两者相差
+ * 超过 STEP_SAMPLES 个样本即一次跳变。编码在突起突止处会让个别过零点偏 1–2 个样本、随后复原，中位数不受影响；
+ * 补零、掉帧或重复会让此后所有过零点一起偏移。
+ */
+const STEP_WINDOW = 5;
+const STEP_SAMPLES = 1;
+
+/** 二阶巴特沃斯低通（RBJ），返回逐样本滤波与某一频率上的群时延（样本数），用来补偿过零点的位置。 */
+function lowpass(cutoffHz: number) {
+  const w0 = (2 * Math.PI * cutoffHz) / SAMPLE_RATE;
+  const alpha = Math.sin(w0) / (2 * Math.SQRT1_2);
+  const cos = Math.cos(w0);
+  const a0 = 1 + alpha;
+  const b0 = (1 - cos) / 2 / a0;
+  const b1 = (1 - cos) / a0;
+  const b2 = b0;
+  const a1 = (-2 * cos) / a0;
+  const a2 = (1 - alpha) / a0;
+  let [x1, x2, y1, y2] = [0, 0, 0, 0];
+  return {
+    step(x: number): number {
+      const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      [x2, x1, y2, y1] = [x1, x, y1, y];
+      return y;
+    },
+    /** 频率 hz 处的相位时延（样本数）。 */
+    delayAt(hz: number): number {
+      const w = (2 * Math.PI * hz) / SAMPLE_RATE;
+      const phase = (c0: number, c1: number, c2: number) =>
+        Math.atan2(
+          -c1 * Math.sin(w) - c2 * Math.sin(2 * w),
+          c0 + c1 * Math.cos(w) + c2 * Math.cos(2 * w),
+        );
+      return -(phase(b0, b1, b2) - phase(1, a1, a2)) / w;
+    },
+  };
+}
+
+/** 把录制的第一条音轨解码成单声道 48kHz 浮点，逐块交给 onSamples。 */
+async function decode(file: string, onSamples: (samples: Float32Array) => void): Promise<void> {
+  const ffmpeg = spawn(
+    'ffmpeg',
+    ['-v', 'error', '-i', file, '-map', '0:a:0', '-ac', '1', '-ar', String(SAMPLE_RATE)].concat([
+      '-f',
+      'f32le',
+      'pipe:1',
+    ]),
+    { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+  );
+  let stderr = '';
+  ffmpeg.stderr.on('data', (chunk) => {
+    stderr += String(chunk);
+  });
+  let carry: Buffer = Buffer.alloc(0);
+  for await (const chunk of ffmpeg.stdout as AsyncIterable<Buffer>) {
+    const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
+    const usable = data.length - (data.length % 4);
+    const samples = new Float32Array(usable / 4);
+    for (let i = 0; i < samples.length; i++) samples[i] = data.readFloatLE(i * 4);
+    onSamples(samples);
+    carry = data.subarray(usable);
+  }
+  const code = await new Promise<number | null>((done) => ffmpeg.once('close', done));
+  if (code !== 0) throw new Error(`ffmpeg 失败（${code}）：${stderr.trim()}`);
+}
+
+const round = (value: number, digits: number) => Math.round(value * 10 ** digits) / 10 ** digits;
+const cents = (hz: number, toneHz: number) => 1200 * Math.log2(hz / toneHz);
 
 export interface RecordingAnalysis {
   file: string;
@@ -33,20 +120,6 @@ export interface RecordingAnalysis {
 }
 
 export async function analyzeRecording(file: string, toneHz = 440): Promise<RecordingAnalysis> {
-  const ffmpeg = spawn(
-    'ffmpeg',
-    ['-v', 'error', '-i', file, '-map', '0:a:0', '-ac', '1', '-ar', String(SAMPLE_RATE)].concat([
-      '-f',
-      'f32le',
-      'pipe:1',
-    ]),
-    { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
-  );
-  let stderr = '';
-  ffmpeg.stderr.on('data', (chunk) => {
-    stderr += String(chunk);
-  });
-
   let n = 0;
   let previous = 0;
   let silentRun = 0;
@@ -61,7 +134,6 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
   /** 窗口内相邻上升过零点的间隔（样本数）与其位置；取中位数估计频率，不受断流影响。 */
   let intervals: Array<[interval: number, at: number]> = [];
   let sumSquares = 0;
-  let carry: Buffer = Buffer.alloc(0);
 
   const closeWindow = () => {
     const samples = n - windowStart;
@@ -75,15 +147,15 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
         discontinuities.count += 1;
         if (discontinuities.listed.length < MAX_LISTED)
           discontinuities.listed.push({
-            atSeconds: Math.round((at / SAMPLE_RATE) * 1000) / 1000,
-            samples: Math.round(interval * 10) / 10,
+            atSeconds: round(at / SAMPLE_RATE, 3),
+            samples: round(interval, 1),
           });
       }
     }
     windows.push({
       atSeconds: windowStart / SAMPLE_RATE,
-      hz: hz === null ? null : Math.round(hz * 1000) / 1000,
-      rms: Math.round(Math.sqrt(sumSquares / samples) * 10_000) / 10_000,
+      hz: hz === null ? null : round(hz, 3),
+      rms: round(Math.sqrt(sumSquares / samples), 4),
     });
     windowStart = n;
     intervals = [];
@@ -100,17 +172,14 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
     silentRun = 0;
   };
 
-  for await (const chunk of ffmpeg.stdout as AsyncIterable<Buffer>) {
-    const data = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
-    const usable = data.length - (data.length % 4);
-    for (let offset = 0; offset < usable; offset += 4) {
-      const x = data.readFloatLE(offset);
+  await decode(file, (samples) => {
+    for (const x of samples) {
       if (Math.abs(x) < SILENCE) silentRun += 1;
       else endGap();
       if (Math.abs(x) > SPIKE) {
         spikes.count += 1;
         if (spikes.listed.length < MAX_LISTED)
-          spikes.listed.push({ atSeconds: n / SAMPLE_RATE, value: Math.round(x * 1000) / 1000 });
+          spikes.listed.push({ atSeconds: n / SAMPLE_RATE, value: round(x, 3) });
       }
       peak = Math.max(Math.abs(x), peak * 0.995);
       if (previous < 0 && x >= 0 && peak > TONE_FLOOR) {
@@ -124,18 +193,14 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
       n += 1;
       if (n - windowStart >= WINDOW_SECONDS * SAMPLE_RATE) closeWindow();
     }
-    carry = data.subarray(usable);
-  }
+  });
   endGap();
   closeWindow();
-  const code = await new Promise<number | null>((done) => ffmpeg.once('close', done));
-  if (code !== 0) throw new Error(`ffmpeg 失败（${code}）：${stderr.trim()}`);
 
   // 只用基本是测试音的窗口估计音高：频率在 ±5% 内。
   const tonal = windows
     .map((w) => w.hz)
     .filter((hz): hz is number => hz !== null && Math.abs(hz / toneHz - 1) < 0.05);
-  const cents = (hz: number) => 1200 * Math.log2(hz / toneHz);
   return {
     file,
     seconds: n / SAMPLE_RATE,
@@ -149,19 +214,342 @@ export async function analyzeRecording(file: string, toneHz = 440): Promise<Reco
         : {
             min: Math.min(...tonal),
             max: Math.max(...tonal),
-            maxCentsOff:
-              Math.round(Math.max(...tonal.map((hz) => Math.abs(cents(hz)))) * 1000) / 1000,
+            maxCentsOff: round(Math.max(...tonal.map((hz) => Math.abs(cents(hz, toneHz)))), 3),
           },
   };
+}
+
+/**
+ * 句段内的相位跳变：按相邻过零间隔折算出每个过零点在等间隔网格上的序号与偏差（样本数），
+ * 前后各 STEP_WINDOW 个偏差的中位数相差超过 STEP_SAMPLES 即一次跳变；相邻的候选合成一次，取偏移最大的。
+ * samples 是跳变的大小（样本数，正为延后，例如中间补了零）。
+ */
+function phaseSteps(
+  intervals: ReadonlyArray<readonly [interval: number, at: number]>,
+  period: number,
+): Array<{ atSeconds: number; samples: number }> {
+  const first = intervals[0];
+  if (!first) return [];
+  // 过零点位置：第一个间隔的起点，再逐个加上间隔。
+  const crossings = [first[1] - first[0], ...intervals.map(([, at]) => at)];
+  const residuals: number[] = [];
+  let index = 0;
+  for (const [k, at] of crossings.entries()) {
+    if (k > 0) index += Math.max(1, Math.round((at - (crossings[k - 1] ?? at)) / period));
+    residuals.push(at - (crossings[0] ?? at) - index * period);
+  }
+  const medianOf = (values: number[]) => {
+    const s = [...values].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)] ?? 0;
+  };
+  const steps: Array<{ atSeconds: number; samples: number }> = [];
+  let best: { at: number; step: number } | undefined;
+  for (let k = STEP_WINDOW; k + STEP_WINDOW <= residuals.length; k++) {
+    const step =
+      medianOf(residuals.slice(k, k + STEP_WINDOW)) - medianOf(residuals.slice(k - STEP_WINDOW, k));
+    if (Math.abs(step) > STEP_SAMPLES) {
+      if (!best || Math.abs(step) > Math.abs(best.step)) best = { at: crossings[k] ?? 0, step };
+    } else if (best) {
+      steps.push({ atSeconds: round(best.at / SAMPLE_RATE, 3), samples: round(best.step, 1) });
+      best = undefined;
+    }
+  }
+  if (best)
+    steps.push({ atSeconds: round(best.at / SAMPLE_RATE, 3), samples: round(best.step, 1) });
+  return steps;
+}
+
+export interface Segment {
+  atSeconds: number;
+  seconds: number;
+  hz: number | null;
+  rms: number;
+  /** 段内相位跳变（持续偏移超过 1 个样本）的次数，见 phaseSteps。 */
+  discontinuities: number;
+  /**
+   * 句段起点处测试音的相位（周期的小数，0–1），由段内的上升过零点按周期外推得出。测试音每句从相位 0 起，
+   * 起点完整时接近 0（或 1）；开头被剪掉 t 秒时接近 t·f 的小数部分。
+   */
+  startPhase: number | null;
+  /** 录制开头或结尾的句段，可能不完整。 */
+  edge: boolean;
+}
+
+export interface SegmentAnalysis {
+  file: string;
+  seconds: number;
+  toneHz: number;
+  /** 预期一句的时长；不给时不判断时长是否相符。 */
+  expectedSeconds: number | null;
+  toleranceMs: number;
+  segments: { count: number; listed: Segment[] };
+  /** 句段之间的空白。 */
+  gaps: { count: number; minMs: number | null; p50Ms: number | null; maxMs: number | null };
+  /** 时长与预期一句不符的句段（不含首尾）：句内断流、截断或两句之间没有空白都会造成。 */
+  mismatched: { count: number; listed: Segment[] };
+  spikes: { count: number; listed: Array<{ atSeconds: number; value: number }> };
+  /** 不含首尾句段的相位跳变（samples 为跳变大小）；首尾句段里的另计在 inEdgeSegments。 */
+  discontinuities: {
+    count: number;
+    listed: Array<{ atSeconds: number; samples: number }>;
+    inEdgeSegments: number;
+  };
+  /** 各句段的音高（只用频率在 ±5% 内的句段）。 */
+  hz: { min: number; max: number; maxCentsOff: number; segments: number } | null;
+}
+
+export interface SegmentOptions {
+  toneHz?: number;
+  expectedSeconds?: number;
+  /** 句段时长与预期相差多少以内算相符，默认 10ms。 */
+  toleranceMs?: number;
+  /** 最后一段按不完整处理（录制以急停截断的一句收尾时）。 */
+  trailingEdge?: boolean;
+  /** 低于这个振幅视为无声，默认 0.05（见 SEGMENT_SILENCE）。 */
+  silence?: number;
+}
+
+export async function analyzeSegments(
+  file: string,
+  options: SegmentOptions = {},
+): Promise<SegmentAnalysis> {
+  const toneHz = options.toneHz ?? 440;
+  const toleranceMs = options.toleranceMs ?? 10;
+  const silence = options.silence ?? SEGMENT_SILENCE;
+  const filter = lowpass(CROSSING_LOWPASS_HZ);
+  const delay = filter.delayAt(toneHz);
+  let n = 0;
+  /** 低通后的上一个样本，过零点在低通后的信号上找。 */
+  let previous = 0;
+  let silentRun = 0;
+  const segments: Segment[] = [];
+  /** 每个句段的相位跳变（与 segments 一一对应），首尾句段定下来之后再汇总。 */
+  const jumpsOf: Array<Array<{ atSeconds: number; samples: number }>> = [];
+  const gapMs: number[] = [];
+  const spikes: SegmentAnalysis['spikes'] = { count: 0, listed: [] };
+  /** 当前句段：起点、平方和与相邻上升过零点的间隔（样本数）及其位置；无声中为 undefined。 */
+  let current:
+    | {
+        start: number;
+        sumSquares: number;
+        lastCrossing: number | undefined;
+        intervals: Array<[interval: number, at: number]>;
+      }
+    | undefined;
+  let lastEnd: number | undefined;
+
+  const closeSegment = (end: number) => {
+    if (!current) return;
+    const { start } = current;
+    const samples = end - start;
+    // 句首句尾是突起突止的，编码器在这里有振铃：两端各 5ms 内的过零间隔不计。
+    const inner = current.intervals.filter(
+      ([, at]) => at - start >= EDGE_SAMPLES && end - at >= EDGE_SAMPLES,
+    );
+    const sorted = inner.map(([interval]) => interval).sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const jumps = median ? phaseSteps(inner, median) : [];
+    jumpsOf.push(jumps);
+    // 从第一个不在句首振铃范围内的上升过零点按周期外推到起点。
+    const firstInner = inner[0]?.[1];
+    const startPhase =
+      median && firstInner !== undefined
+        ? round((1 - (((firstInner - start) / median) % 1) + 1) % 1, 3)
+        : null;
+    segments.push({
+      atSeconds: round(current.start / SAMPLE_RATE, 3),
+      seconds: round(samples / SAMPLE_RATE, 4),
+      hz: median ? round(SAMPLE_RATE / median, 3) : null,
+      rms: round(Math.sqrt(current.sumSquares / Math.max(1, samples)), 4),
+      discontinuities: jumps.length,
+      startPhase,
+      edge: current.start === 0,
+    });
+    lastEnd = end;
+    current = undefined;
+  };
+
+  await decode(file, (samples) => {
+    for (const x of samples) {
+      if (Math.abs(x) < silence) {
+        silentRun += 1;
+        // 无声满 1ms 才算句段结束；结束点是这段无声的起点。
+        if (current && silentRun >= GAP_MIN_SAMPLES) closeSegment(n - silentRun + 1);
+      } else {
+        if (!current) {
+          if (lastEnd !== undefined) gapMs.push(((n - lastEnd) * 1000) / SAMPLE_RATE);
+          current = { start: n, sumSquares: 0, lastCrossing: undefined, intervals: [] };
+        }
+        silentRun = 0;
+      }
+      if (Math.abs(x) > SPIKE) {
+        spikes.count += 1;
+        if (spikes.listed.length < MAX_LISTED)
+          spikes.listed.push({ atSeconds: round(n / SAMPLE_RATE, 3), value: round(x, 3) });
+      }
+      const y = filter.step(x);
+      if (current) {
+        current.sumSquares += x * x;
+        if (previous < 0 && y >= 0) {
+          // 低通后的上升过零点，插值到样本之间，再减去低通在测试音频率上的时延。
+          const at = n - 1 + previous / (previous - y) - delay;
+          if (current.lastCrossing !== undefined)
+            current.intervals.push([at - current.lastCrossing, at]);
+          current.lastCrossing = at;
+        }
+      }
+      previous = y;
+      n += 1;
+    }
+  });
+  // 录制结束时仍在句中，或调用方知道最后一句被截断（例如以急停收尾）：最后一段不完整。
+  const cutAtEnd = current !== undefined || options.trailingEdge === true;
+  closeSegment(n - (current ? silentRun : 0));
+  const last = segments.at(-1);
+  if (last && cutAtEnd) last.edge = true;
+  // 首尾句段（录制截断、急停后 OBS 切场景）里的跳变不计入，单独报数。
+  const discontinuities: SegmentAnalysis['discontinuities'] = {
+    count: 0,
+    listed: [],
+    inEdgeSegments: 0,
+  };
+  for (const [k, segment] of segments.entries()) {
+    const jumps = jumpsOf[k] ?? [];
+    if (segment.edge) {
+      discontinuities.inEdgeSegments += jumps.length;
+      continue;
+    }
+    discontinuities.count += jumps.length;
+    for (const jump of jumps)
+      if (discontinuities.listed.length < MAX_LISTED) discontinuities.listed.push(jump);
+  }
+
+  const expected = options.expectedSeconds;
+  const mismatched =
+    expected === undefined
+      ? []
+      : segments.filter(
+          (segment) => !segment.edge && Math.abs(segment.seconds - expected) * 1000 > toleranceMs,
+        );
+  const tonal = segments
+    .map((segment) => segment.hz)
+    .filter((hz): hz is number => hz !== null && Math.abs(hz / toneHz - 1) < 0.05);
+  const sortedGaps = [...gapMs].sort((a, b) => a - b);
+  return {
+    file,
+    seconds: n / SAMPLE_RATE,
+    toneHz,
+    expectedSeconds: expected ?? null,
+    toleranceMs,
+    segments: { count: segments.length, listed: segments },
+    gaps: {
+      count: sortedGaps.length,
+      minMs: sortedGaps.length ? round(sortedGaps[0] as number, 2) : null,
+      p50Ms: sortedGaps.length
+        ? round(sortedGaps[Math.floor(sortedGaps.length / 2)] as number, 2)
+        : null,
+      maxMs: sortedGaps.length ? round(sortedGaps.at(-1) as number, 2) : null,
+    },
+    mismatched: { count: mismatched.length, listed: mismatched.slice(0, MAX_LISTED) },
+    spikes,
+    discontinuities,
+    hz:
+      tonal.length === 0
+        ? null
+        : {
+            min: Math.min(...tonal),
+            max: Math.max(...tonal),
+            maxCentsOff: round(Math.max(...tonal.map((hz) => Math.abs(cents(hz, toneHz)))), 3),
+            segments: tonal.length,
+          },
+  };
+}
+
+export interface WindowLevel {
+  fromSeconds: number;
+  toSeconds: number;
+  /** 窗口内的最大振幅（dBFS）。 */
+  peakDb: number | null;
+  /** 高通滤波后 5ms 滑动 RMS 的最大值（dBFS）：咔哒声、爆音落在这里，低频的唤醒信号被滤掉。 */
+  highpassRmsDb: number | null;
+}
+
+const toDb = (value: number) => (value > 0 ? round(20 * Math.log10(value), 1) : null);
+
+/**
+ * 逐个时间窗量电平（窗口按时间排序、不重叠）：最大振幅，与二阶高通（缺省 150Hz）后的 5ms RMS 峰值。
+ * 用来核对句前的唤醒信号经 OBS 混音与 AAC 编码后没有带出可闻的咔哒声：与静默窗口、正文相比。
+ */
+export async function windowLevels(
+  file: string,
+  windows: ReadonlyArray<readonly [fromSeconds: number, toSeconds: number]>,
+  options: { highpassHz?: number } = {},
+): Promise<WindowLevel[]> {
+  const w0 = (2 * Math.PI * (options.highpassHz ?? 150)) / SAMPLE_RATE;
+  const alpha = Math.sin(w0) / (2 * Math.SQRT1_2);
+  const cos = Math.cos(w0);
+  const a0 = 1 + alpha;
+  const [b0, b1, b2] = [(1 + cos) / 2 / a0, -(1 + cos) / a0, (1 + cos) / 2 / a0];
+  const [a1, a2] = [(-2 * cos) / a0, (1 - alpha) / a0];
+  let [x1, x2, y1, y2] = [0, 0, 0, 0];
+  const rmsSamples = (5 * SAMPLE_RATE) / 1000;
+  const ring = new Float64Array(rmsSamples);
+  let sum = 0;
+  const ranges = windows.map(([from, to]) => [from * SAMPLE_RATE, to * SAMPLE_RATE] as const);
+  const peaks = windows.map(() => 0);
+  const hp = windows.map(() => 0);
+  let w = 0;
+  let n = 0;
+  await decode(file, (samples) => {
+    for (const x of samples) {
+      const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      [x2, x1, y2, y1] = [x1, x, y1, y];
+      const slot = n % rmsSamples;
+      sum += y * y - (ring[slot] ?? 0);
+      ring[slot] = y * y;
+      while (w < ranges.length && n >= (ranges[w]?.[1] ?? 0)) w += 1;
+      const range = ranges[w];
+      if (range && n >= range[0]) {
+        peaks[w] = Math.max(peaks[w] ?? 0, Math.abs(x));
+        hp[w] = Math.max(hp[w] ?? 0, Math.sqrt(Math.max(0, sum) / rmsSamples));
+      }
+      n += 1;
+    }
+  });
+  return windows.map(([fromSeconds, toSeconds], i) => ({
+    fromSeconds,
+    toSeconds,
+    peakDb: toDb(peaks[i] ?? 0),
+    highpassRmsDb: toDb(hp[i] ?? 0),
+  }));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { tone: { type: 'string', default: '440' } },
+    options: {
+      tone: { type: 'string', default: '440' },
+      'segment-seconds': { type: 'string' },
+    },
   });
   const file = positionals[0];
-  if (!file) throw new Error('用法：analyze-recording.ts <录制文件> [--tone 440]');
-  const result = await analyzeRecording(file, Number(values.tone));
-  console.log(JSON.stringify({ ...result, windows: result.windows.length }, null, 2));
+  if (!file)
+    throw new Error('用法：analyze-recording.ts <录制文件> [--tone 440] [--segment-seconds 秒]');
+  const toneHz = Number(values.tone);
+  if (values['segment-seconds'] !== undefined) {
+    const result = await analyzeSegments(file, {
+      toneHz,
+      expectedSeconds: Number(values['segment-seconds']),
+    });
+    console.log(
+      JSON.stringify(
+        { ...result, segments: { count: result.segments.count, listed: undefined } },
+        null,
+        2,
+      ),
+    );
+  } else {
+    const result = await analyzeRecording(file, toneHz);
+    console.log(JSON.stringify({ ...result, windows: result.windows.length }, null, 2));
+  }
 }

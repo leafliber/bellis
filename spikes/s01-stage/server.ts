@@ -12,6 +12,9 @@
  *     --strict-origin        按 R-08 字面要求，所有请求缺少 Origin 都拒绝（缺省只放行顶层文档导航）。
  *     --record               全程让 OBS 录制，结束后用 ffmpeg 分析录音（断流、异常峰值、音高）；录制文件保留在 OBS 的录制目录。
  *     --hide-at、--show-at、--stop-heartbeat-after、--resume-heartbeat-at、--refresh-at：时间线动作，见 PlayOptions。
+ *     --burst-seconds、--gap-seconds [--gap-fill-db] [--wake-ms --wake-hz --wake-db --wake-fade-ms]：
+ *                            按句播出（静默与测试音交替，可在句前放唤醒信号），录音按句段分析，见 PlayOptions。
+ *     结束时把浏览器源的设置（含 URL）写回开始时的样子。
  *
  * 浏览器对顶层导航的 GET 通常不带 Origin，所以探针记录每个请求实际带的头，供判断 R-08 的校验能否照字面执行。
  */
@@ -34,7 +37,7 @@ import { OBS_SECRET, readObsSecret } from '@bellis/config';
 import { ObsClient, type ObsResult } from '@bellis/obs';
 import { KeyringSecretStore } from '@bellis/secret-store';
 import { WebSocket, WebSocketServer } from 'ws';
-import { analyzeRecording } from './analyze-recording.ts';
+import { analyzeRecording, analyzeSegments, windowLevels } from './analyze-recording.ts';
 import { ObsMeters } from './meters.ts';
 
 const PAGE_DIR = fileURLToPath(new URL('./page/', import.meta.url));
@@ -373,7 +376,47 @@ interface PlayOptions {
   showAt: number | undefined;
   refreshAt: number | undefined;
   record: boolean;
+  /**
+   * 按句播出：先静默 gapSeconds 秒，再放 burstSeconds 秒的测试音（每段从相位 0 起），循环。gapFillDb 给出时，
+   * 静默期间填该电平（dBFS）的白噪声而不是数字静音，用来检验静默之后首句开头的缺失是否取决于页面是否“有声”。
+   */
+  burstSeconds: number | undefined;
+  gapSeconds: number | undefined;
+  gapFillDb: number | undefined;
+  /**
+   * 唤醒信号：每段测试音之前、静默的最后 wakeMs 毫秒放 wakeHz 赫兹、wakeDb dBFS 的正弦，
+   * 两端各 wakeFadeMs 毫秒升余弦淡入淡出。用来选定 Stage 页面句前唤醒信号的形态、电平与时长。
+   */
+  wakeMs: number | undefined;
+  wakeHz: number;
+  wakeDb: number;
+  wakeFadeMs: number;
   log: (entry: Record<string, unknown>) => void;
+}
+
+/** 第 n 个采样：连续测试音，或按句播出的测试音与静默（见 PlayOptions）。 */
+function sampleSource(options: PlayOptions): (n: number, rate: number) => number {
+  const { burstSeconds, gapSeconds } = options;
+  if (burstSeconds === undefined || gapSeconds === undefined)
+    return (n, rate) => 0.2 * Math.sin((2 * Math.PI * TONE_HZ * n) / rate);
+  const fill = options.gapFillDb === undefined ? 0 : 10 ** (options.gapFillDb / 20);
+  const wakeAmplitude = 10 ** (options.wakeDb / 20);
+  return (n, rate) => {
+    const gap = Math.round(gapSeconds * rate);
+    const position = n % (gap + Math.round(burstSeconds * rate));
+    if (position >= gap) return 0.2 * Math.sin((2 * Math.PI * TONE_HZ * (position - gap)) / rate);
+    if (options.wakeMs !== undefined) {
+      const length = Math.round((options.wakeMs / 1000) * rate);
+      const k = position - (gap - length);
+      if (k >= 0) {
+        const fade = Math.max(1, Math.round((options.wakeFadeMs / 1000) * rate));
+        const edge = Math.min(k, length - k);
+        const gain = edge >= fade ? 1 : 0.5 - 0.5 * Math.cos((Math.PI * edge) / fade);
+        return wakeAmplitude * gain * Math.sin((2 * Math.PI * options.wakeHz * k) / rate);
+      }
+    }
+    return fill === 0 ? 0 : fill * (Math.random() * 2 - 1);
+  };
 }
 
 interface Session {
@@ -402,6 +445,7 @@ async function play(options: PlayOptions) {
   const sessions: Session[] = [];
   const ackDelays: number[] = [];
   let heartbeatOn = true;
+  const sampleAt = sampleSource(options);
 
   server.onHelloRejected = () => note('hello-rejected');
   server.onSession = (ws, hello) => {
@@ -423,9 +467,7 @@ async function play(options: PlayOptions) {
     const pump = setInterval(() => {
       while (sent - consumed < session.sampleRate * AHEAD_SECONDS) {
         const samples = new Float32Array(chunk);
-        for (let i = 0; i < chunk; i++) {
-          samples[i] = 0.2 * Math.sin((2 * Math.PI * TONE_HZ * (sent + i)) / session.sampleRate);
-        }
+        for (let i = 0; i < chunk; i++) samples[i] = sampleAt(sent + i, session.sampleRate);
         ws.send(samples.buffer);
         sent += chunk;
       }
@@ -466,6 +508,8 @@ async function play(options: PlayOptions) {
   let meters: ObsMeters | undefined;
   let item: { sceneName: string; sceneItemId: number } | undefined;
   let hidden = false;
+  /** 浏览器源原来的设置（含 URL），结束时整体写回。 */
+  let originalSettings: Record<string, unknown> | undefined;
   /** 每个输入每一秒的峰值（dBFS）。 */
   const levels = new Map<string, number[]>();
   const source = options.obsSource;
@@ -482,6 +526,8 @@ async function play(options: PlayOptions) {
       }
     });
     item = await findSceneItem(obs, source);
+    originalSettings = okData(await obs.request('GetInputSettings', { inputName: source }))
+      .inputSettings as Record<string, unknown>;
     result.source = await pointSourceAt(obs, source, server.url);
     note('url-set');
     if (options.record) {
@@ -569,6 +615,14 @@ async function play(options: PlayOptions) {
     note('record-finalized');
   }
   if (hidden) await setVisible(true).catch(() => {});
+  if (obs && source && originalSettings) {
+    const restored = await obs.request('SetInputSettings', {
+      inputName: source,
+      inputSettings: originalSettings,
+      overlay: false,
+    });
+    result.sourceRestored = restored.ok;
+  }
   meters?.close();
   obs?.close();
   await server.close();
@@ -613,7 +667,40 @@ async function play(options: PlayOptions) {
   );
   if (recordingPath) {
     // 录制开始于探针时间线上的 record-started，分析结果里的时刻都相对录制开头。
-    result.recording = await analyzeRecording(recordingPath, TONE_HZ);
+    result.recording =
+      options.burstSeconds === undefined
+        ? await analyzeRecording(recordingPath, TONE_HZ)
+        : await analyzeSegments(recordingPath, {
+            toneHz: TONE_HZ,
+            expectedSeconds: options.burstSeconds,
+            trailingEdge: true,
+            // 唤醒信号的电平远低于测试音：调高无声阈值，免得把它算进句段。
+            ...(options.wakeMs === undefined ? {} : { silence: 0.05 }),
+          });
+    const gapSeconds = options.gapSeconds;
+    if (options.burstSeconds !== undefined && gapSeconds !== undefined) {
+      // 每段测试音之前：静默中段、唤醒信号（或同一位置的静默）与正文各量一次电平，核对有没有咔哒声。
+      const segments = (
+        result.recording as { segments: { listed: Array<{ atSeconds: number }> } }
+      ).segments.listed.filter((segment) => segment.atSeconds > gapSeconds / 2 + 0.2);
+      const wakeSeconds = (options.wakeMs ?? 100) / 1000;
+      const windows = segments.flatMap((segment) => {
+        const at = segment.atSeconds;
+        const middle = at - gapSeconds / 2;
+        return [
+          [middle - 0.1, middle],
+          [at - wakeSeconds - 0.02, at - 0.002],
+          [at + 0.2, at + 0.3],
+        ] as Array<readonly [number, number]>;
+      });
+      const levels = await windowLevels(recordingPath, windows);
+      result.wakeCheck = segments.map((segment, i) => ({
+        atSeconds: segment.atSeconds,
+        silence: levels[i * 3],
+        wake: levels[i * 3 + 1],
+        speech: levels[i * 3 + 2],
+      }));
+    }
   }
   return result;
 }
@@ -631,6 +718,13 @@ async function main(): Promise<void> {
       'show-at': { type: 'string' },
       'refresh-at': { type: 'string' },
       record: { type: 'boolean', default: false },
+      'burst-seconds': { type: 'string' },
+      'gap-seconds': { type: 'string' },
+      'gap-fill-db': { type: 'string' },
+      'wake-ms': { type: 'string' },
+      'wake-hz': { type: 'string', default: '20' },
+      'wake-db': { type: 'string', default: '-40' },
+      'wake-fade-ms': { type: 'string', default: '10' },
       out: { type: 'string' },
     },
   });
@@ -665,6 +759,13 @@ async function main(): Promise<void> {
       showAt: number(values['show-at']),
       refreshAt: number(values['refresh-at']),
       record: values.record,
+      burstSeconds: number(values['burst-seconds']),
+      gapSeconds: number(values['gap-seconds']),
+      gapFillDb: number(values['gap-fill-db']),
+      wakeMs: number(values['wake-ms']),
+      wakeHz: Number(values['wake-hz']),
+      wakeDb: Number(values['wake-db']),
+      wakeFadeMs: Number(values['wake-fade-ms']),
       log: (entry) => lines.push(JSON.stringify(entry)),
     });
     writeFileSync(`${out}.jsonl`, `${lines.join('\n')}\n`);

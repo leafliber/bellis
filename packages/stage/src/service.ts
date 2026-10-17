@@ -14,13 +14,26 @@ import {
 interface Playing {
   resolve(result: PlaybackResult): void;
   played: number;
+  /** 已转发给页面的采样数；页面回报 ended 时据此判断是否完整。 */
+  forwarded: number;
   envelope: EnvelopeBuilder;
+  /** 逐句的回报摘要，句子结束时记入日志，供运维核对欠载与游标。 */
+  report: {
+    startedAt: number | undefined;
+    underruns: number;
+    cursors: number;
+    first: [at: number, played: number] | undefined;
+    last: [at: number, played: number] | undefined;
+    maxCursorGapMs: number;
+  };
 }
 
 /**
  * Stage 服务（关键平面）：只转发带有效 Stage 音频输出许可令牌的音频，把令牌变化告诉页面，
  * 定时发心跳；页面在截止时间内不应答心跳即报告失败，由安全核走急停路径（D-30）。
  * 转发音频时按句计算响度包络，供形象驱动口型。
+ * 页面回报的欠载与静音即时记入日志；每句结束时记一条摘要（实际播出的采样数、欠载次数、游标回报的
+ * 次数、首末两次游标与最大间隔），游标本身不逐条记录。
  */
 export const stageService = definePlugin({
   manifest: {
@@ -52,7 +65,40 @@ export const stageService = definePlugin({
       const entry = playing.get(sentenceId);
       if (!entry) return;
       playing.delete(sentenceId);
+      const { report } = entry;
+      ctx.log('stage.sentence', {
+        sentenceId,
+        played: result.played,
+        complete: result.complete,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+        startedAt: report.startedAt ?? null,
+        endedAt: clock.now(),
+        underruns: report.underruns,
+        cursors: report.cursors,
+        firstCursor: report.first ?? null,
+        lastCursor: report.last ?? null,
+        maxCursorGapMs: report.maxCursorGapMs,
+      });
       entry.resolve(result);
+    };
+
+    /** 把页面的回报计入这一句的摘要；欠载与静音即时记录。 */
+    const note = (message: FromPage, entry: Playing | undefined) => {
+      const now = clock.now();
+      if (message.kind === 'muted') ctx.log('stage.muted', { reason: message.reason });
+      if (!entry) return;
+      const { report } = entry;
+      if (message.kind === 'started') report.startedAt = now;
+      else if (message.kind === 'underrun') {
+        report.underruns += 1;
+        ctx.log('stage.underrun', { sentenceId: message.sentenceId, played: message.played });
+      } else if (message.kind === 'cursor') {
+        if (report.last)
+          report.maxCursorGapMs = Math.max(report.maxCursorGapMs, now - report.last[0]);
+        report.cursors += 1;
+        report.last = [now, message.played];
+        report.first ??= report.last;
+      }
     };
 
     ctx.register(
@@ -61,15 +107,24 @@ export const stageService = definePlugin({
           lastAck = clock.now();
           return;
         }
+        note(message, 'sentenceId' in message ? playing.get(message.sentenceId) : undefined);
         if ('sentenceId' in message) {
           const entry = playing.get(message.sentenceId);
           if (entry && 'played' in message) entry.played = message.played;
           if (message.kind === 'ended') {
-            finish(message.sentenceId, {
-              sentenceId: message.sentenceId,
-              played: message.played,
-              complete: true,
-            });
+            // 页面的“播完”只说明它收到的都播了：比已转发的少，就是有音频没到页面或被页面丢弃，不算完整。
+            const forwarded = entry?.forwarded ?? 0;
+            finish(
+              message.sentenceId,
+              message.played < forwarded
+                ? {
+                    sentenceId: message.sentenceId,
+                    played: message.played,
+                    complete: false,
+                    reason: `页面回报播完，但只播出已转发的 ${message.played}/${forwarded} 个采样`,
+                  }
+                : { sentenceId: message.sentenceId, played: message.played, complete: true },
+            );
           } else if (message.kind === 'truncated') {
             finish(message.sentenceId, {
               sentenceId: message.sentenceId,
@@ -95,14 +150,27 @@ export const stageService = definePlugin({
       }),
     );
 
+    /** 本轮心跳定时器预定的触发时刻。 */
+    let due = clock.now();
     const beat = () => {
+      const now = clock.now();
+      const lateMs = now - due;
+      due = now + ctx.config.heartbeatMs;
       timer = clock.setTimeout(beat, ctx.config.heartbeatMs);
       // 真实页面还没连上（例如 OBS 尚未加载 URL）：安全停止下只算未就绪；输出模式下照常计时，超时即失败。
       if (page.ready === false && !producesOutput(safety.mode)) {
-        lastAck = clock.now();
+        lastAck = now;
         return;
       }
-      if (clock.now() - lastAck > ctx.config.pageTimeoutMs) {
+      // 定时器晚到不止一个心跳周期：宿主自己刚卡过（事件循环阻塞或进程被挂起），这段时间没有发出心跳，
+      // 页面自然没有应答。这一轮不判页面失败，先发心跳、从现在起重新计时。宿主卡死由外部看门狗负责，
+      // 页面收不到心跳也会自静音，安全性不因此降低；真的无响应的页面最多晚一个超时被发现。
+      // 阈值取一个心跳周期：S-05 实测满核负载下 250ms 定时器最多晚约 30ms，晚一整个周期只会是宿主卡过；
+      // 晚到不足一个周期时，距上次应答最多约两个周期加往返（缺省约 500ms），小于页面超时（缺省 1000ms），照常判定。
+      if (lateMs > ctx.config.heartbeatMs) {
+        ctx.log('stage.heartbeat-late', { lateMs, sinceAckMs: now - lastAck });
+        lastAck = now;
+      } else if (now - lastAck > ctx.config.pageTimeoutMs) {
         for (const [id, entry] of [...playing]) {
           finish(id, {
             sentenceId: id,
@@ -140,7 +208,20 @@ export const stageService = definePlugin({
         }
         const envelope = new EnvelopeBuilder(sentence.sampleRate, ctx.config.envelopeWindowMs);
         const result = new Promise<PlaybackResult>((resolve) => {
-          playing.set(sentence.id, { resolve, played: 0, envelope });
+          playing.set(sentence.id, {
+            resolve,
+            played: 0,
+            forwarded: 0,
+            envelope,
+            report: {
+              startedAt: undefined,
+              underruns: 0,
+              cursors: 0,
+              first: undefined,
+              last: undefined,
+              maxCursorGapMs: 0,
+            },
+          });
         });
         page.send({
           kind: 'begin',
@@ -162,6 +243,8 @@ export const stageService = definePlugin({
                 break;
               }
               envelope.push(next.value);
+              const entry = playing.get(sentence.id);
+              if (entry) entry.forwarded += next.value.length;
               page.send({ kind: 'audio', sentenceId: sentence.id, token, pcm: next.value });
             }
             if (playing.has(sentence.id)) {

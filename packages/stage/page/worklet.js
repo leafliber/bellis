@@ -12,10 +12,30 @@
  *   end { id, src }            这一句不会再有音频；src 是原始采样总数
  *   truncate { id }            立即停止这一句
  * 回报：started、cursor、underrun、ended、truncated（played 均为原始采样数）、muted。
+ *
+ * 唤醒信号（见 Stage“播放”）：OBS 浏览器源只在页面“有声”时采集音频，静默约 2–3 秒后停止，再次有声时
+ * 开头会丢 20–80ms。所以即将输出正文、而此前连续数字静音（按渲染帧计，含句中欠载的补零）已超过 1.5 秒时，
+ * 先放 150ms 唤醒信号：20Hz、峰值 -50dBFS 的正弦，两端 10ms 升余弦淡入淡出。句首与句中欠载恢复同一条规则。
+ * 唤醒信号放完才算有声；中途被打断（没有句子了、静音、截断）就作废，下次照样从头放。它只在队首有句子、
+ * 且已收到要播的音频时才放，而句子只在持有许可、未静音时才会入队，所以空闲、安全停止与自静音时仍是数字静音。
+ * started 在正文开始时回报；唤醒期间游标不推进，唤醒样本不计入已播出。
  */
 
 const HEARTBEAT_TIMEOUT_SECONDS = 1;
 const CURSOR_EVERY_SECONDS = 0.1;
+const WAKE_AFTER_SECONDS = 1.5;
+const WAKE_SECONDS = 0.15;
+const WAKE_FADE_SECONDS = 0.01;
+const WAKE_HZ = 20;
+const WAKE_AMPLITUDE = 10 ** (-50 / 20);
+
+/** 唤醒信号的第 k 帧。 @param {number} k @param {number} length */
+function wakeSample(k, length) {
+  const fade = Math.max(1, Math.round(WAKE_FADE_SECONDS * sampleRate));
+  const edge = Math.min(k, length - k);
+  const gain = edge >= fade ? 1 : 0.5 - 0.5 * Math.cos((Math.PI * edge) / fade);
+  return WAKE_AMPLITUDE * gain * Math.sin((2 * Math.PI * WAKE_HZ * k) / sampleRate);
+}
 
 /**
  * @typedef {object} Sentence
@@ -45,6 +65,11 @@ class StageProcessor extends AudioWorkletProcessor {
     this.sinceHeartbeat = 0;
     this.sinceCursor = 0;
     this.muted = false;
+    /** 连续输出数字静音的渲染帧数（放到一半的唤醒信号也算静音）；页面刚加载时视为已静默很久。 */
+    this.silentFrames = Number.POSITIVE_INFINITY;
+    this.wakeFrames = Math.round(WAKE_SECONDS * sampleRate);
+    /** 正在放的唤醒信号已放的帧数；null 表示没有在放。 @type {number | null} */
+    this.wakeAt = null;
     this.port.onmessage = (event) => this.receive(/** @type {Command} */ (event.data));
   }
 
@@ -114,6 +139,8 @@ class StageProcessor extends AudioWorkletProcessor {
 
   /** @param {Sentence} sentence @param {string} reason */
   drop(sentence, reason) {
+    // 为队首放的唤醒信号随之作废。
+    if (this.queue[0] === sentence) this.wakeAt = null;
     this.queue.splice(this.queue.indexOf(sentence), 1);
     this.port.postMessage({
       kind: 'truncated',
@@ -150,6 +177,8 @@ class StageProcessor extends AudioWorkletProcessor {
     }
 
     let written = 0;
+    /** 写到当前位置为止连续数字静音的帧数。 */
+    let silent = this.silentFrames;
     while (!this.muted && written < frames) {
       const head = this.queue[0];
       if (!head) break;
@@ -171,6 +200,23 @@ class StageProcessor extends AudioWorkletProcessor {
         }
         break;
       }
+      // 即将输出正文：此前连续数字静音（含句中欠载的补零）够久，先放唤醒信号（见文件头），放完再继续。
+      if (this.wakeAt === null && silent >= WAKE_AFTER_SECONDS * sampleRate) this.wakeAt = 0;
+      if (this.wakeAt !== null) {
+        const take = Math.min(frames - written, this.wakeFrames - this.wakeAt);
+        for (let i = 0; i < take; i++) {
+          const value = wakeSample(this.wakeAt + i, this.wakeFrames);
+          for (const channel of channels) channel[written + i] = value;
+        }
+        this.wakeAt += take;
+        written += take;
+        silent += take;
+        if (this.wakeAt >= this.wakeFrames) {
+          this.wakeAt = null;
+          silent = 0;
+        }
+        continue;
+      }
       if (!head.started) {
         head.started = true;
         this.port.postMessage({ kind: 'started', sentenceId: head.id });
@@ -180,6 +226,7 @@ class StageProcessor extends AudioWorkletProcessor {
       for (const channel of channels)
         channel.set(chunk.subarray(head.offset, head.offset + take), written);
       written += take;
+      silent = 0;
       head.offset += take;
       if (head.offset >= chunk.length) {
         head.chunks.shift();
@@ -189,6 +236,9 @@ class StageProcessor extends AudioWorkletProcessor {
     }
     // 补零不推进游标。
     for (const channel of channels) channel.fill(0, written);
+    this.silentFrames = silent + (frames - written);
+    // 没有句子了或已静音：放到一半的唤醒信号作废。
+    if (this.muted || this.queue.length === 0) this.wakeAt = null;
 
     this.sinceCursor += frames;
     if (this.sinceCursor >= sampleRate * CURSOR_EVERY_SECONDS) {
