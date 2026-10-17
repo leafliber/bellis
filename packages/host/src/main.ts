@@ -51,6 +51,7 @@ const LOGGED_FACTS = new Set([
   'safety.emergency-requested',
   'safety.emergency-completed',
   'watchdog.acted',
+  'stage.connected',
 ]);
 const isModeParams = Compile(OperatorModeParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);

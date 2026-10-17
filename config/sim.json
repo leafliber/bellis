@@ -12,12 +12,14 @@
     "leaseTtlMs": {
       "stage.audio": 2000,
       "game.input": 500,
-      "obs.control": 2000
+      "obs.control": 2000,
+      "obs.stage-url": 2000
     },
     "leaseCapabilities": {
       "stage.audio": "speech.output",
       "game.input": "game.input",
-      "obs.control": "obs.control"
+      "obs.control": "obs.control",
+      "obs.stage-url": "obs.control"
     },
     "presenceTtlMs": 600000,
     "rateLimits": {
