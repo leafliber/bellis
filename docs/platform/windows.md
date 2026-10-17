@@ -13,6 +13,20 @@ Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Win
 - **孙进程要自己管。** libuv 把 Node 和它的直接子进程放进一个“父进程退出即杀死”的 Job，但孙进程会脱离这个 Job。所以 sidecar 必须用 Job Object（KILL_ON_JOB_CLOSE）管住自己派生的进程。[来源](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
 - **环境变量**：键不区分大小写；不要删掉 `SYSTEMROOT` 等系统必需变量，否则 Winsock 初始化会失败。
 
+## 登录时运行
+
+启动器由“登录时运行”的计划任务拉起（R-23）。维护者在自己的终端里用 `pnpm autostart register [配置文件]` 注册（缺省 `config/live.json`，覆盖同名任务），`pnpm autostart unregister` 注销，`pnpm autostart status` 读回核对；其它平台报告 unsupported。
+
+- **注册方式（R-26）。** 以 `spawn` 调用 `%SystemRoot%\System32\schtasks.exe`，不经 shell、不按 PATH 查找：`/Create /TN Bellis /XML <文件> /F` 注册，`/Delete /TN Bellis /F` 注销，`/Query /TN Bellis /XML` 读回。schtasks 的输出随系统语言本地化，成败只看退出码。任务名是根目录下的 `Bellis`，不建任务文件夹，注销后不留空文件夹。
+- **任务 XML** 由代码生成（Task Scheduler 1.2 schema），写进系统临时目录，用完即删：
+  - 唯一的触发器是登录触发器，`UserId` 为当前用户 `USERDOMAIN\用户名`；取不到时报错，不放宽成任意用户。
+  - 运行身份同为当前用户，交互令牌（`InteractiveToken`：只在该用户登录后运行，进程在其桌面上）、最低权限（`LeastPrivilege`）。
+  - `ExecutionTimeLimit` 为 `PT0S`（不限时）；`Priority` 为 5（普通；缺省的 7 低于普通，宿主与看门狗会继承）；`MultipleInstancesPolicy` 为 `IgnoreNew`；用电池时照常启动、不停止；允许按需启动（`schtasks /Run`）。
+  - 动作：用执行注册命令的 node（`process.execPath`）运行启动器入口，参数为配置文件的绝对路径，工作目录为仓库根。换了 Node 的安装位置或移动了仓库要重新注册。计划任务会展开动作里的 `%变量%`，路径含 `%`、引号或控制字符时直接报错。
+- 注册后与 `status` 都读回任务 XML，核对触发器与运行身份的用户、登录类型、运行级别、命令行、配置文件是否存在、工作目录与上述设置；读回的用户是 SID 时记为未核对。
+- **PENDING（真机验证）**：任务文件的编码（现为 UTF-16 LE 带 BOM，与 XML 声明一致）；非提权进程能否为当前用户注册登录触发的任务；`/Query /XML` 输出的编码（依次按 BOM、UTF-16、UTF-8 识别，都不是时报错）与读回的用户形式。
+- **运行与停止。** node 是控制台程序，计划任务以交互令牌拉起它时，系统为启动器新开一个控制台窗口（PENDING），日志写在窗口里；在该窗口按 Ctrl+C，按正常顺序停止。关闭窗口不是停止入口：关闭事件同时送达共用该控制台的启动器、宿主与看门狗（Node 中为 `SIGHUP`），三者都不处理，会被直接结束而不经过停止顺序。[来源](https://nodejs.org/api/process.html#signal-events) 用 `schtasks /End` 结束任务同样不经过停止顺序。启动失败时窗口随即关闭、输出随之丢失，排查时在终端里用 `pnpm start` 以同一配置运行。
+
 ## 本机通信
 
 - **命名管道**（D-12）：路径形如 `\\.\pipe\bellis-<会话>-<128 位随机数>`，每次启动重新生成；子进程经环境变量获得，非子进程从 SecretStore 读取（R-23）；用会话密钥做 HMAC 双向认证（R-05）。
