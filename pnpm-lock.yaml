@@ -194,6 +194,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.5.15
         version: 2.5.15
+      '@types/audioworklet':
+        specifier: 0.0.100
+        version: 0.0.100
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
@@ -496,6 +499,13 @@ importers:
       typebox:
         specifier: 1.3.37
         version: 1.3.37
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
 
   packages/store:
     devDependencies:
@@ -706,6 +716,9 @@ packages:
   '@napi-rs/keyring@2.1.1':
     resolution: {integrity: sha512-7HUq8FHgW/O4s8ESvkxngTC9tOR/IyktdR0ral2VD0C8HDZk86FwPAH4qZyerKwS1DhJ6AhoebIsxcyw+Lbt1Q==}
     engines: {node: '>= 10'}
+
+  '@types/audioworklet@0.0.100':
+    resolution: {integrity: sha512-mWt4Z5CWi0CupDnSYWJgx6dw61XUk9JSRGrM9F/YNrpOoY/0XG+sxP+8rAjQq80H4febOe8PrzGmmN/X3w8LsQ==}
 
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
@@ -960,6 +973,8 @@ snapshots:
       '@napi-rs/keyring-win32-arm64-msvc': 2.1.1
       '@napi-rs/keyring-win32-ia32-msvc': 2.1.1
       '@napi-rs/keyring-win32-x64-msvc': 2.1.1
+
+  '@types/audioworklet@0.0.100': {}
 
   '@types/node@26.6.5':
     dependencies:

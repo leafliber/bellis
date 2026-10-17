@@ -1,6 +1,6 @@
 import { definePlugin, defineService } from '@bellis/kernel';
 import type { ObsClient, ObsRequest } from '@bellis/obs';
-import { SafetyService } from '@bellis/safety';
+import { SafetyService, STAGE_URL } from '@bellis/safety';
 import type { Intent } from '@bellis/store';
 import Type from 'typebox';
 
@@ -22,13 +22,19 @@ export type ObsAction =
   | { kind: 'scene'; sceneName: string }
   | { kind: 'mute'; inputName: string; muted: boolean }
   /** 写来源设置，例如浏览器源的 url；只覆盖给出的键。 */
-  | { kind: 'input-settings'; inputName: string; inputSettings: Record<string, unknown> };
+  | { kind: 'input-settings'; inputName: string; inputSettings: Record<string, unknown> }
+  /**
+   * 把 URL 写进急停时静音的那个 Stage 源，只写 `url`。安全停止下唯一允许的动作，
+   * 用于在进入输出模式前下发 Stage 的一次性令牌（见安全核“监督模式”）。
+   */
+  | { kind: 'stage-url'; url: string };
 
 /** 每种动作要求意图申请的能力（均不允许来自不可信输入，见安全核的 Rule of Two）。 */
 export const OBS_ACTION_CAPABILITY = {
   scene: 'obs.scene',
   mute: 'obs.audio',
   'input-settings': 'obs.source',
+  'stage-url': STAGE_URL,
 } as const satisfies Record<ObsAction['kind'], string>;
 
 export interface ObsControl {
@@ -44,7 +50,7 @@ export interface ObsControl {
 
 export const ObsControlService = defineService<ObsControl>('obs.control', 1);
 
-function toRequest(action: ObsAction): ObsRequest {
+function toRequest(action: ObsAction, stageSource: string): ObsRequest {
   switch (action.kind) {
     case 'scene':
       return {
@@ -65,13 +71,19 @@ function toRequest(action: ObsAction): ObsRequest {
           overlay: true,
         },
       };
+    case 'stage-url':
+      return {
+        requestType: 'SetInputSettings',
+        requestData: { inputName: stageSource, inputSettings: { url: action.url }, overlay: true },
+      };
   }
 }
 
 /**
  * OBS 控制（关键平面）：经自己的 obs-websocket 连接切场景、静音源、写来源设置，
  * 每次操作都持有执行许可（见 Stage、OBS 与形象）。只执行别的插件已经授权的意图，
- * 不自己决定做什么；安全停止与维护态下拿不到许可，因此什么都不做。
+ * 不自己决定做什么；安全停止与维护态下拿不到许可，因此什么都不做（写 Stage URL 例外，
+ * 安全停止下也能执行）。
  */
 export const obsControl = definePlugin({
   manifest: {
@@ -125,14 +137,16 @@ export const obsControl = definePlugin({
       if (!intent.capabilities.includes(capability)) {
         throw new Error(`意图 ${intent.key} 没有申请 ${capability}`);
       }
-      const granted = safety.grant(OBS_CONTROL);
+      // 写 Stage URL 用单独的许可资源，安全停止下也能取得；其余动作都用 obs.control。
+      const resource = action.kind === 'stage-url' ? STAGE_URL : OBS_CONTROL;
+      const granted = safety.grant(resource);
       if (!granted.ok) throw new Error(`拿不到 OBS 控制许可：${granted.reason}`);
       const { lease } = granted;
       try {
         const obs = await ensureClient();
         if (ctx.signal.aborted) throw new Error('OBS 控制正在停用');
-        if (!safety.isValid(OBS_CONTROL, lease.token)) throw new Error('OBS 控制许可已失效');
-        const request = toRequest(action);
+        if (!safety.isValid(resource, lease.token)) throw new Error('OBS 控制许可已失效');
+        const request = toRequest(action, safety.stageSource);
         const result = await obs.request(request.requestType, request.requestData, {
           timeoutMs: ctx.config.requestTimeoutMs,
         });
