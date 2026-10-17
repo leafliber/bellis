@@ -179,6 +179,11 @@ export interface Segment {
   rms: number;
   /** 段内过零间隔偏离本段中位数超过 1 个样本的次数。 */
   discontinuities: number;
+  /**
+   * 句段起点处测试音的相位（周期的小数，0–1），由段内的上升过零点按周期外推得出。测试音每句从相位 0 起，
+   * 起点完整时接近 0（或 1）；开头被剪掉 t 秒时接近 t·f 的小数部分。
+   */
+  startPhase: number | null;
   /** 录制开头或结尾的句段，可能不完整。 */
   edge: boolean;
 }
@@ -257,12 +262,19 @@ export async function analyzeSegments(
           });
       }
     }
+    // 从第一个不在句首振铃范围内的上升过零点按周期外推到起点。
+    const firstInner = inner[0]?.[1];
+    const startPhase =
+      median && firstInner !== undefined
+        ? round((1 - (((firstInner - start) / median) % 1) + 1) % 1, 3)
+        : null;
     segments.push({
       atSeconds: round(current.start / SAMPLE_RATE, 3),
       seconds: round(samples / SAMPLE_RATE, 4),
       hz: median ? round(SAMPLE_RATE / median, 3) : null,
       rms: round(Math.sqrt(current.sumSquares / Math.max(1, samples)), 4),
       discontinuities: jumps,
+      startPhase,
       edge: current.start === 0,
     });
     lastEnd = end;
