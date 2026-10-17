@@ -367,6 +367,49 @@ test('认证后的页面收到心跳、令牌、句子与带头的二进制音�
   }
 });
 
+test('页面回报播完但采样数少于已转发的：按未完整播出处理，played 取页面回报的数', async () => {
+  const s = await setup();
+  try {
+    const page = await attempt(s, hello(s.token()));
+    assert.equal(page.result, 'welcome');
+    const ws = page.ws as WebSocket;
+    /** 每句回报的“播完”采样数：第一句只收到一半，第二句一点都没收到。 */
+    const reported = [240, 0, 480];
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return;
+      const message = JSON.parse(String(data)) as { kind: string; sentenceId?: string };
+      if (message.kind === 'heartbeat') ws.send(JSON.stringify({ kind: 'heartbeat-ack' }));
+      if (message.kind === 'end') {
+        const played = reported.shift() ?? 0;
+        ws.send(JSON.stringify({ kind: 'ended', sentenceId: message.sentenceId, played }));
+      }
+    });
+    await until(() => page.messages.some((m) => (m as { kind: string }).kind === 'heartbeat'));
+    assert.ok(s.core.requestMode('M1').ok);
+    assert.deepEqual(await s.speaker().play(480), {
+      sentenceId: 's1',
+      played: 240,
+      complete: false,
+      reason: '页面回报播完，但只播出已转发的 240/480 个采样',
+    });
+    assert.deepEqual(await s.speaker().play(480), {
+      sentenceId: 's2',
+      played: 0,
+      complete: false,
+      reason: '页面回报播完，但只播出已转发的 0/480 个采样',
+    });
+    // 收到的都播了：照常算完整。
+    assert.deepEqual(await s.speaker().play(480), {
+      sentenceId: 's3',
+      played: 480,
+      complete: true,
+    });
+    ws.close();
+  } finally {
+    await s.close();
+  }
+});
+
 test('页面未连接：安全停止下 Stage 服务只是未就绪、不判失败；开始一句时立即以未连接截断', async () => {
   const s = await setup();
   try {

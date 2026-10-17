@@ -14,6 +14,8 @@ import {
 interface Playing {
   resolve(result: PlaybackResult): void;
   played: number;
+  /** 已转发给页面的采样数；页面回报 ended 时据此判断是否完整。 */
+  forwarded: number;
   envelope: EnvelopeBuilder;
   /** 逐句的回报摘要，句子结束时记入日志，供运维核对欠载与游标。 */
   report: {
@@ -110,11 +112,19 @@ export const stageService = definePlugin({
           const entry = playing.get(message.sentenceId);
           if (entry && 'played' in message) entry.played = message.played;
           if (message.kind === 'ended') {
-            finish(message.sentenceId, {
-              sentenceId: message.sentenceId,
-              played: message.played,
-              complete: true,
-            });
+            // 页面的“播完”只说明它收到的都播了：比已转发的少，就是有音频没到页面或被页面丢弃，不算完整。
+            const forwarded = entry?.forwarded ?? 0;
+            finish(
+              message.sentenceId,
+              message.played < forwarded
+                ? {
+                    sentenceId: message.sentenceId,
+                    played: message.played,
+                    complete: false,
+                    reason: `页面回报播完，但只播出已转发的 ${message.played}/${forwarded} 个采样`,
+                  }
+                : { sentenceId: message.sentenceId, played: message.played, complete: true },
+            );
           } else if (message.kind === 'truncated') {
             finish(message.sentenceId, {
               sentenceId: message.sentenceId,
@@ -188,6 +198,7 @@ export const stageService = definePlugin({
           playing.set(sentence.id, {
             resolve,
             played: 0,
+            forwarded: 0,
             envelope,
             report: {
               startedAt: undefined,
@@ -219,6 +230,8 @@ export const stageService = definePlugin({
                 break;
               }
               envelope.push(next.value);
+              const entry = playing.get(sentence.id);
+              if (entry) entry.forwarded += next.value.length;
               page.send({ kind: 'audio', sentenceId: sentence.id, token, pcm: next.value });
             }
             if (playing.has(sentence.id)) {
