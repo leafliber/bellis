@@ -2,7 +2,12 @@
  * P1 第 10 步的真机诊断：静默之后第一句的开头在 OBS 录音里缺几十毫秒（长测冒烟中首句缺 60ms）。
  *
  *   node spikes/drill-stage-silence.ts --stage-source 名字 [--gaps 0.5,2,3,4,5,15,60] [--repeats 3]
- *                                       [--initial 8] [--sentence-seconds 1.5] [--out 结果文件前缀]
+ *                                       [--split-pauses 0.5,3,15] [--initial 8] [--sentence-seconds 1.5]
+ *                                       [--out 结果文件前缀]
+ *
+ * --split-pauses：改测句中欠载（模拟 TTS 中途卡住）。每句隔 3 秒播一次，先送前一半，页面回报欠载后停这么多秒，
+ * 再送后一半；录音里一句分成两段，各自核对缺失与起点相位。模拟 TTS 的 slowness 只会让每帧都慢一点，
+ * 造不出一次超过 1.5 秒的停顿，所以在这里直接停送音频。
  *
  * 本进程装配真实 Stage 页面（spikes/stage-harness.ts，本进程扮演 Stage 服务），页面认证后先静默 --initial 秒，
  * 再按 --gaps 依次在不同长度的静默之后各播一句测试音（440Hz、从相位 0 起），整组重复 --repeats 次。
@@ -55,6 +60,11 @@ interface Sentence {
   finished: unknown;
   /** 上一句播完（或页面认证）到这一句发出的实际静默。 */
   silenceMs: number;
+  /** 录音里这一句的段数：中途欠载的句子分成两段。 */
+  parts: number;
+  pauseSeconds?: number;
+  underrunAt?: number;
+  resumedAt?: number;
 }
 
 async function main(): Promise<void> {
@@ -66,6 +76,7 @@ async function main(): Promise<void> {
       repeats: { type: 'string', default: '3' },
       initial: { type: 'string', default: '8' },
       'sentence-seconds': { type: 'string', default: '1.5' },
+      'split-pauses': { type: 'string' },
       out: { type: 'string' },
     },
   });
@@ -75,6 +86,7 @@ async function main(): Promise<void> {
   const repeats = Number(values.repeats);
   const initialSeconds = Number(values.initial);
   const sentenceSeconds = Number(values['sentence-seconds']);
+  const splitPauses = values['split-pauses']?.split(',').map(Number);
   const started = new Date().toISOString();
   const out = resolve(
     values.out ?? join('reports', `drill-stage-silence-${started.replace(/[:.]/g, '-')}`),
@@ -152,9 +164,33 @@ async function main(): Promise<void> {
     await startRecording();
     await sleep(initialSeconds * 1000);
 
-    const plan: Array<number | 'initial'> = ['initial'];
-    for (let r = 0; r < repeats; r++) plan.push(...gaps);
     let lastFinished = authenticatedAt;
+    if (splitPauses) {
+      const pauses = Array.from({ length: repeats }, () => splitPauses).flat();
+      for (const [index, pause] of pauses.entries()) {
+        if (index > 0) await sleep(Math.max(0, lastFinished + 3000 - Date.now()));
+        const silenceMs = Date.now() - lastFinished;
+        const played = await harness.playSplit(sentenceSeconds, pause);
+        lastFinished = played.finishedAt;
+        sentences.push({
+          index,
+          gapSeconds: index === 0 ? 'initial' : 3,
+          recording: recordings.length,
+          sentAt: played.sentAt,
+          startedAt: played.startedAt,
+          finishedAt: played.finishedAt,
+          finished: played.finished,
+          silenceMs,
+          parts: 2,
+          pauseSeconds: pause,
+          underrunAt: played.underrunAt,
+          resumedAt: played.resumedAt,
+        });
+        say(`第 ${index} 句（中途停 ${pause} 秒）：${JSON.stringify(played.finished)}`);
+      }
+    }
+    const plan: Array<number | 'initial'> = splitPauses ? [] : ['initial'];
+    for (let r = 0; r < repeats && !splitPauses; r++) plan.push(...gaps);
     for (const [index, gap] of plan.entries()) {
       if (gap !== 'initial') {
         const wait = gap * 1000;
@@ -179,6 +215,7 @@ async function main(): Promise<void> {
         finishedAt: played.finishedAt,
         finished: played.finished,
         silenceMs,
+        parts: 1,
       });
       say(
         `第 ${index} 句（静默 ${round(silenceMs / 1000, 2)} 秒）：${JSON.stringify(played.finished)}`,
@@ -188,7 +225,7 @@ async function main(): Promise<void> {
     await stopRecording();
 
     // ---------------- 分析 ----------------
-    const expectedSeconds = sentenceSeconds;
+    const expectedSeconds = splitPauses ? sentenceSeconds / 2 : sentenceSeconds;
     const perRecording: Array<Record<string, unknown>> = [];
     const segmentsByRecording: Segment[][] = [];
     /** 句前唤醒信号所在窗口与静默中段的电平（只量前面静默不短于 1 秒的句子），键为“录音:句段”。 */
@@ -229,6 +266,7 @@ async function main(): Promise<void> {
         seconds: round(analysis.seconds, 2),
         segments: analysis.segments.count,
         sentences: sentences.filter((s) => s.recording === i).length,
+        parts: sentences.filter((s) => s.recording === i).reduce((n, s) => n + s.parts, 0),
         spikes: analysis.spikes.count,
         discontinuities: analysis.discontinuities.count,
         hz: analysis.hz,
@@ -237,9 +275,12 @@ async function main(): Promise<void> {
     const rows = sentences.map((s) => {
       const inRecording = sentences.filter((x) => x.recording === s.recording);
       const segments = segmentsByRecording[s.recording] ?? [];
-      const segment =
-        segments.length === inRecording.length ? segments[inRecording.indexOf(s)] : undefined;
+      // 按顺序对应：前面各句的段数之和就是这一句的第一段。
+      const first = inRecording.slice(0, inRecording.indexOf(s)).reduce((n, x) => n + x.parts, 0);
+      const matched = segments.length === inRecording.reduce((n, x) => n + x.parts, 0);
+      const segment = matched ? segments[first] : undefined;
       const shortMs = segment ? round((expectedSeconds - segment.seconds) * 1000) : null;
+      const resumed = matched && s.parts === 2 ? segments[first + 1] : undefined;
       // 音量表：上一句播完到这一句发出之间 Stage 源的读数是否消失过；这一句开始后多久重新出现、多久有声。
       const previous = sentences[sentences.indexOf(s) - 1];
       const silenceFrom = previous?.finishedAt ?? authenticatedAt;
@@ -274,9 +315,24 @@ async function main(): Promise<void> {
               // 缺的若是开头，起点相位应接近缺失时长对应的相位。
               phaseIfStartCut: shortMs === null ? null : round(((shortMs / 1000) * TONE_HZ) % 1, 3),
               discontinuities: segment.discontinuities,
-              preRoll: preRoll.get(`${s.recording}:${inRecording.indexOf(s)}`) ?? null,
+              preRoll: preRoll.get(`${s.recording}:${first}`) ?? null,
             }
           : null,
+        ...(s.parts === 2
+          ? {
+              pauseSeconds: s.pauseSeconds,
+              // 页面回报欠载到送出后一半音频之间的时长（真正的静默还要加上页面回报的延迟）。
+              underrunToResumeMs: (s.resumedAt ?? 0) - (s.underrunAt ?? 0),
+              resumedPart: resumed
+                ? {
+                    seconds: resumed.seconds,
+                    shortMs: round((expectedSeconds - resumed.seconds) * 1000),
+                    startPhase: resumed.startPhase,
+                    preRoll: preRoll.get(`${s.recording}:${first + 1}`) ?? null,
+                  }
+                : null,
+            }
+          : {}),
       };
     });
     result.recordings = perRecording;
@@ -284,7 +340,7 @@ async function main(): Promise<void> {
     // 按静默长度汇总：录音里缺了多少毫秒、音量表读数是否在静默中消失。
     const byGap = new Map<string, Array<(typeof rows)[number]>>();
     for (const row of rows) {
-      const key = String(row.gapSeconds);
+      const key = splitPauses ? `pause ${row.pauseSeconds}` : String(row.gapSeconds);
       byGap.set(key, [...(byGap.get(key) ?? []), row]);
     }
     result.summary = [...byGap].map(([gap, list]) => ({
@@ -292,6 +348,12 @@ async function main(): Promise<void> {
       n: list.length,
       shortMs: list.map((r) => r.recorded?.shortMs ?? null),
       startPhase: list.map((r) => r.recorded?.startPhase ?? null),
+      ...(splitPauses
+        ? {
+            resumedShortMs: list.map((r) => r.resumedPart?.shortMs ?? null),
+            resumedStartPhase: list.map((r) => r.resumedPart?.startPhase ?? null),
+          }
+        : {}),
       meterAbsentDuringSilence: list.map((r) => r.meter.absentDuringSilence),
       meterAbsentAfterSilenceMs: list.map((r) => r.meter.absentAfterSilenceMs),
       meterReappearedAfterStartedMs: list.map((r) => r.meter.reappearedAfterStartedMs),

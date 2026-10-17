@@ -231,6 +231,66 @@ export async function startStageHarness(options: HarnessOptions) {
         finished: finished.event,
       };
     },
+    /**
+     * 播一句中途断流的测试音（模拟 TTS 中途卡住）：先送前一半，等页面回报欠载，再停 pauseSeconds 秒，
+     * 然后送后一半。测试音按绝对采样位置生成，前一半为 0.75 秒时后一半恰从相位 0 起。
+     */
+    async playSplit(seconds: number, pauseSeconds: number) {
+      const link = page();
+      if (!tokenSent) {
+        link.send({ kind: 'token', token: TOKEN, ttlMs: 3_600_000 });
+        tokenSent = true;
+      }
+      sentences += 1;
+      const sentenceId = `harness-${sentences}`;
+      const from = events.length;
+      const pcm = tone(Math.round(seconds * HARNESS_SAMPLE_RATE));
+      const half = Math.round(pcm.length / 2);
+      const send = (part: Int16Array) => {
+        for (let offset = 0; offset < part.length; offset += FRAME_SAMPLES)
+          link.send({
+            kind: 'audio',
+            sentenceId,
+            token: TOKEN,
+            pcm: part.subarray(offset, offset + FRAME_SAMPLES),
+          });
+      };
+      const isThis = (e: FromPage) => 'sentenceId' in e && e.sentenceId === sentenceId;
+      const sentAt = Date.now();
+      link.send({
+        kind: 'begin',
+        sentenceId,
+        token: TOKEN,
+        subtitle: '诊断用测试音',
+        sampleRate: HARNESS_SAMPLE_RATE,
+      });
+      send(pcm.subarray(0, half));
+      const underrun = await waitEvent(
+        (e) => isThis(e) && e.kind === 'underrun',
+        seconds * 1000 + 10_000,
+        from,
+      );
+      await new Promise((wait) => setTimeout(wait, pauseSeconds * 1000));
+      const resumedAt = Date.now();
+      send(pcm.subarray(half));
+      link.send({ kind: 'end', sentenceId, token: TOKEN });
+      const finished = await waitEvent(
+        (e) => isThis(e) && (e.kind === 'ended' || e.kind === 'truncated'),
+        seconds * 1000 + 10_000,
+        from,
+      );
+      const started = events.slice(from).find((e) => isThis(e.event) && e.event.kind === 'started');
+      return {
+        sentenceId,
+        samples: pcm.length,
+        sentAt,
+        startedAt: started?.at ?? null,
+        underrunAt: underrun.at,
+        resumedAt,
+        finishedAt: finished.at,
+        finished: finished.event,
+      };
+    },
     async close() {
       clearInterval(beat);
       await active.shutdown();
