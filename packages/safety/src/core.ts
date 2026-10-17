@@ -376,7 +376,6 @@ export class SafetyCore {
   }
 
   /** 操作员切换模式。升级须满足目标模式的前置条件；切到安全停止走急停路径。 */
-
   requestMode(target: Mode): { ok: true } | { ok: false; reason: string } {
     const blocker = this.modeBlocker(target);
     if (blocker) {
