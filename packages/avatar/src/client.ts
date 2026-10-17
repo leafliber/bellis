@@ -1,4 +1,5 @@
 import type { Clock, TimerHandle } from '@bellis/kernel';
+import WebSocket from 'ws';
 
 export const VTS_API_NAME = 'VTubeStudioPublicAPI';
 export const VTS_API_VERSION = '1.0';
@@ -38,6 +39,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * VTube Studio 插件 API 的客户端（R-15）：JSON 文本消息，按 requestID 配对请求与应答；只发请求，
  * 不订阅事件。截止时间经插件的时钟计时。请求内容（例如插件令牌）不写进任何错误信息。
+ *
+ * 用 `ws` 并关闭 permessage-deflate（R-10）：Node 自带的 WebSocket 会请求压缩，VTS 接受后每条消息
+ * 发一个以结束块收尾的完整 deflate 流，自带客户端只解得出第一条，之后的应答都成了空消息（真机 VTS 1.35.10 实测）。
  */
 export class VtsClient {
   readonly #socket: WebSocket;
@@ -50,19 +54,23 @@ export class VtsClient {
   private constructor(socket: WebSocket, clock: Clock) {
     this.#socket = socket;
     this.#clock = clock;
-    socket.addEventListener('message', (event) => this.#onMessage(event.data));
-    socket.addEventListener('close', (event) => this.#onClose(`code=${event.code}`));
+    socket.on('message', (data, binary) => {
+      if (!binary) this.#onMessage(data.toString());
+    });
+    socket.on('close', (code) => this.#onClose(`code=${code}`));
   }
 
   /** 建立连接；VTS 不在或截止时间内没连上即失败。 */
   static connect(url: string, clock: Clock, timeoutMs: number): Promise<VtsClient> {
     return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
+      const socket = new WebSocket(url, { perMessageDeflate: false });
+      // 连接出错之后总会关闭，由关闭处理；没有错误监听时 ws 会把错误抛成进程异常。
+      socket.on('error', () => {});
       const cleanup = () => {
         clock.clearTimeout(timer);
-        socket.removeEventListener('open', onOpen);
-        socket.removeEventListener('error', onError);
-        socket.removeEventListener('close', onClose);
+        socket.off('open', onOpen);
+        socket.off('error', onError);
+        socket.off('close', onClose);
       };
       const fail = (error: Error) => {
         cleanup();
@@ -74,15 +82,15 @@ export class VtsClient {
         resolve(new VtsClient(socket, clock));
       };
       const onError = () => fail(new VtsError(`无法连接 VTube Studio：${url}`));
-      const onClose = (event: CloseEvent) =>
-        fail(new VtsError(`VTube Studio 连接在建立时关闭：${event.code}`));
+      const onClose = (code: number) =>
+        fail(new VtsError(`VTube Studio 连接在建立时关闭：${code}`));
       const timer = clock.setTimeout(
         () => fail(new VtsError(`连接 VTube Studio 未在 ${timeoutMs}ms 内完成`)),
         timeoutMs,
       );
-      socket.addEventListener('open', onOpen);
-      socket.addEventListener('error', onError);
-      socket.addEventListener('close', onClose);
+      socket.once('open', onOpen);
+      socket.once('error', onError);
+      socket.once('close', onClose);
     });
   }
 
