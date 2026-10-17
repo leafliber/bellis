@@ -20,15 +20,15 @@ Stage 是运行在 OBS 浏览器源里的页面，负责播放音频、显示字
 - **连接**：WebSocket 服务端用 `ws`，以 `noServer` 方式在 HTTP 升级阶段认证（R-08）。音频用二进制消息，控制用文本消息；单条消息设上限，不用默认值。
 - **来源校验**：OBS 里的其他浏览器源和停靠面板也能访问本机端口，本机其他网页也可能经 DNS 重绑定找上门。因此（R-08）：
   - 每个 HTTP 请求与 WebSocket 升级都要求 `Host` 等于 `127.0.0.1:端口`。
-  - 脚本、AudioWorklet 模块等子资源与 WebSocket 升级还要求 `Origin` 等于 `http://127.0.0.1:端口`，缺少即拒绝。
+  - 脚本、AudioWorklet 模块、样式表等子资源与 WebSocket 升级还要求 `Origin` 等于 `http://127.0.0.1:端口`，缺少即拒绝。样式表默认以 no-cors 方式请求、不带 `Origin`，页面里的 `<link>` 因此加 `crossorigin` 属性。
   - 页面文档本身是顶层导航，浏览器不为它带 `Origin`（OBS 32.2.x 中已确认，刷新时 `Sec-Fetch-Site` 为 `same-origin`，初次加载与改 URL 时为 `none`），只在 `Sec-Fetch-Mode` 为 `navigate` 且 `Sec-Fetch-Dest` 为 `document` 时放行。文档是静态的，不含任何秘密，令牌在 URL 片段里不随请求发出；别的网页把它嵌进 iframe 时 `Sec-Fetch-Dest` 为 `iframe`，仍被拒绝。
 - **会话令牌**：浏览器源的 URL 以明文存在场景集合里，`GetInputSettings` 也能读出，因此 URL 里只放一次性令牌：
-  - 宿主启动时以及每次重新下发时，生成 128 位、短时效的一次性令牌，经 obs-websocket 的 `SetInputSettings` 写进 URL 的片段（`#` 之后，不会出现在 HTTP 请求与日志里）。
-  - 页面读出令牌后立即用 `history.replaceState` 从地址中去掉，以首条 WebSocket 消息出示，换取只存于内存的会话密钥。
+  - 宿主启动时以及每次重新下发时，生成 128 位、短时效的一次性令牌，经 OBS 控制写进 URL 的片段（`#` 之后，不会出现在 HTTP 请求与日志里）。宿主启动时处于安全停止，这一步是安全停止下唯一允许的动作（见[安全核](safety-core.md#监督模式)）。
+  - 页面读出令牌后立即用 `history.replaceState` 从地址中去掉，以首条 WebSocket 消息出示，换取只存于内存的会话密钥。连接断开后，页面在时限内用会话密钥重连；超过时限，宿主重新下发 URL。
   - 同时只允许一个已认证会话，第二个升级请求直接拒绝；心跳超时回收半开连接。
-  - 页面刷新会重放已用过的令牌而被拒；宿主据此限频重新下发 URL。
+  - 刷新浏览器源时，OBS 32.2.x 重新加载的是已去掉片段的地址，页面没有令牌，照样以首条消息报到；宿主拒绝并限频重新下发 URL。重放用过的令牌同样被拒并重新下发。
   - 页面不在 localStorage、IndexedDB 中保存任何密钥：OBS 的全部浏览器源共用一个浏览器配置。
-- **播放**：PCM 经 MessagePort 送入 AudioWorklet 的环形缓冲，不依赖 SharedArrayBuffer（它要求跨源隔离，在 OBS 浏览器源中是否可用由 S-01 验证）。欠载时补零，但补零不推进播放游标。
+- **播放**：PCM 经 MessagePort 送入 AudioWorklet 的缓冲，不依赖 SharedArrayBuffer（它要求跨源隔离，在 OBS 浏览器源中是否可用由 S-01 验证）。页面按句把 PCM 线性插值重采样到 AudioContext 的采样率（OBS 32.2.2 中为 192kHz），游标仍按原始采样数回报。欠载时补零，但补零不推进播放游标。
 - **令牌校验**：页面只播放带当前许可令牌的音频；令牌变更后，旧令牌的缓冲立即丢弃。令牌消息带许可时长，续约时重发；页面在时长内收不到续约即视为许可过期，自行停止并清空缓冲。
 - **计时**：许可时长与心跳超时都在 AudioWorklet 里按已渲染的样本帧计时，不用页面定时器：来源隐藏时 Chromium 会把定时器节流到每秒一次，隐藏且无声 5 分钟后再降到每分钟一次（[Chrome 定时器节流](https://developer.chrome.com/blog/timer-throttling-in-chrome-88)）。
 - **播放游标**：页面回报每句的实际开始、已播采样数、结束与截断（定义见[发声](speech.md#播放游标与写回)）。字幕与口型随游标推进，而不是随文本到达或墙钟推进。游标是页面渲染的样本数，不含 OBS 自身的音频缓冲与同步偏移，也反映不了 OBS 侧的静音或来源不在节目场景中。`getOutputTimestamp()` 在 OBS 接管音频时究竟对应哪个时钟，由 S-01 实测；与推流混音之间的偏差在 OBS 录制回环中校准。
@@ -38,7 +38,7 @@ Stage 是运行在 OBS 浏览器源里的页面，负责播放音频、显示字
 
 ## OBS 控制
 
-- 只执行别的插件已授权的意图，不自己决定做什么；意图的载荷就是动作。动作与意图须申请的能力：切场景 `obs.scene`，静音源 `obs.audio`，写来源设置 `obs.source`。三者都不允许来自不可信输入（见[安全核](safety-core.md#执行闸门)的 Rule of Two）；意图没有申请对应能力时不执行。
+- 只执行别的插件已授权的意图，不自己决定做什么；意图的载荷就是动作。动作与意图须申请的能力：切场景 `obs.scene`，静音源 `obs.audio`，写来源设置 `obs.source`，写 Stage URL `obs.stage-url`（只写急停时静音的那个 Stage 源的 `url`，安全停止下也能执行）。这些都不允许来自不可信输入（见[安全核](safety-core.md#执行闸门)的 Rule of Two）；意图没有申请对应能力时不执行。
 - 每个动作执行时取得 `obs.control` 资源的执行许可，发出请求前再核对一次令牌，完成后交还；动作逐个执行。安全停止与维护态下拿不到许可，因此什么都不做。
 - 用自己的 obs-websocket 连接，由宿主建立并交出已认证的连接：凭据不进插件，只有被授予 `obs.control` 权限的实例能连接。
 
@@ -48,7 +48,7 @@ Stage 是运行在 OBS 浏览器源里的页面，负责播放音频、显示字
 - 不开启“Shutdown source when not visible”和“Refresh browser when scene becomes active”，避免切场景时页面被卸载或重载；页面权限设为不授予任何 OBS 访问权限。
 - Win11 曾因忽略被遮挡且无声进程的定时器精度请求，导致浏览器源音频失真（[obs-studio #7588](https://github.com/obsproject/obs-studio/issues/7588)、[obs-browser #406](https://github.com/obsproject/obs-browser/issues/406)）。OBS 31.1 已修复（[obs-browser #484](https://github.com/obsproject/obs-browser/pull/484)），32.2.x 包含此修复；长时间运行的表现仍由 S-01 实测。
 - 基线版本 OBS 32.2.x（D-24）；OBS 与浏览器内核版本写进 Stage 握手，便于对照兼容矩阵。迁移到 OBS 33 前须复测页面导航或刷新后声音仍只经 OBS：33 的测试版曾有此后绕过 OBS 的缺陷（[obs-browser 修复](https://github.com/obsproject/obs-browser/commit/de7e68f33f76f76312ea4c2237ca3c8f809de363)），否则急停的静音会失效。
-- 安全场景与静音目标在配置中固定，开播预检确认它们存在。
+- 安全场景与静音目标在配置中固定，开播预检确认它们存在、浏览器源的上述设置无误，并确认安全场景里不含 Stage 源。
 
 ## 形象
 

@@ -1,5 +1,11 @@
 import type { Clock, TimerHandle } from '@bellis/kernel';
-import { type EmergencyOutcome, type EmergencyPolicy, ObsClient, runEmergency } from '@bellis/obs';
+import {
+  type EmergencyOutcome,
+  type EmergencyPolicy,
+  inspectObsTargets,
+  ObsClient,
+  runEmergency,
+} from '@bellis/obs';
 
 /** 安全核执行急停动作的 OBS 通道。 */
 export interface EmergencyObs {
@@ -53,6 +59,16 @@ export class ObsEmergencyConnection implements EmergencyObs {
   async run(policy: EmergencyPolicy): Promise<EmergencyOutcome> {
     const client = this.ready ? (this.#client as ObsClient) : await this.#connect();
     return runEmergency(client, policy);
+  }
+
+  /** 开播预检：只读核对应急目标（见 inspectObsTargets）。不可用时以失败项返回。 */
+  async inspect(policy: EmergencyPolicy): Promise<string[]> {
+    try {
+      const client = this.ready ? (this.#client as ObsClient) : await this.#connect();
+      return await inspectObsTargets(client, policy);
+    } catch (error) {
+      return [`OBS 预检失败：${(error as Error).message}`];
+    }
   }
 
   close(): void {

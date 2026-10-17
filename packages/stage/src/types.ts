@@ -30,6 +30,10 @@ export type FromPage =
 
 /** Stage 服务与页面之间的链路。 */
 export interface PageLink {
+  /**
+   * 页面是否已连上并认证。真实页面在 OBS 加载 URL 之前为 false；模拟页面不提供，视为一直就绪。
+   */
+  readonly ready?: boolean;
   send(message: ToPage): void;
   onMessage(listener: (message: FromPage) => void): () => void;
 }
@@ -51,6 +55,8 @@ export interface PlaybackResult {
 }
 
 export interface Stage {
+  /** 页面是否已连上并认证（开播预检用）。模拟页面一直就绪。 */
+  readonly ready: boolean;
   /**
    * 播放一句：只在许可令牌有效时转发音频，令牌失效即停止转发并要求页面截断。
    * 结果来自页面的回报；页面无响应时以 Stage 不可用结束。

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { catalog, definePlugin, Kernel, type ResolvedEntry, systemClock } from '@bellis/kernel';
 import { ObsClient, SimObs } from '@bellis/obs';
-import { type Decision, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
+import { type Decision, SafetyCore, SafetyService, STAGE_URL, safetyFacade } from '@bellis/safety';
 import { type Intent, StateStore } from '@bellis/store';
 import Type from 'typebox';
 import {
@@ -37,8 +37,8 @@ async function setup() {
     clock,
     config: {
       simulation: false,
-      leaseTtlMs: { [OBS_CONTROL]: 2000 },
-      leaseCapabilities: { [OBS_CONTROL]: 'obs.control' },
+      leaseTtlMs: { [OBS_CONTROL]: 2000, [STAGE_URL]: 2000 },
+      leaseCapabilities: { [OBS_CONTROL]: 'obs.control', [STAGE_URL]: 'obs.control' },
       presenceTtlMs: 60_000,
       rateLimits: {},
       guardTimeoutMs: 200,
@@ -91,7 +91,7 @@ async function setup() {
   kernel.add(
     [
       entry('obs', 'obs-control', ['obs.control']),
-      entry('caller', 'obs-caller', ['obs.scene', 'obs.audio', 'obs.source']),
+      entry('caller', 'obs-caller', ['obs.scene', 'obs.audio', 'obs.source', STAGE_URL]),
     ],
     catalog(obsControl, callerPlugin),
   );
@@ -203,6 +203,29 @@ test('含不可信输入的意图不能申请任何 OBS 管理能力', async () 
       const decision = await s.caller().authorize(action, [capability], true);
       assert.equal(decision.allowed, false);
     }
+  } finally {
+    await s.close();
+  }
+});
+
+test('安全停止下只能写 Stage URL：只写急停静音的那个 Stage 源，其它动作与混合申请都被拒', async () => {
+  const s = await setup();
+  try {
+    assert.equal(s.core.mode, 'safe-stop');
+    const url: ObsAction = { kind: 'stage-url', url: 'http://127.0.0.1:2/#token' };
+    const written = await s.caller().run(await s.authorized(url, [STAGE_URL]), url);
+    assert.equal(written.state, 'succeeded');
+    assert.equal(s.obs.inputSettings.get('Stage')?.url, 'http://127.0.0.1:2/#token');
+
+    const scene: ObsAction = { kind: 'scene', sceneName: 'Game' };
+    assert.equal((await s.caller().authorize(scene, ['obs.scene'])).allowed, false);
+    assert.equal((await s.caller().authorize(url, [STAGE_URL, 'obs.scene'])).allowed, false);
+    assert.equal((await s.caller().authorize(url, [STAGE_URL], true)).allowed, false);
+
+    // 维护态中同样拒绝。
+    assert.ok(s.core.enterMaintenance().ok);
+    assert.equal((await s.caller().authorize(url, [STAGE_URL])).allowed, false);
+    assert.equal(s.obs.currentScene, 'Live');
   } finally {
     await s.close();
   }

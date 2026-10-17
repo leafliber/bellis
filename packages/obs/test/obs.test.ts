@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ObsClient, runEmergency, SimObs } from '../src/index.ts';
+import { inspectObsTargets, ObsClient, runEmergency, SimObs } from '../src/index.ts';
 
 const policy = { stageSource: 'Stage', safeScene: 'Safe', stopStream: true };
 
@@ -78,4 +78,31 @@ test('批量结果缺失或对不上时，应急结果为失败', async () => {
   assert.equal((await runEmergency(fake, policy)).ok, false);
   const empty = { batch: async () => [] } as unknown as Parameters<typeof runEmergency>[0];
   assert.equal((await runEmergency(empty, policy)).ok, false);
+});
+
+test('开播预检核对应急目标：安全场景与 Stage 源存在、浏览器源设置正确、安全场景不含 Stage 源', async () => {
+  const policy = { stageSource: 'Stage', safeScene: 'Safe', stopStream: false };
+  const good = await SimObs.start({ inputSettings: { Stage: { reroute_audio: true } } });
+  const bad = await SimObs.start({
+    scenes: ['Live', 'Safe'],
+    inputSettings: { Stage: { shutdown: true, restart_when_active: true } },
+    sceneItems: { Live: ['Stage'], Safe: ['Stage'] },
+  });
+  const missing = await SimObs.start({ scenes: ['Live'], inputs: ['Other'] });
+  const clients = await Promise.all(
+    [good, bad, missing].map((obs) => ObsClient.connect(obs.url, undefined)),
+  );
+  try {
+    const [ok, wrong, absent] = await Promise.all(
+      clients.map((client) => inspectObsTargets(client, policy)),
+    );
+    assert.deepEqual(ok, []);
+    assert.equal(wrong?.length, 4);
+    assert.ok(wrong?.some((f) => f.includes('Control audio via OBS')));
+    assert.ok(wrong?.some((f) => f.includes('安全场景「Safe」里含有')));
+    assert.deepEqual(absent, ['OBS 中没有安全场景「Safe」', 'OBS 中没有 Stage 源「Stage」']);
+  } finally {
+    for (const client of clients) client.close();
+    await Promise.all([good, bad, missing].map((obs) => obs.close()));
+  }
 });

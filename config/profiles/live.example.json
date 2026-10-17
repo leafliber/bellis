@@ -12,12 +12,38 @@
       ]
     },
     {
+      "name": "stage",
+      "entries": [
+        {
+          "id": "stage-page",
+          "plugin": "stage-page-obs",
+          "grant": ["obs.stage-url"]
+        },
+        {
+          "id": "stage",
+          "plugin": "stage-service"
+        }
+      ]
+    },
+    {
       "name": "moderation",
       "entries": [
         {
           "id": "moderation",
           "plugin": "moderation",
           "disabled": true
+        }
+      ]
+    },
+    {
+      "name": "speech",
+      "entries": [
+        {
+          "id": "review",
+          "plugin": "speech-review",
+          "config": {
+            "delayMs": 3000
+          }
         }
       ]
     }

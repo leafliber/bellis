@@ -1,5 +1,5 @@
 import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
-import { SafetyService } from '@bellis/safety';
+import { producesOutput, SafetyService } from '@bellis/safety';
 import Type from 'typebox';
 import {
   type FromPage,
@@ -92,6 +92,11 @@ export const stageService = definePlugin({
 
     const beat = () => {
       timer = clock.setTimeout(beat, ctx.config.heartbeatMs);
+      // 真实页面还没连上（例如 OBS 尚未加载 URL）：安全停止下只算未就绪；输出模式下照常计时，超时即失败。
+      if (page.ready === false && !producesOutput(safety.mode)) {
+        lastAck = clock.now();
+        return;
+      }
       if (clock.now() - lastAck > ctx.config.pageTimeoutMs) {
         for (const [id, entry] of [...playing]) {
           finish(id, {
@@ -121,6 +126,9 @@ export const stageService = definePlugin({
     });
 
     const stage: Stage = {
+      get ready() {
+        return page.ready !== false;
+      },
       async play(sentence, audio, token) {
         if (!safety.isValid(STAGE_AUDIO, token)) {
           return { sentenceId: sentence.id, played: 0, complete: false, reason: '许可无效' };

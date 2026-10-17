@@ -86,11 +86,18 @@ export interface SafetyOptions {
   log?(event: string, fields: Record<string, unknown>): void;
 }
 
+/**
+ * 安全停止下唯一允许的动作：把会话令牌写进 Stage 浏览器源的 URL。只申请这一能力的意图、
+ * 这一资源的许可，在安全停止下照常判定与授予；维护态与存储不可用时仍拒绝（见安全核“监督模式”）。
+ */
+export const STAGE_URL = 'obs.stage-url';
+
 /** 含不可信输入的意图永远不能申请的能力（Rule of Two）。 */
 const UNTRUSTED_FORBIDDEN = new Set([
   'obs.scene',
   'obs.audio',
   'obs.source',
+  STAGE_URL,
   'obs.stream',
   'secret.read',
   'memory.private',
@@ -151,6 +158,11 @@ export class SafetyCore {
     return this.#maintenance;
   }
 
+  /** 急停时静音的 Stage 源，也是写 Stage URL 唯一允许的目标。 */
+  get stageSource(): string {
+    return this.#config.emergency.stageSource;
+  }
+
   get moderationEnabled(): boolean | undefined {
     return this.#moderation;
   }
@@ -198,7 +210,9 @@ export class SafetyCore {
   }
 
   async #denial(request: IntentRequest): Promise<string | undefined> {
-    const immediate = this.#outputBlocker();
+    const stageUrlOnly =
+      request.capabilities.length > 0 && request.capabilities.every((c) => c === STAGE_URL);
+    const immediate = this.#outputBlocker(stageUrlOnly);
     if (immediate) return immediate;
     const granted = this.#permissionsOf(request.holder);
     if (!granted) return `未知的意图来源 ${request.holder}`;
@@ -231,12 +245,14 @@ export class SafetyCore {
       if (verdict && typeof verdict.deny === 'string') return verdict.deny;
     }
     // 守卫可能是异步的：判定期间若进入了安全停止，同样拒绝。
-    return this.#outputBlocker();
+    return this.#outputBlocker(stageUrlOnly);
   }
 
-  #outputBlocker(): string | undefined {
+  /** `stageUrl` 为 true 时是写 Stage URL：安全停止下放行，维护态仍拒绝。 */
+  #outputBlocker(stageUrl = false): string | undefined {
     if (!this.#store.healthy) return '状态存储不可用';
-    if (!producesOutput(this.#mode)) return '安全停止中，不产生新输出';
+    if (!producesOutput(this.#mode) && !(stageUrl && !this.#maintenance))
+      return '安全停止中，不产生新输出';
     if (this.#maintenance) return '维护态中';
     return undefined;
   }
@@ -255,7 +271,7 @@ export class SafetyCore {
   // ---------------------------------------------------------------- 执行许可
 
   grant(holder: string, resource: string): LeaseResult {
-    const blocked = this.#outputBlocker();
+    const blocked = this.#outputBlocker(resource === STAGE_URL);
     if (blocked) return { ok: false, reason: blocked };
     const capability = this.#config.leaseCapabilities[resource];
     if (!capability) return { ok: false, reason: `资源 ${resource} 没有配置所需能力` };
@@ -270,7 +286,7 @@ export class SafetyCore {
   }
 
   renew(lease: Lease): LeaseResult {
-    const blocked = this.#outputBlocker();
+    const blocked = this.#outputBlocker(lease.resource === STAGE_URL);
     if (blocked) return { ok: false, reason: blocked };
     try {
       return { ok: true, lease: this.leases.renew(lease) };
@@ -319,11 +335,17 @@ export class SafetyCore {
     }
   }
 
+  /** 操作员否决 M1 中等待放行的句子（key 为空时否决全部），经控制通道送到持有它们的插件。 */
+  veto(key: string | undefined): void {
+    this.control.broadcast({ kind: 'veto', key, reason: '操作员否决' });
+  }
+
   // ---------------------------------------------------------------- 监督模式
 
   /** 操作员切换模式。升级须满足目标模式的前置条件；切到安全停止走急停路径。 */
-  requestMode(target: Mode): { ok: true } | { ok: false; reason: string } {
-    const blocker = upgradeBlocker(this.#mode, target, {
+  /** 切换到目标模式的前置条件是否满足（不切换、不记录）；满足时返回 undefined。 */
+  modeBlocker(target: Mode): string | undefined {
+    return upgradeBlocker(this.#mode, target, {
       simulation: this.#config.simulation,
       maintenance: this.#maintenance,
       storeHealthy: this.#store.healthy,
@@ -333,6 +355,10 @@ export class SafetyCore {
       moderationEnabled: this.#moderation,
       unattendedGatesSatisfied: this.#config.unattendedGatesSatisfied,
     });
+  }
+
+  requestMode(target: Mode): { ok: true } | { ok: false; reason: string } {
+    const blocker = this.modeBlocker(target);
     if (blocker) {
       this.#record('supervision.refused', { from: this.#mode, to: target, reason: blocker });
       return { ok: false, reason: blocker };
