@@ -13,6 +13,7 @@
 - `pnpm run format`：自动修正格式。
 - `pnpm start [配置文件]`：在本机运行启动器（拉起宿主与看门狗，缺省用 `config/sim.json`），Ctrl+C 停止。接真实 OBS 用 `pnpm start config/live.json`；真实配置与 profile 从对应的 `*.example.json` 复制，不入库。
 - `pnpm secret <list | set 名字 | delete 名字>`：维护者录入凭据，例如 `pnpm secret set obs`；值不回显、不打印，列出时只显示名字。Agent 不代为录入。
+- `pnpm autostart <register [配置文件] | unregister | status>`：维护者注册、注销、读回核对“登录时运行”的计划任务，只在 Windows 上可用，register 缺省用 `config/live.json`；详见 [Windows 平台](docs/platform/windows.md#登录时运行)。它改动的是本机的持久系统配置，Agent 不代为运行。
 - `pnpm operator <status | mode 目标 | presence | estop | veto [句键] | preflight [目标]>`：操作员命令，例如 `pnpm operator mode M0`。
 - `pnpm sim [--seed N] [--runs N]`：确定性仿真的大规模探索；失败时给出复现命令。
 
