@@ -1,6 +1,6 @@
 /**
  * 探针 S-05（宿主定时部分）：Node 定时器在 Windows 上的实际延迟分布（见 docs/plan/spikes.md）。
- * sidecar 推理在 EcoQoS 前后的时延另测，需要 Python sidecar 工具链。
+ * sidecar 推理在 EcoQoS 前后的时延见 spikes/s05-sidecar.ts。
  *
  *   node spikes/s05-timers.ts [--samples N] [--interval-seconds S] [--load N] [--spawned] [--out 结果文件]
  *     --samples           每个目标延迟的 setTimeout 样本数（缺省 200）
