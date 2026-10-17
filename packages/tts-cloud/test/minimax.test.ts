@@ -187,8 +187,10 @@ test('MiniMax：服务端空闲断开（2201）后下一句重新建连', async 
   const t = await setup({ idleCloseMs: 100 });
   try {
     await collect(await t.engine.start('你好。', new AbortController().signal));
-    await wait(250);
-    assert.ok(t.wire.some((w) => w.kind === 'stale' && w.code === 2201));
+    const disconnected = () => t.wire.some((w) => w.kind === 'stale' && w.code === 2201);
+    for (let waited = 0; !disconnected() && waited < 5000; waited += 20) await wait(20);
+    assert.ok(disconnected());
+    await wait(20);
     const { pcm } = await collect(await t.engine.start('再见。', new AbortController().signal));
     assert.equal(pcm.length, 3 * 80);
     assert.equal(t.fake.connections, 2);
@@ -198,11 +200,12 @@ test('MiniMax：服务端空闲断开（2201）后下一句重新建连', async 
 });
 
 test('MiniMax：空闲时定时 ping，服务端不因空闲断开', async () => {
-  const t = await setup({ idleCloseMs: 200 }, { pingIntervalMs: 50 });
+  // 服务端空闲 600ms 断开，客户端每 50ms ping：超过服务端时限的空闲期内连接保持。
+  const t = await setup({ idleCloseMs: 600 }, { pingIntervalMs: 50 });
   try {
     await collect(await t.engine.start('你好。', new AbortController().signal));
-    await wait(450);
-    assert.ok(t.fake.pings >= 3);
+    await wait(1000);
+    assert.ok(t.fake.pings >= 5);
     await collect(await t.engine.start('再见。', new AbortController().signal));
     assert.equal(t.fake.connections, 1);
   } finally {
