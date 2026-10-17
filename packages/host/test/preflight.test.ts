@@ -19,6 +19,7 @@ const ready: PreflightInputs = {
   target: 'M1',
   plugins: [plugin('stage', 'active'), plugin('moderation', 'waiting', false)],
   stageReady: true,
+  avatar: { ready: true, status: '就绪' },
   moderationEnabled: false,
   reviewPresent: true,
   inspectObs: async () => [],
@@ -26,6 +27,17 @@ const ready: PreflightInputs = {
 
 test('开播预检：全部就绪时没有未通过项', async () => {
   assert.deepEqual(await preflight(ready), []);
+});
+
+test('开播预检：形象在场但未就绪时列出状态；profile 不含形象时不作要求', async () => {
+  assert.deepEqual(
+    await preflight({
+      ...ready,
+      avatar: { ready: false, status: '参数 MouthOpen 已被其他插件占用' },
+    }),
+    ['形象未就绪（参数 MouthOpen 已被其他插件占用）'],
+  );
+  assert.deepEqual(await preflight({ ...ready, avatar: undefined }), []);
 });
 
 test('开播预检：插件未就绪、Stage 未认证、审核开关未设置、M1 缺放行环节、OBS 目标不对都列出', async () => {

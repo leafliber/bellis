@@ -7,6 +7,11 @@ export interface PreflightInputs {
   plugins: readonly EntrySnapshot[];
   /** Stage 服务是否在场、页面是否已认证；没有 Stage 服务时为 undefined。 */
   stageReady: boolean | undefined;
+  /**
+   * 形象是否就绪（已连上 VTube Studio 并认证、嘴型参数可写）与状态说明；profile 不含形象时为 undefined，
+   * 不作要求（profile 中启用了形象却没激活，由插件状态一项报告）。
+   */
+  avatar: { ready: boolean; status: string } | undefined;
   /** 审核插件的开关；未显式设置时为 undefined。 */
   moderationEnabled: boolean | undefined;
   /** M1 的逐句放行环节是否在场。 */
@@ -29,6 +34,7 @@ export async function preflight(inputs: PreflightInputs): Promise<string[]> {
   }
   if (inputs.stageReady === undefined) failures.push('Stage 服务不在场');
   else if (!inputs.stageReady) failures.push('Stage 页面尚未认证');
+  if (inputs.avatar && !inputs.avatar.ready) failures.push(`形象未就绪（${inputs.avatar.status}）`);
   if (inputs.moderationEnabled === undefined)
     failures.push('审核插件的开关没有在 profile 中显式设置');
   if (inputs.target === 'M1' && !inputs.reviewPresent)

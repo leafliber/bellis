@@ -1,4 +1,5 @@
 import { danmakuReplay, triage } from '@bellis/audience';
+import { vtsAvatar } from '@bellis/avatar';
 import { director, replayLlm } from '@bellis/director';
 import { catalog } from '@bellis/kernel';
 import { moderation, simModerationModel } from '@bellis/moderation';
@@ -21,4 +22,5 @@ export const builtinPlugins = catalog(
   danmakuReplay,
   director,
   replayLlm,
+  vtsAvatar,
 );

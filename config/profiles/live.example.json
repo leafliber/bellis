@@ -26,6 +26,20 @@
       ]
     },
     {
+      "name": "avatar",
+      "entries": [
+        {
+          "id": "avatar",
+          "plugin": "avatar-vts",
+          "grant": ["secret:vts"],
+          "config": {
+            "url": "ws://127.0.0.1:8001",
+            "expressions": {}
+          }
+        }
+      ]
+    },
+    {
       "name": "moderation",
       "entries": [
         {

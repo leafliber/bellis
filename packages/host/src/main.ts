@@ -3,6 +3,7 @@
  * 装配顺序：状态存储（并恢复）→ OBS 应急连接 → 安全核 → 插件内核 → 按 profile 加载插件；之后向看门狗发送心跳。
  * 启动后总处于安全停止，由操作员显式切换模式。
  */
+import { type Avatar, AvatarService } from '@bellis/avatar';
 import { listen, RpcPeer } from '@bellis/channel';
 import {
   loadConfig,
@@ -226,10 +227,15 @@ logEvent('host.ready', { pid: process.pid, ppid: process.ppid, mode: core.mode }
 function runPreflight(target: 'M1' | 'M2' | 'M3'): Promise<string[]> {
   const stage = host.services.resolve(StageService.name, StageService.major);
   const review = host.services.resolve(ReviewService.name, ReviewService.major);
+  const avatar = host.services.resolve(AvatarService.name, AvatarService.major);
   return preflight({
     target,
     plugins: host.snapshot(),
     stageReady: 'missing' in stage ? undefined : (stage.impl as Stage).ready,
+    avatar:
+      'missing' in avatar
+        ? undefined
+        : { ready: (avatar.impl as Avatar).ready, status: (avatar.impl as Avatar).status },
     moderationEnabled: core.moderationEnabled,
     reviewPresent: !('missing' in review),
     inspectObs: () => emergency.inspect(config.safety.emergency),

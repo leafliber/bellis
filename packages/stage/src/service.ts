@@ -1,6 +1,7 @@
 import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
 import { producesOutput, SafetyService } from '@bellis/safety';
 import Type from 'typebox';
+import { EnvelopeBuilder } from './envelope.ts';
 import {
   type FromPage,
   type PlaybackResult,
@@ -13,11 +14,13 @@ import {
 interface Playing {
   resolve(result: PlaybackResult): void;
   played: number;
+  envelope: EnvelopeBuilder;
 }
 
 /**
  * Stage 服务（关键平面）：只转发带有效 Stage 音频输出许可令牌的音频，把令牌变化告诉页面，
  * 定时发心跳；页面在截止时间内不应答心跳即报告失败，由安全核走急停路径（D-30）。
+ * 转发音频时按句计算响度包络，供形象驱动口型。
  */
 export const stageService = definePlugin({
   manifest: {
@@ -32,6 +35,8 @@ export const stageService = definePlugin({
       heartbeatMs: Type.Integer({ minimum: 1, default: 250 }),
       /** 超过这么久收不到页面的心跳应答，视为 Stage 不可用。 */
       pageTimeoutMs: Type.Integer({ minimum: 1, default: 1000 }),
+      /** 响度包络的窗口长度，按原始采样率折算成采样数。 */
+      envelopeWindowMs: Type.Integer({ minimum: 5, maximum: 100, default: 20 }),
     }),
   },
   activate(ctx) {
@@ -133,8 +138,9 @@ export const stageService = definePlugin({
         if (!safety.isValid(STAGE_AUDIO, token)) {
           return { sentenceId: sentence.id, played: 0, complete: false, reason: '许可无效' };
         }
+        const envelope = new EnvelopeBuilder(sentence.sampleRate, ctx.config.envelopeWindowMs);
         const result = new Promise<PlaybackResult>((resolve) => {
-          playing.set(sentence.id, { resolve, played: 0 });
+          playing.set(sentence.id, { resolve, played: 0, envelope });
         });
         page.send({
           kind: 'begin',
@@ -155,10 +161,13 @@ export const stageService = definePlugin({
                 page.send({ kind: 'truncate', sentenceId: sentence.id });
                 break;
               }
+              envelope.push(next.value);
               page.send({ kind: 'audio', sentenceId: sentence.id, token, pcm: next.value });
             }
-            if (playing.has(sentence.id))
+            if (playing.has(sentence.id)) {
+              envelope.finish();
               page.send({ kind: 'end', sentenceId: sentence.id, token });
+            }
           } catch (error) {
             const entry = playing.get(sentence.id);
             finish(sentence.id, {
@@ -180,6 +189,9 @@ export const stageService = definePlugin({
       onEvent(listener) {
         listeners.add(listener);
         return () => listeners.delete(listener);
+      },
+      envelope(sentenceId) {
+        return playing.get(sentenceId)?.envelope;
       },
     };
     ctx.provide(StageService, stage);

@@ -1,4 +1,5 @@
 import { defineService } from '@bellis/kernel';
+import type { Envelope } from './envelope.ts';
 
 /** Stage 音频输出许可对应的资源名。 */
 export const STAGE_AUDIO = 'stage.audio';
@@ -68,6 +69,11 @@ export interface Stage {
   ): Promise<PlaybackResult>;
   truncate(sentenceId: string): void;
   onEvent(listener: (event: FromPage) => void): () => void;
+  /**
+   * 还在 Stage 上（排队或播放中）的句子的响度包络，随音频转发逐步增长，形象据此驱动口型。
+   * 句子播完、被截断或不在 Stage 上时为 undefined。
+   */
+  envelope(sentenceId: string): Envelope | undefined;
 }
 
 export const StageService = defineService<Stage>('stage', 1);
