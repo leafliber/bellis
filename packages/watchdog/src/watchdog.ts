@@ -2,7 +2,14 @@ import { once } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { connect, RpcPeer } from '@bellis/channel';
 import { type EmergencyPolicy, ObsClient, runEmergency } from '@bellis/obs';
-import { HostHeartbeat, HostStopping, type ObsSecret, Role } from '@bellis/protocol';
+import {
+  HostHeartbeat,
+  HostStopping,
+  type ObsSecret,
+  Role,
+  WatchdogActed,
+  type WatchdogActedParams,
+} from '@bellis/protocol';
 
 export interface WatchdogOptions {
   channelPath: string;
@@ -20,11 +27,15 @@ export interface WatchdogOptions {
  * 以 `watchdog` 角色连接宿主并接收心跳；心跳超时或连接意外断开时，用一次 RequestBatch
  * 静音 Stage 源、切到安全场景（按策略停推流），然后呼叫操作员。宿主计划内停止不触发。
  * 执行过一次后，直到再次收到心跳才会重新武装，避免反复动作。
+ * 执行后通知宿主（`watchdog.acted`）：连接还在（宿主卡死）就在原连接上发，宿主恢复后读到；
+ * 连接已断开则在重连后补报。
  */
 export class Watchdog {
   readonly #options: WatchdogOptions;
   #obs: ObsClient | undefined;
   #obsConnecting: Promise<ObsClient> | undefined;
+  #host: RpcPeer | undefined;
+  #unreported: WatchdogActedParams | undefined;
   #acted = false;
   #stopped = false;
 
@@ -56,10 +67,10 @@ export class Watchdog {
         let timer: NodeJS.Timeout | undefined;
         const arm = () => {
           clearTimeout(timer);
-          timer = setTimeout(() => {
-            void this.#act('heartbeat-lost');
-            connection.destroy();
-          }, this.#options.heartbeatTimeoutMs);
+          timer = setTimeout(
+            () => void this.#act('heartbeat-lost'),
+            this.#options.heartbeatTimeoutMs,
+          );
         };
         rpc.onNotification(HostHeartbeat, () => {
           this.#acted = false;
@@ -70,8 +81,11 @@ export class Watchdog {
           clearTimeout(timer);
         });
         arm();
+        this.#host = rpc;
         log('watchdog.connected');
+        this.#report();
         await once(connection, 'close');
+        this.#host = undefined;
         clearTimeout(timer);
         if (planned) {
           log('watchdog.host-stopped');
@@ -89,20 +103,38 @@ export class Watchdog {
     }
   }
 
-  async #act(reason: string): Promise<void> {
+  async #act(reason: WatchdogActedParams['reason']): Promise<void> {
     if (this.#acted || this.#stopped) return;
     this.#acted = true;
     const { log } = this.#options;
     log('watchdog.acting', { reason });
+    let ok = false;
     try {
       const client = await this.#ensureObs();
       const outcome = await runEmergency(client, this.#options.policy);
-      log('watchdog.acted', { reason, ok: outcome.ok, results: outcome.results });
+      ok = outcome.ok;
+      log('watchdog.acted', { reason, ok, results: outcome.results });
     } catch (error) {
       log('watchdog.act-failed', { reason, error: (error as Error).message });
     }
-    // 呼叫操作员的渠道待定；P0 先记录事件。
+    // 呼叫操作员的渠道待定；先记录事件。
     log('watchdog.paged', { reason });
+    this.#unreported = { reason, ok, actedAt: new Date().toISOString() };
+    this.#report();
+  }
+
+  /** 把未报告的应急动作告诉宿主；没有可用连接时留到下次连上。 */
+  #report(): void {
+    const report = this.#unreported;
+    const host = this.#host;
+    if (!report || !host?.connection.isOpen) return;
+    try {
+      host.notify(WatchdogActed, report);
+    } catch {
+      return;
+    }
+    this.#unreported = undefined;
+    this.#options.log('watchdog.reported', { ...report });
   }
 
   #ensureObs(): Promise<ObsClient> {

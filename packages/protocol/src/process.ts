@@ -68,6 +68,23 @@ export const HostHeartbeatParams = Type.Object(
 );
 export type HostHeartbeatParams = Static<typeof HostHeartbeatParams>;
 
+/**
+ * 看门狗执行过应急动作后通知宿主，宿主据此进入安全停止并记录事件（R-14）。
+ * 连接还在（宿主卡死）时立即发送，宿主恢复后读到；连接已断开时在重连后补报。
+ */
+export const WatchdogActed = 'watchdog.acted';
+
+export const WatchdogActedParams = Type.Object(
+  {
+    reason: Type.Union([Type.Literal('heartbeat-lost'), Type.Literal('connection-lost')]),
+    /** OBS 是否确认了全部应急请求。 */
+    ok: Type.Boolean(),
+    actedAt: Type.String({ format: 'date-time' }),
+  },
+  closed,
+);
+export type WatchdogActedParams = Static<typeof WatchdogActedParams>;
+
 /** 启动器查询宿主状态，用于判断会话是否就绪（看门狗已连上宿主）。 */
 export const HostStatus = 'host.status';
 

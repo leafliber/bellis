@@ -35,5 +35,7 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: 0.11.11
+          # 缺省按一组通配符在整个仓库里找依赖文件算缓存键，会遍历 node_modules，Windows 上要十几分钟。
+          cache-dependency-glob: uv.lock
       - run: uv sync --locked
       - run: pnpm run check

@@ -120,3 +120,51 @@ test('关键平面在输出模式下意外停用时走急停', async () => {
     await s.close();
   }
 });
+
+test('看门狗报告已执行应急动作：输出模式下走急停进入安全停止，并记录事实', async () => {
+  const s = await setup();
+  try {
+    s.safety.requestMode('M1');
+    const granted = s.safety.grant('speaker#1', 'stage.audio');
+    assert.ok(granted.ok);
+    s.obs.currentScene = 'Live';
+    s.safety.watchdogActed({
+      reason: 'heartbeat-lost',
+      ok: true,
+      actedAt: new Date().toISOString(),
+    });
+    assert.equal(s.safety.mode, 'safe-stop');
+    assert.equal(s.safety.leases.isValid('stage.audio', granted.lease.token), false);
+    assert.equal(s.events('watchdog.acted').length, 1);
+    await s.safety.emergencyStop('等待前一次急停完成');
+    assert.equal(s.obs.currentScene, 'Safe');
+  } finally {
+    await s.close();
+  }
+});
+
+test('看门狗报告：已在安全停止时只记录；看门狗动作失败时用自己的应急连接再做一次', async () => {
+  const s = await setup();
+  try {
+    s.obs.currentScene = 'Live';
+    s.safety.watchdogActed({
+      reason: 'connection-lost',
+      ok: true,
+      actedAt: new Date().toISOString(),
+    });
+    assert.equal(s.events('watchdog.acted').length, 1);
+    assert.equal(s.events('safety.emergency-requested').length, 0);
+    assert.equal(s.obs.currentScene, 'Live');
+
+    s.safety.watchdogActed({
+      reason: 'connection-lost',
+      ok: false,
+      actedAt: new Date().toISOString(),
+    });
+    assert.equal(s.events('safety.emergency-requested').length, 1);
+    await s.safety.emergencyStop('等待前一次急停完成');
+    assert.equal(s.obs.currentScene, 'Safe');
+  } finally {
+    await s.close();
+  }
+});

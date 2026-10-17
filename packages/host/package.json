@@ -16,6 +16,7 @@
     "@bellis/protocol": "workspace:*",
     "@bellis/safety": "workspace:*",
     "@bellis/secret-store": "workspace:*",
+    "@bellis/stage": "workspace:*",
     "@bellis/store": "workspace:*",
     "typebox": "1.3.37"
   }

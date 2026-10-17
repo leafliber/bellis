@@ -68,6 +68,13 @@ export interface EmergencyReport {
   obs: { ok: boolean; error?: string };
 }
 
+/** 外部看门狗的应急动作报告。 */
+export interface WatchdogReport {
+  reason: string;
+  ok: boolean;
+  actedAt: string;
+}
+
 export interface SafetyOptions {
   store: StateStore;
   clock: Clock;
@@ -80,7 +87,14 @@ export interface SafetyOptions {
 }
 
 /** 含不可信输入的意图永远不能申请的能力（Rule of Two）。 */
-const UNTRUSTED_FORBIDDEN = new Set(['obs.scene', 'obs.stream', 'secret.read', 'memory.private']);
+const UNTRUSTED_FORBIDDEN = new Set([
+  'obs.scene',
+  'obs.audio',
+  'obs.source',
+  'obs.stream',
+  'secret.read',
+  'memory.private',
+]);
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -291,6 +305,18 @@ export class SafetyCore {
       if (!obs.ok) this.#log('safety.alarm', { reason: 'emergency-obs-failed', detail: obs.error });
       return { reason, revoked, obs };
     });
+  }
+
+  /**
+   * 外部看门狗报告已执行应急动作：记录事实，并走急停路径进入安全停止（R-14）。
+   * 已在安全停止时只记录；看门狗的 OBS 动作没有成功时，仍用自己的应急连接再做一次。
+   */
+  watchdogActed(report: WatchdogReport): void {
+    this.#record('watchdog.acted', { ...report });
+    this.#log('safety.alarm', { reason: 'watchdog-acted', report });
+    if (this.#mode !== 'safe-stop' || !report.ok) {
+      void this.emergencyStop(`外部看门狗已执行应急动作（${report.reason}）`);
+    }
   }
 
   // ---------------------------------------------------------------- 监督模式

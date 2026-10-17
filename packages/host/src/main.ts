@@ -14,6 +14,7 @@ import {
   SidecarHostService,
   systemClock,
 } from '@bellis/kernel';
+import { ObsClient } from '@bellis/obs';
 import { builtinPlugins } from '@bellis/plugins';
 import {
   channelCredentialsFromEnv,
@@ -30,9 +31,12 @@ import {
   OperatorMethod,
   OperatorModeParams,
   Role,
+  WatchdogActed,
+  WatchdogActedParams,
 } from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { KeyringSecretStore } from '@bellis/secret-store';
+import { OBS_CONTROL, ObsConnectorService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
 
@@ -46,9 +50,11 @@ const LOGGED_FACTS = new Set([
   'moderation.switched',
   'safety.emergency-requested',
   'safety.emergency-completed',
+  'watchdog.acted',
 ]);
 const isModeParams = Compile(OperatorModeParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
+const isWatchdogActed = Compile(WatchdogActedParams);
 
 const configPath = process.env[ChildEnv.Config];
 if (!configPath) throw new Error(`缺少环境变量 ${ChildEnv.Config}`);
@@ -83,11 +89,8 @@ logEvent('host.recovered', {
   orphaned: recovery.orphaned.map((i) => i.key),
 });
 
-const emergency = new ObsEmergencyConnection(
-  await readObsSecret(secrets, obsSecretName(config)),
-  clock,
-  logEvent,
-);
+const obsSecret = await readObsSecret(secrets, obsSecretName(config));
+const emergency = new ObsEmergencyConnection(obsSecret, clock, logEvent);
 await emergency.start();
 
 const peers = new Set<RpcPeer>();
@@ -122,6 +125,13 @@ const hub = new ChannelHub();
 host.provideCore(SidecarHostService, { credentials, hub });
 host.provideCore(ClockService, clock);
 host.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(core, instanceId));
+// OBS 控制的连接：凭据留在宿主装配代码里，只有被授予 obs.control 权限的实例能连接。
+host.provideScoped(ObsConnectorService, ({ instanceId, permissions }) => ({
+  connect: () =>
+    permissions.has(OBS_CONTROL)
+      ? ObsClient.connect(obsSecret.url, obsSecret.password, { timeoutMs: 2000 })
+      : Promise.reject(new Error(`${instanceId} 没有权限 ${OBS_CONTROL}`)),
+}));
 core.setModeration(!moderationEntry.disabled);
 host.add(entries, builtinPlugins);
 await host.settled();
@@ -154,6 +164,13 @@ const server = await listen(credentials.path, {
       rpc.handle(HostStatus, () => ({ watchdogConnected: watchdogs().length > 0 }));
     }
     if (connection.role === Role.Operator) serveOperator(rpc);
+    if (connection.role === Role.Watchdog) {
+      // 看门狗已静音并切了安全场景：宿主据此进入安全停止（断开即急停只是兜底）。
+      rpc.onNotification(WatchdogActed, (params) => {
+        if (isWatchdogActed.Check(params)) core.watchdogActed(params);
+        else logEvent('host.watchdog-report-invalid', {});
+      });
+    }
     logEvent('host.connection-accepted', { role: connection.role });
   },
   onRejected(error) {

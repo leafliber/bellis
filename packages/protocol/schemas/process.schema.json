@@ -155,6 +155,36 @@
         }
       },
       "additionalProperties": false
+    },
+    "WatchdogActedParams": {
+      "type": "object",
+      "required": [
+        "reason",
+        "ok",
+        "actedAt"
+      ],
+      "properties": {
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "heartbeat-lost"
+            },
+            {
+              "type": "string",
+              "const": "connection-lost"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "actedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

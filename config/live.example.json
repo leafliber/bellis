@@ -11,11 +11,13 @@
   "safety": {
     "leaseTtlMs": {
       "stage.audio": 2000,
-      "game.input": 500
+      "game.input": 500,
+      "obs.control": 2000
     },
     "leaseCapabilities": {
       "stage.audio": "speech.output",
-      "game.input": "game.input"
+      "game.input": "game.input",
+      "obs.control": "obs.control"
     },
     "presenceTtlMs": 600000,
     "rateLimits": {

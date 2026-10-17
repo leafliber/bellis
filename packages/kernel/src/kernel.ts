@@ -91,6 +91,8 @@ export type ReplaceResult = { ok: true } | { ok: false; error: string };
 export interface ServiceOwner {
   entryId: string;
   instanceId: string;
+  /** profile 授予该条目的权限。激活期间实例尚未登记，按实例编号查不到，工厂据此判断。 */
+  permissions: ReadonlySet<string>;
 }
 
 interface Instance {
@@ -722,7 +724,10 @@ export class Kernel {
       if (!found.scoped) return found.impl;
       if (!instance.scoped.has(token.name)) {
         const factory = found.impl as (owner: ServiceOwner) => unknown;
-        instance.scoped.set(token.name, factory({ entryId: entry.id, instanceId: instance.id }));
+        instance.scoped.set(
+          token.name,
+          factory({ entryId: entry.id, instanceId: instance.id, permissions: entry.grant }),
+        );
       }
       return instance.scoped.get(token.name);
     };
