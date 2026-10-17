@@ -2,7 +2,10 @@
  * P1 第 10 步的真机演练：开播预检逐项失败（P1 任务卡出口“开播预检任一项失败时无法进入 M1、M2”）
  * 与真实 Stage 页面的拒绝核对（出口“错误的 Host、Origin、重放的令牌与第二个会话都被拒绝”）。
  *
- *   node spikes/drill-preflight.ts --stage-source 名字 [--safe-scene Safe] [--out 结果文件]
+ *   node spikes/drill-preflight.ts --stage-source 名字 [--safe-scene Safe] [--only 项,项] [--out 结果文件]
+ *
+ * --only 只跑列出的项：presence、reroute、shutdown、restart、safe-scene、stage-source、safe-item、
+ * stage-unauth、watchdog、rejections、playback、no-review、avatar、moderation。
  *
  * 用启动器拉起真实宿主与看门狗，profile 参照 drill-output：OBS 控制、真实 Stage、440Hz 测试音的模拟 TTS、
  * 发声仲裁、M1 放行环节、审核显式关闭。逐项制造一个失败，核对三件事：预检（操作员 RPC 与 operator 命令行）
@@ -10,8 +13,9 @@
  *   - OBS 上的项：浏览器源的三项设置；安全场景改名；Stage 源改名；在安全场景里加一个 Stage 源的场景项。
  *   - Stage 页面未认证：把浏览器源的 URL 改成 about:blank，页面卸载、会话断开；恢复走宿主自己的路径，
  *     即重连时限（本演练设为 20 秒）过后重新下发带新令牌的 URL。
- *   - 安全核在切换时核对的项（不在预检列表里）：看门狗未连接（终止看门狗进程，启动器约 0.5 秒后重启它；
- *     经启动器角色的 host.status 确认宿主已看到断开再切换）、M2 未确认在场（会话开始时尚未确认）。
+ *   - 安全核的前置条件（预检把它列为第一项，切换时由安全核拒绝）：看门狗未连接（终止看门狗进程，经启动器
+ *     角色的 host.status 确认宿主已看到断开；主会话里启动器约 0.5 秒后重启它，另起一次不重启的会话，
+ *     从容地用命令行核对）、M2 未确认在场（会话开始时尚未确认）。
  *   - profile 变体，各起一次会话：审核开关未显式设置（宿主拒绝启动）、M1 没有放行环节、
  *     启用了 VTube Studio 形象但 VTS 不在（核对挡住 M1、M2，且重连不刷屏）。
  *   - TTS 就绪一项要等 TTS 路由合入，记为 PENDING。
@@ -57,6 +61,8 @@ const DELAY_MS = 3000;
 const RESUME_WINDOW_MS = 20_000;
 const TEXT = '这是一句用来核对开播预检的测试播报。';
 const REFUSED = '开播预检未通过';
+const PRESENCE = '在场确认无效';
+const NO_WATCHDOG = '外部看门狗未连接';
 
 type LogLine = { t: string; event: string; [field: string]: unknown };
 
@@ -151,7 +157,8 @@ function wsAttempt(
   });
 }
 
-type Variant = 'main' | 'no-review' | 'avatar' | 'moderation-implicit';
+/** profile 变体；watchdog-gone 与主 profile 相同，只是启动器不重启看门狗。 */
+type Variant = 'main' | 'no-review' | 'avatar' | 'moderation-implicit' | 'watchdog-gone';
 
 function profileFor(variant: Variant) {
   const announcements = Array.from({ length: 80 }, (_, i) => ({
@@ -205,11 +212,35 @@ async function main(): Promise<void> {
       'stage-source': { type: 'string' },
       'safe-scene': { type: 'string', default: 'Safe' },
       out: { type: 'string' },
+      only: { type: 'string' },
     },
   });
   const stageSource = values['stage-source'];
   if (!stageSource) throw new Error('需要 --stage-source');
   const safeScene = values['safe-scene'];
+  const ONLY_KEYS = [
+    'presence',
+    'reroute',
+    'shutdown',
+    'restart',
+    'safe-scene',
+    'stage-source',
+    'safe-item',
+    'stage-unauth',
+    'watchdog',
+    'rejections',
+    'playback',
+    'no-review',
+    'avatar',
+    'moderation',
+  ];
+  const only = values.only ? new Set(values.only.split(',').map((key) => key.trim())) : undefined;
+  for (const key of only ?? []) {
+    if (!ONLY_KEYS.includes(key))
+      throw new Error(`--only 不认识 ${key}，可选：${ONLY_KEYS.join(',')}`);
+  }
+  /** 只跑 --only 列出的项（不给时全跑）。 */
+  const want = (key: string) => only === undefined || only.has(key);
   const started = new Date().toISOString();
   const say = (message: string) => console.log(`${new Date().toISOString()} ${message}`);
 
@@ -230,7 +261,13 @@ async function main(): Promise<void> {
   const store = new KeyringSecretStore(service);
   const configPath = join(tmpdir(), `${service}.json`);
   const profilePath = join(tmpdir(), `${service}.profile.json`);
-  const variants: Variant[] = ['main', 'no-review', 'avatar', 'moderation-implicit'];
+  const variants: Variant[] = [
+    'main',
+    'no-review',
+    'avatar',
+    'moderation-implicit',
+    'watchdog-gone',
+  ];
   const storePath = (variant: Variant) => join(tmpdir(), `${service}-${variant}.db`);
   /** 临时改名用的名字。 */
   const tempScene = `${safeScene}-drill-${randomBytes(2).toString('hex')}`;
@@ -282,6 +319,7 @@ async function main(): Promise<void> {
       watchdog: { command: process.execPath, args: [watchdogMain] },
       stdout: 'pipe',
       log: (event, fields) => launcherLog.push({ t: new Date().toISOString(), event, ...fields }),
+      ...(variant === 'watchdog-gone' ? { maxWatchdogRestarts: 0 } : {}),
     });
     const host = new Lines(session.host.stdout);
     const watchdogs = [new Lines(session.watchdog.stdout)];
@@ -510,138 +548,177 @@ async function main(): Promise<void> {
       await live.host.wait((l) => l.event === 'stage-page.authenticated', 30_000);
       const port = live.host.items.find((l) => l.event === 'stage-page.listening')?.port as number;
       const pageOrigin = `http://127.0.0.1:${port}`;
-      const baseline = await live.untilPass(30_000);
+      // 基线：会话开始时还没有确认在场，M1 的预检应全部通过、M2 只列出在场确认。
+      const baseline: Record<string, unknown> = { passed: false };
+      for (const t0 = performance.now(); performance.now() - t0 < 30_000; ) {
+        const m1 = (await live.preflight('M1')).value;
+        const m2 = (await live.preflight('M2')).value;
+        Object.assign(baseline, { ms: round(performance.now() - t0), M1: m1, M2: m2 });
+        if (m1.length === 0 && isDeepStrictEqual(m2, [PRESENCE])) {
+          baseline.passed = true;
+          break;
+        }
+        await sleep(250);
+      }
       result.baseline = baseline;
       say(`基线预检：${JSON.stringify(baseline)}`);
       if (!baseline.passed) throw new Error('基线预检未通过，不再逐项演练');
 
       // M2 未确认在场：会话开始时还没有确认过。
-      {
+      if (want('presence')) {
         const before = (await live.call(OperatorMethod.Status)).presenceValid;
-        const m2 = await live.mode('M2');
+        const preflightM1 = await live.preflight('M1');
         const preflightM2 = await live.preflight('M2');
+        const cliM1 = await live.cli(['preflight', 'M1']);
         const cliM2 = await live.cli(['preflight', 'M2']);
+        const m2 = await live.mode('M2');
         await live.call(OperatorMethod.Presence);
         const after = (await live.call(OperatorMethod.Status)).presenceValid;
+        const again = await live.untilPass(5000);
         const record = {
-          name: 'M2 未确认在场（安全核在切换时核对）',
+          name: 'M2 未确认在场（安全核的前置条件）',
           presenceValidBefore: before,
-          modeM2: m2,
+          preflightM1,
           preflightM2,
+          cliM1,
           cliM2,
+          modeM2: m2,
           presenceValidAfter: after,
-          note: 'operator preflight 不跑安全核的前置条件，所以不列出在场；M1 不要求在场，不切 M1。',
+          afterPresence: again,
+          note: 'M1 不要求在场：M1 的预检不列出这一项，所以不切 M1。',
           pass:
             before === false &&
+            preflightM1.value.length === 0 &&
+            lists(preflightM2.value, PRESENCE) &&
+            (cliM1.output as { failures?: unknown[] }).failures?.length === 0 &&
+            lists((cliM2.output as { failures?: unknown }).failures, PRESENCE) &&
             m2.value.ok === false &&
-            m2.value.reason === '在场确认无效' &&
-            after === true,
+            m2.value.reason === PRESENCE &&
+            after === true &&
+            again.passed,
         };
         items.push(record);
         say(`${record.pass ? '通过' : '未通过'}：${record.name}`);
+      } else {
+        await live.call(OperatorMethod.Presence);
       }
 
-      items.push(
-        await runItem(live, settingItem('reroute_audio', false, '没有开启“Control audio via OBS”')),
-      );
-      items.push(
-        await runItem(
-          live,
-          settingItem('shutdown', true, '开启了“Shutdown source when not visible”'),
-        ),
-      );
-      items.push(
-        await runItem(
-          live,
-          settingItem(
-            'restart_when_active',
-            true,
-            '开启了“Refresh browser when scene becomes active”',
+      if (want('reroute'))
+        items.push(
+          await runItem(
+            live,
+            settingItem('reroute_audio', false, '没有开启“Control audio via OBS”'),
           ),
-        ),
-      );
-      items.push(
-        await runItem(live, {
-          name: '安全场景不存在（临时改名）',
-          expect: `OBS 中没有安全场景「${safeScene}」`,
-          inject: async () => {
-            ok(
-              await obs.request('SetSceneName', { sceneName: safeScene, newSceneName: tempScene }),
-            );
-          },
-          restore: async () => {
-            ok(
-              await obs.request('SetSceneName', { sceneName: tempScene, newSceneName: safeScene }),
-            );
-          },
-          verify: async () => {
-            const now = await snapshot(obs, stageSource, safeScene);
-            return isDeepStrictEqual(now.scenes, snap.scenes)
-              ? []
-              : [`场景读回为 ${JSON.stringify(now.scenes)}`];
-          },
-        }),
-      );
-      items.push(
-        await runItem(live, {
-          name: 'Stage 静音目标不存在（临时改名）',
-          expect: `OBS 中没有 Stage 源「${stageSource}」`,
-          inject: async () => {
-            ok(
-              await obs.request('SetInputName', {
-                inputName: stageSource,
-                newInputName: tempInput,
-              }),
-            );
-          },
-          restore: async () => {
-            ok(
-              await obs.request('SetInputName', {
-                inputName: tempInput,
-                newInputName: stageSource,
-              }),
-            );
-          },
-          verify: async () => {
-            const now = await snapshot(obs, stageSource, safeScene);
-            return isDeepStrictEqual(now.inputs, snap.inputs)
-              ? []
-              : [`输入读回为 ${JSON.stringify(now.inputs)}`];
-          },
-        }),
-      );
+        );
+      if (want('shutdown'))
+        items.push(
+          await runItem(
+            live,
+            settingItem('shutdown', true, '开启了“Shutdown source when not visible”'),
+          ),
+        );
+      if (want('restart'))
+        items.push(
+          await runItem(
+            live,
+            settingItem(
+              'restart_when_active',
+              true,
+              '开启了“Refresh browser when scene becomes active”',
+            ),
+          ),
+        );
+      if (want('safe-scene'))
+        items.push(
+          await runItem(live, {
+            name: '安全场景不存在（临时改名）',
+            expect: `OBS 中没有安全场景「${safeScene}」`,
+            inject: async () => {
+              ok(
+                await obs.request('SetSceneName', {
+                  sceneName: safeScene,
+                  newSceneName: tempScene,
+                }),
+              );
+            },
+            restore: async () => {
+              ok(
+                await obs.request('SetSceneName', {
+                  sceneName: tempScene,
+                  newSceneName: safeScene,
+                }),
+              );
+            },
+            verify: async () => {
+              const now = await snapshot(obs, stageSource, safeScene);
+              return isDeepStrictEqual(now.scenes, snap.scenes)
+                ? []
+                : [`场景读回为 ${JSON.stringify(now.scenes)}`];
+            },
+          }),
+        );
+      if (want('stage-source'))
+        items.push(
+          await runItem(live, {
+            name: 'Stage 静音目标不存在（临时改名）',
+            expect: `OBS 中没有 Stage 源「${stageSource}」`,
+            inject: async () => {
+              ok(
+                await obs.request('SetInputName', {
+                  inputName: stageSource,
+                  newInputName: tempInput,
+                }),
+              );
+            },
+            restore: async () => {
+              ok(
+                await obs.request('SetInputName', {
+                  inputName: tempInput,
+                  newInputName: stageSource,
+                }),
+              );
+            },
+            verify: async () => {
+              const now = await snapshot(obs, stageSource, safeScene);
+              return isDeepStrictEqual(now.inputs, snap.inputs)
+                ? []
+                : [`输入读回为 ${JSON.stringify(now.inputs)}`];
+            },
+          }),
+        );
       let addedItem: number | undefined;
-      items.push(
-        await runItem(live, {
-          name: '安全场景里含 Stage 源（临时加一个场景项）',
-          expect: `安全场景「${safeScene}」里含有 Stage 源「${stageSource}」`,
-          inject: async () => {
-            addedItem = ok(
-              await obs.request('CreateSceneItem', {
-                sceneName: safeScene,
-                sourceName: stageSource,
-                sceneItemEnabled: true,
-              }),
-            ).sceneItemId as number;
-          },
-          restore: async () => {
-            if (addedItem === undefined) return;
-            ok(
-              await obs.request('RemoveSceneItem', {
-                sceneName: safeScene,
-                sceneItemId: addedItem,
-              }),
-            );
-          },
-          verify: async () => {
-            const now = await snapshot(obs, stageSource, safeScene);
-            return isDeepStrictEqual(now.safeItems, snap.safeItems)
-              ? []
-              : [`安全场景的场景项读回为 ${JSON.stringify(now.safeItems)}`];
-          },
-        }),
-      );
-      {
+      if (want('safe-item'))
+        items.push(
+          await runItem(live, {
+            name: '安全场景里含 Stage 源（临时加一个场景项）',
+            expect: `安全场景「${safeScene}」里含有 Stage 源「${stageSource}」`,
+            inject: async () => {
+              addedItem = ok(
+                await obs.request('CreateSceneItem', {
+                  sceneName: safeScene,
+                  sourceName: stageSource,
+                  sceneItemEnabled: true,
+                }),
+              ).sceneItemId as number;
+            },
+            restore: async () => {
+              if (addedItem === undefined) return;
+              ok(
+                await obs.request('RemoveSceneItem', {
+                  sceneName: safeScene,
+                  sceneItemId: addedItem,
+                }),
+              );
+            },
+            verify: async () => {
+              const now = await snapshot(obs, stageSource, safeScene);
+              return isDeepStrictEqual(now.safeItems, snap.safeItems)
+                ? []
+                : [`安全场景的场景项读回为 ${JSON.stringify(now.safeItems)}`];
+            },
+          }),
+        );
+      if (want('stage-unauth')) {
         const from = live.host.items.length;
         const record = await runItem(live, {
           name: 'Stage 页面未认证（URL 改成 about:blank，页面卸载）',
@@ -666,8 +743,8 @@ async function main(): Promise<void> {
         items.push(record);
       }
 
-      // 看门狗未连接：终止看门狗进程；启动器约 0.5 秒后重启它。
-      {
+      // 看门狗未连接：终止看门狗进程；启动器约 0.5 秒后重启它，所以先用 RPC 跑预检、再切换。
+      if (want('watchdog')) {
         const old = live.session.watchdog;
         const t0 = performance.now();
         process.kill(old.pid);
@@ -682,15 +759,17 @@ async function main(): Promise<void> {
           await sleep(5);
         }
         const record: Record<string, unknown> = {
-          name: '看门狗未连接（安全核在切换时核对）',
+          name: '看门狗未连接（安全核的前置条件；启动器随后重启看门狗）',
           exitedMs,
           hostSawDisconnectMs: seenMs ?? null,
         };
         if (seenMs !== undefined) {
-          record.modeM1 = await live.mode('M1');
-          record.modeM2 = await live.mode('M2');
           record.preflightM1 = await live.preflight('M1');
           record.preflightM2 = await live.preflight('M2');
+          record.modeM1 = await live.mode('M1');
+          record.modeM2 = await live.mode('M2');
+          // 核对完时宿主仍未重新连上看门狗，上面的结果才都发生在断开期间。
+          record.stillDisconnected = !(await live.watchdogConnected());
         }
         let reconnectedMs: number | undefined;
         for (const deadline = performance.now() + 15_000; performance.now() < deadline; ) {
@@ -703,17 +782,22 @@ async function main(): Promise<void> {
         if (live.session.watchdog !== old)
           live.watchdogs.push(new Lines(live.session.watchdog.stdout));
         record.reconnectedMs = reconnectedMs ?? null;
+        record.afterReconnect = await live.untilPass(10_000);
         record.launcher = live.launcherLog.slice();
-        record.note =
-          'operator preflight 不跑安全核的前置条件，所以不列出看门狗；切换时由安全核拒绝。';
         const refused = (answer: unknown) =>
           (answer as Timed<Record<string, unknown>> | undefined)?.value.ok === false &&
-          (answer as Timed<Record<string, unknown>>).value.reason === '外部看门狗未连接';
+          (answer as Timed<Record<string, unknown>>).value.reason === NO_WATCHDOG;
+        const listed = (answer: unknown) =>
+          lists((answer as Timed<string[]> | undefined)?.value, NO_WATCHDOG);
         record.pass =
           seenMs !== undefined &&
+          record.stillDisconnected === true &&
+          listed(record.preflightM1) &&
+          listed(record.preflightM2) &&
           refused(record.modeM1) &&
           refused(record.modeM2) &&
-          reconnectedMs !== undefined;
+          reconnectedMs !== undefined &&
+          (record.afterReconnect as { passed: boolean }).passed;
         items.push(record);
         say(`${record.pass ? '通过' : '未通过'}：${record.name}`);
       }
@@ -721,7 +805,7 @@ async function main(): Promise<void> {
       result.afterItems = await live.untilPass(30_000);
 
       // ---------------- 真实会话中的 Stage 拒绝核对 ----------------
-      {
+      if (want('rejections')) {
         say('开始：Stage 拒绝核对');
         const host = `127.0.0.1:${port}`;
         const origin = pageOrigin;
@@ -896,7 +980,7 @@ async function main(): Promise<void> {
       }
 
       // ---------------- 之后照常播出（M2） ----------------
-      {
+      if (want('playback')) {
         await live.call(OperatorMethod.Presence);
         const modeAt = Date.now();
         const m2 = await live.call(OperatorMethod.Mode, { target: 'M2' });
@@ -928,8 +1012,64 @@ async function main(): Promise<void> {
       current = undefined;
     }
 
+    // ---------------- 看门狗断开后不重启：从容地用 RPC 与命令行核对 ----------------
+    if (want('watchdog')) {
+      const variant = await startLive('watchdog-gone');
+      try {
+        await variant.host.wait((l) => l.event === 'stage-page.authenticated', 30_000);
+        await variant.call(OperatorMethod.Presence);
+        const before = await variant.untilPass(30_000);
+        const old = variant.session.watchdog;
+        const t0 = performance.now();
+        process.kill(old.pid);
+        await old.exited;
+        let seenMs: number | undefined;
+        for (const deadline = performance.now() + 2000; performance.now() < deadline; ) {
+          if (!(await variant.watchdogConnected())) {
+            seenMs = round(performance.now() - t0);
+            break;
+          }
+          await sleep(5);
+        }
+        const record: Record<string, unknown> = {
+          name: '看门狗未连接（安全核的前置条件；启动器不重启看门狗）',
+          before,
+          hostSawDisconnectMs: seenMs ?? null,
+        };
+        const checks: boolean[] = [seenMs !== undefined, before.passed];
+        if (seenMs !== undefined) {
+          const preflight: Record<string, Timed<string[]>> = {};
+          const cli: Record<string, { output: unknown; ms: number }> = {};
+          const mode: Record<string, Timed<Record<string, unknown>>> = {};
+          for (const t of ['M1', 'M2']) preflight[t] = await variant.preflight(t);
+          for (const t of ['M1', 'M2']) cli[t] = await variant.cli(['preflight', t]);
+          for (const t of ['M1', 'M2']) mode[t] = await variant.mode(t);
+          Object.assign(record, { preflight, cli, mode });
+          for (const t of ['M1', 'M2']) {
+            checks.push(
+              lists(preflight[t]?.value, NO_WATCHDOG),
+              // 安全核的原因列在第一项。
+              preflight[t]?.value[0] === NO_WATCHDOG,
+              lists((cli[t]?.output as { failures?: unknown } | undefined)?.failures, NO_WATCHDOG),
+              mode[t]?.value.ok === false && mode[t]?.value.reason === NO_WATCHDOG,
+            );
+          }
+          record.stillDisconnected = !(await variant.watchdogConnected());
+          checks.push(record.stillDisconnected === true);
+        }
+        record.launcher = variant.launcherLog.slice();
+        record.violations = variant.violations;
+        record.pass = checks.every(Boolean);
+        result.watchdogGone = record;
+        say(`${record.pass ? '通过' : '未通过'}：${record.name}`);
+      } finally {
+        await variant.stop();
+        current = undefined;
+      }
+    }
+
     // ---------------- profile 变体：M1 没有放行环节 ----------------
-    {
+    if (want('no-review')) {
       const variant = await startLive('no-review');
       try {
         await variant.host.wait((l) => l.event === 'stage-page.authenticated', 30_000);
@@ -951,7 +1091,7 @@ async function main(): Promise<void> {
     }
 
     // ---------------- profile 变体：启用了 VTube Studio 形象，但 VTS 不在 ----------------
-    {
+    if (want('avatar')) {
       const variant = await startLive('avatar');
       const startedAt = Date.now();
       try {
@@ -985,7 +1125,7 @@ async function main(): Promise<void> {
     }
 
     // ---------------- profile 变体：审核开关没有显式设置 ----------------
-    {
+    if (want('moderation')) {
       say('开始：审核开关没有显式设置（profile 变体）');
       await waitForNoOtherBellis({ log: say });
       writeSessionFiles('moderation-implicit');
