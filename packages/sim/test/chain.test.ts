@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ReplayLlmService } from '@bellis/director';
 import { SpeechService } from '@bellis/speech';
+import { checkHistory, SAMPLES_PER_CHAR } from '../src/index.ts';
 import { played, speak, startChain } from './helpers.ts';
 
 const hello = { atMs: 0, id: 'd1', viewer: 'v1', nickname: '小明', text: '主播你好' };
@@ -59,6 +60,42 @@ test('声明可立即抢占的发言被打断时按播放游标截断，写回�
     assert.equal(second?.heard, '紧急提醒。');
   } finally {
     await world.close();
+  }
+});
+
+test('两段式映射：被立即抢占的发言按细化后的映射写回，与 Stage 回报的采样数逐字一致', async () => {
+  for (const atMs of [730, 1010, 1260, 1550]) {
+    const world = await startChain({
+      announcements: [{ id: 'urgent', atMs, text: '紧急提醒。' }],
+      // 插值按每字 60ms 估计，实际每字 100ms：只有细化后的映射才能写回正确的前缀。
+      tts: { samplesPerChar: SAMPLES_PER_CHAR, twoStage: true, estimateMsPerChar: 60 },
+    });
+    try {
+      void world.service(SpeechService).request({
+        id: 'chatter-1',
+        source: 'chatter',
+        text: reply,
+        expiresAt: 60_000,
+        preempt: 'immediate',
+        inputs: [],
+        untrusted: false,
+      });
+      await world.until(() => played(world).length === 2);
+      const [first] = played(world);
+      assert.equal(first?.end, 'preempted');
+      assert.ok(
+        (first?.heard.length ?? 0) > '谢谢你来！'.length,
+        `${atMs}ms 时第二句应已播出一部分`,
+      );
+      const violations = checkHistory({
+        trace: world.trace,
+        events: world.events(),
+        moderationEnabled: true,
+      });
+      assert.deepEqual(violations, [], `${atMs}ms 抢占`);
+    } finally {
+      await world.close();
+    }
   }
 });
 

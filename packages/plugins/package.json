@@ -12,6 +12,7 @@
     "@bellis/kernel": "workspace:*",
     "@bellis/moderation": "workspace:*",
     "@bellis/speech": "workspace:*",
-    "@bellis/stage": "workspace:*"
+    "@bellis/stage": "workspace:*",
+    "@bellis/tts-cloud": "workspace:*"
   }
 }

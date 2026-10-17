@@ -66,6 +66,7 @@ const LOGGED_FACTS = new Set([
   'stage.connected',
   'speech.held',
   'speech.vetoed',
+  'tts.switched',
 ]);
 const isModeParams = Compile(OperatorModeParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
