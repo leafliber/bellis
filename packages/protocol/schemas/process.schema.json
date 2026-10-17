@@ -156,6 +156,39 @@
       },
       "additionalProperties": false
     },
+    "OperatorVetoParams": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorPreflightParams": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "M1"
+            },
+            {
+              "type": "string",
+              "const": "M2"
+            },
+            {
+              "type": "string",
+              "const": "M3"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "WatchdogActedParams": {
       "type": "object",
       "required": [

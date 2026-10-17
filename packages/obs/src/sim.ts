@@ -15,6 +15,10 @@ export interface SimObsOptions {
   password?: string;
   scenes?: readonly string[];
   inputs?: readonly string[];
+  /** 各场景里的来源；缺省时第一个场景含全部输入，其余场景为空。 */
+  sceneItems?: Readonly<Record<string, readonly string[]>>;
+  /** 各输入的初始设置。 */
+  inputSettings?: Readonly<Record<string, Record<string, unknown>>>;
   initialScene?: string;
 }
 
@@ -36,6 +40,7 @@ export class SimObs {
   readonly muted = new Map<string, boolean>();
   /** 各输入的设置（例如浏览器源的 url）。 */
   readonly inputSettings = new Map<string, Record<string, unknown>>();
+  readonly sceneItems = new Map<string, string[]>();
   currentScene: string;
   streaming = false;
   /** 收到的全部请求，按顺序记录。 */
@@ -49,10 +54,14 @@ export class SimObs {
   private constructor(options: SimObsOptions) {
     this.scenes = options.scenes ?? ['Live', 'Safe'];
     this.currentScene = options.initialScene ?? this.scenes[0] ?? '';
-    for (const input of options.inputs ?? ['Stage']) {
+    const inputs = options.inputs ?? ['Stage'];
+    for (const input of inputs) {
       this.muted.set(input, false);
-      this.inputSettings.set(input, {});
+      this.inputSettings.set(input, { ...(options.inputSettings?.[input] ?? {}) });
     }
+    this.scenes.forEach((scene, index) => {
+      this.sceneItems.set(scene, [...(options.sceneItems?.[scene] ?? (index === 0 ? inputs : []))]);
+    });
     this.#password = options.password;
     this.#server = new WebSocketServer({
       host: '127.0.0.1',
@@ -157,6 +166,23 @@ export class SimObs {
     this.requests.push({ requestType, requestData: data });
     if (this.failing) return { code: 702, comment: '模拟 OBS 故障' };
     switch (requestType) {
+      case 'GetSceneList':
+        return {
+          code: RequestStatus.Success,
+          data: {
+            currentProgramSceneName: this.currentScene,
+            scenes: this.scenes.map((sceneName) => ({ sceneName })),
+          },
+        };
+      case 'GetSceneItemList': {
+        const items = this.sceneItems.get(String(data.sceneName));
+        if (!items)
+          return { code: RequestStatus.ResourceNotFound, comment: `没有场景 ${data.sceneName}` };
+        return {
+          code: RequestStatus.Success,
+          data: { sceneItems: items.map((sourceName) => ({ sourceName })) },
+        };
+      }
       case 'GetCurrentProgramScene':
         return {
           code: RequestStatus.Success,
