@@ -5,12 +5,13 @@
  *   node spikes/drill-preflight.ts --stage-source 名字 [--safe-scene Safe] [--only 项,项] [--out 结果文件]
  *
  * --only 只跑列出的项：presence、reroute、shutdown、restart、safe-scene、stage-source、safe-item、
- * stage-unauth、watchdog、rejections、playback、no-review、avatar、moderation。
+ * muted、program-safe、stage-unauth、watchdog、rejections、playback、no-review、avatar、moderation。
  *
  * 用启动器拉起真实宿主与看门狗，profile 参照 drill-output：OBS 控制、真实 Stage、440Hz 测试音的模拟 TTS、
  * 发声仲裁、M1 放行环节、审核显式关闭。逐项制造一个失败，核对三件事：预检（操作员 RPC 与 operator 命令行）
  * 对 M1、M2 都列出这一项；切 M1、M2 都被拒（切 M2 前先确认在场，拒绝只能来自预检）；恢复后预检重新通过。
- *   - OBS 上的项：浏览器源的三项设置；安全场景改名；Stage 源改名；在安全场景里加一个 Stage 源的场景项。
+ *   - OBS 上的项：浏览器源的三项设置；安全场景改名；Stage 源改名；在安全场景里加一个 Stage 源的场景项；
+ *     急停之后的状态：Stage 源被静音、节目场景是安全场景（临时静音、临时切过去）。
  *   - Stage 页面未认证：把浏览器源的 URL 改成 about:blank，页面卸载、会话断开；恢复走宿主自己的路径，
  *     即重连时限（本演练设为 20 秒）过后重新下发带新令牌的 URL。
  *   - 安全核的前置条件（预检把它列为第一项，切换时由安全核拒绝）：看门狗未连接（终止看门狗进程，经启动器
@@ -226,6 +227,8 @@ async function main(): Promise<void> {
     'safe-scene',
     'stage-source',
     'safe-item',
+    'muted',
+    'program-safe',
     'stage-unauth',
     'watchdog',
     'rejections',
@@ -715,6 +718,43 @@ async function main(): Promise<void> {
               return isDeepStrictEqual(now.safeItems, snap.safeItems)
                 ? []
                 : [`安全场景的场景项读回为 ${JSON.stringify(now.safeItems)}`];
+            },
+          }),
+        );
+      // 急停之后的 OBS 状态：Stage 源被静音、节目场景是安全场景，都要由操作员先恢复。
+      if (want('muted'))
+        items.push(
+          await runItem(live, {
+            name: 'Stage 源被静音（临时静音）',
+            expect: `Stage 源「${stageSource}」被静音`,
+            inject: async () => {
+              ok(await obs.request('SetInputMute', { inputName: stageSource, inputMuted: true }));
+            },
+            restore: async () => {
+              ok(await obs.request('SetInputMute', { inputName: stageSource, inputMuted: false }));
+            },
+            verify: async () => {
+              const muted = ok(
+                await obs.request('GetInputMute', { inputName: stageSource }),
+              ).inputMuted;
+              return muted === false ? [] : ['Stage 源读回仍是静音'];
+            },
+          }),
+        );
+      if (want('program-safe'))
+        items.push(
+          await runItem(live, {
+            name: '节目场景是安全场景（临时切到安全场景）',
+            expect: `节目场景是安全场景「${safeScene}」`,
+            inject: async () => {
+              ok(await obs.request('SetCurrentProgramScene', { sceneName: safeScene }));
+            },
+            restore: async () => {
+              ok(await obs.request('SetCurrentProgramScene', { sceneName: snap.programScene }));
+            },
+            verify: async () => {
+              const scene = ok(await obs.request('GetCurrentProgramScene')).currentProgramSceneName;
+              return scene === snap.programScene ? [] : [`节目场景读回为「${String(scene)}」`];
             },
           }),
         );

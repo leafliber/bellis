@@ -22,7 +22,12 @@ import { ObsClient, type ObsResult } from '@bellis/obs';
 import { KeyringSecretStore } from '@bellis/secret-store';
 import { waitForNoOtherBellis } from './bellis-processes.ts';
 import { differences, restoreSnapshot, snapshot } from './obs-snapshot.ts';
-import { analyzeSegments, type Segment } from './s01-stage/analyze-recording.ts';
+import {
+  analyzeSegments,
+  type Segment,
+  type WindowLevel,
+  windowLevels,
+} from './s01-stage/analyze-recording.ts';
 import { type MeterReading, ObsMeters } from './s01-stage/meters.ts';
 import { startStageHarness } from './stage-harness.ts';
 
@@ -186,10 +191,38 @@ async function main(): Promise<void> {
     const expectedSeconds = sentenceSeconds;
     const perRecording: Array<Record<string, unknown>> = [];
     const segmentsByRecording: Segment[][] = [];
+    /** 句前唤醒信号所在窗口与静默中段的电平（只量前面静默不短于 1 秒的句子），键为“录音:句段”。 */
+    const preRoll = new Map<
+      string,
+      { silence: WindowLevel | undefined; wake: WindowLevel | undefined }
+    >();
     for (const [i, recording] of recordings.entries()) {
       say(`分析第 ${i + 1} 段录音……`);
-      const analysis = await analyzeSegments(recording.path, { toneHz: TONE_HZ, expectedSeconds });
-      segmentsByRecording.push(analysis.segments.listed);
+      // 句前可能有唤醒信号（峰值 -50dBFS）：无声阈值调到 0.05，免得把它算进句段。
+      const analysis = await analyzeSegments(recording.path, {
+        toneHz: TONE_HZ,
+        expectedSeconds,
+        silence: 0.05,
+      });
+      const listed = analysis.segments.listed;
+      segmentsByRecording.push(listed);
+      const quiet = listed.flatMap((segment, k) => {
+        const previous = listed[k - 1];
+        const gapStart = previous ? previous.atSeconds + previous.seconds : 0;
+        return segment.atSeconds - gapStart >= 1 ? [k] : [];
+      });
+      const levels = await windowLevels(
+        recording.path,
+        quiet.flatMap((k) => {
+          const at = listed[k]?.atSeconds ?? 0;
+          return [
+            [at - 0.8, at - 0.7],
+            [at - 0.12, at - 0.002],
+          ] as Array<readonly [number, number]>;
+        }),
+      );
+      for (const [j, k] of quiet.entries())
+        preRoll.set(`${i}:${k}`, { silence: levels[j * 2], wake: levels[j * 2 + 1] });
       perRecording.push({
         path: recording.path,
         bytes: statSync(recording.path).size,
@@ -241,6 +274,7 @@ async function main(): Promise<void> {
               // 缺的若是开头，起点相位应接近缺失时长对应的相位。
               phaseIfStartCut: shortMs === null ? null : round(((shortMs / 1000) * TONE_HZ) % 1, 3),
               discontinuities: segment.discontinuities,
+              preRoll: preRoll.get(`${s.recording}:${inRecording.indexOf(s)}`) ?? null,
             }
           : null,
       };

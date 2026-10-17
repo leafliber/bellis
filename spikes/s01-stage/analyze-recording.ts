@@ -213,6 +213,10 @@ export interface SegmentOptions {
   toleranceMs?: number;
   /** 最后一段按不完整处理（录制以急停截断的一句收尾时）。 */
   trailingEdge?: boolean;
+  /**
+   * 低于这个振幅视为无声，默认 0.005。句前有唤醒信号（极低电平）时调高，例如 0.05，免得把它算进句段。
+   */
+  silence?: number;
 }
 
 export async function analyzeSegments(
@@ -221,6 +225,7 @@ export async function analyzeSegments(
 ): Promise<SegmentAnalysis> {
   const toneHz = options.toneHz ?? 440;
   const toleranceMs = options.toleranceMs ?? 10;
+  const silence = options.silence ?? SILENCE;
   let n = 0;
   let previous = 0;
   let silentRun = 0;
@@ -283,7 +288,7 @@ export async function analyzeSegments(
 
   await decode(file, (samples) => {
     for (const x of samples) {
-      if (Math.abs(x) < SILENCE) {
+      if (Math.abs(x) < silence) {
         silentRun += 1;
         // 无声满 1ms 才算句段结束；结束点是这段无声的起点。
         if (current && silentRun >= GAP_MIN_SAMPLES) closeSegment(n - silentRun + 1);
@@ -357,6 +362,65 @@ export async function analyzeSegments(
             segments: tonal.length,
           },
   };
+}
+
+export interface WindowLevel {
+  fromSeconds: number;
+  toSeconds: number;
+  /** 窗口内的最大振幅（dBFS）。 */
+  peakDb: number | null;
+  /** 高通滤波后 5ms 滑动 RMS 的最大值（dBFS）：咔哒声、爆音落在这里，低频的唤醒信号被滤掉。 */
+  highpassRmsDb: number | null;
+}
+
+const toDb = (value: number) => (value > 0 ? round(20 * Math.log10(value), 1) : null);
+
+/**
+ * 逐个时间窗量电平（窗口按时间排序、不重叠）：最大振幅，与二阶高通（缺省 150Hz）后的 5ms RMS 峰值。
+ * 用来核对句前的唤醒信号经 OBS 混音与 AAC 编码后没有带出可闻的咔哒声：与静默窗口、正文相比。
+ */
+export async function windowLevels(
+  file: string,
+  windows: ReadonlyArray<readonly [fromSeconds: number, toSeconds: number]>,
+  options: { highpassHz?: number } = {},
+): Promise<WindowLevel[]> {
+  const w0 = (2 * Math.PI * (options.highpassHz ?? 150)) / SAMPLE_RATE;
+  const alpha = Math.sin(w0) / (2 * Math.SQRT1_2);
+  const cos = Math.cos(w0);
+  const a0 = 1 + alpha;
+  const [b0, b1, b2] = [(1 + cos) / 2 / a0, -(1 + cos) / a0, (1 + cos) / 2 / a0];
+  const [a1, a2] = [(-2 * cos) / a0, (1 - alpha) / a0];
+  let [x1, x2, y1, y2] = [0, 0, 0, 0];
+  const rmsSamples = (5 * SAMPLE_RATE) / 1000;
+  const ring = new Float64Array(rmsSamples);
+  let sum = 0;
+  const ranges = windows.map(([from, to]) => [from * SAMPLE_RATE, to * SAMPLE_RATE] as const);
+  const peaks = windows.map(() => 0);
+  const hp = windows.map(() => 0);
+  let w = 0;
+  let n = 0;
+  await decode(file, (samples) => {
+    for (const x of samples) {
+      const y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+      [x2, x1, y2, y1] = [x1, x, y1, y];
+      const slot = n % rmsSamples;
+      sum += y * y - (ring[slot] ?? 0);
+      ring[slot] = y * y;
+      while (w < ranges.length && n >= (ranges[w]?.[1] ?? 0)) w += 1;
+      const range = ranges[w];
+      if (range && n >= range[0]) {
+        peaks[w] = Math.max(peaks[w] ?? 0, Math.abs(x));
+        hp[w] = Math.max(hp[w] ?? 0, Math.sqrt(Math.max(0, sum) / rmsSamples));
+      }
+      n += 1;
+    }
+  });
+  return windows.map(([fromSeconds, toSeconds], i) => ({
+    fromSeconds,
+    toSeconds,
+    peakDb: toDb(peaks[i] ?? 0),
+    highpassRmsDb: toDb(hp[i] ?? 0),
+  }));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
