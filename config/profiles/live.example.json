@@ -89,6 +89,17 @@
               "timestamps": "subtitle"
             }
           }
+        },
+        {
+          "id": "tts-local",
+          "plugin": "tts-local",
+          "disabled": true,
+          "config": {
+            "backend": "fake",
+            "fake": {
+              "toneHz": 440
+            }
+          }
         }
       ]
     }

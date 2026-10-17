@@ -24,7 +24,7 @@ import {
 } from '@bellis/protocol';
 import Type from 'typebox';
 import { Compile } from 'typebox/compile';
-import type { Manifest, PluginDefinition } from './plugin.ts';
+import type { Manifest, PluginContext, PluginDefinition } from './plugin.ts';
 import { defineService, parseRef } from './service.ts';
 
 /**
@@ -74,12 +74,25 @@ export interface SidecarService {
   request(method: string, params?: RpcParams, options?: RequestOptions): Promise<unknown>;
 }
 
-export interface SidecarSpec {
-  manifest: Omit<Manifest, 'process' | 'config'>;
+/** 怎样拉起一个 sidecar 子进程。环境变量只有系统必需的与这里显式给出的，外加宿主分配的连接信息。 */
+export interface SidecarLaunch {
   command: string;
   args: readonly string[];
   env?: Record<string, string>;
+  cwd?: string;
+  /** 握手与普通请求的截止时间，默认 2000ms。 */
   rpcTimeoutMs?: number;
+}
+
+export interface SidecarSpec extends SidecarLaunch {
+  manifest: Omit<Manifest, 'process' | 'config'>;
+}
+
+/** 已完成握手的 sidecar。 */
+export interface RunningSidecar {
+  readonly rpc: RpcPeer;
+  /** 宿主的直接子进程的 pid。 */
+  readonly pid: number;
 }
 
 const isDescription = Compile(SidecarDescription);
@@ -98,10 +111,97 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * sidecar 代理插件：用一个可撤销注册持有整个子进程。
- * 启动子进程 → 等它以分配的角色连上 → 握手（协议版本、提供的服务、申请的权限）→ 健康检查 → 注册服务。
- * 子进程退出或连接断开时报告失败，内核撤回其服务，依赖方回到 WAITING，并按退避重启。
- * 停止：RPC shutdown → 关闭 stdin → 超时强制终止（R-06）；收尾超时时直接终止。
+ * 在插件激活期间拉起 sidecar 并完成握手，返回 RPC 对端。子进程由一个可撤销注册持有。
+ * 启动子进程 → 等它以分配的角色 `sidecar.<条目 id>` 连上 → 握手（协议版本、提供的服务须与 `provides`
+ * 一致、申请的权限须已授予）→ 健康检查。调用方插件须在 inject 中声明 `SidecarHostService`。
+ * 握手完成后子进程退出或连接断开时，先调用 `onLost`，再经 `ctx.fail` 报告失败：内核撤回该插件的服务，
+ * 依赖方回到 WAITING，并按退避重启。
+ * 停止：RPC shutdown → 关闭 stdin → 超时强制终止（R-06）；收尾超时时直接终止。停在哪一步记入日志。
+ */
+export async function startSidecar(
+  ctx: PluginContext,
+  provides: readonly string[],
+  launch: SidecarLaunch,
+  onLost?: (reason: string) => void,
+): Promise<RunningSidecar> {
+  const host = ctx.service(SidecarHostService);
+  const role = `sidecar.${ctx.entryId}`;
+  const pending = host.hub.expect(role);
+  let child: ManagedProcess;
+  try {
+    child = await ManagedProcess.start({
+      name: role,
+      command: launch.command,
+      args: launch.args,
+      ...(launch.cwd === undefined ? {} : { cwd: launch.cwd }),
+      env: {
+        ...baseEnvironment(),
+        ...launch.env,
+        [ChildEnv.ChannelPath]: host.credentials.path,
+        [ChildEnv.ChannelKey]: encodeSessionKey(host.credentials.key),
+        [ChildEnv.Role]: role,
+      },
+    });
+  } catch (error) {
+    pending.cancel();
+    throw error;
+  }
+
+  let rpc: RpcPeer | undefined;
+  ctx.register(async () => {
+    pending.cancel();
+    const peer = rpc;
+    if (ctx.forced) {
+      child.kill();
+      const status = await child.exited;
+      ctx.log('sidecar.stopped', { pid: child.pid, stage: 'killed', code: status.code });
+    } else {
+      const result = await child.stop(
+        peer ? { shutdown: () => peer.request(ProcessShutdown, { reason: 'unload' }) } : {},
+      );
+      ctx.log('sidecar.stopped', { pid: child.pid, stage: result.stage, code: result.code });
+    }
+    peer?.connection.destroy();
+  });
+
+  const exitedEarly = child.exited.then((status) => {
+    throw new Error(`sidecar 在握手完成前退出：code=${status.code} signal=${status.signal}`);
+  });
+  const connection = await Promise.race([pending.connection, exitedEarly]);
+  const peer = new RpcPeer(connection, { timeoutMs: launch.rpcTimeoutMs ?? 2000 });
+  rpc = peer;
+
+  const description = await peer.request(SidecarDescribe);
+  if (!isDescription.Check(description)) throw new Error('sidecar 的描述不合法');
+  if (description.protocol !== SIDECAR_PROTOCOL) throw new Error('sidecar 协议版本不兼容');
+  if (!sameSet(description.provides, provides)) {
+    throw new Error(
+      `sidecar 提供的服务 ${description.provides.join(',')} 与清单 ${provides.join(',')} 不一致`,
+    );
+  }
+  const ungranted = description.permissions.filter((p) => !ctx.permissions.has(p));
+  if (ungranted.length > 0) throw new Error(`sidecar 申请了未授予的权限 ${ungranted.join(',')}`);
+
+  const health = await peer.request(SidecarHealth);
+  if (!isHealth.Check(health) || !health.ok) {
+    throw new Error(`sidecar 健康检查未通过：${JSON.stringify(health)}`);
+  }
+
+  let reported = false;
+  const lost = (why: string) => {
+    if (reported || ctx.signal.aborted) return;
+    reported = true;
+    onLost?.(why);
+    ctx.fail(new Error(why));
+  };
+  void child.exited.then((s) => lost(`sidecar 进程退出：code=${s.code} signal=${s.signal}`));
+  connection.once('close', () => lost('sidecar 连接断开'));
+  return { rpc: peer, pid: child.pid };
+}
+
+/**
+ * 通用的 sidecar 代理插件：sidecar 声明的每个服务在宿主内都是经 RPC 转发的客户端（`SidecarService`）。
+ * 需要把 sidecar 的 RPC 适配成具体服务接口的（例如 `tts@1`），自己定义插件并调用 `startSidecar`。
  */
 export function sidecarPlugin(spec: SidecarSpec): PluginDefinition {
   const manifest = {
@@ -113,80 +213,14 @@ export function sidecarPlugin(spec: SidecarSpec): PluginDefinition {
   return {
     manifest,
     async activate(ctx) {
-      const host = ctx.service(SidecarHostService);
-      const role = `sidecar.${ctx.entryId}`;
-      const pending = host.hub.expect(role);
-      let child: ManagedProcess;
-      try {
-        child = await ManagedProcess.start({
-          name: role,
-          command: spec.command,
-          args: spec.args,
-          env: {
-            ...baseEnvironment(),
-            ...spec.env,
-            [ChildEnv.ChannelPath]: host.credentials.path,
-            [ChildEnv.ChannelKey]: encodeSessionKey(host.credentials.key),
-            [ChildEnv.Role]: role,
-          },
-        });
-      } catch (error) {
-        pending.cancel();
-        throw error;
-      }
-
-      let rpc: RpcPeer | undefined;
-      ctx.register(async () => {
-        pending.cancel();
-        const peer = rpc;
-        if (ctx.forced) {
-          child.kill();
-        } else {
-          await child.stop(
-            peer ? { shutdown: () => peer.request(ProcessShutdown, { reason: 'unload' }) } : {},
-          );
-        }
-        await child.exited;
-        peer?.connection.destroy();
-      });
-
-      const exitedEarly = child.exited.then((status) => {
-        throw new Error(`sidecar 在握手完成前退出：code=${status.code} signal=${status.signal}`);
-      });
-      const connection = await Promise.race([pending.connection, exitedEarly]);
-      const peer = new RpcPeer(connection, { timeoutMs: spec.rpcTimeoutMs ?? 2000 });
-      rpc = peer;
-
-      const description = await peer.request(SidecarDescribe);
-      if (!isDescription.Check(description)) throw new Error('sidecar 的描述不合法');
-      if (description.protocol !== SIDECAR_PROTOCOL) throw new Error('sidecar 协议版本不兼容');
-      if (!sameSet(description.provides, manifest.provides)) {
-        throw new Error(
-          `sidecar 提供的服务 ${description.provides.join(',')} 与清单 ${manifest.provides.join(',')} 不一致`,
-        );
-      }
-      const ungranted = description.permissions.filter((p) => !ctx.permissions.has(p));
-      if (ungranted.length > 0)
-        throw new Error(`sidecar 申请了未授予的权限 ${ungranted.join(',')}`);
-
-      const health = await peer.request(SidecarHealth);
-      if (!isHealth.Check(health) || !health.ok) {
-        throw new Error(`sidecar 健康检查未通过：${JSON.stringify(health)}`);
-      }
-
+      const { rpc } = await startSidecar(ctx, manifest.provides, spec);
       const client: SidecarService = {
-        request: (method, params, options) => peer.request(method, params, options),
+        request: (method, params, options) => rpc.request(method, params, options),
       };
       for (const ref of manifest.provides) {
         const { name, major } = parseRef(ref);
         ctx.provide(defineService<SidecarService>(name, major), client);
       }
-
-      const lost = (why: string) => {
-        if (!ctx.signal.aborted) ctx.fail(new Error(why));
-      };
-      void child.exited.then((s) => lost(`sidecar 进程退出：code=${s.code} signal=${s.signal}`));
-      connection.once('close', () => lost('sidecar 连接断开'));
     },
   };
 }

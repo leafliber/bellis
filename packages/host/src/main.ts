@@ -68,6 +68,8 @@ const LOGGED_FACTS = new Set([
   'speech.held',
   'speech.vetoed',
   'tts.switched',
+  'tts.started',
+  'tts.degraded',
 ]);
 const isModeParams = Compile(OperatorModeParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
@@ -164,10 +166,9 @@ host.provideScoped(ObsConnectorService, ({ instanceId, permissions }) => ({
       : Promise.reject(new Error(`${instanceId} 没有权限 ${OBS_CONTROL}`)),
 }));
 core.setModeration(!moderationEntry.disabled);
-host.add(entries, builtinPlugins);
-await host.settled();
 
 let stopping = false;
+// 先监听再加载插件：sidecar 代理插件在激活期间等它的子进程连上来。
 const server = await listen(credentials.path, {
   key: credentials.key,
   onConnection(connection) {
@@ -211,6 +212,8 @@ const server = await listen(credentials.path, {
     logEvent('host.channel-error', { message: error.message });
   },
 });
+host.add(entries, builtinPlugins);
+await host.settled();
 
 let seq = 0;
 const heartbeat = setInterval(() => {
