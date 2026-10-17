@@ -2,7 +2,13 @@ import { danmakuReplay, triage } from '@bellis/audience';
 import { director, replayLlm } from '@bellis/director';
 import { catalog } from '@bellis/kernel';
 import { moderation, simModerationModel } from '@bellis/moderation';
-import { scheduledAnnouncements, simTts, speechArbiter, speechReview } from '@bellis/speech';
+import {
+  localTts,
+  scheduledAnnouncements,
+  simTts,
+  speechArbiter,
+  speechReview,
+} from '@bellis/speech';
 import { obsControl, obsStagePage, simStagePage, stageService } from '@bellis/stage';
 import { cloudTts } from '@bellis/tts-cloud';
 
@@ -17,6 +23,7 @@ export const builtinPlugins = catalog(
   scheduledAnnouncements,
   simTts,
   cloudTts,
+  localTts,
   moderation,
   simModerationModel,
   triage,

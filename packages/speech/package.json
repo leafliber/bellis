@@ -8,8 +8,13 @@
   },
   "dependencies": {
     "@bellis/kernel": "workspace:*",
+    "@bellis/protocol": "workspace:*",
     "@bellis/safety": "workspace:*",
     "@bellis/stage": "workspace:*",
     "typebox": "1.3.37"
+  },
+  "devDependencies": {
+    "@bellis/channel": "workspace:*",
+    "@bellis/store": "workspace:*"
   }
 }

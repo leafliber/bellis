@@ -1,0 +1,11 @@
+[project]
+name = "bellis-tts-local"
+version = "0.0.0"
+description = "Bellis 的本地降级 TTS sidecar（R-10）；运行时见 python/bellis_sidecar"
+requires-python = "==3.12.*"
+# 真实后端（Qwen3-TTS 与 Qwen3-ForcedAligner）的依赖待维护者批准下载后单独成组，只在 Windows 真机安装（R-24）。
+dependencies = ["pydantic==2.14.1"]
+
+[tool.uv]
+# 不打包安装：宿主拉起时经 PYTHONPATH 指向 src 与 python/bellis_sidecar/src。
+package = false

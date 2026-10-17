@@ -1,0 +1,11 @@
+[project]
+name = "bellis-sidecar"
+version = "0.0.0"
+description = "Bellis 的 Python sidecar 运行时：本机通道客户端、JSON-RPC 对端、握手与 Job Object"
+requires-python = "==3.12.*"
+# Pydantic 模型由 packages/protocol 的 TypeBox 定义生成（D-21、R-24）。
+dependencies = ["pydantic==2.14.1"]
+
+[tool.uv]
+# 不打包安装：宿主拉起 sidecar 时经 PYTHONPATH 指向 src，测试与类型检查的路径在根 pyproject 中配置。
+package = false

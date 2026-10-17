@@ -6,7 +6,7 @@
 证明为 HMAC-SHA256(会话密钥, JSON([域, 方向, 角色, 客户端随机数, 服务端随机数]))，base64url 无填充。
 服务端未能证明时立即断开，不回送证明，也不发任何业务数据（地址可能被抢注）。
 
-探针 S-03 先在 spikes 里验证这一实现；sidecar 正式落地时再按第 6 步迁移。
+探针 S-03 用这一份；sidecar 的正式实现在 python/bellis_sidecar（握手消息改由生成的模型校验）。
 """
 
 from __future__ import annotations

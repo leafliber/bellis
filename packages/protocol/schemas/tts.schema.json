@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bellis:schema:tts",
+  "$defs": {
+    "TtsInfoResult": {
+      "type": "object",
+      "required": [
+        "sampleRate",
+        "backend",
+        "processes"
+      ],
+      "properties": {
+        "sampleRate": {
+          "type": "integer",
+          "minimum": 8000,
+          "maximum": 48000
+        },
+        "backend": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "maxLength": 32
+        },
+        "processes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "TtsSynthesizeParams": {
+      "type": "object",
+      "required": [
+        "stream",
+        "text"
+      ],
+      "properties": {
+        "stream": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "additionalProperties": false
+    },
+    "TtsSynthesizeResult": {
+      "type": "object",
+      "required": [
+        "samples"
+      ],
+      "properties": {
+        "samples": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

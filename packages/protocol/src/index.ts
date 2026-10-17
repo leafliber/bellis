@@ -29,12 +29,14 @@ import {
   SessionInfo,
   WatchdogActedParams,
 } from './process.ts';
+import { TtsInfoResult, TtsSynthesizeParams, TtsSynthesizeResult } from './tts.ts';
 
 export * from './channel.ts';
 export * from './config.ts';
 export * from './jsonrpc.ts';
 export * from './plugin.ts';
 export * from './process.ts';
+export * from './tts.ts';
 
 /**
  * 需要生成 JSON Schema 文件的类型，按模块分组。
@@ -66,4 +68,5 @@ export const schemaModules = {
     OperatorPreflightParams,
     WatchdogActedParams,
   },
+  tts: { TtsInfoResult, TtsSynthesizeParams, TtsSynthesizeResult },
 } as const;
