@@ -217,14 +217,16 @@ const server = await listen(credentials.path, {
     logEvent('host.channel-error', { message: error.message });
   },
 });
-host.add(entries, builtinPlugins);
-await host.settled();
-
+// 看门狗一连上就开始计时，心跳要在加载插件之前开始：sidecar 代理插件激活时要等子进程启动并连上来，
+// 加载可能超过心跳超时，期间宿主照常运行，不能让看门狗误判为卡死。
 let seq = 0;
 const heartbeat = setInterval(() => {
   seq += 1;
   for (const peer of watchdogs()) peer.notify(HostHeartbeat, { seq, ...core.heartbeat() });
 }, config.heartbeatIntervalMs);
+
+host.add(entries, builtinPlugins);
+await host.settled();
 
 watchLifeline(() => void stop('stdin-eof'));
 // 控制台的 Ctrl+C 会送达同一控制台的全部进程；宿主只按启动器的停止顺序退出。

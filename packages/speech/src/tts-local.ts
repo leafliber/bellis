@@ -63,6 +63,8 @@ const FakeBackend = Type.Object(
     workers: Type.Integer({ minimum: 0, maximum: 4, default: 0 }),
     /** 模拟模型加载的耗时与失败。 */
     loadDelayMs: Type.Integer({ minimum: 0, default: 0 }),
+    /** 连接宿主之前先等这么久，模拟启动慢的 sidecar（插件激活随之变慢）。 */
+    startupDelayMs: Type.Integer({ minimum: 0, maximum: 5000, default: 0 }),
     loadError: Type.String({ maxLength: 100, default: '' }),
     /** 给出精确的逐码点时间戳，模拟强制对齐。 */
     aligned: Type.Boolean({ default: false }),
@@ -160,6 +162,8 @@ export function sidecarArgs(config: LocalTtsConfig): string[] | { error: string 
     String(f.workers),
     '--load-delay-ms',
     String(f.loadDelayMs),
+    '--startup-delay-ms',
+    String(f.startupDelayMs),
     ...(f.loadError ? ['--load-error', f.loadError] : []),
     ...(f.aligned ? ['--aligned'] : []),
     ...f.crashOn.flatMap((part) => ['--crash-on', part]),

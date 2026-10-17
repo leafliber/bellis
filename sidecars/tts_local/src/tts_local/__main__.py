@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 
 from bellis_sidecar.processes import contain_descendants
 from bellis_sidecar.protocol import SidecarHealthResult
@@ -38,6 +39,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     fake.add_argument('--crash-on', action='append', default=[])
     fake.add_argument('--workers', type=int, default=0)
     fake.add_argument('--load-delay-ms', type=int, default=0)
+    fake.add_argument('--startup-delay-ms', type=int, default=0)
     fake.add_argument('--load-error', default='')
     fake.add_argument('--aligned', action='store_true')
     qwen = parser.add_argument_group('qwen3')
@@ -88,6 +90,9 @@ def build_backend(args: argparse.Namespace) -> Backend:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     contain_descendants()
+    if args.backend == 'fake' and args.startup_delay_ms > 0:
+        # 假后端：连接宿主之前先等一会儿，模拟启动慢的 sidecar。
+        time.sleep(args.startup_delay_ms / 1000)
     backend = build_backend(args)
     services: list[TtsService] = []
 
