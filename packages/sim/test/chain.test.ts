@@ -194,3 +194,30 @@ test('非法的模型输出被丢弃，不产生发声', async () => {
     await world.close();
   }
 });
+
+test('Stage 服务即时记录欠载，每句结束时记一条回报摘要', async () => {
+  const world = await startChain({
+    announcements: [{ id: 'slow', atMs: 0, text: '慢一点说。' }],
+    // 音频产生得比播放慢一倍：页面必然欠载，补上后整句照样播完。
+    tts: { slowness: 2 },
+  });
+  try {
+    await world.until(() => played(world).length === 1);
+    assert.equal(played(world)[0]?.end, 'complete');
+    const underruns = world.logs.filter((l) => l.event === 'stage.underrun');
+    assert.ok(underruns.length > 0);
+    const summaries = world.logs.filter((l) => l.event === 'stage.sentence');
+    assert.equal(summaries.length, 1);
+    const summary = summaries[0]?.fields ?? {};
+    assert.equal(summary.complete, true);
+    assert.equal(summary.underruns, underruns.length);
+    assert.ok((summary.cursors as number) > 0);
+    const [firstAt, firstPlayed] = summary.firstCursor as [number, number];
+    const [lastAt, lastPlayed] = summary.lastCursor as [number, number];
+    assert.ok(lastAt >= firstAt && lastPlayed >= firstPlayed);
+    assert.ok((summary.played as number) >= lastPlayed);
+    assert.equal(typeof summary.startedAt, 'number');
+  } finally {
+    await world.close();
+  }
+});

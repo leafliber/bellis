@@ -15,12 +15,23 @@ interface Playing {
   resolve(result: PlaybackResult): void;
   played: number;
   envelope: EnvelopeBuilder;
+  /** 逐句的回报摘要，句子结束时记入日志，供运维核对欠载与游标。 */
+  report: {
+    startedAt: number | undefined;
+    underruns: number;
+    cursors: number;
+    first: [at: number, played: number] | undefined;
+    last: [at: number, played: number] | undefined;
+    maxCursorGapMs: number;
+  };
 }
 
 /**
  * Stage 服务（关键平面）：只转发带有效 Stage 音频输出许可令牌的音频，把令牌变化告诉页面，
  * 定时发心跳；页面在截止时间内不应答心跳即报告失败，由安全核走急停路径（D-30）。
  * 转发音频时按句计算响度包络，供形象驱动口型。
+ * 页面回报的欠载与静音即时记入日志；每句结束时记一条摘要（实际播出的采样数、欠载次数、游标回报的
+ * 次数、首末两次游标与最大间隔），游标本身不逐条记录。
  */
 export const stageService = definePlugin({
   manifest: {
@@ -52,7 +63,40 @@ export const stageService = definePlugin({
       const entry = playing.get(sentenceId);
       if (!entry) return;
       playing.delete(sentenceId);
+      const { report } = entry;
+      ctx.log('stage.sentence', {
+        sentenceId,
+        played: result.played,
+        complete: result.complete,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+        startedAt: report.startedAt ?? null,
+        endedAt: clock.now(),
+        underruns: report.underruns,
+        cursors: report.cursors,
+        firstCursor: report.first ?? null,
+        lastCursor: report.last ?? null,
+        maxCursorGapMs: report.maxCursorGapMs,
+      });
       entry.resolve(result);
+    };
+
+    /** 把页面的回报计入这一句的摘要；欠载与静音即时记录。 */
+    const note = (message: FromPage, entry: Playing | undefined) => {
+      const now = clock.now();
+      if (message.kind === 'muted') ctx.log('stage.muted', { reason: message.reason });
+      if (!entry) return;
+      const { report } = entry;
+      if (message.kind === 'started') report.startedAt = now;
+      else if (message.kind === 'underrun') {
+        report.underruns += 1;
+        ctx.log('stage.underrun', { sentenceId: message.sentenceId, played: message.played });
+      } else if (message.kind === 'cursor') {
+        if (report.last)
+          report.maxCursorGapMs = Math.max(report.maxCursorGapMs, now - report.last[0]);
+        report.cursors += 1;
+        report.last = [now, message.played];
+        report.first ??= report.last;
+      }
     };
 
     ctx.register(
@@ -61,6 +105,7 @@ export const stageService = definePlugin({
           lastAck = clock.now();
           return;
         }
+        note(message, 'sentenceId' in message ? playing.get(message.sentenceId) : undefined);
         if ('sentenceId' in message) {
           const entry = playing.get(message.sentenceId);
           if (entry && 'played' in message) entry.played = message.played;
@@ -140,7 +185,19 @@ export const stageService = definePlugin({
         }
         const envelope = new EnvelopeBuilder(sentence.sampleRate, ctx.config.envelopeWindowMs);
         const result = new Promise<PlaybackResult>((resolve) => {
-          playing.set(sentence.id, { resolve, played: 0, envelope });
+          playing.set(sentence.id, {
+            resolve,
+            played: 0,
+            envelope,
+            report: {
+              startedAt: undefined,
+              underruns: 0,
+              cursors: 0,
+              first: undefined,
+              last: undefined,
+              maxCursorGapMs: 0,
+            },
+          });
         });
         page.send({
           kind: 'begin',
