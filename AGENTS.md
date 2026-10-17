@@ -8,6 +8,7 @@
 
 - `pnpm install`：安装依赖（Node 版本见 `.node-version`，pnpm 版本见 `package.json` 的 `packageManager`）。
 - `uv sync --locked`：安装 Python 解释器与依赖（R-24，版本见 `.python-version` 与 `uv.lock`；CI 用的 uv 版本见工作流）。
+- `uv sync --locked --group tts-local`：只在 Windows 真机上同时安装本地 TTS 的 PyTorch 与模型依赖（R-24）；不带这个组再跑 `uv sync --locked` 会卸掉它们。模型权重的下载见[发声](docs/modules/speech.md#本地-tts-sidecar)。
 - `pnpm run check`：CI 运行的完整检查，依次为格式与 lint、类型检查、生成物核对、测试，TypeScript（Biome、tsc、node:test）与 Python（ruff、pyright、pytest）各一遍。提交前必须通过。
 - `pnpm run gen`：协议类型（`packages/protocol`）改动后重新生成 JSON Schema 与 sidecar 用的 Pydantic 模型（经 uv 运行，先 `uv sync --locked`），生成物与源一起提交。
 - `pnpm run format`：自动修正格式。

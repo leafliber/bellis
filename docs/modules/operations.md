@@ -21,7 +21,7 @@
 - 安全场景、Stage 静音目标存在，看门狗连接正常；Stage 浏览器源的设置符合 [Stage](stage.md#obs-配置要求) 的要求，安全场景里不含 Stage 源（经 OBS 应急连接只读核对）；
 - Stage 已认证，AI 标识可见；
 - 审核插件的状态已确认（启用且审核模型可用，或已显式关闭）；
-- TTS、形象、弹幕接入、Iris、Game Runtime 按 profile 就绪（profile 中启用的插件全部激活）；形象还要求已连上 VTube Studio 并认证、嘴型参数没有被其他插件占用；M1 还要求逐句放行环节在场；
+- TTS、形象、弹幕接入、Iris、Game Runtime 按 profile 就绪（profile 中启用的插件全部激活）；TTS 路由配置中第一个音频引擎（只出字幕不算）就绪，例如本地模型已加载完成；形象还要求已连上 VTube Studio 并认证、嘴型参数没有被其他插件占用；M1 还要求逐句放行环节在场；
 - 合规清单中试播门禁项已满足（见[合规](../compliance.md)）。
 
 ## 观测
