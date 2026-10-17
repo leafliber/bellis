@@ -73,8 +73,8 @@ async function worklet() {
   return { posted, send, render, kinds };
 }
 
-/** 唤醒信号：48kHz 下 100ms 的帧数与峰值（见 worklet.js 文件头）。 */
-const WAKE_FRAMES = 4800;
+/** 唤醒信号：48kHz 下 150ms 的帧数与峰值（见 worklet.js 文件头）。 */
+const WAKE_FRAMES = 7200;
 const WAKE_PEAK = 10 ** (-50 / 20);
 const peak = (samples: number[]) => samples.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 
@@ -84,15 +84,15 @@ test('AudioWorklet：有许可时按句播放，回报开始、游标与以原�
   w.send({ type: 'lease', ttlMs: 2000 });
   w.send({ type: 'begin', id: 's1' });
   w.send({ type: 'pcm', id: 's1', data: new Float32Array(256).fill(0.5), src: 128 });
-  // 页面刚加载视为已静默很久：先放 100ms 唤醒信号，再放正文。
-  const out = w.render(41);
+  // 页面刚加载视为已静默很久：先放 150ms 唤醒信号，再放正文。
+  const out = w.render(60);
   assert.ok(peak(out.slice(0, WAKE_FRAMES)) <= WAKE_PEAK + 1e-9);
   const first = out.slice(WAKE_FRAMES, WAKE_FRAMES + 256);
   assert.ok(first.every((value) => value === 0.5));
   // 数据耗尽但还没收到 end：欠载，补零。
   const gap = out.slice(WAKE_FRAMES + 256);
   assert.ok(gap.length > 0 && gap.every((value) => value === 0));
-  // 渲染满 100ms 时会有一次游标回报；欠载回报的是正文已播出的原始采样数。
+  // 游标每渲染 100ms 回报一次（只在正文开始后），这里不核对；欠载回报的是正文已播出的原始采样数。
   assert.deepEqual(
     w.kinds().filter((kind) => kind !== 'cursor'),
     ['started', 'underrun'],
@@ -170,7 +170,7 @@ test('AudioWorklet：静默超过 1.5 秒后的第一句先放唤醒信号，sta
   sentence(w, 'a');
   const out = play(w, 0.5);
   const wake = out.slice(0, WAKE_FRAMES);
-  assert.equal(firstLoud(out), WAKE_FRAMES, '正文在 100ms 唤醒信号之后开始');
+  assert.equal(firstLoud(out), WAKE_FRAMES, '正文在 150ms 唤醒信号之后开始');
   assert.ok(peak(wake) > 0.9 * WAKE_PEAK && peak(wake) <= WAKE_PEAK + 1e-9, '峰值 -50dBFS');
   assert.ok(Math.abs(wake[0] ?? 1) < 1e-6 && Math.abs(wake.at(-1) ?? 1) < 1e-4, '两端淡入淡出');
   assert.equal(w.kinds()[0], 'started', '唤醒期间没有游标');
@@ -178,7 +178,7 @@ test('AudioWorklet：静默超过 1.5 秒后的第一句先放唤醒信号，sta
     w.posted.find((m) => m.kind === 'ended'),
     { kind: 'ended', sentenceId: 'a', played: 2400 },
   );
-  assert.equal(peak(out.slice(2 * WAKE_FRAMES + 128)), 0, '播完之后是数字静音');
+  assert.equal(peak(out.slice(WAKE_FRAMES + 4800 + 128)), 0, '播完之后是数字静音');
 
   // 静默不足 1.5 秒：下一句直接开始。
   play(w, 1.0);
@@ -220,5 +220,39 @@ test('AudioWorklet：唤醒期间许可过期，句子被丢弃，之后仍是�
       played: 0,
       reason: '许可过期',
     },
+  );
+});
+
+test('AudioWorklet：句中欠载超过 1.5 秒后恢复时同样先放唤醒信号，唤醒期间游标不推进', async () => {
+  const w = await worklet();
+  w.send({ type: 'hb' });
+  w.send({ type: 'lease', ttlMs: 60_000 });
+  w.send({ type: 'begin', id: 'a' });
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(4800).fill(0.2), src: 2400 });
+  play(w, 0.4);
+  assert.equal(w.posted.find((m) => m.kind === 'underrun')?.played, 2400);
+
+  // 欠载约 0.6 秒后音频补上：直接恢复。
+  play(w, 0.4);
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(4800).fill(0.3), src: 2400 });
+  assert.ok(firstLoud(play(w, 0.2)) < 128, '欠载不足 1.5 秒直接恢复');
+
+  // 再欠载 1.6 秒（补零即数字静音）后补上：先放唤醒信号，再接着播。
+  play(w, 1.6);
+  const from = w.posted.length;
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(4800).fill(0.4), src: 2400 });
+  w.send({ type: 'end', id: 'a', src: 7200 });
+  const later = play(w, 0.4);
+  assert.ok(Math.abs(firstLoud(later) - WAKE_FRAMES) < 128, '欠载超过 1.5 秒后先唤醒');
+  assert.ok(peak(later.slice(0, WAKE_FRAMES - 128)) <= WAKE_PEAK + 1e-9);
+  const reports = w.posted.slice(from);
+  // 唤醒期间的游标停在欠载时的位置，唤醒样本不计入已播出；开始只回报一次。
+  const cursors = reports.filter((m) => m.kind === 'cursor').map((m) => m.played as number);
+  assert.equal(cursors[0], 4800, '唤醒期间游标不推进');
+  assert.ok(cursors.every((played) => played >= 4800 && played <= 7200));
+  assert.equal(w.kinds().filter((kind) => kind === 'started').length, 1);
+  assert.deepEqual(
+    reports.find((m) => m.kind === 'ended'),
+    { kind: 'ended', sentenceId: 'a', played: 7200 },
   );
 });
