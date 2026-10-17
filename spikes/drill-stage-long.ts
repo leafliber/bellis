@@ -424,6 +424,8 @@ async function main(): Promise<void> {
       .wait((l) => l.event === 'fact' && l.type === 'stage.connected', 5000)
       .catch(() => undefined);
     result.handshake = connected?.data ?? null;
+    // M2 的预检含在场确认（安全核的前置条件），先确认在场再等预检通过。
+    await call(OperatorMethod.Presence);
     for (const deadline = Date.now() + 20_000; ; ) {
       const failures = (await call(OperatorMethod.Preflight, { target: 'M2' }))
         .failures as string[];

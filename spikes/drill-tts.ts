@@ -266,6 +266,8 @@ async function main(): Promise<void> {
     const scheduleStart = at(scheduleActive);
     const ready = await host.wait((l) => l.event === 'tts-local.ready', 60_000);
     const firstPid = ready.pid as number;
+    // M2 的预检含在场确认（安全核的前置条件），先确认在场再等预检通过。
+    await call(OperatorMethod.Presence);
     const seen: string[][] = [];
     const deadline = Date.now() + 180_000;
     for (;;) {
@@ -286,7 +288,6 @@ async function main(): Promise<void> {
     };
     console.log('加载：', JSON.stringify(result.loading));
 
-    await call(OperatorMethod.Presence);
     const m2 = await call(OperatorMethod.Mode, { target: 'M2' });
     if (m2.ok !== true) throw new Error(`进入 M2 失败：${JSON.stringify(m2)}`);
     const m2At = Date.now();
