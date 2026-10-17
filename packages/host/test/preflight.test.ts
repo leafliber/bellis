@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { EntrySnapshot } from '@bellis/kernel';
+import { type EntrySnapshot, ManualClock } from '@bellis/kernel';
+import { SafetyCore } from '@bellis/safety';
+import { StateStore } from '@bellis/store';
 import { type PreflightInputs, preflight } from '../src/preflight.ts';
 
 const plugin = (id: string, state: EntrySnapshot['state'], enabled = true): EntrySnapshot => ({
@@ -17,6 +19,7 @@ const plugin = (id: string, state: EntrySnapshot['state'], enabled = true): Entr
 
 const ready: PreflightInputs = {
   target: 'M1',
+  safetyBlocker: undefined,
   plugins: [plugin('stage', 'active'), plugin('moderation', 'waiting', false)],
   stageReady: true,
   avatar: { ready: true, status: '就绪' },
@@ -76,4 +79,53 @@ test('开播预检：M2 不要求放行环节；没有 Stage 服务或 OBS 核�
 
 test('开播预检：没有 TTS 路由（只用模拟 TTS）时不核对 TTS 主引擎', async () => {
   assert.deepEqual(await preflight({ ...ready, ttsPrimary: undefined }), []);
+});
+
+/** 真实的安全核：只在内存里，OBS 应急连接视为可用，看门狗是否连接由调用方决定。 */
+function safetyCore(watchdog: { connected: boolean }) {
+  const store = StateStore.open({ path: ':memory:' });
+  const core = new SafetyCore({
+    store,
+    clock: new ManualClock(),
+    config: {
+      simulation: false,
+      leaseTtlMs: {},
+      leaseCapabilities: {},
+      presenceTtlMs: 60_000,
+      rateLimits: {},
+      guardTimeoutMs: 200,
+      emergency: { stageSource: 'Stage', safeScene: 'Safe', stopStream: false },
+      unattendedGatesSatisfied: false,
+    },
+    obs: { ready: true, run: async () => ({ ok: true, results: [] }) },
+    permissionsOf: () => undefined,
+    watchdogConnected: () => watchdog.connected,
+  });
+  return { core, close: () => store.close() };
+}
+
+test('开播预检：先列出安全核的拒绝原因——看门狗未连接、M2 的在场确认无效', async () => {
+  const watchdog = { connected: false };
+  const { core, close } = safetyCore(watchdog);
+  try {
+    const check = (target: 'M1' | 'M2', extra: Partial<PreflightInputs> = {}) =>
+      preflight({ ...ready, target, safetyBlocker: core.modeBlocker(target), ...extra });
+    assert.deepEqual(await check('M1'), ['外部看门狗未连接']);
+    assert.deepEqual(await check('M2'), ['外部看门狗未连接']);
+    // 安全核的原因在前，其余各项照常列出。
+    assert.deepEqual(await check('M1', { stageReady: false }), [
+      '外部看门狗未连接',
+      'Stage 页面尚未认证',
+    ]);
+
+    watchdog.connected = true;
+    assert.deepEqual(await check('M1'), [], 'M1 不要求在场确认');
+    assert.deepEqual(await check('M2'), ['在场确认无效']);
+
+    core.confirmPresence();
+    assert.deepEqual(await check('M1'), []);
+    assert.deepEqual(await check('M2'), []);
+  } finally {
+    close();
+  }
 });
