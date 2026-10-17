@@ -6,7 +6,7 @@
  * 前提：VTS 已开启插件 API（ws://127.0.0.1:8001）并载入模型；OBS 的直播场景里有采集 VTS 的游戏采集源
  * （--avatar-source），安全场景里没有它。
  *
- * 本进程另以插件「Bellis 演练」连上 VTS 作观察者（令牌只在内存里，每次运行在 VTS 中允许一次），
+ * 本进程另以插件「Bellis Drill」连上 VTS 作观察者（令牌只在内存里，每次运行在 VTS 中允许一次），
  * 以约 40Hz 读嘴型参数的值。宿主用缺省的 SecretStore 服务名 bellis：形象插件的令牌像正式运行一样存进
  * bellis 的 vts 条目（第一次运行时维护者在 VTS 中允许「Bellis」）。依次核对：
  *   1. 参数占用：观察者先以 set 模式写嘴型参数，宿主的形象插件记 avatar.injection-stopped、报告未就绪，
@@ -40,7 +40,7 @@ const hostMain = file('../packages/host/src/main.ts');
 const watchdogMain = file('../packages/watchdog/src/main.ts');
 const liveExample = file('../config/live.example.json');
 const VTS_URL = 'ws://127.0.0.1:8001';
-const OBSERVER = { pluginName: 'Bellis 演练', pluginDeveloper: VTS_PLUGIN_DEVELOPER };
+const OBSERVER = { pluginName: 'Bellis Drill', pluginDeveloper: VTS_PLUGIN_DEVELOPER };
 const MOUTH = 'MouthOpen';
 const SOUND_DB = -40;
 const EVERY_MS = 8000;
@@ -118,7 +118,7 @@ function percentile(values: number[], p: number): number | null {
 async function observer(): Promise<VtsClient> {
   const clock = systemClock();
   const vts = await VtsClient.connect(VTS_URL, clock, 3000);
-  say('请在 VTube Studio 中允许插件「Bellis 演练」（观察者，令牌不保存）');
+  say('请在 VTube Studio 中允许插件「Bellis Drill」（观察者，令牌不保存）');
   const granted = await vts.request('AuthenticationTokenRequest', OBSERVER, 300_000);
   if (!granted.ok) throw new Error(`观察者的令牌申请被拒：${granted.errorId} ${granted.message}`);
   const token = granted.data.authenticationToken;
