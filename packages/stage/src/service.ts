@@ -150,14 +150,27 @@ export const stageService = definePlugin({
       }),
     );
 
+    /** 本轮心跳定时器预定的触发时刻。 */
+    let due = clock.now();
     const beat = () => {
+      const now = clock.now();
+      const lateMs = now - due;
+      due = now + ctx.config.heartbeatMs;
       timer = clock.setTimeout(beat, ctx.config.heartbeatMs);
       // 真实页面还没连上（例如 OBS 尚未加载 URL）：安全停止下只算未就绪；输出模式下照常计时，超时即失败。
       if (page.ready === false && !producesOutput(safety.mode)) {
-        lastAck = clock.now();
+        lastAck = now;
         return;
       }
-      if (clock.now() - lastAck > ctx.config.pageTimeoutMs) {
+      // 定时器晚到不止一个心跳周期：宿主自己刚卡过（事件循环阻塞或进程被挂起），这段时间没有发出心跳，
+      // 页面自然没有应答。这一轮不判页面失败，先发心跳、从现在起重新计时。宿主卡死由外部看门狗负责，
+      // 页面收不到心跳也会自静音，安全性不因此降低；真的无响应的页面最多晚一个超时被发现。
+      // 阈值取一个心跳周期：S-05 实测满核负载下 250ms 定时器最多晚约 30ms，晚一整个周期只会是宿主卡过；
+      // 晚到不足一个周期时，距上次应答最多约两个周期加往返（缺省约 500ms），小于页面超时（缺省 1000ms），照常判定。
+      if (lateMs > ctx.config.heartbeatMs) {
+        ctx.log('stage.heartbeat-late', { lateMs, sinceAckMs: now - lastAck });
+        lastAck = now;
+      } else if (now - lastAck > ctx.config.pageTimeoutMs) {
         for (const [id, entry] of [...playing]) {
           finish(id, {
             sentenceId: id,
