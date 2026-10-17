@@ -12,8 +12,8 @@
  *   1. 参数占用：观察者先以 set 模式写嘴型参数，宿主的形象插件记 avatar.injection-stopped、报告未就绪，
  *      开播预检列出形象未就绪。
  *   2. 口型跟随播放：M2 下 440Hz 测试音的定时播报播出时嘴型张开，句间为 0；粗测音量表出声到嘴型张开的时间。
- *   3. 宿主失联：说话中挂起宿主进程，量嘴型归位（VTS 收不到注入约 1 秒后交还控制）的时间；看门狗切到
- *      安全场景后核对形象源不在节目场景里。
+ *   3. 宿主失联：说话中挂起宿主进程（重复 --trials 次），量嘴型归位（VTS 收不到注入约 1 秒后交还控制）的时间；
+ *      看门狗切到安全场景后核对形象源不在节目场景里。最后操作员急停一次，核对同样不可见、嘴型归位。
  *
  * 会改写浏览器源的 URL、切换节目场景并静音；推流或录制进行中时拒绝运行，结束后恢复。
  */
@@ -138,6 +138,8 @@ async function main(): Promise<void> {
       'stage-source': { type: 'string' },
       'avatar-source': { type: 'string' },
       'safe-scene': { type: 'string', default: 'Safe' },
+      /** 宿主失联重复的次数。 */
+      trials: { type: 'string', default: '5' },
       out: { type: 'string' },
     },
   });
@@ -145,6 +147,7 @@ async function main(): Promise<void> {
   const avatarSource = values['avatar-source'];
   if (!stageSource || !avatarSource) throw new Error('需要 --stage-source 与 --avatar-source');
   const safeScene = values['safe-scene'];
+  const trialCount = Number(values.trials);
 
   const secret = await readObsSecret(new KeyringSecretStore('bellis'), OBS_SECRET);
   const obs = await ObsClient.connect(secret.url, secret.password);
@@ -245,7 +248,7 @@ async function main(): Promise<void> {
     };
     void readLoop();
 
-    const announcements = Array.from({ length: 30 }, (_, i) => ({
+    const announcements = Array.from({ length: 60 }, (_, i) => ({
       id: `a${i}`,
       atMs: 4000 + i * EVERY_MS,
       text: TEXT,
@@ -323,10 +326,14 @@ async function main(): Promise<void> {
     await sleep(500);
     let run = await start();
     session = run.s;
-    const stoppedLine = await run.host.wait(fact('avatar.injection-stopped'), 15_000);
+    const stoppedLine = await run.host.wait((l) => l.event === 'avatar.injection-stopped', 15_000);
     await run.call(OperatorMethod.Presence);
     result.occupied = {
-      injectionStopped: stoppedLine.data,
+      injectionStopped: {
+        parameter: stoppedLine.parameter,
+        errorId: stoppedLine.errorId,
+        reason: stoppedLine.reason,
+      },
       preflightM2: (await run.call(OperatorMethod.Preflight, { target: 'M2' })).failures,
     };
     say(`参数占用：${JSON.stringify(result.occupied)}`);
@@ -334,6 +341,9 @@ async function main(): Promise<void> {
     await session.stop();
     session = undefined;
     injecting = false;
+    // 计划内停止时宿主切到了安全场景并静音（预检因此不通过）：像操作员一样切回直播场景、取消静音。
+    ok(await obs.request('SetCurrentProgramScene', { sceneName: original.scene }));
+    ok(await obs.request('SetInputMute', { inputName: stageSource, inputMuted: false }));
     await sleep(2000);
 
     // 2. 口型跟随播放。
@@ -403,52 +413,118 @@ async function main(): Promise<void> {
     };
     say(`口型跟随：${JSON.stringify(result.following)}`);
 
-    // 3. 宿主失联：说话中挂起宿主。
-    const speakingFrom = Date.now();
-    for (;;) {
-      const latest = mouth.at(-1);
-      if (latest && latest[0] > speakingFrom && latest[1] > 0.5) break;
-      if (Date.now() - speakingFrom > EVERY_MS * 2) throw new Error('等不到嘴型张开');
-      await sleep(20);
-    }
-    await sleep(1000);
-    const pid = session.host.pid;
-    const before = mouth.at(-1)?.[1] ?? null;
-    const suspendAt = Date.now();
-    suspender.stdin?.write(`suspend ${pid}\n`);
-    suspendedPid = pid;
-    await replies.wait((l) => l.event.startsWith('suspend'), 5000);
-    let returned: number | undefined;
-    for (const deadline = suspendAt + 5000; Date.now() < deadline; ) {
-      const hit = mouth.find(([t, v]) => t > suspendAt && v < 0.05);
-      if (hit) {
-        returned = hit[0];
-        break;
+    // 3. 宿主失联：说话中挂起宿主，重复 --trials 次；最后改由操作员急停一次。
+    const live = original.scene;
+    const enterM2 = async () => {
+      ok(await obs.request('SetCurrentProgramScene', { sceneName: live }));
+      ok(await obs.request('SetInputMute', { inputName: stageSource, inputMuted: false }));
+      await call(OperatorMethod.Presence);
+      for (const deadline = Date.now() + 30_000; ; ) {
+        const failures = (await call(OperatorMethod.Preflight, { target: 'M2' }))
+          .failures as string[];
+        if (failures.length === 0) break;
+        if (Date.now() > deadline) throw new Error(`预检未通过：${failures.join('；')}`);
+        await sleep(300);
       }
-      await sleep(20);
+      const entered = await call(OperatorMethod.Mode, { target: 'M2' });
+      if (entered.ok !== true) throw new Error(`进入 M2 失败：${JSON.stringify(entered)}`);
+    };
+    /** 等到嘴型张开（正在说话）。 */
+    const waitSpeaking = async () => {
+      const since = Date.now();
+      for (;;) {
+        const latest = mouth.at(-1);
+        if (latest && latest[0] > since && latest[1] > 0.5) return;
+        if (Date.now() - since > EVERY_MS * 2) throw new Error('等不到嘴型张开');
+        await sleep(20);
+      }
+    };
+    /** 从 since 起嘴型第一次归位（低于 0.05）的时刻。 */
+    const mouthClosedAfter = async (since: number) => {
+      for (const deadline = since + 5000; Date.now() < deadline; ) {
+        const hit = mouth.find(([t, v]) => t > since && v < 0.05);
+        if (hit) return hit[0];
+        await sleep(20);
+      }
+      return undefined;
+    };
+    const avatarShown = async () => {
+      const program = ok(await obs.request('GetCurrentProgramScene'))
+        .currentProgramSceneName as string;
+      const items = await itemsOf(program);
+      return { program, visible: items.some((i) => i.name === avatarSource && i.enabled) };
+    };
+    const trials: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < trialCount; i++) {
+      if (i > 0) await enterM2();
+      await waitSpeaking();
+      // 挂起时刻落在说话中的不同位置。
+      await sleep(300 + Math.random() * 700);
+      const pid = session.host.pid;
+      const hostMark = host.items.length;
+      const watchdogMark = watchdog.items.length;
+      const before = mouth.at(-1)?.[1] ?? null;
+      const suspendAt = Date.now();
+      suspender.stdin?.write(`suspend ${pid}
+`);
+      suspendedPid = pid;
+      await replies.wait((l) => l.event.startsWith('suspend'), 5000, replies.items.length - 1);
+      const returned = await mouthClosedAfter(suspendAt);
+      const acted = await watchdog.wait((l) => l.event === 'watchdog.acted', 5000, watchdogMark);
+      const shown = await avatarShown();
+      suspender.stdin?.write(`resume ${pid}
+`);
+      await replies.wait((l) => l.event.startsWith('resume'), 5000, replies.items.length - 1);
+      suspendedPid = undefined;
+      await host.wait(fact('watchdog.acted'), 10_000, hostMark);
+      const trial = {
+        mouthBefore: before,
+        mouthReturnedMs: returned === undefined ? null : returned - suspendAt,
+        watchdogActed: acted.reason,
+        watchdogActedMs: Date.parse(acted.t) - suspendAt,
+        programScene: shown.program,
+        avatarVisible: shown.visible,
+        modeAfterResume: (await call(OperatorMethod.Status)).mode,
+      };
+      trials.push(trial);
+      say(`宿主失联 ${i + 1}/${trialCount}：${JSON.stringify(trial)}`);
     }
-    const acted = await watchdog.wait((l) => l.event === 'watchdog.acted', 5000);
-    const program = ok(await obs.request('GetCurrentProgramScene'))
-      .currentProgramSceneName as string;
-    const programItems = await itemsOf(program);
+    const returnedMs = trials
+      .map((t) => t.mouthReturnedMs)
+      .filter((v): v is number => typeof v === 'number');
+    const actedMs = trials.map((t) => t.watchdogActedMs as number);
     result.hostLost = {
-      mouthBefore: before,
-      mouthReturnedMs: returned === undefined ? null : returned - suspendAt,
-      mouthAfter: mouth.at(-1)?.[1] ?? null,
-      watchdogActed: acted.reason,
-      watchdogActedMs: Date.parse(acted.t) - suspendAt,
-      programScene: program,
-      avatarVisible: programItems.some((i) => i.name === avatarSource && i.enabled),
+      trials,
+      mouthReturnedMs: {
+        n: returnedMs.length,
+        p50: percentile(returnedMs, 50),
+        p95: percentile(returnedMs, 95),
+        max: percentile(returnedMs, 100),
+      },
+      watchdogActedMs: {
+        n: actedMs.length,
+        p50: percentile(actedMs, 50),
+        p95: percentile(actedMs, 95),
+        max: percentile(actedMs, 100),
+      },
+      avatarVisibleAfterAct: trials.filter((t) => t.avatarVisible).length,
     };
-    say(`宿主失联：${JSON.stringify(result.hostLost)}`);
-    suspender.stdin?.write(`resume ${pid}\n`);
-    await replies.wait((l) => l.event.startsWith('resume'), 5000);
-    suspendedPid = undefined;
-    await host.wait(fact('watchdog.acted'), 10_000);
-    result.hostLost = {
-      ...(result.hostLost as object),
-      modeAfterResume: (await call(OperatorMethod.Status)).mode,
+
+    // 操作员急停：切到安全场景，形象不可见；仲裁停止说话，嘴型随之归位。
+    await enterM2();
+    await waitSpeaking();
+    await sleep(500);
+    const estopAt = Date.now();
+    await call(OperatorMethod.EmergencyStop, { reason: '演练：形象急停' });
+    const closedAt = await mouthClosedAfter(estopAt);
+    const shown = await avatarShown();
+    result.estop = {
+      mouthClosedMs: closedAt === undefined ? null : closedAt - estopAt,
+      programScene: shown.program,
+      avatarVisible: shown.visible,
+      mode: (await call(OperatorMethod.Status)).mode,
     };
+    say(`操作员急停：${JSON.stringify(result.estop)}`);
     run.operator.connection.close();
   } finally {
     reading = false;
