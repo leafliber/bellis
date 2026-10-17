@@ -617,6 +617,9 @@ importers:
 
   spikes:
     dependencies:
+      '@bellis/avatar':
+        specifier: workspace:*
+        version: link:../packages/avatar
       '@bellis/channel':
         specifier: workspace:*
         version: link:../packages/channel
