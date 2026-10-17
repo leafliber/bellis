@@ -43,7 +43,7 @@ const until = async (condition: () => boolean, timeoutMs = 5000) => {
   }
 };
 
-async function setup() {
+async function setup(pageConfig: Record<string, unknown> = {}) {
   const path = join(tmpdir(), `bellis-stage-page-${randomBytes(6).toString('hex')}.db`);
   const store = StateStore.open({ path });
   const clock = systemClock();
@@ -119,6 +119,7 @@ async function setup() {
         resumeWindowMs: 400,
         helloTimeoutMs: 500,
         idleTimeoutMs: 1000,
+        ...pageConfig,
       }),
       entry('stage', 'stage-service', [], { heartbeatMs: 100, pageTimeoutMs: 2000 }),
       entry('speaker', 'test-speaker', ['speech.output']),
@@ -284,6 +285,25 @@ test('令牌：错误与重放都被拒并限频重新下发；同时只允许�
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal((await attempt(s, { kind: 'resume', sessionKey })).result, 'close-4401');
     await until(() => s.token() !== token);
+  } finally {
+    await s.close();
+  }
+});
+
+test('会话断开后令牌又被拒：按最小间隔重新下发，不等到重连时限', async () => {
+  const s = await setup({ redistributeMinMs: 1000, resumeWindowMs: 10_000 });
+  try {
+    const token = s.token();
+    const page = await attempt(s, hello(token));
+    assert.equal(page.result, 'welcome');
+    // 会话断开：按重连时限（10 秒）排了一次重新下发。
+    page.ws?.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // 距上次下发不到最小间隔时重放用过的令牌（OBS 重建浏览器后页面会这样）：被拒，按最小间隔重新下发。
+    const rejectedAt = Date.now();
+    assert.equal((await attempt(s, hello(token))).result, 'close-4401');
+    await until(() => s.token() !== token, 4000);
+    assert.ok(Date.now() - rejectedAt < 4000);
   } finally {
     await s.close();
   }

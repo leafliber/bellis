@@ -91,6 +91,8 @@ export const obsStagePage = definePlugin({
     let distributing = false;
     let distributions = 0;
     let retry: TimerHandle | undefined;
+    /** 已排的重新下发在何时触发（clock.now() 的刻度）。 */
+    let retryAt = Number.POSITIVE_INFINITY;
 
     const refusal = (req: IncomingMessage, path: string, upgrade: boolean) => {
       if (req.headers.host !== host) return 'host';
@@ -146,8 +148,18 @@ export const obsStagePage = definePlugin({
       wss.handleUpgrade(req, socket, head, (ws) => authenticate(ws));
     };
 
+    /**
+     * 排一次重新下发。已经排了更早的就不动；已排的更晚（例如会话断开后按重连时限排的）就提前到这一次，
+     * 否则令牌被拒后要等到重连时限才重新下发，而不是按最小间隔。
+     */
     const scheduleDistribute = (reason: string, delayMs: number) => {
-      if (retry || ctx.signal.aborted) return;
+      if (ctx.signal.aborted) return;
+      const at = clock.now() + Math.max(0, delayMs);
+      if (retry) {
+        if (retryAt <= at) return;
+        clock.clearTimeout(retry);
+      }
+      retryAt = at;
       retry = clock.setTimeout(
         () => {
           retry = undefined;
