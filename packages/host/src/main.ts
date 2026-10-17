@@ -4,13 +4,20 @@
  * 启动后总处于安全停止，由操作员显式切换模式。
  */
 import { listen, RpcPeer } from '@bellis/channel';
-import { loadConfig, obsSecretName, readObsSecret } from '@bellis/config';
+import {
+  loadConfig,
+  OBS_SECRET,
+  obsSecretName,
+  readObsSecret,
+  SIM_OBS_SECRET,
+} from '@bellis/config';
 import {
   ChannelHub,
   ClockService,
   Kernel,
   readJsonFile,
   resolveProfile,
+  SecretsService,
   SidecarHostService,
   systemClock,
 } from '@bellis/kernel';
@@ -37,12 +44,13 @@ import {
   WatchdogActedParams,
 } from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
-import { KeyringSecretStore } from '@bellis/secret-store';
+import { KeyringSecretStore, SESSION_SECRET } from '@bellis/secret-store';
 import { type HeldSentence, ReviewService } from '@bellis/speech';
 import { OBS_CONTROL, ObsConnectorService, type Stage, StageService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
 import { preflight } from './preflight.ts';
+import { pluginSecrets } from './secrets.ts';
 
 const RPC_TIMEOUT_MS = 2000;
 /** 写进日志的事实类型，便于运维观察。 */
@@ -141,6 +149,11 @@ const hub = new ChannelHub();
 host.provideCore(SidecarHostService, { credentials, hub });
 host.provideCore(ClockService, clock);
 host.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(core, instanceId));
+// 插件凭据：只放行 profile 授予的条目；会话连接信息与 OBS 凭据由宿主管理，插件拿不到。
+const reservedSecrets = new Set([SESSION_SECRET, OBS_SECRET, SIM_OBS_SECRET]);
+host.provideScoped(SecretsService, ({ permissions }) =>
+  pluginSecrets(secrets, permissions, reservedSecrets),
+);
 // OBS 控制的连接：凭据留在宿主装配代码里，只有被授予 obs.control 权限的实例能连接。
 host.provideScoped(ObsConnectorService, ({ instanceId, permissions }) => ({
   connect: () =>
