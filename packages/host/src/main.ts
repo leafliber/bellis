@@ -235,8 +235,8 @@ logEvent('host.ready', { pid: process.pid, ppid: process.ppid, mode: core.mode }
 
 /** 操作员命令：查看状态、切换模式（升级只能经这里显式发起）、确认在场、急停。 */
 /**
- * 开播预检（见 preflight.ts）。withSafety 时先问安全核“现在切到目标模式会不会被拒”，把原因列为一项；
- * 切换时安全核已先核对过，不再重复。
+ * 开播预检（见 preflight.ts）。withSafety 时先问安全核目标模式的前置条件（已处于该模式不算未通过），
+ * 把原因列为一项；切换时安全核已先核对过，不再重复。
  */
 function runPreflight(target: 'M1' | 'M2' | 'M3', withSafety: boolean): Promise<string[]> {
   const stage = host.services.resolve(StageService.name, StageService.major);
@@ -245,7 +245,7 @@ function runPreflight(target: 'M1' | 'M2' | 'M3', withSafety: boolean): Promise<
   const routing = host.services.resolve(TtsRoutingService.name, TtsRoutingService.major);
   return preflight({
     target,
-    safetyBlocker: withSafety ? core.modeBlocker(target) : undefined,
+    safetyBlocker: withSafety ? core.preconditionBlocker(target) : undefined,
     plugins: host.snapshot(),
     stageReady: 'missing' in stage ? undefined : (stage.impl as Stage).ready,
     avatar:

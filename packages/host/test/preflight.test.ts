@@ -109,7 +109,7 @@ test('开播预检：先列出安全核的拒绝原因——看门狗未连接�
   const { core, close } = safetyCore(watchdog);
   try {
     const check = (target: 'M1' | 'M2', extra: Partial<PreflightInputs> = {}) =>
-      preflight({ ...ready, target, safetyBlocker: core.modeBlocker(target), ...extra });
+      preflight({ ...ready, target, safetyBlocker: core.preconditionBlocker(target), ...extra });
     assert.deepEqual(await check('M1'), ['外部看门狗未连接']);
     assert.deepEqual(await check('M2'), ['外部看门狗未连接']);
     // 安全核的原因在前，其余各项照常列出。
@@ -125,6 +125,12 @@ test('开播预检：先列出安全核的拒绝原因——看门狗未连接�
     core.confirmPresence();
     assert.deepEqual(await check('M1'), []);
     assert.deepEqual(await check('M2'), []);
+
+    // 已在 M2 中跑 M2 的预检：不报“已经处于该模式”；看门狗断开照样报出。
+    assert.deepEqual(core.requestMode('M2'), { ok: true });
+    assert.deepEqual(await check('M2'), []);
+    watchdog.connected = false;
+    assert.deepEqual(await check('M2'), ['外部看门狗未连接']);
   } finally {
     close();
   }

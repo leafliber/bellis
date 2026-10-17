@@ -4,8 +4,9 @@ import type { EntrySnapshot } from '@bellis/kernel';
 export interface PreflightInputs {
   target: 'M1' | 'M2' | 'M3';
   /**
-   * 安全核对“现在切到目标模式”的拒绝原因（`SafetyCore.modeBlocker`）：状态存储、OBS 应急连接、
-   * 看门狗、在场确认等；没有时为 undefined。切换时安全核已先核对并拒绝过，此处传 undefined，免得报两次。
+   * 安全核核对的目标模式前置条件未满足的原因（`SafetyCore.preconditionBlocker`）：状态存储、OBS 应急连接、
+   * 看门狗、在场确认等；已处于目标模式不算未满足。没有时为 undefined。切换时安全核已先核对并拒绝过，
+   * 此处传 undefined，免得报两次。
    */
   safetyBlocker: string | undefined;
   /** profile 中的全部条目。 */

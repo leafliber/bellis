@@ -18,7 +18,14 @@ import { ControlChannel } from './control.ts';
 import type { EmergencyObs } from './emergency.ts';
 import { type Lease, Leases } from './leases.ts';
 import { type RateLimit, RateLimiter } from './rate.ts';
-import { downgradeTarget, type Mode, producesOutput, upgradeBlocker } from './supervision.ts';
+import {
+  downgradeTarget,
+  type Mode,
+  preconditionBlocker,
+  producesOutput,
+  type UpgradeContext,
+  upgradeBlocker,
+} from './supervision.ts';
 
 export interface SafetyConfig {
   /** `sim` profile：只允许 M0，只连模拟设备。 */
@@ -342,10 +349,21 @@ export class SafetyCore {
 
   // ---------------------------------------------------------------- 监督模式
 
-  /** 操作员切换模式。升级须满足目标模式的前置条件；切到安全停止走急停路径。 */
   /** 切换到目标模式的前置条件是否满足（不切换、不记录）；满足时返回 undefined。 */
   modeBlocker(target: Mode): string | undefined {
-    return upgradeBlocker(this.#mode, target, {
+    return upgradeBlocker(this.#mode, target, this.#upgradeContext());
+  }
+
+  /**
+   * 开播预检用：目标模式的前置条件是否满足，不计“已经处于该模式”（见 preconditionBlocker）。
+   * 不切换、不记录；满足时返回 undefined。
+   */
+  preconditionBlocker(target: Mode): string | undefined {
+    return preconditionBlocker(this.#mode, target, this.#upgradeContext());
+  }
+
+  #upgradeContext(): UpgradeContext {
+    return {
       simulation: this.#config.simulation,
       maintenance: this.#maintenance,
       storeHealthy: this.#store.healthy,
@@ -354,8 +372,10 @@ export class SafetyCore {
       presenceValid: this.presenceValid(),
       moderationEnabled: this.#moderation,
       unattendedGatesSatisfied: this.#config.unattendedGatesSatisfied,
-    });
+    };
   }
+
+  /** 操作员切换模式。升级须满足目标模式的前置条件；切到安全停止走急停路径。 */
 
   requestMode(target: Mode): { ok: true } | { ok: false; reason: string } {
     const blocker = this.modeBlocker(target);
