@@ -121,3 +121,23 @@ export interface ModerationStatus {
 }
 
 export const ModerationService = defineService<ModerationStatus>('moderation', 1);
+
+/** M1 中等待放行的一句。 */
+export interface HeldSentence {
+  /** 与授权意图相同的键：`发言编号#句序号`。 */
+  key: string;
+  utteranceId: string;
+  index: number;
+  source: SpeechSource;
+  subtitle: string;
+}
+
+/**
+ * M1 的逐句放行环节（固定延迟加否决）：仲裁在 M1 下每句播出前交给它，
+ * 等待期满放行（返回 undefined），被操作员否决或模式变化时返回拦下的原因。
+ */
+export interface Review {
+  hold(sentence: HeldSentence, signal: AbortSignal): Promise<string | undefined>;
+}
+
+export const ReviewService = defineService<Review>('speech.review', 1);

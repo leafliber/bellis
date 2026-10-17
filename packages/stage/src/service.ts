@@ -126,6 +126,9 @@ export const stageService = definePlugin({
     });
 
     const stage: Stage = {
+      get ready() {
+        return page.ready !== false;
+      },
       async play(sentence, audio, token) {
         if (!safety.isValid(STAGE_AUDIO, token)) {
           return { sentenceId: sentence.id, played: 0, complete: false, reason: '许可无效' };

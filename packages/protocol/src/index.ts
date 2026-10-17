@@ -22,6 +22,8 @@ import {
   HostStoppingParams,
   OperatorEmergencyParams,
   OperatorModeParams,
+  OperatorPreflightParams,
+  OperatorVetoParams,
   ProcessShutdownParams,
   ProcessShutdownResult,
   SessionInfo,
@@ -60,6 +62,8 @@ export const schemaModules = {
     HostHeartbeatParams,
     OperatorModeParams,
     OperatorEmergencyParams,
+    OperatorVetoParams,
+    OperatorPreflightParams,
     WatchdogActedParams,
   },
 } as const;

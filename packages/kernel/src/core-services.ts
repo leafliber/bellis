@@ -17,3 +17,21 @@ export interface Trace {
 }
 
 export const TraceService = defineService<Trace>('trace', 1);
+
+/**
+ * 宿主提供给插件的凭据（按实例隔离）：插件只能读写 profile 授予它的条目，权限写成 `secret:<名字>`。
+ * 值不写日志、不进事件；处理观众输入的插件不授予任何凭据（Rule of Two）。
+ */
+export interface PluginSecrets {
+  /** 条目不存在时返回 undefined；没有授权时抛错。 */
+  read(name: string): Promise<string | undefined>;
+  write(name: string, value: string): Promise<void>;
+  delete(name: string): Promise<boolean>;
+}
+
+export const SecretsService = defineService<PluginSecrets>('secrets', 1);
+
+/** 授予凭据条目的权限名。 */
+export function secretPermission(name: string): string {
+  return `secret:${name}`;
+}
