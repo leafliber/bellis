@@ -780,7 +780,7 @@ function mouthOf(
   const before = valuesIn(
     track,
     Math.max(prev ? prev.end + 0.35 : -Infinity, s.onset - 1),
-    s.onset - 0.2,
+    s.onset - 0.35,
   );
   const closed = before.length >= 2 ? (median(before) ?? fallbackClosed) : fallbackClosed;
   const inside =

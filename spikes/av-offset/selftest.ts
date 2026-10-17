@@ -9,7 +9,7 @@
  *     20Hz 唤醒信号；语音变体改用 220Hz 载波乘音节状的包络（约 4.2 个音节每秒）。
  *   - 字幕：字幕带内一行宽度随字数变化的白块（带黑边），在句首加 Δ字幕 后出现、句尾加 Δ清除 后消失。
  *   - 嘴：脸上一小块，测试音变体在句首、句尾各加 Δ嘴 后张开、闭合（阶跃）；语音变体的张开程度按形象插件的
- *     映射跟随包络，整体滞后 Δ嘴。
+ *     映射跟随包络，整体偏移 Δ嘴。Δ 可正可负（-200…+200ms）：既有录像里字幕比声音早 100 多毫秒。
  *   - 干扰：全画面时变噪声、周期眨眼、来回移动的彩色块，都与音频无关。
  * 变体：30fps、60fps、音轨比画面晚 0.25 秒开始（核对按时间线对齐）、语音、以及没有字幕和嘴型变化的反例。
  *
@@ -131,9 +131,9 @@ function scenario(variant: Variant): Sentence[] {
       onset,
       end,
       gapBefore: prev ? onset - prev.end : null,
-      subtitleShow: offGrid(onset + between(-0.04, 0.08), variant.fps) - onset,
-      subtitleClear: offGrid(end + between(-0.03, 0.07), variant.fps) - end,
-      mouth: between(0.04, 0.2),
+      subtitleShow: offGrid(onset + between(-0.2, 0.08), variant.fps) - onset,
+      subtitleClear: offGrid(end + between(-0.2, 0.07), variant.fps) - end,
+      mouth: between(-0.2, 0.2),
       chars,
       syllables,
       phase: between(0, 2 * Math.PI),
