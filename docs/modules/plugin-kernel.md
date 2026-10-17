@@ -108,10 +108,13 @@ WAITING ──依赖齐全──► LOADING ──► ACTIVE ──停用或依�
 启动子进程 → 握手（协议版本、提供的服务与主版本、申请的权限）→ 健康检查 → 注册服务
 ```
 
-- 子进程以 `sidecar.<条目 id>` 角色连接宿主。握手是 `sidecar.describe` 与 `sidecar.health` 两个 RPC：声明提供的服务须与清单一致，申请的权限须已授予，否则加载失败。
+- 子进程以 `sidecar.<条目 id>` 角色连接宿主；宿主先监听本机通道，再按 profile 加载插件。握手是 `sidecar.describe` 与 `sidecar.health` 两个 RPC：声明提供的服务须与清单一致，申请的权限须已授予，否则加载失败。
+- 代理插件可以把 sidecar 的方法原样转发成服务，也可以适配成具体的服务接口，例如 TTS 代理把 `tts.synthesize` 与二进制音频适配成 `tts@1`（见[发声](speech.md#本地-tts-sidecar)）。
 - 子进程退出或连接断开时，代理撤回其服务，依赖方自动回到 WAITING；代理按 FAILED 的退避重启子进程。
 - sidecar 只返回数据，不直接驱动扬声器、OBS 或游戏。
-- 停止方式：先发 RPC 关闭，再关 stdin 让子进程读到 EOF 后退出，超时再强制终止（R-06）。
+- 停止方式：先发 RPC 关闭，再关 stdin 让子进程读到 EOF 后退出，超时再强制终止（R-06）；子进程在哪一步退出记入日志。
+- sidecar 管住自己派生的进程（R-06）：Windows 上启动时先把自己放进设了 KILL_ON_JOB_CLOSE 的 Job Object，此后派生的全部子孙进程（含第三方库自己起的）都在其中，不能脱离；句柄不被继承、不主动关闭，sidecar 无论怎样退出它们都随之终止。其它平台跳过，派生的进程以 stdin 为生命线。
+- Python sidecar 的运行时在 `python/bellis_sidecar`：本机通道客户端、JSON-RPC 对端、握手与停止、Job Object；消息模型由 `packages/protocol` 经 `pnpm run gen` 生成（D-21、R-24）。宿主直接启动 uv 工作区虚拟环境里的解释器，不经 `uv run`（见 [Windows 平台](../platform/windows.md#进程)），以 PYTHONPATH 指向各包的源码目录。
 
 ## 权限
 
