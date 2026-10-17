@@ -1,13 +1,15 @@
 /**
  * 凭据录入命令的实现（D-28）：维护者自己把凭据写进 SecretStore，Agent 与日志都不经手。
  * 值只从不回显的输入读取，不打印、不写日志；列出时只显示名字。
+ * `audit` 核对文件中有没有出现凭据的值，只输出文件、条目名、编码与次数（见 secret-audit.ts）。
  */
 import { createInterface } from 'node:readline';
 import { createInterface as createPromptInterface } from 'node:readline/promises';
 import { OBS_SECRET, SIM_OBS_SECRET, writeObsSecret } from '@bellis/config';
 import { SESSION_SECRET, type SecretStore } from '@bellis/secret-store';
+import { type AuditFs, defaultAuditLocations, runSecretAudit } from './secret-audit.ts';
 
-export const SECRET_USAGE = '用法：secret <list | set 名字 | delete 名字>';
+export const SECRET_USAGE = '用法：secret <list | set 名字 | delete 名字 | audit [路径…]>';
 
 /** 由启动器写入与删除的条目，不能手工改。 */
 const MANAGED = new Set([SESSION_SECRET, SIM_OBS_SECRET]);
@@ -23,15 +25,35 @@ export interface SecretCommandIo {
   prompt: Prompter;
   /** 给维护者看的结果与错误；从不包含凭据的值。 */
   print(line: string): void;
+  /** audit 的相对路径按此目录解析。 */
+  cwd: string;
+  /** 仓库根：audit 不给路径时，缺省位置由此确定。 */
+  root: string;
+  /** audit 用到的文件操作，测试可以替换。 */
+  fs?: AuditFs;
 }
 
-/** 执行命令并返回退出码：0 成功，1 失败，2 用法错误。 */
+/** 执行命令并返回退出码：0 成功，1 失败（audit：有命中或读取失败），2 用法错误。 */
 export async function runSecretCommand(
   args: readonly string[],
   store: SecretStore,
   io: SecretCommandIo,
 ): Promise<number> {
   const [command, name, ...rest] = args;
+  if (command === 'audit') {
+    const paths = args.slice(1);
+    // 不支持选项；以 - 开头的文件名写成 ./-x。
+    if (paths.some((path) => path === '' || path.startsWith('-'))) {
+      io.print(SECRET_USAGE);
+      return 2;
+    }
+    return runSecretAudit(paths, store, {
+      print: io.print,
+      cwd: io.cwd,
+      defaults: () => defaultAuditLocations(io.root),
+      ...(io.fs ? { fs: io.fs } : {}),
+    });
+  }
   if (command === 'list' && name === undefined) {
     const names = await store.names();
     if (names.length === 0) io.print('（没有凭据）');

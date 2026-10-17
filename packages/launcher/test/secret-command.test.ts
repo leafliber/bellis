@@ -27,7 +27,12 @@ function scripted(answers: string[]) {
 async function run(args: string[], store: MemorySecretStore, answers: string[] = []) {
   const { prompt, asked } = scripted(answers);
   const printed: string[] = [];
-  const code = await runSecretCommand(args, store, { prompt, print: (line) => printed.push(line) });
+  const code = await runSecretCommand(args, store, {
+    prompt,
+    print: (line) => printed.push(line),
+    cwd: process.cwd(),
+    root: process.cwd(),
+  });
   return { code, printed, asked };
 }
 
