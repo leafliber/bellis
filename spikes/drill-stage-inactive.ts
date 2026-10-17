@@ -370,7 +370,8 @@ async function main(): Promise<void> {
               (l.event === 'plugin.failed' && l.entry === 'stage') ||
               (l.event === 'plugin.transition' && l.entryId === 'stage') ||
               String(l.event).startsWith('stage-page.') ||
-              l.event === 'stage.muted',
+              l.event === 'stage.muted' ||
+              l.event === 'stage.heartbeat-late',
           )
           .map((l) => ({
             s: round((Date.parse(l.t) - t0) / 1000, 2),
@@ -378,6 +379,7 @@ async function main(): Promise<void> {
             ...(l.error ? { error: l.error } : {}),
             ...(l.to ? { to: l.to, reason: l.reason ?? null } : {}),
             ...(l.event.startsWith('stage-page.') && l.reason ? { reason: l.reason } : {}),
+            ...(l.lateMs !== undefined ? { lateMs: l.lateMs, sinceAckMs: l.sinceAckMs } : {}),
           }));
       const status = async () =>
         (
