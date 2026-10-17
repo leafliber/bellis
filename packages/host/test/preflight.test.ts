@@ -22,6 +22,7 @@ const ready: PreflightInputs = {
   avatar: { ready: true, status: '就绪' },
   moderationEnabled: false,
   reviewPresent: true,
+  ttsPrimary: { engine: 'local', ready: true, status: '就绪' },
   inspectObs: async () => [],
 };
 
@@ -47,12 +48,14 @@ test('开播预检：插件未就绪、Stage 未认证、审核开关未设置�
     stageReady: false,
     moderationEnabled: undefined,
     reviewPresent: false,
+    ttsPrimary: { engine: 'local', ready: false, status: '模型加载中' },
     inspectObs: async () => ['OBS 中没有安全场景「Safe」'],
   });
   assert.deepEqual(failures, [
     '插件 tts 未就绪（waiting：缺少服务 tts@1）',
     'Stage 页面尚未认证',
     '审核插件的开关没有在 profile 中显式设置',
+    'TTS 主引擎 local 未就绪：模型加载中',
     'M1 需要逐句放行环节（speech-review）',
     'OBS 中没有安全场景「Safe」',
   ]);
@@ -69,4 +72,8 @@ test('开播预检：M2 不要求放行环节；没有 Stage 服务或 OBS 核�
     },
   });
   assert.deepEqual(failures, ['Stage 服务不在场', 'OBS 预检失败：连接已关闭']);
+});
+
+test('开播预检：没有 TTS 路由（只用模拟 TTS）时不核对 TTS 主引擎', async () => {
+  assert.deepEqual(await preflight({ ...ready, ttsPrimary: undefined }), []);
 });

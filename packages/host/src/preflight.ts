@@ -16,6 +16,11 @@ export interface PreflightInputs {
   moderationEnabled: boolean | undefined;
   /** M1 的逐句放行环节是否在场。 */
   reviewPresent: boolean;
+  /**
+   * TTS 路由配置中第一个音频引擎（只出字幕不算）的状态；没有 TTS 路由或没有配置音频引擎时为 undefined，
+   * 不核对（只用模拟 TTS 的 profile）。
+   */
+  ttsPrimary: { engine: string; ready: boolean; status: string } | undefined;
   /** OBS 应急目标的只读核对，返回未通过的项。 */
   inspectObs(): Promise<string[]>;
 }
@@ -37,6 +42,8 @@ export async function preflight(inputs: PreflightInputs): Promise<string[]> {
   if (inputs.avatar && !inputs.avatar.ready) failures.push(`形象未就绪（${inputs.avatar.status}）`);
   if (inputs.moderationEnabled === undefined)
     failures.push('审核插件的开关没有在 profile 中显式设置');
+  if (inputs.ttsPrimary && !inputs.ttsPrimary.ready)
+    failures.push(`TTS 主引擎 ${inputs.ttsPrimary.engine} 未就绪：${inputs.ttsPrimary.status}`);
   if (inputs.target === 'M1' && !inputs.reviewPresent)
     failures.push('M1 需要逐句放行环节（speech-review）');
   try {

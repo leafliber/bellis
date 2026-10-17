@@ -56,7 +56,10 @@ const script = (specifier: string) => fileURLToPath(import.meta.resolve(specifie
 const simConfig = fileURLToPath(new URL('../../../config/sim.json', import.meta.url));
 
 /** 测试用的快速 profile：弹幕很快到达，模拟 TTS 每字 20ms。 */
-function fastProfile(moderationDisabled: boolean | undefined) {
+function fastProfile(
+  moderationDisabled: boolean | undefined,
+  extra: readonly Record<string, unknown>[] = [],
+) {
   const moderation: Record<string, unknown> = { id: 'moderation', plugin: 'moderation' };
   if (moderationDisabled !== undefined) moderation.disabled = moderationDisabled;
   return {
@@ -88,6 +91,7 @@ function fastProfile(moderationDisabled: boolean | undefined) {
             },
           },
           { id: 'director', plugin: 'director' },
+          ...extra,
         ],
       },
     ],
@@ -95,7 +99,10 @@ function fastProfile(moderationDisabled: boolean | undefined) {
 }
 
 async function start(
-  options: { moderationDisabled?: boolean | undefined } = { moderationDisabled: false },
+  options: {
+    moderationDisabled?: boolean | undefined;
+    extra?: readonly Record<string, unknown>[];
+  } = { moderationDisabled: false },
 ) {
   // 独立的服务名与临时存储，不碰真实的 bellis 条目与本机运行数据。
   const id = randomBytes(4).toString('hex');
@@ -107,7 +114,10 @@ async function start(
   const configPath = join(tmpdir(), `bellis-launch-${id}.json`);
   const profilePath = join(tmpdir(), `bellis-launch-${id}.profile.json`);
   const config = JSON.parse(readFileSync(simConfig, 'utf8'));
-  writeFileSync(profilePath, JSON.stringify(fastProfile(options.moderationDisabled)));
+  writeFileSync(
+    profilePath,
+    JSON.stringify(fastProfile(options.moderationDisabled, options.extra)),
+  );
   writeFileSync(configPath, JSON.stringify({ ...config, storePath: dbPath, profile: profilePath }));
   const cleanup = async () => {
     await store.delete(SIM_OBS_SECRET);
@@ -167,6 +177,30 @@ test('启动器分别拉起宿主与看门狗；计划内停止时宿主自己�
     assert.equal(s.obs.currentScene, 'Safe');
     assert.equal(await readSessionInfo(s.store), undefined);
   } finally {
+    await s.cleanup();
+  }
+});
+
+test('加载插件超过心跳超时（sidecar 启动慢）时宿主照常发心跳，看门狗不动作', async () => {
+  // 假后端的 sidecar 先等 1.5 秒再连宿主，超过看门狗的心跳超时（1 秒）；心跳在加载插件之前就开始。
+  const s = await start({
+    moderationDisabled: false,
+    extra: [
+      {
+        id: 'tts-local',
+        plugin: 'tts-local',
+        config: { backend: 'fake', fake: { startupDelayMs: 1500 } },
+      },
+    ],
+  });
+  try {
+    await s.watchdog.wait('watchdog.connected');
+    await s.host.waitFor((line) => line.event === 'tts-local.ready', 15_000);
+    await s.host.wait('host.ready');
+    assert.equal(s.watchdog.has('watchdog.acting'), false);
+    assert.equal(s.obs.currentScene, 'Live');
+  } finally {
+    await s.session.stop();
     await s.cleanup();
   }
 });

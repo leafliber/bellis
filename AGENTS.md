@@ -8,8 +8,9 @@
 
 - `pnpm install`：安装依赖（Node 版本见 `.node-version`，pnpm 版本见 `package.json` 的 `packageManager`）。
 - `uv sync --locked`：安装 Python 解释器与依赖（R-24，版本见 `.python-version` 与 `uv.lock`；CI 用的 uv 版本见工作流）。
+- `uv sync --locked --group tts-local`：只在 Windows 真机上同时安装本地 TTS 的 PyTorch 与模型依赖（R-24）；不带这个组再跑 `uv sync --locked` 会卸掉它们。模型权重的下载见[发声](docs/modules/speech.md#本地-tts-sidecar)。
 - `pnpm run check`：CI 运行的完整检查，依次为格式与 lint、类型检查、生成物核对、测试，TypeScript（Biome、tsc、node:test）与 Python（ruff、pyright、pytest）各一遍。提交前必须通过。
-- `pnpm run gen`：协议类型（`packages/protocol`）改动后重新生成 JSON Schema，生成物与源一起提交。
+- `pnpm run gen`：协议类型（`packages/protocol`）改动后重新生成 JSON Schema 与 sidecar 用的 Pydantic 模型（经 uv 运行，先 `uv sync --locked`），生成物与源一起提交。
 - `pnpm run format`：自动修正格式。
 - `pnpm start [配置文件]`：在本机运行启动器（拉起宿主与看门狗，缺省用 `config/sim.json`），Ctrl+C 停止。接真实 OBS 用 `pnpm start config/live.json`；真实配置与 profile 从对应的 `*.example.json` 复制，不入库。
 - `pnpm secret <list | set 名字 | delete 名字>`：维护者录入凭据，例如 `pnpm secret set obs`；值不回显、不打印，列出时只显示名字。Agent 不代为录入。

@@ -10,7 +10,9 @@ Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Win
   1. 发 RPC `shutdown`；
   2. 关闭子进程的 stdin，子进程读到 EOF 后自行退出；
   3. 超过截止时间再 `kill()`。
-- **孙进程要自己管。** libuv 把 Node 和它的直接子进程放进一个“父进程退出即杀死”的 Job，但孙进程会脱离这个 Job。所以 sidecar 必须用 Job Object（KILL_ON_JOB_CLOSE）管住自己派生的进程。[来源](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
+- **孙进程要自己管。** libuv 把 Node 和它的直接子进程放进一个“父进程退出即杀死”的 Job，但孙进程会脱离这个 Job。所以 sidecar 必须用 Job Object（KILL_ON_JOB_CLOSE）管住自己派生的进程，做法见[插件内核](../modules/plugin-kernel.md#sidecar-代理)。[来源](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c)
+- **stdin 生命线不能挂着同步读。** 宿主给子进程的 stdin 管道不支持重叠 I/O，只能在线程里同步读；而同一文件对象上的同步 I/O 是串行的，挂着的 ReadFile 会让其它线程对 stdin 的查询（例如查询读写位置）一直等下去。本机实测：sidecar 的生命线线程挂着读时，`import torch` 在加载原生库时卡死。所以 Windows 上 sidecar 用 PeekNamedPipe 轮询，管道断开即视为 EOF。
+- **Python sidecar 不经 `uv run` 启动。** 本机实测（uv 0.11.11）：强制终止 `uv run` 时，它经虚拟环境的 `python.exe` 启动的解释器不随之退出；虚拟环境的 `python.exe` 是个启动器，被强制终止时它启动的解释器随之退出。所以宿主直接启动虚拟环境里的 `python.exe`；`uv run` 每次启动还会按锁文件同步环境，也不适合在直播中拉起进程。
 - **环境变量**：键不区分大小写；不要删掉 `SYSTEMROOT` 等系统必需变量，否则 Winsock 初始化会失败。
 
 ## 登录时运行

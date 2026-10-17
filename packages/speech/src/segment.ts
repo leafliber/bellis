@@ -1,4 +1,4 @@
-import type { Sentence } from './types.ts';
+import type { Sentence, TimingPoint } from './types.ts';
 
 const SENTENCE_END = new Set(['。', '！', '？', '!', '?', '；', ';', '\n']);
 const CLAUSE_END = new Set(['，', '、', ',', '：', ':']);
@@ -100,14 +100,14 @@ export function speakable(subtitle: string): { spoken: string; align: number[] }
 }
 
 /**
- * 按播放游标算出观众实际听到的字幕前缀：只计入已完整播出的朗读码点。
- * 最后一个码点的结束位置是合成的总采样数；总数未知时最后一个码点不计入。
- * 没有时间映射时返回 undefined（只能按整句计）。
+ * 按播放游标算出观众实际听到的字幕前缀：只计入已完整播出的朗读码点（结束时刻不晚于游标，R-11）。
+ * 一个码点的结束位置是下一个码点的开始；最后一个码点的结束位置是合成的总采样数，总数未知时不计入。
+ * 没有时间映射时返回 undefined（只能按整句计）。映射可以是精确、插值或细化后的，传入换算那一刻的映射。
  */
 export function heardPrefix(
   sentence: Sentence,
   played: number,
-  timing: ReadonlyArray<{ sample: number; char: number }> | undefined,
+  timing: ReadonlyArray<TimingPoint> | undefined,
   totalSamples: number | undefined,
 ): string | undefined {
   if (!timing) return undefined;

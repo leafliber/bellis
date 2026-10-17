@@ -58,6 +58,55 @@
           "config": {
             "delayMs": 3000
           }
+        },
+        {
+          "id": "tts",
+          "plugin": "tts-router",
+          "config": {
+            "order": ["local", "subtitles"]
+          }
+        },
+        {
+          "id": "tts-local",
+          "plugin": "tts-local",
+          "config": {
+            "backend": "qwen3",
+            "qwen3": {
+              "speaker": "vivian",
+              "language": "chinese"
+            }
+          }
+        },
+        {
+          "id": "tts-cloud",
+          "plugin": "tts-cloud",
+          "disabled": true,
+          "grant": [
+            "net.egress:api.minimax.cn",
+            "net.egress:openspeech.bytedance.com",
+            "secret:minimax",
+            "secret:volcengine"
+          ],
+          "config": {
+            "primary": "minimax",
+            "fallback": ["volcengine"],
+            "minimax": {
+              "egress": false,
+              "endpoint": "wss://api.minimax.cn/ws/v1/t2a_v2_bidi",
+              "model": "speech-2.8-turbo",
+              "voiceId": "",
+              "sampleRate": 24000,
+              "languageBoost": "Chinese"
+            },
+            "volcengine": {
+              "egress": false,
+              "endpoint": "wss://openspeech.bytedance.com/api/v3/tts/bidirection",
+              "resourceId": "seed-tts-2.0",
+              "speaker": "",
+              "sampleRate": 24000,
+              "timestamps": "subtitle"
+            }
+          }
         }
       ]
     }

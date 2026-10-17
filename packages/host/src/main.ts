@@ -46,7 +46,12 @@ import {
 } from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { KeyringSecretStore, SESSION_SECRET } from '@bellis/secret-store';
-import { type HeldSentence, ReviewService } from '@bellis/speech';
+import {
+  type HeldSentence,
+  ReviewService,
+  type TtsRouting,
+  TtsRoutingService,
+} from '@bellis/speech';
 import { OBS_CONTROL, ObsConnectorService, type Stage, StageService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
@@ -67,6 +72,9 @@ const LOGGED_FACTS = new Set([
   'stage.connected',
   'speech.held',
   'speech.vetoed',
+  'tts.switched',
+  'tts.started',
+  'tts.degraded',
 ]);
 const isModeParams = Compile(OperatorModeParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
@@ -163,10 +171,9 @@ host.provideScoped(ObsConnectorService, ({ instanceId, permissions }) => ({
       : Promise.reject(new Error(`${instanceId} 没有权限 ${OBS_CONTROL}`)),
 }));
 core.setModeration(!moderationEntry.disabled);
-host.add(entries, builtinPlugins);
-await host.settled();
 
 let stopping = false;
+// 先监听再加载插件：sidecar 代理插件在激活期间等它的子进程连上来。
 const server = await listen(credentials.path, {
   key: credentials.key,
   onConnection(connection) {
@@ -210,12 +217,16 @@ const server = await listen(credentials.path, {
     logEvent('host.channel-error', { message: error.message });
   },
 });
-
+// 看门狗一连上就开始计时，心跳要在加载插件之前开始：sidecar 代理插件激活时要等子进程启动并连上来，
+// 加载可能超过心跳超时，期间宿主照常运行，不能让看门狗误判为卡死。
 let seq = 0;
 const heartbeat = setInterval(() => {
   seq += 1;
   for (const peer of watchdogs()) peer.notify(HostHeartbeat, { seq, ...core.heartbeat() });
 }, config.heartbeatIntervalMs);
+
+host.add(entries, builtinPlugins);
+await host.settled();
 
 watchLifeline(() => void stop('stdin-eof'));
 // 控制台的 Ctrl+C 会送达同一控制台的全部进程；宿主只按启动器的停止顺序退出。
@@ -228,6 +239,7 @@ function runPreflight(target: 'M1' | 'M2' | 'M3'): Promise<string[]> {
   const stage = host.services.resolve(StageService.name, StageService.major);
   const review = host.services.resolve(ReviewService.name, ReviewService.major);
   const avatar = host.services.resolve(AvatarService.name, AvatarService.major);
+  const routing = host.services.resolve(TtsRoutingService.name, TtsRoutingService.major);
   return preflight({
     target,
     plugins: host.snapshot(),
@@ -238,6 +250,7 @@ function runPreflight(target: 'M1' | 'M2' | 'M3'): Promise<string[]> {
         : { ready: (avatar.impl as Avatar).ready, status: (avatar.impl as Avatar).status },
     moderationEnabled: core.moderationEnabled,
     reviewPresent: !('missing' in review),
+    ttsPrimary: 'missing' in routing ? undefined : (routing.impl as TtsRouting).primary(),
     inspectObs: () => emergency.inspect(config.safety.emergency),
   });
 }

@@ -6,18 +6,44 @@
 exclude-newer = "1 day"
 # 只用 uv 安装的解释器，不依赖系统 Python。
 python-preference = "only-managed"
+# qwen-tts 锁定 transformers 4.57.3、qwen-asr（Qwen3-ForcedAligner）锁定 4.57.6：统一到后者（R-24）。
+override-dependencies = ["transformers==4.57.6"]
 
 [tool.uv.workspace]
-members = ["spikes/python"]
+members = ["spikes/python", "python/bellis_sidecar", "sidecars/tts_local"]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
+torchaudio = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
 
 [dependency-groups]
-dev = ["pytest==9.1.1", "ruff==0.17.0"]
+# datamodel-code-generator 只在 `pnpm run gen` 中由 JSON Schema 生成 Pydantic 模型（R-24）。
+dev = [
+    "datamodel-code-generator==0.84.0",
+    "pytest==9.1.1",
+    "ruff==0.17.0",
+]
+# 本地 TTS 的真实后端（Qwen3-TTS 与 Qwen3-ForcedAligner，R-10、R-11、R-24）。只在 Windows 真机安装：
+# `uv sync --locked --group tts-local`；不在缺省组里，三平台 CI 的 `uv sync --locked` 不会下载它们。
+tts-local = [
+    "torch==2.11.0; sys_platform == 'win32'",
+    "torchaudio==2.11.0; sys_platform == 'win32'",
+    "qwen-tts==0.1.1; sys_platform == 'win32'",
+    "qwen-asr==0.0.6; sys_platform == 'win32'",
+]
 
 [tool.ruff]
 # 只管 Python；Markdown 等由 Biome 与人工维护。
 include = ["*.py", "*.pyi", "**/pyproject.toml"]
 line-length = 100
 target-version = "py312"
+# sidecar 的包不打包安装，按源码目录识别为本项目的模块。
+src = ["python/bellis_sidecar/src", "sidecars/tts_local/src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
@@ -28,11 +54,13 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 quote-style = "single"
 
 [tool.pyright]
-include = ["spikes/python"]
+include = ["spikes/python", "python", "sidecars"]
+extraPaths = ["python/bellis_sidecar/src", "sidecars/tts_local/src"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
-testpaths = ["spikes/python"]
+testpaths = ["spikes/python", "python", "sidecars"]
+pythonpath = ["python/bellis_sidecar/src", "sidecars/tts_local/src"]

@@ -100,20 +100,80 @@ export const PreCheck = defineExtension<'serial', PreCheckInput, PreCheckVerdict
   'serial',
 );
 
+/** 时间映射中的一点：朗读文本第 `char` 个码点从这一句的第 `sample` 个采样开始。 */
+export interface TimingPoint {
+  sample: number;
+  char: number;
+}
+
+/**
+ * 一句的合成结果。
+ *
+ * `totalSamples` 与 `timing` 是活的：提供方可以在合成过程中更新它们（例如用 getter 读
+ * {@link Alignment}）——句段一到先给插值映射，随后用 TTS 的时间戳细化，合成完成后填上实际总采样数
+ * （R-11 两段式对齐）。使用方按播放游标换算已播出的文本时现读，不要提前取出缓存；
+ * 一开始就给出精确映射的提供方（例如模拟 TTS）用普通字段即可。
+ */
 export interface Synthesis {
-  sampleRate: number;
-  /** 这一句合成后的总采样数；流式合成时未知则为 undefined。 */
-  totalSamples: number | undefined;
-  /** 采样偏移 → 朗读文本码点下标，按采样偏移递增；没有映射时为 undefined。 */
-  timing: ReadonlyArray<{ sample: number; char: number }> | undefined;
-  frames: AsyncIterable<Int16Array>;
+  readonly sampleRate: number;
+  /** 这一句合成后的总采样数；流式合成尚未结束、或被取消时为 undefined。 */
+  readonly totalSamples: number | undefined;
+  /** 采样偏移 → 朗读文本码点下标，按采样偏移不减；没有映射时为 undefined（只能按整句计）。 */
+  readonly timing: ReadonlyArray<TimingPoint> | undefined;
+  /**
+   * 增量产出的音频（16 位 PCM，单声道）。中止信号触发后立即结束；使用方提前停止迭代
+   * （例如 Stage 截断了这一句）时，提供方应取消合成。合成出错时迭代抛错。
+   */
+  readonly frames: AsyncIterable<Int16Array>;
 }
 
 export interface Tts {
+  /**
+   * 合成一句已通过发声前检查的朗读文本。没有任何可用引擎时以错误拒绝；
+   * 中止后返回的 `frames` 立即结束。
+   */
   synthesize(spoken: string, signal: AbortSignal): Promise<Synthesis>;
 }
 
 export const TtsService = defineService<Tts>('tts', 1);
+
+/**
+ * 一个 TTS 引擎（本地、云端）：在 `Tts` 之上报告此刻能否合成。`tts@1` 由路由插件（`tts-router`）提供，
+ * 它按 profile 配置的顺序选第一个就绪的引擎；引擎崩溃、未就绪或不在时只降级，`tts@1` 不消失。
+ */
+export interface TtsEngine extends Tts {
+  /** 此刻能否合成，例如本地模型已加载、云端至少有一家厂商不在冷却中。 */
+  readonly ready: boolean;
+  /** 给操作员看的状态说明，例如“模型加载中”。 */
+  readonly status: string;
+}
+
+export const LocalTtsService = defineService<TtsEngine>('tts.local', 1);
+export const CloudTtsService = defineService<TtsEngine>('tts.cloud', 1);
+
+/**
+ * 这一句本身被拒绝（例如云端厂商以文本过长为由拒绝）：换引擎也无济于事，这一句合成失败，
+ * 路由不换引擎，引擎照常可用。其余错误按“引擎不可用”处理，路由改用下一个。
+ */
+export class TtsRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TtsRequestError';
+  }
+}
+
+/** 路由选用的一项：本地引擎、云端引擎，或只出字幕。 */
+export type TtsOption = 'local' | 'cloud' | 'subtitles';
+
+/** 路由插件的状态，供开播预检核对。 */
+export interface TtsRouting {
+  /** 配置中第一个音频引擎（只出字幕不算）此刻的状态；没有配置音频引擎时为 undefined。 */
+  primary():
+    | { engine: Exclude<TtsOption, 'subtitles'>; ready: boolean; status: string }
+    | undefined;
+}
+
+export const TtsRoutingService = defineService<TtsRouting>('tts.routing', 1);
 
 /** 审核插件在启用时提供的服务；仲裁据此确认审核确实在场。 */
 export interface ModerationStatus {
