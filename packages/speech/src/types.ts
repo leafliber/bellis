@@ -100,16 +100,38 @@ export const PreCheck = defineExtension<'serial', PreCheckInput, PreCheckVerdict
   'serial',
 );
 
+/** 时间映射中的一点：朗读文本第 `char` 个码点从这一句的第 `sample` 个采样开始。 */
+export interface TimingPoint {
+  sample: number;
+  char: number;
+}
+
+/**
+ * 一句的合成结果。
+ *
+ * `totalSamples` 与 `timing` 是活的：提供方可以在合成过程中更新它们（例如用 getter 读
+ * {@link Alignment}）——句段一到先给插值映射，随后用 TTS 的时间戳细化，合成完成后填上实际总采样数
+ * （R-11 两段式对齐）。使用方按播放游标换算已播出的文本时现读，不要提前取出缓存；
+ * 一开始就给出精确映射的提供方（例如模拟 TTS）用普通字段即可。
+ */
 export interface Synthesis {
-  sampleRate: number;
-  /** 这一句合成后的总采样数；流式合成时未知则为 undefined。 */
-  totalSamples: number | undefined;
-  /** 采样偏移 → 朗读文本码点下标，按采样偏移递增；没有映射时为 undefined。 */
-  timing: ReadonlyArray<{ sample: number; char: number }> | undefined;
-  frames: AsyncIterable<Int16Array>;
+  readonly sampleRate: number;
+  /** 这一句合成后的总采样数；流式合成尚未结束、或被取消时为 undefined。 */
+  readonly totalSamples: number | undefined;
+  /** 采样偏移 → 朗读文本码点下标，按采样偏移不减；没有映射时为 undefined（只能按整句计）。 */
+  readonly timing: ReadonlyArray<TimingPoint> | undefined;
+  /**
+   * 增量产出的音频（16 位 PCM，单声道）。中止信号触发后立即结束；使用方提前停止迭代
+   * （例如 Stage 截断了这一句）时，提供方应取消合成。合成出错时迭代抛错。
+   */
+  readonly frames: AsyncIterable<Int16Array>;
 }
 
 export interface Tts {
+  /**
+   * 合成一句已通过发声前检查的朗读文本。没有任何可用引擎时以错误拒绝；
+   * 中止后返回的 `frames` 立即结束。
+   */
   synthesize(spoken: string, signal: AbortSignal): Promise<Synthesis>;
 }
 

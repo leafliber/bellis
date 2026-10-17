@@ -427,6 +427,9 @@ importers:
       '@bellis/stage':
         specifier: workspace:*
         version: link:../stage
+      '@bellis/tts-cloud':
+        specifier: workspace:*
+        version: link:../tts-cloud
 
   packages/process:
     dependencies:
@@ -550,6 +553,37 @@ importers:
         specifier: 4.10.2
         version: 4.10.2
 
+  packages/tts-cloud:
+    dependencies:
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@bellis/speech':
+        specifier: workspace:*
+        version: link:../speech
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@bellis/secret-store':
+        specifier: workspace:*
+        version: link:../secret-store
+      '@bellis/stage':
+        specifier: workspace:*
+        version: link:../stage
+      '@bellis/store':
+        specifier: workspace:*
+        version: link:../store
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
+
   packages/watchdog:
     dependencies:
       '@bellis/channel':
@@ -597,12 +631,18 @@ importers:
       '@bellis/secret-store':
         specifier: workspace:*
         version: link:../packages/secret-store
+      '@bellis/speech':
+        specifier: workspace:*
+        version: link:../packages/speech
       '@bellis/stage':
         specifier: workspace:*
         version: link:../packages/stage
       '@bellis/store':
         specifier: workspace:*
         version: link:../packages/store
+      '@bellis/tts-cloud':
+        specifier: workspace:*
+        version: link:../packages/tts-cloud
       typebox:
         specifier: 1.3.37
         version: 1.3.37

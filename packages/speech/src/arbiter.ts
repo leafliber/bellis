@@ -276,20 +276,34 @@ export const speechArbiter = definePlugin({
 
           let playback: PlaybackResult | undefined;
           let synthesis: Synthesis | undefined;
+          let ttsError: string | undefined;
+          // 这一句的合成在发言中止时取消；合成了却没有播完（被打断、截断或出错）时也取消，
+          // 不让云端 TTS 继续合成没人听的部分。
+          const sentenceAbort = new AbortController();
+          const ttsSignal = AbortSignal.any([current.abort.signal, sentenceAbort.signal]);
           await safety.execute(decision.intent, payload, async (p) => {
-            // 授权的等待期间可能已被打断：此时这一句一个采样都没有播出，按失败记录。
-            if (halted()) throw new Error('播出前被打断');
-            synthesis = await tts.synthesize(p.spoken, current.abort.signal);
-            if (halted()) throw new Error('播出前被打断');
-            const sentenceId = `${p.utteranceId}#${p.index}`;
-            current.sentenceId = sentenceId;
-            playback = await stage.play(
-              { id: sentenceId, subtitle: p.subtitle, sampleRate: synthesis.sampleRate },
-              synthesis.frames,
-              token,
-            );
-            current.sentenceId = undefined;
-            return { played: playback.played, complete: playback.complete };
+            try {
+              // 授权的等待期间可能已被打断：此时这一句一个采样都没有播出，按失败记录。
+              if (halted()) throw new Error('播出前被打断');
+              try {
+                synthesis = await tts.synthesize(p.spoken, ttsSignal);
+              } catch (error) {
+                ttsError = error instanceof Error ? error.message : String(error);
+                throw error;
+              }
+              if (halted()) throw new Error('播出前被打断');
+              const sentenceId = `${p.utteranceId}#${p.index}`;
+              current.sentenceId = sentenceId;
+              playback = await stage.play(
+                { id: sentenceId, subtitle: p.subtitle, sampleRate: synthesis.sampleRate },
+                synthesis.frames,
+                token,
+              );
+              current.sentenceId = undefined;
+              return { played: playback.played, complete: playback.complete };
+            } finally {
+              if (!playback?.complete) sentenceAbort.abort(new Error('这一句没有播完'));
+            }
           });
 
           if (playback?.complete) {
@@ -297,7 +311,11 @@ export const speechArbiter = definePlugin({
             previous = sentence.subtitle;
             continue;
           }
+          // 没有任何可用的 TTS 引擎：这一句一个采样都没有播出。
+          if (ttsError !== undefined && !halted())
+            return finish({ end: 'unavailable', reason: `TTS 不可用：${ttsError}` });
           const played = playback?.played ?? 0;
+          // 时间映射可能在合成过程中被细化（R-11），按播放游标换算时现读。
           const prefix = heardPrefix(sentence, played, synthesis?.timing, synthesis?.totalSamples);
           if (prefix === undefined) result.interruptedMidSentence = played > 0;
           else result.heard += prefix;
