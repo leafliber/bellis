@@ -176,6 +176,60 @@ export function subtitleBand(pageWidth: number, pageHeight: number, lines: numbe
   return intersect(band, { x: 0, y: 0, w: pageWidth, h: pageHeight }) as Rect;
 }
 
+/**
+ * 单行字幕的几何（字幕居中，逐字推进时从中间向两边长）：中线、行框的上沿与高度（整个行高）、
+ * 每个汉字的宽度（字号）与一行的最大宽度。
+ */
+export interface SubtitleLine {
+  centerX: number;
+  top: number;
+  height: number;
+  charWidth: number;
+  maxWidth: number;
+}
+
+/** 单行字幕在来源像素中的几何。 */
+export function subtitleLine(pageWidth: number, pageHeight: number): SubtitleLine {
+  const lineH = SUBTITLE.fontPx * SUBTITLE.lineHeight;
+  const bottom = pageHeight * (1 - SUBTITLE.bottom);
+  return {
+    centerX: pageWidth / 2,
+    top: bottom - lineH,
+    height: lineH,
+    charWidth: SUBTITLE.fontPx,
+    maxWidth: pageWidth * (1 - 2 * SUBTITLE.side),
+  };
+}
+
+/** 把来源像素中的单行字幕几何换到录像像素。 */
+export function lineToVideo(
+  line: SubtitleLine,
+  p: Placement,
+  canvas: { width: number; height: number },
+  video: { width: number; height: number },
+): SubtitleLine {
+  const sx = (video.width / canvas.width) * p.scaleX;
+  const sy = (video.height / canvas.height) * p.scaleY;
+  return {
+    centerX: (p.originX + line.centerX * p.scaleX) * (video.width / canvas.width),
+    top: (p.originY + line.top * p.scaleY) * (video.height / canvas.height),
+    height: line.height * sy,
+    charWidth: line.charWidth * sx,
+    maxWidth: line.maxWidth * sx,
+  };
+}
+
+/** 显示 chars 个字时的行框（录像像素），四周留 pad。 */
+export function lineBox(line: SubtitleLine, chars: number, pad: number): Rect {
+  const width = Math.min(line.maxWidth, chars * line.charWidth);
+  return {
+    x: line.centerX - width / 2 - pad,
+    y: line.top - pad,
+    w: width + 2 * pad,
+    h: line.height + 2 * pad,
+  };
+}
+
 /** 字幕一行（来源像素）：居中、第 line 行（从上往下，0 起），用于合成自检画面。 */
 export function subtitleLineBox(
   pageWidth: number,

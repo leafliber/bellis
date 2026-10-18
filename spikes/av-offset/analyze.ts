@@ -1,7 +1,8 @@
 /**
  * 字幕、口型与音频偏差的录像分析（P1 出口“字幕、口型与音频的偏差在 OBS 录制中实测”）。
  *
- *   node spikes/av-offset/analyze.ts <录像> --mode tone|speech --subtitle x,y,w,h --mouth-search x,y,w,h
+ *   node spikes/av-offset/analyze.ts <录像> --mode tone|speech --subtitle x,y,w,h [--line cx,top,h,cw,maxw]
+ *        [--seconds-per-char 0.15] --mouth-search x,y,w,h
  *        [--exclude x,y,w,h]… [--out 结果.json] [--debug-dir 目录]
  *
  * 区域是录像画面的像素。只看录像本身：画面与音轨都是 OBS 混好、观众看到的样子，不需要对齐宿主的时钟。
@@ -9,10 +10,8 @@
  * - 音频：每句的出声与结束时刻。测试音（tone）用 S-01 的分析器按句段切分（440Hz、振幅 0.05 以上），
  *   精确到 1ms；真实语音（speech）按 10ms 窗的 RMS 高于 -40dBFS 切分，句内短于 350ms 的停顿并入同一句。
  *   音轨按录像时间线对齐（见 DecodeOptions.timeline），与画面帧的时间戳同一个原点。
- * - 字幕：字幕带内每帧“与无字幕参考帧相差超过 32 级亮度的像素占比”。参考帧取句间安静时段（离任何句段
- *   0.4 秒以上）的帧逐像素取中位数。每句按句前安静时的占比（关）与句中占比（开）定阈值：
- *   第一次超过 10% 的帧为“出现”，超过 90% 的帧为“显示完”，之后第一次低于 50% 的帧为“清除”。
- *   Stage 页面现在整句一次显示（started 时显示、ended 时清空），出现与显示完应当是同一帧。
+ * - 字幕：随游标逐字推进（Stage 文档“字幕”），按字的出现事件量第一个字、最后一个字（显示完）与清除，
+ *   测试音另量每个字相对它的声音的偏差与推进速率，方法见 subtitle.ts。字幕带的帧整段读入内存。
  * - 口型：在形象区域里找对口型最敏感的像素。由录音按形象插件的映射（20ms RMS，下限 0.01、上限 0.2，
  *   线性映射到 0–1）算出“应有的嘴型”，先按块（块均值）与它在几个时延上求相关，定出嘴部附近，
  *   再在那一小块里逐像素求相关，取相关最强的像素合成嘴型信号（正为张开）。每句：
@@ -22,7 +21,7 @@
  * 帧时刻取 ffmpeg 解码后每帧的显示时间戳（showinfo），即观众看到这一帧的时刻。字幕出现等“第一帧”类的量
  * 是该帧时刻减去音频时刻：画面上的变化发生在这一帧与上一帧之间，所以单次测量的分辨率是一帧
  * （30fps 时 33.3ms），对“系统在何时改了画面”的估计有 0 到 1 帧的量化误差。互相关时延是连续量的估计，
- * 对阶跃（测试音）误差在半帧以内，对连续的包络（语音）更细。
+ * 对阶跃（测试音）误差在半帧加约 6ms 以内（20ms RMS 窗与 2ms 步长），对连续的包络（语音）更细。
  */
 import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -32,13 +31,26 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { analyzeSegments, decode } from '../s01-stage/analyze-recording.ts';
-import { intersect, parseRect, type Rect } from './layout.ts';
+import { intersect, lineBox, parseRect, type Rect, type SubtitleLine } from './layout.ts';
+import {
+  type AudioSegment,
+  median,
+  percentile,
+  quiet,
+  robustSd,
+  round,
+  summarize,
+} from './stats.ts';
+import {
+  analyzeSubtitles,
+  type SubtitleAnalysis,
+  type SubtitleSentence,
+  summarizeSubtitles,
+} from './subtitle.ts';
+
+export { summarize } from './stats.ts';
 
 const AUDIO_RATE = 48_000;
-/** 字幕带里亮度差超过这么多级才算“变了”。 */
-const SUBTITLE_DIFF = 32;
-/** 离句段这么远（秒）才算安静，参考帧与闭合水平都从安静时段取。 */
-const QUIET_MARGIN = 0.4;
 /** 定位嘴部时试的时延（毫秒）。 */
 const LOCATE_LAGS_MS = [-200, -100, 0, 100, 200, 300, 400];
 /** 互相关时延的搜索范围与步长（毫秒）。 */
@@ -62,6 +74,10 @@ export interface AnalyzeOptions {
   mode: Mode;
   /** 字幕带；不给时不分析字幕。 */
   subtitle?: Rect;
+  /** 单行字幕的几何（录像像素）；给出时只看每句的行框。 */
+  subtitleLine?: SubtitleLine;
+  /** 测试音每个字的秒数（模拟 TTS 每个码点等长）；给出时逐字配对、量推进速率。 */
+  secondsPerChar?: number;
   /** 找嘴部的范围；不给时不分析口型。 */
   mouthSearch?: Rect;
   /** 找嘴部时排除的范围（例如字幕带）。 */
@@ -84,16 +100,6 @@ export interface VideoProbe {
   duration: number;
 }
 
-export interface Summary {
-  n: number;
-  missing: number;
-  min: number | null;
-  p50: number | null;
-  p95: number | null;
-  p99: number | null;
-  max: number | null;
-}
-
 export interface SentenceResult {
   index: number;
   onset: number;
@@ -102,13 +108,7 @@ export interface SentenceResult {
   /** 与上一句段之间的空白（毫秒）；第一句为 null。超过 1.5 秒时页面先放唤醒信号。 */
   gapBeforeMs: number | null;
   edge: boolean;
-  subtitle: {
-    firstVisibleMs: number | null;
-    fullMs: number | null;
-    clearedMs: number | null;
-    contrast: number;
-    note?: string;
-  } | null;
+  subtitle: SubtitleSentence | null;
   mouth: {
     openMs: number | null;
     openInterpMs: number | null;
@@ -119,41 +119,6 @@ export interface SentenceResult {
     contrast: number;
     note?: string;
   } | null;
-}
-
-const round = (value: number, digits = 1) => Math.round(value * 10 ** digits) / 10 ** digits;
-
-function percentile(sorted: readonly number[], q: number): number | null {
-  if (sorted.length === 0) return null;
-  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? null;
-}
-
-/** 样本数、缺失数与分位数（与其它演练的取法一致：第 floor(q·n) 个）。 */
-export function summarize(values: ReadonlyArray<number | null>): Summary {
-  const present = values.filter((v): v is number => v !== null && Number.isFinite(v));
-  const sorted = [...present].sort((a, b) => a - b);
-  const r = (v: number | null) => (v === null ? null : round(v));
-  return {
-    n: sorted.length,
-    missing: values.length - sorted.length,
-    min: r(sorted[0] ?? null),
-    p50: r(percentile(sorted, 0.5)),
-    p95: r(percentile(sorted, 0.95)),
-    p99: r(percentile(sorted, 0.99)),
-    max: r(sorted.at(-1) ?? null),
-  };
-}
-
-function median(values: readonly number[]): number | null {
-  const sorted = [...values].sort((a, b) => a - b);
-  return percentile(sorted, 0.5);
-}
-
-/** 稳健的标准差：中位数绝对偏差乘 1.4826。 */
-function robustSd(values: readonly number[]): number {
-  const m = median(values);
-  if (m === null) return 0;
-  return 1.4826 * (median(values.map((v) => Math.abs(v - m))) ?? 0);
 }
 
 /** 分析用的 ffmpeg 以低于正常的优先级运行，不和同机的实测抢 CPU。 */
@@ -356,12 +321,7 @@ export function expectedMouth(track: AudioTrack, t: number): number {
   return Math.min(1, Math.max(0, (rms - floor) / (ceiling - floor)));
 }
 
-export interface AudioSegment {
-  onset: number;
-  end: number;
-  /** 录像开头或结尾处的句段，可能不完整。 */
-  edge: boolean;
-}
+export type { AudioSegment } from './stats.ts';
 
 async function toneSegments(file: string, toneHz: number): Promise<AudioSegment[]> {
   const analysis = await analyzeSegments(file, { toneHz, timeline: true });
@@ -399,10 +359,6 @@ export function speechSegments(
   return merged
     .filter(([a, b]) => b - a >= minMs)
     .map(([a, b]) => ({ onset: a / 1000, end: b / 1000, edge: a === 0 || b >= track.ms }));
-}
-
-function quiet(t: number, segments: readonly AudioSegment[]): boolean {
-  return !segments.some((s) => t >= s.onset - QUIET_MARGIN && t <= s.end + QUIET_MARGIN);
 }
 
 interface Track {
@@ -459,45 +415,27 @@ function interpolated(track: Track, k: number, threshold: number): number {
   return t0 + ((threshold - v0) / (v1 - v0)) * (t1 - t0);
 }
 
-/** 字幕带每帧与参考帧相差的像素占比。 */
-async function subtitleTrack(
+/** 读入字幕带的全部帧，交给 subtitle.ts 分析。 */
+async function subtitleOf(
   file: string,
   rect: Rect,
   segments: readonly AudioSegment[],
-  video: VideoProbe,
-): Promise<{ track: Track; referenceFrames: number }> {
-  // 第一遍：隔帧留样，取安静时段的帧逐像素求中位数作参考。
-  const estimate = Math.max(1, Math.round(video.duration * video.fps));
-  const every = Math.max(1, Math.floor(estimate / 300));
-  const kept: Array<{ pts: number; pixels: Uint8Array }> = [];
-  let index = 0;
+  options: AnalyzeOptions,
+): Promise<SubtitleAnalysis> {
+  const times: number[] = [];
+  const frames: Uint8Array[] = [];
   const geometry = await readFrames(file, rect, 1, (pts, pixels) => {
-    if (index % every === 0) kept.push({ pts, pixels });
-    index += 1;
+    times.push(pts);
+    frames.push(pixels);
   });
-  const calm = kept.filter((f) => quiet(f.pts, segments));
-  if (calm.length < 3) throw new Error('录像里没有足够的安静帧作字幕参考');
-  const step = Math.max(1, Math.floor(calm.length / 61));
-  const chosen = calm.filter((_, i) => i % step === 0).slice(0, 61);
-  const size = geometry.width * geometry.height;
-  const reference = new Uint8Array(size);
-  const column = new Uint8Array(chosen.length);
-  for (let p = 0; p < size; p++) {
-    for (let i = 0; i < chosen.length; i++) column[i] = chosen[i]?.pixels[p] ?? 0;
-    column.sort();
-    reference[p] = column[column.length >> 1] ?? 0;
-  }
-  // 第二遍：每帧变了的像素占比。
-  const track: Track = { times: [], values: [] };
-  await readFrames(file, rect, 1, (pts, pixels) => {
-    let changed = 0;
-    for (let p = 0; p < size; p++) {
-      if (Math.abs((pixels[p] ?? 0) - (reference[p] ?? 0)) > SUBTITLE_DIFF) changed += 1;
-    }
-    track.times.push(pts);
-    track.values.push(changed / size);
-  });
-  return { track, referenceFrames: chosen.length };
+  return analyzeSubtitles(
+    { rect: geometry.rect, width: geometry.width, height: geometry.height, times, frames },
+    segments,
+    {
+      ...(options.subtitleLine ? { line: options.subtitleLine } : {}),
+      ...(options.secondsPerChar ? { secondsPerChar: options.secondsPerChar } : {}),
+    },
+  );
 }
 
 interface MouthTrack {
@@ -715,58 +653,6 @@ function lagOf(
   return { lagMs, r: round(top, 3), atEdge: lo === 0 || hi === rs.length - 1 };
 }
 
-function subtitleOf(
-  track: Track,
-  s: AudioSegment,
-  prev: AudioSegment | undefined,
-  next: AudioSegment | undefined,
-  noise: number,
-  fallbackOff: number,
-): NonNullable<SentenceResult['subtitle']> {
-  const offValues = valuesIn(
-    track,
-    Math.max(prev ? prev.end + 0.35 : -Infinity, s.onset - 1.5),
-    s.onset - 0.35,
-  );
-  const off = offValues.length >= 2 ? (median(offValues) ?? fallbackOff) : fallbackOff;
-  const onValues = valuesIn(track, s.onset + 0.25, s.end - 0.15);
-  const on =
-    onValues.length >= 2
-      ? (median(onValues) ?? 0)
-      : Math.max(...valuesIn(track, s.onset, s.end + 0.2), off);
-  const contrast = on - off;
-  const none = {
-    firstVisibleMs: null,
-    fullMs: null,
-    clearedMs: null,
-    contrast: round(contrast, 4),
-  };
-  if (contrast < Math.max(0.01, 6 * noise)) return { ...none, note: '字幕带没有可辨的变化' };
-  const low = off + Math.max(0.1 * contrast, 4 * noise);
-  const high = off + 0.9 * contrast;
-  const mid = off + 0.5 * contrast;
-  const searchTo = next ? Math.min(next.onset - 0.05, s.end + 1) : s.end + 1;
-  const first = crossing(track, s.onset - 1, Math.min(s.onset + 1, searchTo), low, true);
-  if (first === undefined) return { ...none, note: '找不到字幕出现的帧' };
-  let full: number | undefined;
-  for (let k = first; k < track.times.length && (track.times[k] ?? 0) <= searchTo; k++) {
-    if ((track.values[k] ?? 0) >= high) {
-      full = k;
-      break;
-    }
-  }
-  const clearedFrom = Math.max(track.times[full ?? first] ?? s.onset, s.end - 1);
-  const cleared = crossing(track, clearedFrom, s.end + 1, mid, false);
-  const ms = (k: number | undefined, ref: number) =>
-    k === undefined ? null : round(((track.times[k] ?? 0) - ref) * 1000);
-  return {
-    firstVisibleMs: ms(first, s.onset),
-    fullMs: ms(full, s.onset),
-    clearedMs: ms(cleared, s.end),
-    contrast: round(contrast, 4),
-  };
-}
-
 function mouthOf(
   mode: Mode,
   track: Track,
@@ -883,15 +769,26 @@ export interface Analysis {
   mode: Mode;
   video: VideoProbe;
   frameMs: number;
-  regions: { subtitle: Rect | null; mouthSearch: Rect | null; exclude: Rect[] };
+  regions: {
+    subtitle: Rect | null;
+    subtitleLine: SubtitleLine | null;
+    mouthSearch: Rect | null;
+    exclude: Rect[];
+  };
   audio: { segments: number; edgeSegments: number };
-  subtitle: { referenceFrames: number; noise: number; error?: string } | null;
+  subtitle:
+    | (Omit<SubtitleAnalysis, 'sentences' | 'series' | 'counts'> & {
+        /** 不含首尾句段的计数。 */
+        counts: SubtitleAnalysis['counts'];
+      })
+    | { error: string }
+    | null;
   mouth:
     | (Omit<MouthTrack, 'track'> & { noise: number; globalLag: unknown })
     | { error: string }
     | null;
   sentences: SentenceResult[];
-  summary: Record<string, Summary | Record<string, Summary>>;
+  summary: Record<string, unknown>;
   debug?: string[];
 }
 
@@ -905,21 +802,13 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
       : speechSegments(audio);
   const exclude = [...(options.exclude ?? [])];
 
-  let subtitle: Analysis['subtitle'] = null;
-  let subtitleData: Track | undefined;
+  let subtitleData: SubtitleAnalysis | undefined;
+  let subtitleError: string | undefined;
   if (options.subtitle) {
     try {
-      const { track, referenceFrames } = await subtitleTrack(
-        file,
-        options.subtitle,
-        segments,
-        video,
-      );
-      const calm = track.values.filter((_, k) => quiet(track.times[k] ?? 0, segments));
-      subtitle = { referenceFrames, noise: round(robustSd(calm), 5) };
-      subtitleData = track;
+      subtitleData = await subtitleOf(file, options.subtitle, segments, options);
     } catch (error) {
-      subtitle = { referenceFrames: 0, noise: 0, error: (error as Error).message };
+      subtitleError = (error as Error).message;
     }
   }
 
@@ -943,11 +832,6 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
     }
   }
 
-  const subtitleNoise = subtitle && !subtitle.error ? subtitle.noise : 0;
-  const subtitleOff = subtitleData
-    ? (median(subtitleData.values.filter((_, k) => quiet(subtitleData?.times[k] ?? 0, segments))) ??
-      0)
-    : 0;
   const mouthNoise = mouth && !('error' in mouth) ? mouth.noise : 0;
   const mouthClosed = mouthData
     ? (median(mouthData.values.filter((_, k) => quiet(mouthData?.times[k] ?? 0, segments))) ?? 0)
@@ -962,9 +846,7 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
       seconds: round(s.end - s.onset, 4),
       gapBeforeMs: prev ? round((s.onset - prev.end) * 1000) : null,
       edge: s.edge,
-      subtitle: subtitleData
-        ? subtitleOf(subtitleData, s, prev, next, subtitleNoise, subtitleOff)
-        : null,
+      subtitle: subtitleData?.sentences[i] ?? null,
       mouth: mouthData
         ? mouthOf(options.mode, mouthData, audio, s, prev, next, mouthNoise, mouthClosed)
         : null,
@@ -975,13 +857,28 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
   const pick = (list: SentenceResult[], get: (s: SentenceResult) => number | null | undefined) =>
     summarize(list.map((s) => get(s) ?? null));
   const metrics = (list: SentenceResult[]) => ({
-    subtitleFirstVisibleMs: pick(list, (s) => s.subtitle?.firstVisibleMs),
-    subtitleFullMs: pick(list, (s) => s.subtitle?.fullMs),
-    subtitleClearedMs: pick(list, (s) => s.subtitle?.clearedMs),
+    subtitle: summarizeSubtitles(list.flatMap((s) => (s.subtitle ? [s.subtitle] : []))),
     mouthOpenMs: pick(list, (s) => s.mouth?.openMs),
     mouthCloseMs: pick(list, (s) => s.mouth?.closeMs),
     mouthLagMs: pick(list, (s) => s.mouth?.lagMs),
   });
+  let subtitle: Analysis['subtitle'] = null;
+  if (subtitleError) subtitle = { error: subtitleError };
+  else if (subtitleData) {
+    const list = counted.flatMap((s) => (s.subtitle ? [s.subtitle] : []));
+    subtitle = {
+      referenceFrames: subtitleData.referenceFrames,
+      offsetMs: subtitleData.offsetMs,
+      pooledRate: subtitleData.pooledRate,
+      counts: {
+        sentences: list.length,
+        notVisible: list.filter((s) => s.additions === 0).length,
+        firstCharNotVisible: list.filter((s) => s.chars !== null && s.firstCharMs === null).length,
+        charsExpected: list.reduce((a, s) => a + (s.chars ?? 0), 0),
+        charsNotVisible: list.reduce((a, s) => a + (s.invisibleChars ?? 0), 0),
+      },
+    };
+  }
   const summary = {
     ...metrics(counted),
     afterSilence: metrics(counted.filter((s) => s.gapBeforeMs === null || s.gapBeforeMs >= 1500)),
@@ -997,6 +894,11 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
     if (sample) {
       const boxes: Array<{ rect: Rect; color: string }> = [];
       if (options.subtitle) boxes.push({ rect: options.subtitle, color: 'yellow' });
+      if (options.subtitleLine)
+        boxes.push({
+          rect: lineBox(options.subtitleLine, Number.POSITIVE_INFINITY, 0),
+          color: 'orange',
+        });
       if (options.mouthSearch) boxes.push({ rect: options.mouthSearch, color: 'cyan' });
       for (const rect of exclude) boxes.push({ rect, color: 'gray' });
       if (mouth && !('error' in mouth)) boxes.push({ rect: mouth.rect, color: 'red' });
@@ -1008,6 +910,21 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
         debug.push(`${base}-mouth.png`);
       }
     }
+    // 字幕带每帧与参考帧、与上一帧相差的像素占比，以及口型信号：画曲线核对用。
+    if (subtitleData) {
+      const { times, reference, previous } = subtitleData.series;
+      const rows = times.map((t, k) => `${t},${reference[k]},${previous[k]}`);
+      writeFileSync(`${base}-subtitle.csv`, `time,vsReference,vsPrevious\n${rows.join('\n')}\n`);
+      debug.push(`${base}-subtitle.csv`);
+    }
+    if (mouthData) {
+      const { times, values } = mouthData;
+      const rows = times.map(
+        (t, k) => `${t},${round(values[k] ?? 0, 4)},${round(expectedMouth(audio, t), 4)}`,
+      );
+      writeFileSync(`${base}-mouth.csv`, `time,mouth,expected\n${rows.join('\n')}\n`);
+      debug.push(`${base}-mouth.csv`);
+    }
   }
 
   return {
@@ -1017,6 +934,7 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
     frameMs: round(1000 / video.fps, 2),
     regions: {
       subtitle: options.subtitle ?? null,
+      subtitleLine: options.subtitleLine ?? null,
       mouthSearch: options.mouthSearch ?? null,
       exclude,
     },
@@ -1041,8 +959,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       out: { type: 'string' },
       'debug-dir': { type: 'string' },
       'min-mouth-r': { type: 'string' },
+      /** 单行字幕的几何：中线 x、行框上沿 y、行高、每字宽、最大行宽（录像像素）。 */
+      line: { type: 'string' },
+      'seconds-per-char': { type: 'string' },
     },
   });
+  const line = values.line?.split(',').map(Number);
+  if (line && (line.length !== 5 || line.some((v) => !Number.isFinite(v))))
+    throw new Error('--line 写成 中线x,上沿y,行高,每字宽,最大行宽');
   const file = positionals[0];
   if (!file) throw new Error('用法：analyze.ts <录像> --mode tone|speech --subtitle x,y,w,h …');
   if (values.mode !== 'tone' && values.mode !== 'speech')
@@ -1050,6 +974,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const result = await analyze(resolve(file), {
     mode: values.mode,
     ...(values.subtitle ? { subtitle: parseRect(values.subtitle) } : {}),
+    ...(line
+      ? {
+          subtitleLine: {
+            centerX: line[0] ?? 0,
+            top: line[1] ?? 0,
+            height: line[2] ?? 0,
+            charWidth: line[3] ?? 0,
+            maxWidth: line[4] ?? 0,
+          },
+        }
+      : {}),
+    ...(values['seconds-per-char'] ? { secondsPerChar: Number(values['seconds-per-char']) } : {}),
     ...(values['mouth-search'] ? { mouthSearch: parseRect(values['mouth-search']) } : {}),
     exclude: (values.exclude ?? []).map(parseRect),
     toneHz: Number(values.tone),

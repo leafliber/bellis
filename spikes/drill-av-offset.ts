@@ -3,8 +3,12 @@
  *
  *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 [--safe-scene Safe]
  *        [--sessions tone,speech] [--tone-seconds 100] [--speech-sentences 10] [--speaker vivian]
- *        [--speech-backend qwen3|fake] [--raise-stage] [--fps 60] [--out 结果文件前缀]
+ *        [--speech-backend qwen3|fake] [--fps 60] [--out 结果文件前缀]
+ *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 --preview [--out 前缀]
  *   node spikes/drill-av-offset.ts --reanalyze 结果文件前缀
+ *
+ * --preview 只读：盘点布局与来源设置，截取节目场景与形象源的画面（<前缀>-preview-*.png），不改 OBS、不拉起宿主，
+ * 用来在录制前核对嘴部大小、透明背景与 VTS 设置面板是否关闭。
  *
  * 前提：VTS 已开插件 API 并载入模型，形象插件「Bellis」的令牌已在 SecretStore（服务名 bellis）的 vts 条目里；
  * OBS 的直播场景里有 Stage 浏览器源与采集 VTS 的游戏采集源，安全场景里没有它们。语音会话还要求本 worktree
@@ -19,13 +23,14 @@
  * 计划内停止时宿主切到安全场景并静音：每个会话之后像操作员一样切回直播场景、取消静音（下一次开播预检会
  * 拦住安全场景与静音，这是预期的）。
  *
- * 录像分析见 spikes/av-offset/analyze.ts：区域由场景项的变换算出（spikes/av-offset/layout.ts），字幕带按
- * stage.css 的布局，嘴部在形象源的范围里（去掉字幕带）按与音频的相关自动找。形象源在 Stage 源之上且盖住
- * 字幕带时拒绝运行；--raise-stage 时把 Stage 源临时移到最上层，结束时移回。帧率决定单次测量的分辨率
- * （30fps 时 33.3ms）：--fps 临时改 OBS 的帧率（只在没有输出进行时能改），结束时改回。
+ * 录像分析见 spikes/av-offset/analyze.ts：区域由场景项的变换算出（spikes/av-offset/layout.ts），字幕带与
+ * 单行字幕的几何按 stage.css 的布局，测试音按每字 0.15 秒逐字配对；嘴部在形象源的范围里（去掉字幕带）按与
+ * 音频的相关自动找。不改场景项顺序：Stage 源之上有别的来源盖住字幕带时拒绝运行，只有形象源且它允许透明时
+ * 照常运行，被模型挡住的字单独计数。帧率决定单次测量的分辨率（30fps 时 33.3ms）：--fps 临时改 OBS 的帧率
+ * （只在没有输出进行时能改），结束时改回。
  *
  * 会改写浏览器源的 URL、切换节目场景、静音并开关录制；推流或录制进行中、或有别的 Bellis 进程在运行时拒绝运行。
- * 结束时恢复浏览器源设置（含 URL）、节目场景、静音、场景项顺序与帧率，整体读回比对。录制文件留在 OBS 的录制目录。
+ * 结束时恢复浏览器源设置（含 URL）、节目场景、静音与帧率，并读回比对（含场景项顺序）。录制文件留在 OBS 的录制目录。
  * 结果写 <前缀>.json，各会话的宿主日志写 <前缀>-<会话>.jsonl，定位图写 <前缀>-debug/。
  */
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -45,10 +50,12 @@ import { analyze, probe } from './av-offset/analyze.ts';
 import {
   intersect,
   itemRect,
+  lineToVideo,
   placement,
   type Rect,
   type SceneItemTransform,
   subtitleBand,
+  subtitleLine,
   subtitleLines,
   toCanvas,
   toVideo,
@@ -261,24 +268,37 @@ async function layoutOf(
 }
 
 /** 按录像分辨率换算区域并分析。 */
-async function analyzeRecording(
-  path: string,
-  kind: Kind,
-  regions: { canvas: Layout['canvas']; subtitle: Rect; mouthSearch: Rect; exclude: Rect },
-  debugDir: string,
-) {
+async function analyzeRecording(path: string, kind: Kind, layout: Layout, debugDir: string) {
   const video = await probe(path);
-  const scale = (rect: Rect) => toVideo(rect, regions.canvas, video);
-  const subtitle = scale(regions.subtitle);
-  const mouthSearch = scale(regions.mouthSearch);
-  const exclude = scale(regions.exclude);
+  const scale = (rect: Rect) => toVideo(rect, layout.canvas, video);
+  const subtitle = scale(layout.subtitle);
+  const mouthSearch = scale(layout.mouthSearch);
+  const exclude = scale(layout.exclude);
+  const page = layout.stage.item.sceneItemTransform;
+  const line = lineToVideo(
+    subtitleLine(page.sourceWidth, page.sourceHeight),
+    placement(page),
+    layout.canvas,
+    video,
+  );
   return analyze(path, {
     mode: kind,
-    ...(subtitle ? { subtitle } : {}),
+    ...(subtitle ? { subtitle, subtitleLine: line } : {}),
+    // 模拟 TTS 每个码点等长：第 k 个字的声音从出声后 k·0.15 秒开始。
+    ...(kind === 'tone' ? { secondsPerChar: SAMPLES_PER_CHAR / SAMPLE_RATE } : {}),
     ...(mouthSearch ? { mouthSearch } : {}),
     exclude: exclude ? [exclude] : [],
     debugDir,
   });
+}
+
+/** 截取一个来源（或场景）的画面写成 PNG。只读。 */
+async function screenshot(obs: ObsClient, sourceName: string, out: string): Promise<string> {
+  const shot = ok(await obs.request('GetSourceScreenshot', { sourceName, imageFormat: 'png' }));
+  const data = String(shot.imageData ?? '');
+  const comma = data.indexOf(',');
+  writeFileSync(out, Buffer.from(comma >= 0 ? data.slice(comma + 1) : data, 'base64'));
+  return out;
 }
 
 /** 宿主日志里切到 M2 之后的部分。 */
@@ -347,7 +367,7 @@ async function main(): Promise<void> {
       'speech-sentences': { type: 'string', default: '10' },
       speaker: { type: 'string', default: 'vivian' },
       'speech-backend': { type: 'string', default: 'qwen3' },
-      'raise-stage': { type: 'boolean', default: false },
+      preview: { type: 'boolean', default: false },
       fps: { type: 'string' },
       out: { type: 'string' },
       reanalyze: { type: 'string' },
@@ -382,7 +402,8 @@ async function main(): Promise<void> {
   const id = Date.now().toString(36);
   let original: ObsSnapshot | undefined;
   let originalItems: Array<{ sceneItemId: number; sceneItemIndex: number; enabled: boolean }> = [];
-  let raised: { scene: string; sceneItemId: number; index: number } | undefined;
+  /** 已开始改动 OBS（预览只读，不恢复）。 */
+  let changed = false;
   /** 改过帧率时的原值。 */
   let originalFps: { fpsNumerator: number; fpsDenominator: number } | undefined;
   let session: Session | undefined;
@@ -429,6 +450,36 @@ async function main(): Promise<void> {
         ),
       },
     };
+    const texts = [
+      ...(kinds.includes('tone') ? toneSchedule(TONE_FIRST_AT_MS + 60_000).map((a) => a.text) : []),
+      ...(kinds.includes('speech') ? SPEECH_TEXTS : []),
+    ];
+    const layout = await layoutOf(obs, live, stageSource, avatarSource, texts);
+    result.layout = layout;
+    result.recordDirectory = ok(await obs.request('GetRecordDirectory')).recordDirectory;
+    say(
+      `布局：${JSON.stringify({ canvas: layout.canvas, output: layout.output, fps: layout.fps, subtitle: layout.subtitle, mouthSearch: layout.mouthSearch, coveringSubtitle: layout.coveringSubtitle })}`,
+    );
+    if (values.preview) {
+      const shots = [
+        await screenshot(obs, live, `${out}-preview-program.png`),
+        await screenshot(obs, avatarSource, `${out}-preview-avatar.png`),
+      ];
+      writeFileSync(
+        `${out}-preview.json`,
+        `${JSON.stringify({ drill: 'av-offset-preview', started, stageSource, avatarSource, shots, ...result }, null, 2)}\n`,
+      );
+      say(`截图：${shots.join('、')}；盘点写入 ${out}-preview.json`);
+      return;
+    }
+    // 不改场景项顺序：盖住字幕带的只能是允许透明的形象源，被模型挡住的字由分析单独计数。
+    const blocking = layout.coveringSubtitle.filter(
+      (name) => name !== avatarSource || avatarSettings.allow_transparency !== true,
+    );
+    if (blocking.length > 0)
+      throw new Error(`字幕带被 Stage 源之上的 ${blocking.join('、')} 盖住，录像里看不到字幕`);
+
+    changed = true;
     if (values.fps !== undefined) {
       const fps = Number(values.fps);
       if (!(Number.isInteger(fps) && fps > 0 && fps <= 120))
@@ -439,45 +490,11 @@ async function main(): Promise<void> {
         fpsDenominator: Number(before.fpsDenominator),
       };
       ok(await obs.request('SetVideoSettings', { fpsNumerator: fps, fpsDenominator: 1 }));
+      layout.fps = fps;
       say(
         `已把 OBS 帧率临时改为 ${fps}（原为 ${originalFps.fpsNumerator}/${originalFps.fpsDenominator}）`,
       );
     }
-
-    const texts = [
-      ...(kinds.includes('tone') ? toneSchedule(TONE_FIRST_AT_MS + 60_000).map((a) => a.text) : []),
-      ...(kinds.includes('speech') ? SPEECH_TEXTS : []),
-    ];
-    let layout = await layoutOf(obs, live, stageSource, avatarSource, texts);
-    if (layout.coveringSubtitle.length > 0) {
-      const onlyAvatar =
-        layout.coveringSubtitle.length === 1 && layout.coveringSubtitle[0] === avatarSource;
-      if (!values['raise-stage'] || !onlyAvatar)
-        throw new Error(
-          `字幕带被 Stage 源之上的 ${layout.coveringSubtitle.join('、')} 盖住，录像里看不到字幕` +
-            (onlyAvatar ? '；加 --raise-stage 临时把 Stage 源移到最上层' : ''),
-        );
-      const top = Math.max(...originalItems.map((i) => i.sceneItemIndex));
-      raised = {
-        scene: live,
-        sceneItemId: layout.stage.item.sceneItemId,
-        index: layout.stage.item.sceneItemIndex,
-      };
-      ok(
-        await obs.request('SetSceneItemIndex', {
-          sceneName: live,
-          sceneItemId: raised.sceneItemId,
-          sceneItemIndex: top,
-        }),
-      );
-      say(`已把「${stageSource}」临时移到最上层（原序号 ${raised.index}）`);
-      layout = await layoutOf(obs, live, stageSource, avatarSource, texts);
-    }
-    result.layout = layout;
-    result.recordDirectory = ok(await obs.request('GetRecordDirectory')).recordDirectory;
-    say(
-      `布局：${JSON.stringify({ canvas: layout.canvas, output: layout.output, fps: layout.fps, subtitle: layout.subtitle, mouthSearch: layout.mouthSearch })}`,
-    );
 
     for (const kind of kinds) {
       // 上一个会话停止后宿主切到了安全场景并静音：像操作员一样切回直播场景、取消静音。
@@ -676,16 +693,8 @@ async function main(): Promise<void> {
   } finally {
     if (recording) await obs.request('StopRecord').catch(() => undefined);
     await session?.stop().catch(() => undefined);
-    if (original) {
+    if (original && changed) {
       const steps = await restoreSnapshot(obs, original, stageSource);
-      if (raised) {
-        const back = await obs.request('SetSceneItemIndex', {
-          sceneName: raised.scene,
-          sceneItemId: raised.sceneItemId,
-          sceneItemIndex: raised.index,
-        });
-        if (!back.ok) steps.push(`移回场景项失败：${back.code} ${back.comment ?? ''}`);
-      }
       if (originalFps) {
         const back = await obs.request('SetVideoSettings', originalFps);
         if (!back.ok) steps.push(`改回帧率失败：${back.code} ${back.comment ?? ''}`);
