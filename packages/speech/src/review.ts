@@ -57,7 +57,7 @@ export const speechReview = definePlugin({
           for (const key of keys) settle(key, 'vetoed', signal.reason);
         } else if (signal.kind === 'stop') {
           withdrawAll(signal.reason);
-        } else if (signal.mode !== 'M1') {
+        } else if (signal.kind === 'mode' && signal.mode !== 'M1') {
           withdrawAll(`监督模式已切到 ${signal.mode}`);
         }
       }),

@@ -34,7 +34,15 @@ interface Active {
   softStopped: string | undefined;
   /** 停止、软收尾或被抢占时 resolve，用来打断等待中的文本流。 */
   interrupted: PromiseWithResolvers<void>;
+  /**
+   * 急停时正在播的那一句：急停那一刻的呈现延迟，以及 OBS 应急静音是否成功（等不到结果按失败）。
+   * 写回据此扣掉已交给 OBS、还没呈现就被静音的那一段。
+   */
+  emergency: { delayMs: number; obsOk: Promise<boolean> } | undefined;
 }
+
+/** 等 OBS 应急动作结果的上限：应急批处理自己的超时是 1 秒。 */
+const EMERGENCY_WAIT_MS = 3000;
 
 /** 静止中需要用到的实例状态，按插件上下文索引。 */
 const instances = new WeakMap<object, { hardStop(reason: string): void; idle(): Promise<void> }>();
@@ -68,7 +76,8 @@ async function* sentencesOf(
  * - 更高优先级、且属于可抢占来源的请求，在当前发言声明的可抢占点打断它（句边界或立即）；
  * - 每句先经发声前检查（审核插件），持有 Stage 音频输出许可、经安全核授权后才合成与播放；
  *   每次等待之后都重新检查停止、软收尾与抢占；
- * - 被打断的发言按 Stage 回报的播放游标截断，只把观众实际听到的部分写回。
+ * - 被打断的发言按 Stage 回报的播放游标截断，只把观众实际听到的部分写回；急停且 OBS 应急静音成功时，
+ *   正在播的那一句再扣掉呈现延迟（发声文档“播放游标与写回”）。
  */
 export const speechArbiter = definePlugin({
   manifest: {
@@ -165,12 +174,39 @@ export const speechArbiter = definePlugin({
       if (active.sentenceId) stage.truncate(active.sentenceId);
     };
 
+    /** 等着下一次 OBS 应急动作结果的句子。 */
+    const emergencyWaiters = new Set<(obsOk: boolean) => void>();
+    /** 急停：记下正在播的那一句的呈现延迟，等 OBS 应急动作的结果（超时按失败）。 */
+    const noteEmergency = () => {
+      const current = active;
+      if (!current?.sentenceId || current.emergency) return;
+      const obsOk = new Promise<boolean>((resolve) => {
+        let timer: TimerHandle | undefined;
+        const settle = (ok: boolean) => {
+          if (timer) clock.clearTimeout(timer);
+          emergencyWaiters.delete(settle);
+          resolve(ok);
+        };
+        emergencyWaiters.add(settle);
+        timer = clock.setTimeout(() => settle(false), EMERGENCY_WAIT_MS);
+      });
+      current.emergency = { delayMs: stage.presentation.delayMs, obsOk };
+    };
     ctx.register(
       safety.onControl((signal) => {
-        if (signal.kind === 'stop') hardStop(signal.reason);
-        else if (signal.kind === 'mode' && signal.mode === 'safe-stop') hardStop(signal.reason);
+        if (signal.kind === 'stop') {
+          noteEmergency();
+          hardStop(signal.reason);
+        } else if (signal.kind === 'mode' && signal.mode === 'safe-stop') {
+          hardStop(signal.reason);
+        } else if (signal.kind === 'emergency-completed') {
+          for (const settle of [...emergencyWaiters]) settle(signal.obsOk);
+        }
       }),
     );
+    ctx.register(() => {
+      for (const settle of [...emergencyWaiters]) settle(false);
+    });
     ctx.register(() => {
       hardStop('仲裁停用');
       releaseLease();
@@ -206,6 +242,29 @@ export const speechArbiter = definePlugin({
         },
         signal,
       );
+    };
+
+    /**
+     * 写回游标：页面回报的已播出采样数。急停且 OBS 应急静音成功时，再扣掉急停那一刻的呈现延迟：
+     * 这一段已交给 OBS，还没呈现就被静音了，观众听不到。页面自己截断、静音失败时不扣。
+     */
+    const heardCursor = async (
+      current: Active,
+      played: number,
+      synthesis: Synthesis | undefined,
+    ): Promise<number> => {
+      const emergency = current.emergency;
+      if (!emergency || !synthesis || played === 0) return played;
+      if (!(await emergency.obsOk)) return played;
+      const unheard = Math.round((emergency.delayMs * synthesis.sampleRate) / 1000);
+      const cursor = Math.max(0, played - unheard);
+      ctx.log('speech.emergency-writeback', {
+        utteranceId: current.item.request.id,
+        played,
+        delayMs: emergency.delayMs,
+        cursor,
+      });
+      return cursor;
     };
 
     const speak = async (current: Active): Promise<UtteranceOutcome> => {
@@ -321,7 +380,7 @@ export const speechArbiter = definePlugin({
           // 没有任何可用的 TTS 引擎：这一句一个采样都没有播出。
           if (ttsError !== undefined && !halted())
             return finish({ end: 'unavailable', reason: `TTS 不可用：${ttsError}` });
-          const played = playback?.played ?? 0;
+          const played = await heardCursor(current, playback?.played ?? 0, synthesis);
           // 时间映射可能在合成过程中被细化（R-11），按播放游标换算时现读。
           const prefix = heardPrefix(sentence, played, synthesis?.timing, synthesis?.totalSamples);
           if (prefix === undefined) result.interruptedMidSentence = played > 0;
@@ -352,6 +411,7 @@ export const speechArbiter = definePlugin({
           stopped: undefined,
           softStopped: undefined,
           interrupted: Promise.withResolvers<void>(),
+          emergency: undefined,
         };
         active = current;
         const result = await speak(current);

@@ -3,6 +3,8 @@ import fc from 'fast-check';
 
 /** 模拟 TTS 每个朗读码点的采样数；不变量据此从播出的采样数推出观众听到了什么。 */
 export const SAMPLES_PER_CHAR = 1600;
+/** 模拟 TTS 的采样率：急停时写回扣掉的呈现延迟按它折算成采样数。 */
+export const SAMPLE_RATE = 16_000;
 
 /** 被审核判为不可说的词，以及会让模拟审核模型出错的词。 */
 export const BLOCKED = '禁词';
@@ -48,6 +50,8 @@ export interface Scenario {
   >;
   announcements: Array<{ atMs: number; sentences: number[]; immediate: boolean }>;
   operator: Array<{ atMs: number; action: 'estop' | 'upgrade' | 'restart' }>;
+  /** 呈现延迟（stage-sync 的初值；仿真里没有音量表，一直用它）。缺省 0。 */
+  presentationMs?: number;
   durationMs: number;
 }
 
@@ -93,6 +97,7 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
       }),
       { maxLength: 4 },
     ),
+    presentationMs: fc.nat(30).map((n) => n * 10),
     durationMs: fc.constant(maxDurationMs),
   });
 }
@@ -127,8 +132,13 @@ export function scenarioEntries(scenario: Scenario, fromMs = 0, outputsUsed = 0)
   return [
     entry('stage-page', 'stage-page-sim'),
     entry('stage', 'stage-service'),
+    entry('stage-sync', 'stage-sync', {
+      grant: ['obs.meters'],
+      config: { initialDelayMs: scenario.presentationMs ?? 0 },
+    }),
     entry('tts', 'tts-sim', {
       config: {
+        sampleRate: SAMPLE_RATE,
         samplesPerChar: SAMPLES_PER_CHAR,
         slowness: scenario.ttsSlow ? 1.5 : 0,
         failOn: [BROKEN_AUDIO],

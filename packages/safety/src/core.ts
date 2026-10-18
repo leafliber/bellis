@@ -306,7 +306,7 @@ export class SafetyCore {
 
   /**
    * 急停：吊销全部执行许可 → 在控制通道广播停止 → 进入安全停止 →
-   * 经 OBS 应急连接静音 Stage 源并切安全场景。前三步同步完成，不依赖存储写入成功。
+   * 经 OBS 应急连接静音 Stage 源并切安全场景，完成后在控制通道广播结果。前三步同步完成，不依赖存储写入成功。
    */
   emergencyStop(reason: string): Promise<EmergencyReport> {
     const revoked = this.leases.revokeAll(`急停：${reason}`);
@@ -320,6 +320,10 @@ export class SafetyCore {
           outcome.ok ? { ok: true } : { ok: false, error: JSON.stringify(outcome.results) },
         (error: unknown) => ({ ok: false, error: message(error) }),
       )
+      .then((obs: EmergencyReport['obs']) => {
+        this.control.broadcast({ kind: 'emergency-completed', reason, obsOk: obs.ok });
+        return obs;
+      })
       .finally(() => {
         this.#obsRun = undefined;
       });

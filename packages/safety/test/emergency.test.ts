@@ -16,6 +16,11 @@ test('急停：吊销全部许可、广播停止、静音并切安全场景，�
     assert.deepEqual(report, { reason: '操作员急停', revoked: 1, obs: { ok: true } });
     assert.equal(s.safety.leases.isValid('stage.audio', granted.lease.token), false);
     assert.deepEqual(signals[0], { kind: 'stop', reason: '操作员急停' });
+    // OBS 应急动作完成后广播结果，同一次应急动作只发一次。
+    assert.deepEqual(
+      signals.filter((signal) => signal.kind === 'emergency-completed'),
+      [{ kind: 'emergency-completed', reason: '操作员急停', obsOk: true }],
+    );
     assert.equal(s.safety.mode, 'safe-stop');
     assert.equal(s.obs.muted.get('Stage'), true);
     assert.equal(s.obs.currentScene, 'Safe');
@@ -63,8 +68,11 @@ test('OBS 不可用时急停仍吊销许可并进入安全停止，结果报告�
   try {
     s.safety.requestMode('M1');
     s.obs.failing = true;
+    const signals: ControlSignal[] = [];
+    s.safety.control.subscribe((signal) => signals.push(signal));
     const report = await s.safety.emergencyStop('测试');
     assert.equal(report.obs.ok, false);
+    assert.deepEqual(signals.at(-1), { kind: 'emergency-completed', reason: '测试', obsOk: false });
     assert.equal(s.safety.mode, 'safe-stop');
     assert.ok(s.logs.some((l) => l.event === 'safety.alarm'));
   } finally {
