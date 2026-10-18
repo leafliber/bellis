@@ -18,3 +18,8 @@ body {
     0 0 8px #000;
   white-space: pre-wrap;
 }
+
+/* 还没显示的字照样参与排版（连同阴影一起不可见），整句的位置与换行从一开始就固定。 */
+#subtitle-hidden {
+  visibility: hidden;
+}

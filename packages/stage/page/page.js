@@ -6,7 +6,7 @@
  *   连接断开后用会话密钥重连。页面不在任何存储里保存密钥。
  * - 只播放带当前许可令牌的音频，令牌变化即丢弃旧缓冲；许可时长与心跳由 AudioWorklet 按渲染帧计时。
  * - 字幕按 AudioWorklet 回报的已播采样数与宿主送来的映射推进（subtitle.js），只用 textContent 渲染；
- *   截断、令牌变化时立即清除。
+ *   未显示的字放在不可见的占位元素里，版面从一开始就固定；截断、令牌变化时立即清除。
  */
 import { decodeAudio, Resampler } from './audio.js';
 import { Subtitles } from './subtitle.js';
@@ -32,7 +32,9 @@ const RECONNECT_MS = 500;
 /** 宿主拒绝认证的关闭码：不再重连，等宿主重新下发 URL。 */
 const REJECTED = new Set([4401, 4408]);
 
-const subtitle = /** @type {HTMLElement} */ (document.getElementById('subtitle'));
+/** 字幕的已显示前缀与不可见的其余部分（占位，固定版面）。 */
+const shownText = /** @type {HTMLElement} */ (document.getElementById('subtitle-shown'));
+const hiddenText = /** @type {HTMLElement} */ (document.getElementById('subtitle-hidden'));
 let token = new URLSearchParams(location.hash.slice(1)).get('t');
 history.replaceState(null, '', location.pathname);
 
@@ -42,8 +44,9 @@ let sessionKey = null;
 let leaseToken = null;
 /** @type {Map<string, Playing>} */
 const playing = new Map();
-const subtitles = new Subtitles((text) => {
-  subtitle.textContent = text;
+const subtitles = new Subtitles((shown, hidden) => {
+  if (shownText.textContent !== shown) shownText.textContent = shown;
+  if (hiddenText.textContent !== hidden) hiddenText.textContent = hidden;
 });
 
 const context = new AudioContext({ latencyHint: 'playback' });

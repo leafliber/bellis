@@ -18,8 +18,8 @@ export interface History {
  * 3. 写回的内容恰好是 Stage 回报已播出的部分（按模拟 TTS 每码点的采样数，从页面回报的采样数独立推出）；
  * 4. 同一句话从未在 Stage 上开始两次（含跨重启），同一意图从未执行两次；
  * 5. 字幕不早于游标：页面显示的是这一句字幕的前缀，其中有朗读的码点都已开始播出（按模拟 TTS 每码点的
- *    采样数，与页面当时已播出的采样数比较）；
- * 6. 页面回报一句播完或截断时，这一句的字幕已经清除。
+ *    采样数，与页面当时已播出的采样数比较）；版面固定：已显示与占位的两段拼起来总是整句；
+ * 6. 页面回报一句播完或截断时，这一句的字幕（两段）已经清除。
  */
 export function checkHistory(history: History): string[] {
   const violations: string[] = [];
@@ -31,7 +31,7 @@ export function checkHistory(history: History): string[] {
   let truncated = new Map<string, number>();
   /** 当前世界里每句已播出的采样数（由页面每拍播出的采样数累计）与页面正在显示的字幕。 */
   let played = new Map<string, number>();
-  let shown: { sentenceId: string; text: string } | undefined;
+  let shown: { sentenceId: string; cleared: boolean } | undefined;
   let mode = 'safe-stop';
 
   for (const entry of history.trace) {
@@ -72,9 +72,14 @@ export function checkHistory(history: History): string[] {
       case 'page.subtitle': {
         const id = String(entry.data.sentenceId);
         const text = String(entry.data.text);
-        shown = { sentenceId: id, text };
-        if (text === '') break;
-        const problem = subtitleAhead(begun.get(id), text, played.get(id) ?? 0);
+        const hidden = String(entry.data.hidden ?? '');
+        shown = { sentenceId: id, cleared: text === '' && hidden === '' };
+        if (shown.cleared) break;
+        const subtitle = begun.get(id);
+        const problem =
+          subtitle !== undefined && text + hidden !== subtitle
+            ? `已显示“${text}”与占位“${hidden}”拼起来不是整句“${subtitle}”`
+            : subtitleAhead(subtitle, text, played.get(id) ?? 0);
         if (problem) violations.push(`句子 ${id} 的字幕${problem}（第 ${entry.seq} 条追踪）`);
         break;
       }
@@ -83,7 +88,7 @@ export function checkHistory(history: History): string[] {
         const id = String(entry.data.sentenceId);
         if (entry.kind === 'page.ended') ended.add(id);
         else truncated.set(id, Number(entry.data.played));
-        if (shown?.sentenceId === id && shown.text !== '')
+        if (shown?.sentenceId === id && !shown.cleared)
           violations.push(`句子 ${id} 播完或截断时字幕没有清除（第 ${entry.seq} 条追踪）`);
         break;
       }

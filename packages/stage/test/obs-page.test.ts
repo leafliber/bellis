@@ -163,17 +163,26 @@ async function setup(pageConfig: Record<string, unknown> = {}) {
 type Setup = Awaited<ReturnType<typeof setup>>;
 
 function get(s: Setup, path: string, headers: Record<string, string>) {
-  return new Promise<{ status: number; headers: Record<string, unknown> }>((done, fail) => {
-    const req = httpRequest(
-      { host: '127.0.0.1', port: s.port, path, headers, setHost: false },
-      (res) => {
-        res.resume();
-        done({ status: res.statusCode ?? 0, headers: res.headers });
-      },
-    );
-    req.on('error', fail);
-    req.end();
-  });
+  return new Promise<{ status: number; headers: Record<string, unknown>; body: string }>(
+    (done, fail) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port: s.port, path, headers, setHost: false },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () =>
+            done({
+              status: res.statusCode ?? 0,
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString('utf8'),
+            }),
+          );
+        },
+      );
+      req.on('error', fail);
+      req.end();
+    },
+  );
 }
 
 /** 模拟页面：建立 WebSocket 并发出首条消息，返回结果与连接。 */
@@ -234,6 +243,20 @@ test('Host 与 Origin：只放行本端地址；缺 Origin 只放行页面文档
     assert.equal((await get(s, '/nope', { host: s.host, origin: s.origin })).status, 404);
     const page = await get(s, '/', { host: s.host, ...navigate });
     assert.match(String(page.headers['content-security-policy']), /frame-ancestors 'none'/);
+    assert.match(String(page.headers['content-security-policy']), /style-src 'self';/);
+    // 样式表带 crossorigin（请求才带 Origin）；字幕两段的样式都在样式表里，没有被 CSP 拦下的内联样式。
+    assert.match(
+      page.body,
+      /<link rel="stylesheet" href="\/stage.css" crossorigin="anonymous" \/>/,
+    );
+    assert.match(
+      page.body,
+      /<span id="subtitle-shown"><\/span><span id="subtitle-hidden"><\/span>/,
+    );
+    assert.doesNotMatch(page.body, /\sstyle=|<style/);
+    const css = await get(s, '/stage.css', { host: s.host, origin: s.origin });
+    assert.equal(css.status, 200);
+    assert.match(css.body, /#subtitle-hidden \{\s*visibility: hidden;\s*\}/);
 
     const token = s.token();
     assert.equal((await attempt(s, hello(token), {})).result, 'http-403');

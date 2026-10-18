@@ -5,9 +5,12 @@
  * - 映射 `starts[k]` 是字幕文本第 k 个码点开始显示的原始采样偏移，按 k 不减，可以比字幕的码点少；
  * - 播放进度是 AudioWorklet 回报的已播采样数，只算正文（唤醒信号与欠载补零不计入），
  *   来自 started（即 0）、progress、cursor 与 underrun；
- * - 显示开始时刻不晚于已播采样数的码点组成的前缀；没有映射时一开始播放就整句显示；已显示的字不收回；
- * - 播完或截断即清除；
- * - 只在显示的文本变化时调用 `write`，页面在其中写 `textContent`。
+ * - 显示开始时刻不晚于显示位置（目前就是已播采样数）的码点组成的前缀；没有映射时一开始播放就整句显示；
+ *   已显示的字不收回；
+ * - 版面固定：一句开始播放就把整句排好，输出分成“已显示”与“未显示”两段，页面把后一段放在不可见的
+ *   占位元素里，字只是逐个变得可见；
+ * - 播完或截断即清除，两段都清空；
+ * - 只在任一段变化时调用 `write`，页面在其中只写 `textContent`。
  */
 
 /**
@@ -36,8 +39,19 @@ export function validStarts(starts) {
   return true;
 }
 
+/**
+ * 显示位置为 `position`（原始采样）时应显示的码点数：开始不晚于它的码点个数。
+ * @param {readonly number[]} starts
+ * @param {number} position
+ */
+export function visibleCount(starts, position) {
+  let count = 0;
+  while (count < starts.length && /** @type {number} */ (starts[count]) <= position) count += 1;
+  return count;
+}
+
 export class Subtitles {
-  /** @param {(text: string, sentenceId: string | null) => void} write */
+  /** @param {(shown: string, hidden: string, sentenceId: string | null) => void} write 已显示与未显示的两段 */
   constructor(write) {
     this.write = write;
     /** 已开始一句、还没播完或截断的句子。 @type {Map<string, Line>} */
@@ -46,8 +60,8 @@ export class Subtitles {
     this.current = null;
     /** 正在显示的码点数。 */
     this.shown = 0;
-    /** 最近一次写出的文本。 */
-    this.text = '';
+    /** 最近一次写出的两段。 */
+    this.output = { shown: '', hidden: '' };
   }
 
   /** 宿主开始一句（令牌已核对）。 @param {string} id @param {string} text */
@@ -71,7 +85,7 @@ export class Subtitles {
       case 'started':
         if (!this.lines.has(id)) return;
         if (this.current !== id) {
-          this.put('');
+          this.put('', '');
           this.current = id;
           this.shown = 0;
         }
@@ -97,7 +111,7 @@ export class Subtitles {
   forget(id) {
     this.lines.delete(id);
     if (this.current !== id) return;
-    this.put('');
+    this.put('', '');
     this.current = null;
     this.shown = 0;
   }
@@ -105,31 +119,35 @@ export class Subtitles {
   /** 令牌变化：全部清除。 */
   clear() {
     for (const id of [...this.lines.keys()]) this.forget(id);
-    this.put('');
+    this.put('', '');
     this.current = null;
     this.shown = 0;
   }
 
-  /** 按当前进度显示，只增不减。 */
+  /**
+   * 这一句的显示位置（原始采样）：字幕按它推进。目前就是已播采样数；要按输出时延推迟字幕时在这里减去。
+   * @param {Line} line
+   */
+  position(line) {
+    return line.played;
+  }
+
+  /** 按当前显示位置显示，只增不减；整句一开始就排好。 */
   render() {
     const line = this.current === null ? undefined : this.lines.get(this.current);
     if (!line) return;
-    let count = line.chars.length;
-    if (line.starts !== null) {
-      const starts = line.starts;
-      count = Math.min(this.shown, starts.length);
-      while (count < starts.length && /** @type {number} */ (starts[count]) <= line.played)
-        count += 1;
-    }
-    if (count <= this.shown) return;
+    const count =
+      line.starts === null
+        ? line.chars.length
+        : Math.max(this.shown, visibleCount(line.starts, this.position(line)));
     this.shown = count;
-    this.put(line.chars.slice(0, count).join(''));
+    this.put(line.chars.slice(0, count).join(''), line.chars.slice(count).join(''));
   }
 
-  /** 文本变化时才写出。 @param {string} text */
-  put(text) {
-    if (text === this.text) return;
-    this.text = text;
-    this.write(text, this.current);
+  /** 任一段变化时才写出。 @param {string} shown @param {string} hidden */
+  put(shown, hidden) {
+    if (shown === this.output.shown && hidden === this.output.hidden) return;
+    this.output = { shown, hidden };
+    this.write(shown, hidden, this.current);
   }
 }

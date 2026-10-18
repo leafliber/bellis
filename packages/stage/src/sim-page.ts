@@ -20,7 +20,8 @@ interface Buffered {
  * - 欠载时补零，补零不推进播放游标；
  * - 只接受当前令牌的音频，令牌变化时丢弃旧令牌的全部缓冲；
  * - 收不到宿主心跳时自行静音并清空缓冲，再次收到心跳后恢复；
- * - 字幕与真实页面用同一套推进规则（page/subtitle.js），每次显示变化记追踪 `page.subtitle`。
+ * - 字幕与真实页面用同一套推进规则（page/subtitle.js），每次显示变化记追踪 `page.subtitle`
+ *   （`text` 为已显示的前缀，`hidden` 为占位的其余部分）。
  */
 export const simStagePage = definePlugin({
   manifest: {
@@ -52,8 +53,8 @@ export const simStagePage = definePlugin({
       trace?.record(`page.${message.kind}`, { ...message });
       for (const listener of [...listeners]) listener(message);
     };
-    const subtitles = new Subtitles((text, sentenceId) => {
-      trace?.record('page.subtitle', { sentenceId, text });
+    const subtitles = new Subtitles((text, hidden, sentenceId) => {
+      trace?.record('page.subtitle', { sentenceId, text, hidden });
     });
     const drop = (predicate: (b: Buffered) => boolean, reason: string) => {
       for (const item of queue.filter(predicate)) {
