@@ -114,15 +114,36 @@ test('MiniMax：中途取消即停止产出，发 task_cancel；取消后到达�
     assert.equal(t.fake.events('task_cancel').length, 1);
     assert.ok(t.wire.some((w) => w.kind === 'cancel-acked'));
     assert.ok(t.wire.some((w) => w.kind === 'audio-after-cancel'));
-    // 被取消的 flush 没有确认：缺省断开重连，不冒险复用。
-    assert.equal(t.fake.connections, 2);
+    // 被取消的 flush 随后确认（S-07 实测）：等到确认再复用同一连接。
+    assert.ok(t.wire.some((w) => w.kind === 'flushed-after-cancel'));
+    assert.equal(t.fake.connections, 1);
   } finally {
     await t.close();
   }
 });
 
-test('MiniMax：使用方提前停止读取等同于取消；开启复用后取消不断开连接', async () => {
-  const t = await setup({ chunkDelayMs: 30 }, { reuseAfterCancel: true });
+test('MiniMax：被取消的 flush 迟到的确认不会被当成下一句的结束', async () => {
+  // 确认晚 150ms 才到：适配器等它到了才开始下一句，下一句的音频完整。
+  const t = await setup({ chunkDelayMs: 30, confirmCanceledFlush: 150 });
+  try {
+    const abort = new AbortController();
+    const stream = await t.engine.start('一二三四五六七八九十', abort.signal);
+    for await (const chunk of stream.chunks) {
+      if (chunk.kind === 'audio') abort.abort();
+    }
+    const next = await collect(await t.engine.start('好的。', new AbortController().signal));
+    assert.equal(next.pcm.length, 3 * 80);
+    assert.equal(t.fake.connections, 1);
+    const flushed = t.wire.findIndex((w) => w.kind === 'flushed-after-cancel');
+    const sent = t.wire.findLastIndex((w) => w.kind === 'text-sent');
+    assert.ok(flushed >= 0 && flushed < sent);
+  } finally {
+    await t.close();
+  }
+});
+
+test('MiniMax：使用方提前停止读取等同于取消；被取消的 flush 不确认时断开，下一句重新建连', async () => {
+  const t = await setup({ chunkDelayMs: 30, confirmCanceledFlush: false });
   try {
     const stream = await t.engine.start('一二三四五六七八九十', new AbortController().signal);
     for await (const chunk of stream.chunks) {
@@ -131,7 +152,8 @@ test('MiniMax：使用方提前停止读取等同于取消；开启复用后取�
     const next = await collect(await t.engine.start('好的。', new AbortController().signal));
     assert.equal(next.pcm.length, 3 * 80);
     assert.equal(t.fake.events('task_cancel').length, 1);
-    assert.equal(t.fake.connections, 1);
+    assert.ok(t.wire.some((w) => w.kind === 'flush-timeout'));
+    assert.equal(t.fake.connections, 2);
   } finally {
     await t.close();
   }

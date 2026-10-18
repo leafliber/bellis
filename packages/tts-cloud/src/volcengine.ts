@@ -217,6 +217,7 @@ export class VolcengineEngine implements Engine {
       timeoutMs: this.#timeouts.connectTimeoutMs,
       maxPayload: MAX_MESSAGE_BYTES,
     });
+    this.#observe('open', { ms: clock.now() - startedAt });
     const connection: Connection = {
       link,
       secrets: Object.values(auth),
@@ -380,7 +381,7 @@ export class VolcengineEngine implements Engine {
         fail(error instanceof Error ? error : new EngineError(String(error)));
       }
     };
-    const addWords = (list: unknown) => {
+    const addWords = (list: unknown, event: number | undefined) => {
       if (!Array.isArray(list)) return;
       for (const item of list as Word[]) {
         if (typeof item?.word !== 'string' || typeof item.startTime !== 'number') continue;
@@ -393,7 +394,7 @@ export class VolcengineEngine implements Engine {
       }
       const all = [...words.values()].sort((a, b) => a.startMs - b.startMs);
       job.push({ kind: 'words', words: all });
-      this.#observe('words', { count: all.length, ms: clock.now() - startedAt });
+      this.#observe('words', { count: all.length, ms: clock.now() - startedAt, event });
     };
 
     job.onStop(() => {
@@ -438,6 +439,7 @@ export class VolcengineEngine implements Engine {
         case Event.SessionStarted:
           if (state !== 'starting') return;
           state = 'running';
+          this.#observe('session-started', { ms: clock.now() - startedAt });
           send(Event.TaskRequest, {
             event: Event.TaskRequest,
             namespace: 'BidirectionalTTS',
@@ -473,7 +475,7 @@ export class VolcengineEngine implements Engine {
           return;
         default:
           // TTSSentenceEnd（TTS 1.0 的时间戳）、TTSSubtitle（TTS 2.0 的字幕，事件号文档未列）等。
-          if (meta && 'words' in meta) addWords(meta.words);
+          if (meta && 'words' in meta) addWords(meta.words, frame.event);
           else this.#observe('event', { event: frame.event });
       }
     };
