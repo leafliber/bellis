@@ -76,6 +76,8 @@ export interface AnalyzeOptions {
   subtitle?: Rect;
   /** 单行字幕的几何（录像像素）；给出时只看每句的行框。 */
   subtitleLine?: SubtitleLine;
+  /** 语音：句内短于它的停顿并入同一句（毫秒，缺省 350）。句与句隔得远时调大，免得一句被拆开。 */
+  speechMergeMs?: number;
   /** 测试音每个字的秒数（模拟 TTS 每个码点等长）；给出时逐字配对、量推进速率。 */
   secondsPerChar?: number;
   /** 找嘴部的范围；不给时不分析口型。 */
@@ -799,7 +801,10 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
   const segments =
     options.mode === 'tone'
       ? await toneSegments(file, options.toneHz ?? 440)
-      : speechSegments(audio);
+      : speechSegments(
+          audio,
+          options.speechMergeMs === undefined ? {} : { mergeMs: options.speechMergeMs },
+        );
   const exclude = [...(options.exclude ?? [])];
 
   let subtitleData: SubtitleAnalysis | undefined;
@@ -870,6 +875,7 @@ export async function analyze(file: string, options: AnalyzeOptions): Promise<An
       referenceFrames: subtitleData.referenceFrames,
       offsetMs: subtitleData.offsetMs,
       pooledRate: subtitleData.pooledRate,
+      maskedFraction: subtitleData.maskedFraction,
       counts: {
         sentences: list.length,
         notVisible: list.filter((s) => s.additions === 0).length,

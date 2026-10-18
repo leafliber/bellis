@@ -9,6 +9,8 @@
  *   两帧出现时会被并成一个；测试音每字 150ms，不会发生）。字幕居中，每多一个字整行左移半个字，所以每个字
  *   的出现都是一次明显的事件。与局部参考相差的像素占比变大的事件是“加字”，降到第一个字出现之前的水平
  *   附近的是“清除”。用局部参考而不是全局参考：形象挡住或移动、背景变化时全局参考不对。
+ * - 运动掩码：安静时（离句段 0.4 秒以上）相邻两帧之间常变（超过 1% 的帧对）的像素，例如字幕带后面飘动的
+ *   头发，不计入上面的占比。
  * - 全局参考（离句段 0.4 秒以上的安静帧逐像素取中位数）只用来输出整段的曲线供核对。
  * - 测试音（给出每字秒数 secondsPerChar）：模拟 TTS 每个码点的时长相同，第 k 个字的声音从
  *   出声 + k·每字秒数 开始，按 Stage 的规则这个字在它开始播出时显示。加字事件数等于字数的句子按顺序配对，
@@ -40,6 +42,8 @@ const MIN_EVENT = 0.003;
 /** 噪声与参考帧最多取这么多帧。 */
 const NOISE_FRAMES = 300;
 const REFERENCE_FRAMES = 61;
+/** 安静帧对里变化超过这个比例的像素算“在动”，不计入字幕的变化。 */
+const MASK_ACTIVITY = 0.01;
 
 export interface SubtitleFrames {
   /** 实际裁出的字幕带（录像像素）。 */
@@ -83,6 +87,8 @@ export interface SubtitleSentence {
 
 export interface SubtitleAnalysis {
   referenceFrames: number;
+  /** 字幕带里被运动掩码排除的像素比例。 */
+  maskedFraction: number;
   /** 测试音：全字可见的句子的偏差中位数（毫秒），用来给有字看不到的句子配对。 */
   offsetMs: number | null;
   /**
@@ -123,16 +129,24 @@ function regionOf(data: SubtitleFrames, line: SubtitleLine | undefined, chars: n
   };
 }
 
-/** 区域里两帧相差超过 DIFF 的像素占比。 */
-function changed(a: Uint8Array, b: Uint8Array, width: number, region: Region): number {
+/** 区域里两帧相差超过 DIFF 的像素占比；mask 为 1 的像素（安静时也在动的）不计。 */
+function changed(
+  a: Uint8Array,
+  b: Uint8Array,
+  width: number,
+  region: Region,
+  mask?: Uint8Array,
+): number {
   let count = 0;
+  let area = 0;
   for (let y = region.y0; y < region.y1; y++) {
     const row = y * width;
     for (let x = region.x0; x < region.x1; x++) {
+      if (mask?.[row + x]) continue;
+      area += 1;
       if (Math.abs((a[row + x] ?? 0) - (b[row + x] ?? 0)) > DIFF) count += 1;
     }
   }
-  const area = (region.x1 - region.x0) * (region.y1 - region.y0);
   return area > 0 ? count / area : 0;
 }
 
@@ -180,6 +194,18 @@ export function analyzeSubtitles(
   );
   const empty = new Uint8Array(size);
   const frame = (k: number) => frames[k] ?? empty;
+  // 运动掩码：安静时（没有字幕）相邻两帧之间也常变的像素，例如字幕带后面飘动的头发，不计入字幕的变化。
+  const activity = new Uint16Array(size);
+  for (const k of noiseIndex) {
+    const a = frame(k);
+    const b = frame(k - 1);
+    for (let p = 0; p < size; p++) {
+      if (Math.abs((a[p] ?? 0) - (b[p] ?? 0)) > DIFF) activity[p] = (activity[p] ?? 0) + 1;
+    }
+  }
+  const busy = Math.max(2, Math.ceil(MASK_ACTIVITY * noiseIndex.length));
+  const mask = Uint8Array.from(activity, (count) => (count >= busy ? 1 : 0));
+  const masked = mask.reduce((a, v) => a + v, 0);
 
   const whole = { x0: 0, y0: 0, x1: data.width, y1: data.height };
   const series = {
@@ -196,7 +222,9 @@ export function analyzeSubtitles(
     const next = segments[i + 1];
     const chars = spc ? Math.max(1, Math.round((s.end - s.onset) / spc)) : null;
     const region = regionOf(data, options.line, chars);
-    const quietPrevious = noiseIndex.map((k) => changed(frame(k), frame(k - 1), width, region));
+    const quietPrevious = noiseIndex.map((k) =>
+      changed(frame(k), frame(k - 1), width, region, mask),
+    );
     const sorted = [...quietPrevious].sort((a, b) => a - b);
     const threshold = Math.max(
       MIN_EVENT,
@@ -212,15 +240,15 @@ export function analyzeSubtitles(
     const k0 = Math.max(1, firstIndexAtOrAfter(times, from));
     const local = frame(k0 - 1);
     for (let k = k0; k < times.length && (times[k] ?? 0) <= to; k++) {
-      const moved = changed(frame(k), frame(k - 1), width, region);
+      const moved = changed(frame(k), frame(k - 1), width, region, mask);
       if (moved >= threshold) {
-        run ??= { start: k, before: changed(frame(k - 1), local, width, region), last: k };
+        run ??= { start: k, before: changed(frame(k - 1), local, width, region, mask), last: k };
         run.last = k;
       } else if (run) {
         events.push({
           t: times[run.start] ?? 0,
           before: run.before,
-          after: changed(frame(run.last), local, width, region),
+          after: changed(frame(run.last), local, width, region, mask),
         });
         run = undefined;
       }
@@ -229,7 +257,7 @@ export function analyzeSubtitles(
       events.push({
         t: times[run.start] ?? 0,
         before: run.before,
-        after: changed(frame(run.last), local, width, region),
+        after: changed(frame(run.last), local, width, region, mask),
       });
     // 清除：降到第一个字出现之前的水平附近（局部的“关”，形象挡住或移动时比全局参考可靠）。
     const additions: Event[] = [];
@@ -337,6 +365,7 @@ export function analyzeSubtitles(
 
   return {
     referenceFrames: chosen.length,
+    maskedFraction: round(masked / size, 4),
     offsetMs: offset === null ? null : ms(offset),
     pooledRate: spc ? pooled(sentences, spc) : null,
     sentences,

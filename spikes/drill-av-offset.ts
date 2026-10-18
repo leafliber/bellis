@@ -33,7 +33,7 @@
  * 结束时恢复浏览器源设置（含 URL）、节目场景、静音与帧率，并读回比对（含场景项顺序）。录制文件留在 OBS 的录制目录。
  * 结果写 <前缀>.json，各会话的宿主日志写 <前缀>-<会话>.jsonl，定位图写 <前缀>-debug/。
  */
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -46,7 +46,7 @@ import { launch, type Session } from '@bellis/launcher';
 import { ObsClient, type ObsResult } from '@bellis/obs';
 import { OperatorMethod, Role } from '@bellis/protocol';
 import { KeyringSecretStore } from '@bellis/secret-store';
-import { analyze, probe } from './av-offset/analyze.ts';
+import { type Analysis, analyze, probe, summarize } from './av-offset/analyze.ts';
 import {
   intersect,
   itemRect,
@@ -286,6 +286,8 @@ async function analyzeRecording(path: string, kind: Kind, layout: Layout, debugD
     ...(subtitle ? { subtitle, subtitleLine: line } : {}),
     // 模拟 TTS 每个码点等长：第 k 个字的声音从出声后 k·0.15 秒开始。
     ...(kind === 'tone' ? { secondsPerChar: SAMPLES_PER_CHAR / SAMPLE_RATE } : {}),
+    // 语音每 12 秒一句：句内的停顿（实测有 356ms 的）并入同一句。
+    ...(kind === 'speech' ? { speechMergeMs: 1500 } : {}),
     ...(mouthSearch ? { mouthSearch } : {}),
     exclude: exclude ? [exclude] : [],
     debugDir,
@@ -318,9 +320,13 @@ function pageSide(lines: LogLine[]) {
     const end = (l.data as { end: string }).end;
     ends[end] = (ends[end] ?? 0) + 1;
   }
+  const started = lines.find(fact('tts.started'))?.data as { sampleRate?: number } | undefined;
   return {
     sentences: sentences.length,
     complete: sentences.filter((s) => s.complete === true).length,
+    /** 完整播出的句子按顺序的原始采样数与采样率（模拟 TTS 为 24kHz，本地 TTS 取 tts.started 的）。 */
+    playedSamples: sentences.filter((s) => s.complete === true).map((s) => Number(s.played)),
+    sampleRate: started?.sampleRate ?? SAMPLE_RATE,
     underruns: sentences.reduce((n, s) => n + Number(s.underruns ?? 0), 0),
     truncated: sentences
       .filter((s) => s.complete !== true)
@@ -334,10 +340,50 @@ function pageSide(lines: LogLine[]) {
   };
 }
 
+/**
+ * 字幕跨度对照页面回报的句长：录像里第一个字出现到清除的时长，比上这一句在页面上播出的时长（原始采样数
+ * 除以采样率）。第一个字在它的映射开始时刻出现，播完即清除：测试音第一个字从第 0 个采样开始，这个比应当
+ * 接近 100%；语音第一个字从对齐出的开始出现，比值少掉的部分就是句首到第一个字的时长。另给出可闻部分
+ * （-40dBFS 以上）占页面时长的比例：语音句首句尾的近乎无声部分也算在页面时长里。录像的句段（不含截断的）
+ * 与完整播出的句子按顺序配对；句段比句子多、或开头的句段被截断时不给。
+ */
+function spanOf(analysis: Analysis, page: { playedSamples: number[]; sampleRate: number }) {
+  // 录制在切到 M2 之前开始，开头不会截掉句子；结尾停录制时正在播的那句是截断的句段，页面上却是完整的。
+  const list = analysis.sentences.filter((s) => !s.edge);
+  const startsCut = analysis.sentences[0]?.edge === true;
+  if (startsCut || list.length > page.playedSamples.length || list.length === 0)
+    return { paired: false, segments: list.length, sentences: page.playedSamples.length };
+  const rows = list.map((s, i) => {
+    const pageSeconds = (page.playedSamples[i] ?? 0) / page.sampleRate;
+    const first = s.subtitle?.firstCharMs;
+    const cleared = s.subtitle?.clearedMs;
+    const span = first == null || cleared == null ? null : s.seconds + (cleared - first) / 1000;
+    return {
+      pageSeconds,
+      audibleSeconds: s.seconds,
+      subtitleSpanSeconds: span === null ? null : Math.round(span * 1000) / 1000,
+      spanPercent: span === null ? null : Math.round((1000 * span) / pageSeconds) / 10,
+      audiblePercent: Math.round((1000 * s.seconds) / pageSeconds) / 10,
+    };
+  });
+  return {
+    paired: true,
+    rows,
+    spanPercent: summarize(rows.map((r) => r.spanPercent)),
+    audiblePercent: summarize(rows.map((r) => r.audiblePercent)),
+  };
+}
+
 async function reanalyze(prefix: string): Promise<void> {
   const report = JSON.parse(readFileSync(`${prefix}.json`, 'utf8')) as {
     layout?: Layout;
-    sessions?: Array<{ kind: Kind; recording?: { path: string }; analysis?: unknown }>;
+    sessions?: Array<{
+      kind: Kind;
+      recording?: { path: string };
+      analysis?: Analysis;
+      page?: { playedSamples: number[]; sampleRate: number };
+      span?: unknown;
+    }>;
     reanalyzedAt?: string;
   };
   if (!report.layout) throw new Error('结果里没有布局');
@@ -350,6 +396,21 @@ async function reanalyze(prefix: string): Promise<void> {
       report.layout,
       `${prefix}-debug`,
     );
+    // 页面侧的摘要按保存的宿主日志重算（旧结果里可能没有逐句的采样数）。
+    const log = `${prefix}-${session.kind}.jsonl`;
+    if (existsSync(log)) {
+      const lines = readFileSync(log, 'utf8')
+        .split('\n')
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line) as LogLine];
+          } catch {
+            return [];
+          }
+        });
+      session.page = pageSide(lines);
+    }
+    if (session.page) session.span = spanOf(session.analysis, session.page);
   }
   report.reanalyzedAt = new Date().toISOString();
   writeFileSync(`${prefix}.json`, `${JSON.stringify(report, null, 2)}\n`);
@@ -685,7 +746,9 @@ async function main(): Promise<void> {
       const path = (entry.recording as { path?: string } | undefined)?.path;
       if (!path) continue;
       say(`分析 ${entry.kind} 录像……`);
-      entry.analysis = await analyzeRecording(path, entry.kind as Kind, layout, `${out}-debug`);
+      const analysis = await analyzeRecording(path, entry.kind as Kind, layout, `${out}-debug`);
+      entry.analysis = analysis;
+      entry.span = spanOf(analysis, entry.page as ReturnType<typeof pageSide>);
     }
   } catch (error) {
     result.error = (error as Error).stack ?? String(error);
