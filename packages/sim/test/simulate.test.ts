@@ -93,6 +93,25 @@ const regressions: Array<[string, Scenario]> = [
     },
   ],
   [
+    '急停吊销许可的截断回报排在停止信号之前：写回仍扣掉呈现延迟',
+    {
+      seed: 0,
+      moderation: { enabled: false, onError: 'skip', delayMs: 0 },
+      ttsSlow: false,
+      danmaku: [{ atMs: 0, viewer: 0, nickname: 0, text: 0 }],
+      outputs: [
+        { kind: 'invalid' },
+        { kind: 'invalid' },
+        { kind: 'reply', sentences: [0], target: 0 },
+        { kind: 'chatter', sentences: [1] },
+      ],
+      announcements: [],
+      operator: [{ atMs: 13400, action: 'estop' }],
+      presentationMs: 10,
+      durationMs: 20_000,
+    },
+  ],
+  [
     'TTS 在句中出错：这一句截断，意图结案，不卡住',
     {
       seed: 0,

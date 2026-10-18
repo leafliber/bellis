@@ -77,6 +77,8 @@ export const simStagePage = definePlugin({
       if (!muted && clock.now() - lastHeartbeat > heartbeatTimeoutMs) {
         muted = true;
         drop(() => true, '宿主心跳丢失');
+        // 与真实页面相同：自静音时连只差推迟清除的字幕也立即清除。
+        subtitles.clear();
         emit({ kind: 'muted', reason: '宿主心跳丢失' });
       }
       if (token !== null && clock.now() >= validUntil) {
@@ -188,6 +190,7 @@ export const simStagePage = definePlugin({
           drop((item) => item.id === message.sentenceId, '要求截断');
           return;
         case 'presentation':
+          trace?.record('page.presentation', { delayMs: message.delayMs });
           subtitles.setDelay(message.delayMs);
           return;
       }

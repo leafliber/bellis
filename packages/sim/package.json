@@ -13,11 +13,11 @@
     "@bellis/plugins": "workspace:*",
     "@bellis/safety": "workspace:*",
     "@bellis/speech": "workspace:*",
+    "@bellis/stage": "workspace:*",
     "@bellis/store": "workspace:*",
     "fast-check": "4.10.2"
   },
   "devDependencies": {
-    "@bellis/audience": "workspace:*",
-    "@bellis/stage": "workspace:*"
+    "@bellis/audience": "workspace:*"
   }
 }

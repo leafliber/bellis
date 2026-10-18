@@ -493,6 +493,9 @@ importers:
       '@bellis/speech':
         specifier: workspace:*
         version: link:../speech
+      '@bellis/stage':
+        specifier: workspace:*
+        version: link:../stage
       '@bellis/store':
         specifier: workspace:*
         version: link:../store
@@ -503,9 +506,6 @@ importers:
       '@bellis/audience':
         specifier: workspace:*
         version: link:../audience
-      '@bellis/stage':
-        specifier: workspace:*
-        version: link:../stage
 
   packages/speech:
     dependencies:

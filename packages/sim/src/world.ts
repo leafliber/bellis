@@ -11,6 +11,7 @@ import {
 } from '@bellis/kernel';
 import { builtinPlugins } from '@bellis/plugins';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
+import { ObsMetersService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { MemoryObs } from './memory-obs.ts';
 
@@ -117,6 +118,10 @@ export class World {
     this.kernel.provideScoped(SafetyService, ({ instanceId }) =>
       safetyFacade(this.safety, instanceId),
     );
+    // 仿真里没有 OBS 音量表：stage-sync 一直用配置的初值作呈现延迟。
+    this.kernel.provideCore(ObsMetersService, {
+      connect: () => Promise.reject(new Error('仿真里没有 OBS 音量表')),
+    });
     this.safety.setModeration(options.moderationEnabled);
     this.kernel.add(options.entries, options.plugins ?? builtinPlugins);
   }
