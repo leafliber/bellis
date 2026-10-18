@@ -281,7 +281,7 @@ function charVisible(chars: number, k: number, occluded: boolean): 'yes' | 'no' 
   const right = box.x + box.w + SHADOW;
   const covered = Math.max(0, Math.min(right, occ.x + occ.w) - Math.max(left, occ.x));
   const shown = 1 - covered / (right - left);
-  // 只露出一条边的字算不清（分析器按加字典型大小的 1/4 过滤），自检不判它看得到与否。
+  // 只露出一条边的字算不清（分析器按加字典型大小的 8% 过滤，露出的部分越小越难测出），自检不判它看得到与否。
   if (shown >= 0.5) return 'yes';
   if (shown <= 0.1) return 'no';
   return 'partial';

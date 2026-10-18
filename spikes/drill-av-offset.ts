@@ -4,7 +4,7 @@
  *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 [--safe-scene Safe]
  *        [--sessions tone,speech] [--tone-seconds 100] [--speech-sentences 10] [--speaker vivian]
  *        [--speech-backend qwen3|fake] [--fps 60] [--repeat N] [--recordings M]
- *        [--latency-hint playback|interactive] [--stats-ms 500] [--out 结果文件前缀]
+ *        [--latency-hint playback|interactive] [--stats-ms 500] [--sync-offset-ms=-80] [--out 结果文件前缀]
  *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 --preview [--out 前缀]
  *   node spikes/drill-av-offset.ts --reanalyze 结果文件前缀
  *
@@ -14,7 +14,8 @@
  * 音画对齐的实验：--repeat 每种会话拉起几次宿主（每次页面重新加载、新的 AudioContext），--recordings 每次
  * 宿主会话录几段（每段 OBS 重新开始录制）；--latency-hint、--stats-ms 打开页面的诊断（stage-page-obs 的
  * latencyHint、statsEveryMs），每段给出浏览器自报的输出时延（stage-page.stats）、OBS 音量表看到出声相对页面
- * 开始播的时长，以及测试音录像的连续性（同 S-01：相位跳变、音高、尖峰、时长不符）。
+ * 开始播的时长，以及测试音录像的连续性（同 S-01：相位跳变、音高、尖峰、时长不符）。--sync-offset-ms 临时改
+ * Stage 源的音频同步偏移（负值让声音提前），结束时改回并读回核对。
  *
  * 前提：VTS 已开插件 API 并载入模型，形象插件「Bellis」的令牌已在 SecretStore（服务名 bellis）的 vts 条目里；
  * OBS 的直播场景里有 Stage 浏览器源与采集 VTS 的游戏采集源，安全场景里没有它们。语音会话还要求本 worktree
@@ -577,6 +578,8 @@ async function main(): Promise<void> {
       'latency-hint': { type: 'string', default: 'playback' },
       /** 诊断：页面回报浏览器自报的音频输出时延的间隔（毫秒），0 为关闭。 */
       'stats-ms': { type: 'string', default: '0' },
+      /** 实验：临时改 Stage 源的音频同步偏移（毫秒，负值让声音提前），结束时改回。 */
+      'sync-offset-ms': { type: 'string' },
       out: { type: 'string' },
       reanalyze: { type: 'string' },
     },
@@ -608,6 +611,13 @@ async function main(): Promise<void> {
   const statsEveryMs = Number(values['stats-ms']);
   if (!(statsEveryMs === 0 || (Number.isInteger(statsEveryMs) && statsEveryMs >= 100)))
     throw new Error('--stats-ms 为 0 或不小于 100 的整数');
+  const syncOffsetMs =
+    values['sync-offset-ms'] === undefined ? undefined : Number(values['sync-offset-ms']);
+  if (
+    syncOffsetMs !== undefined &&
+    !(Number.isInteger(syncOffsetMs) && Math.abs(syncOffsetMs) <= 950)
+  )
+    throw new Error('--sync-offset-ms 为 -950 到 950 的整数');
   const started = new Date().toISOString();
   const out = resolve(
     values.out ?? join('reports', `drill-av-offset-${started.replace(/[:.]/g, '-')}`),
@@ -634,6 +644,8 @@ async function main(): Promise<void> {
   let changed = false;
   /** 改过帧率时的原值。 */
   let originalFps: { fpsNumerator: number; fpsDenominator: number } | undefined;
+  /** 改过 Stage 源音频同步偏移时的原值。 */
+  let originalSyncOffset: number | undefined;
   let session: Session | undefined;
   let recording = false;
   const temporary: string[] = [];
@@ -708,6 +720,18 @@ async function main(): Promise<void> {
       throw new Error(`字幕带被 Stage 源之上的 ${blocking.join('、')} 盖住，录像里看不到字幕`);
 
     changed = true;
+    if (syncOffsetMs !== undefined) {
+      const before = sync.ok ? sync.data?.inputAudioSyncOffset : undefined;
+      if (typeof before !== 'number') throw new Error('读不出 Stage 源的音频同步偏移');
+      originalSyncOffset = before;
+      ok(
+        await obs.request('SetInputAudioSyncOffset', {
+          inputName: stageSource,
+          inputAudioSyncOffset: syncOffsetMs,
+        }),
+      );
+      say(`已把「${stageSource}」的音频同步偏移临时改为 ${syncOffsetMs}ms（原为 ${before}ms）`);
+    }
     if (values.fps !== undefined) {
       const fps = Number(values.fps);
       if (!(Number.isInteger(fps) && fps > 0 && fps <= 120))
@@ -966,7 +990,19 @@ async function main(): Promise<void> {
         const back = await obs.request('SetVideoSettings', originalFps);
         if (!back.ok) steps.push(`改回帧率失败：${back.code} ${back.comment ?? ''}`);
       }
+      if (originalSyncOffset !== undefined) {
+        const back = await obs.request('SetInputAudioSyncOffset', {
+          inputName: stageSource,
+          inputAudioSyncOffset: originalSyncOffset,
+        });
+        if (!back.ok) steps.push(`改回同步偏移失败：${back.code} ${back.comment ?? ''}`);
+      }
       const diffs = differences(original, await snapshot(obs, stageSource, safeScene));
+      if (originalSyncOffset !== undefined) {
+        const now = await obs.request('GetInputAudioSyncOffset', { inputName: stageSource });
+        const value = now.ok ? now.data?.inputAudioSyncOffset : undefined;
+        if (value !== originalSyncOffset) diffs.push(`同步偏移 ${value} 与开始时不同`);
+      }
       if (originalFps) {
         const now = ok(await obs.request('GetVideoSettings'));
         if (
@@ -1013,6 +1049,7 @@ async function main(): Promise<void> {
         recordings,
         latencyHint,
         statsEveryMs,
+        syncOffsetMs: syncOffsetMs ?? null,
         ...result,
       },
       null,
