@@ -43,6 +43,38 @@ test('口型：没有包络、截断、页面静音时闭嘴；中途开始跟�
   assert.equal(mouth.value(50), 0);
 });
 
+test('口型推迟：取 lag 之前的位置；播完推迟 lag 才闭嘴，下一句按自己的开始时刻接上', () => {
+  /** 头 50 个采样闭嘴，之后全开。 */
+  const second: Envelope = {
+    sampleRate: 1000,
+    window: 10,
+    rms: [...Array(5).fill(0.05), ...Array(25).fill(0.4)],
+  };
+  const envelopes = new Map([
+    ['a', envelope],
+    ['b', second],
+  ]);
+  const mouth = new MouthTracker(options, (id) => envelopes.get(id));
+  mouth.onEvent({ kind: 'started', sentenceId: 'a' }, 1000);
+  // 开始后的头 60ms 还在推迟里：闭嘴。
+  assert.equal(mouth.value(1050, 60), 0);
+  mouth.onEvent({ kind: 'cursor', sentenceId: 'a', played: 200 }, 1200);
+  // 不推迟时在采样 200（全开）；推迟 60ms 取采样 140（半开），往回推也成立。
+  assert.equal(mouth.value(1200), 1);
+  assert.ok(Math.abs(mouth.value(1200, 60) - 0.5) < 1e-9);
+  // 播完：Stage 不再提供包络，推迟期间用开始时留下的；下一句紧接着开始。
+  mouth.onEvent({ kind: 'ended', sentenceId: 'a', played: 300 }, 1300);
+  envelopes.delete('a');
+  mouth.onEvent({ kind: 'started', sentenceId: 'b' }, 1300);
+  assert.equal(mouth.value(1330, 60), 1, '推迟 60ms：仍在 a 的末尾（采样 270）');
+  assert.equal(mouth.value(1361, 60), 0, 'a 推迟后也已播完，b 在开头的静音里（采样 1）');
+  mouth.onEvent({ kind: 'cursor', sentenceId: 'b', played: 160 }, 1400);
+  assert.equal(mouth.value(1400, 60), 1, 'b 的采样 100');
+  // 截断不推迟。
+  mouth.onEvent({ kind: 'truncated', sentenceId: 'b', played: 100, reason: '要求截断' }, 1400);
+  assert.equal(mouth.value(1400, 60), 0);
+});
+
 test('口型：ceiling 不大于 floor 时拒绝配置', () => {
   assert.throws(
     () => new MouthTracker({ ...options, rmsCeiling: 0.1 }, () => undefined),

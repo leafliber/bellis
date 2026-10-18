@@ -44,6 +44,7 @@ export const AvatarService = defineService<Avatar>('avatar', 1);
  * - 插件令牌经凭据服务读写 `vts` 条目。没有令牌或令牌被拒时发令牌申请，VTS 弹窗由维护者点允许，
  *   拿到后写回再认证；维护者拒绝后本实例不再申请。令牌的值不进日志与事件。
  * - 按 Stage 的播放游标与响度包络，以固定频率注入嘴型参数（`set` 模式，声明已检测到面部）；
+ *   取位置时推迟（Stage 的呈现延迟 − k_mouth），与声音对齐（Stage 文档“对齐”）；
  *   不说话时照常注入 0，满足 VTS 每个参数至少每秒重发一次的要求，宿主失联后 VTS 约 1 秒内收回控制。
  * - VTS 报告参数被其他插件占用时，记录事实并停止注入，不重试抢占。
  * - VTS 不在或断开时保持激活、报告未就绪，按固定间隔重连。
@@ -73,6 +74,11 @@ export const vtsAvatar = definePlugin({
       rmsCeiling: Type.Number({ minimum: 0, maximum: 1, default: 0.2 }),
       /** 两次游标回报之间按墙钟外推的上限。 */
       extrapolateMaxMs: Type.Integer({ minimum: 0, maximum: 200, default: 200 }),
+      /**
+       * k_mouth：口型从注入到出现在 OBS 画面里比字幕多出的时延。口型推迟（呈现延迟 − k_mouth），不小于 0；
+       * 缺省值与重标方法见 Stage 文档“对齐”。
+       */
+      kMouthMs: Type.Integer({ minimum: 0, maximum: 300, default: 40 }),
       /** 连接失败或断开后的重连间隔。 */
       reconnectMs: Type.Integer({ minimum: 100, default: 3000 }),
       /** 建立连接与普通请求等待 VTS 的上限。 */
@@ -167,7 +173,7 @@ export const vtsAvatar = definePlugin({
       ticker = undefined;
       const session = client;
       if (!session || halted || stopped()) return;
-      inject(session, mouth.value(clock.now()));
+      inject(session, mouth.value(clock.now(), stage.presentation.delayMs - config.kMouthMs));
       const now = clock.now();
       // 按绝对时刻排下一次，避免漂移；落后时不补发。
       nextTick = Math.max(nextTick + period, now);

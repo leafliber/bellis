@@ -6,7 +6,8 @@
  *   连接断开后用会话密钥重连。页面不在任何存储里保存密钥。
  * - 只播放带当前许可令牌的音频，令牌变化即丢弃旧缓冲；许可时长与心跳由 AudioWorklet 按渲染帧计时。
  * - 字幕按 AudioWorklet 回报的已播采样数与宿主送来的映射推进（subtitle.js），只用 textContent 渲染；
- *   未显示的字放在不可见的占位元素里，版面从一开始就固定；截断、令牌变化时立即清除。
+ *   未显示的字放在不可见的占位元素里，版面从一开始就固定；按宿主送来的呈现延迟推迟显示与播完后的清除，
+ *   截断、令牌变化与页面静音时立即清除。
  */
 import { decodeAudio, Resampler } from './audio.js';
 import { latencyHintOf, latencyStats, statsEveryOf } from './diagnostics.js';
@@ -19,6 +20,7 @@ import { Subtitles } from './subtitle.js';
  *   | { kind: 'timing', sentenceId: string, token: number, starts: number[] }
  *   | { kind: 'end', sentenceId: string, token: number }
  *   | { kind: 'truncate', sentenceId: string }
+ *   | { kind: 'presentation', delayMs: number }
  *   | { kind: 'heartbeat' }} FromHost
  */
 
@@ -83,9 +85,13 @@ function forget(sentenceId) {
 
 node.port.onmessage = (event) => {
   const report = /** @type {{ kind: string, sentenceId?: string, played?: number }} */ (event.data);
-  if ((report.kind === 'ended' || report.kind === 'truncated') && report.sentenceId) {
+  if (report.kind === 'truncated' && report.sentenceId) {
     forget(report.sentenceId);
+  } else if (report.kind === 'muted') {
+    subtitles.clear();
   } else {
+    // 播完的句子不会再有音频；字幕推迟呈现延迟后再清除。
+    if (report.kind === 'ended' && report.sentenceId) playing.delete(report.sentenceId);
     subtitles.report(report);
   }
   // progress 只用来推进字幕，宿主不收。
@@ -145,6 +151,9 @@ function receive(message) {
       // 字幕立即清除，不等 AudioWorklet 回报。
       forget(message.sentenceId);
       toWorklet({ type: 'truncate', id: message.sentenceId });
+      return;
+    case 'presentation':
+      subtitles.setDelay(message.delayMs);
       return;
   }
 }

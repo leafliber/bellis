@@ -243,3 +243,130 @@ test('AudioWorklet 驱动：截断与自静音时字幕立即清除', async () =
   assert.ok(w.kinds().includes('muted'));
   assert.deepEqual(s.writes.slice(-2), ['再见|', '|']);
 });
+
+/** 手动推进的时钟与定时器（代替页面的 performance.now() 与 setTimeout）。 */
+function manualTimers() {
+  let now = 0;
+  let next = 1;
+  const timers = new Map<number, { at: number; callback: () => void }>();
+  return {
+    timers: {
+      now: () => now,
+      set: (callback: () => void, ms: number) => {
+        const id = next++;
+        timers.set(id, { at: now + Math.max(0, ms), callback });
+        return id;
+      },
+      clear: (handle: unknown) => {
+        timers.delete(handle as number);
+      },
+    },
+    /** 排着的定时器个数。 */
+    get pending() {
+      return timers.size;
+    },
+    advance(ms: number) {
+      const target = now + ms;
+      for (;;) {
+        const due = [...timers].filter(([, t]) => t.at <= target).sort((a, b) => a[1].at - b[1].at);
+        const first = due[0];
+        if (!first) break;
+        timers.delete(first[0]);
+        now = first[1].at;
+        first[1].callback();
+      }
+      now = target;
+    },
+  };
+}
+
+/** 带呈现延迟的字幕：每次写出记为 [时刻, “已显示|未显示”]。 */
+function delayedScreen(delayMs: number) {
+  const clock = manualTimers();
+  const writes: Array<[at: number, text: string]> = [];
+  const subtitles = new Subtitles((shown, hidden) => {
+    writes.push([clock.timers.now(), `${shown}|${hidden}`]);
+  }, clock.timers);
+  subtitles.setDelay(delayMs);
+  return { clock, subtitles, writes };
+}
+
+test('呈现延迟：开始、进度与播完都推迟 D 生效，期间没有新回报也按定时器显示', () => {
+  const { clock, subtitles, writes } = delayedScreen(100);
+  subtitles.begin('a', '你好世界');
+  subtitles.timing('a', [0, 100, 200, 300]);
+  subtitles.report({ kind: 'started', sentenceId: 'a' });
+  assert.deepEqual(writes, [], '还没到 D');
+  clock.advance(10);
+  subtitles.report({ kind: 'progress', sentenceId: 'a', played: 150 });
+  clock.advance(30);
+  subtitles.report({ kind: 'progress', sentenceId: 'a', played: 300 });
+  clock.advance(10);
+  subtitles.report({ kind: 'ended', sentenceId: 'a', played: 400 });
+  // 之后不再有任何回报：显示与清除都靠定时器。
+  clock.advance(1000);
+  assert.deepEqual(writes, [
+    [100, '你|好世界'],
+    [110, '你好|世界'],
+    [140, '你好世界|'],
+    [150, '|'],
+  ]);
+  assert.equal(clock.pending, 0, '队列空了不留定时器');
+});
+
+test('呈现延迟：上一句的清除与下一句的开始按原来的先后推迟', () => {
+  const { clock, subtitles, writes } = delayedScreen(80);
+  subtitles.begin('a', '甲');
+  subtitles.begin('b', '乙');
+  subtitles.report({ kind: 'started', sentenceId: 'a' });
+  clock.advance(500);
+  subtitles.report({ kind: 'ended', sentenceId: 'a', played: 100 });
+  subtitles.report({ kind: 'started', sentenceId: 'b' });
+  clock.advance(500);
+  assert.deepEqual(writes, [
+    [80, '甲|'],
+    [580, '|'],
+    [580, '乙|'],
+  ]);
+});
+
+test('呈现延迟：截断、令牌变化与页面静音立即清除，丢掉推迟中的回报', () => {
+  const { clock, subtitles, writes } = delayedScreen(100);
+  subtitles.begin('a', '你好');
+  subtitles.timing('a', [0, 50]);
+  subtitles.report({ kind: 'started', sentenceId: 'a' });
+  clock.advance(120);
+  subtitles.report({ kind: 'progress', sentenceId: 'a', played: 60 });
+  assert.deepEqual(writes, [[100, '你|好']]);
+  // AudioWorklet 回报截断：不等 D。
+  clock.advance(5);
+  subtitles.report({ kind: 'truncated', sentenceId: 'a', played: 60 });
+  assert.deepEqual(writes.at(-1), [125, '|']);
+  clock.advance(1000);
+  assert.equal(writes.length, 2, '推迟中的进度不再生效');
+
+  // 令牌变化（page.js 收到新令牌）与页面静音都走 clear()。
+  subtitles.begin('b', '再见');
+  subtitles.report({ kind: 'started', sentenceId: 'b' });
+  clock.advance(150);
+  subtitles.report({ kind: 'ended', sentenceId: 'b', played: 100 });
+  assert.deepEqual(writes.at(-1), [1225, '再见|']);
+  subtitles.clear();
+  assert.deepEqual(writes.at(-1), [1275, '|']);
+  assert.equal(clock.pending, 0);
+});
+
+test('呈现延迟：改小时到期的回报立即生效；不合格的值忽略；为 0 时与不推迟相同', () => {
+  const { clock, subtitles, writes } = delayedScreen(200);
+  subtitles.begin('a', '你好');
+  subtitles.report({ kind: 'started', sentenceId: 'a' });
+  clock.advance(50);
+  subtitles.setDelay(40);
+  assert.deepEqual(writes, [[50, '你好|']]);
+  for (const bad of [-1, 301, 1.5, Number.NaN, '20', null]) subtitles.setDelay(bad);
+  assert.equal(subtitles.delayMs, 40);
+  subtitles.setDelay(0);
+  subtitles.report({ kind: 'ended', sentenceId: 'a', played: 10 });
+  assert.deepEqual(writes.at(-1), [50, '|']);
+  assert.equal(clock.pending, 0);
+});

@@ -63,7 +63,24 @@ export type PageEvent = Static<typeof PageEvent>;
 export const isPageFirst = Compile(PageFirst);
 export const isPageEvent = Compile(PageEvent);
 
-/** 页面 AudioContext 的 latencyHint；正常运行用 playback，interactive 只用于音画对齐的实验。 */
+/** 呈现延迟的上限（毫秒）。 */
+export const MAX_PRESENTATION_DELAY_MS = 300;
+
+/**
+ * 宿主发给页面的呈现延迟（Stage 文档“对齐”）：页面把字幕按播放游标推进的时刻整体推迟这么多毫秒，
+ * 播完后的清除同样推迟；截断、令牌变化与自静音仍立即清除。Stage 服务发送前按此校验。
+ */
+export const PagePresentation = Type.Object(
+  {
+    kind: Type.Literal('presentation'),
+    delayMs: Type.Integer({ minimum: 0, maximum: MAX_PRESENTATION_DELAY_MS }),
+  },
+  closed,
+);
+export type PagePresentation = Static<typeof PagePresentation>;
+export const isPagePresentation = Compile(PagePresentation);
+
+/** 页面 AudioContext 的 latencyHint：缺省 interactive，playback 留作退路（见 stage-page-obs）。 */
 export const LatencyHint = Type.Union([Type.Literal('playback'), Type.Literal('interactive')]);
 export type LatencyHint = Static<typeof LatencyHint>;
 

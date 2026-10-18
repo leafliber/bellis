@@ -10,8 +10,29 @@
  * - 版面固定：一句开始播放就把整句排好，输出分成“已显示”与“未显示”两段，页面把后一段放在不可见的
  *   占位元素里，字只是逐个变得可见；
  * - 播完或截断即清除，两段都清空；
+ * - 呈现延迟 D（Stage 文档“对齐”）：开始播放、进度与播完的回报都推迟 D 才生效，显示位置因此是 D 之前的
+ *   已播采样数，播完后的清除也推迟 D；推迟期间没有新的回报时按定时器生效。截断、令牌变化与页面静音不推迟，
+ *   立即清除，并丢掉这一句推迟中的回报。D 为 0 时回报立即生效；
  * - 只在任一段变化时调用 `write`，页面在其中只写 `textContent`。
  */
+
+/** 呈现延迟的上限（毫秒），与宿主的线上格式一致。 */
+export const MAX_DELAY_MS = 300;
+
+/**
+ * 推迟回报用的时钟与定时器：页面用 performance.now() 与 setTimeout，模拟页面用宿主的时钟。
+ * @typedef {object} Timers
+ * @property {() => number} now 毫秒
+ * @property {(callback: () => void, ms: number) => unknown} set
+ * @property {(handle: unknown) => void} clear
+ */
+
+/** @type {Timers} */
+const SYSTEM_TIMERS = {
+  now: () => performance.now(),
+  set: (callback, ms) => setTimeout(callback, ms),
+  clear: (handle) => clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (handle)),
+};
 
 /**
  * @typedef {object} Line
@@ -51,9 +72,21 @@ export function visibleCount(starts, position) {
 }
 
 export class Subtitles {
-  /** @param {(shown: string, hidden: string, sentenceId: string | null) => void} write 已显示与未显示的两段 */
-  constructor(write) {
+  /**
+   * @param {(shown: string, hidden: string, sentenceId: string | null) => void} write 已显示与未显示的两段
+   * @param {Timers} [timers]
+   */
+  constructor(write, timers = SYSTEM_TIMERS) {
     this.write = write;
+    this.timers = timers;
+    /** 呈现延迟（毫秒）。 */
+    this.delayMs = 0;
+    /** 推迟中的回报，按收到的先后。 @type {{ at: number, report: Report }[]} */
+    this.queue = [];
+    /** 下一条回报到期的定时器与到期时刻。 @type {unknown} */
+    this.timer = undefined;
+    /** @type {number | undefined} */
+    this.due = undefined;
     /** 已开始一句、还没播完或截断的句子。 @type {Map<string, Line>} */
     this.lines = new Map();
     /** 正在显示的句子。 @type {string | null} */
@@ -77,8 +110,59 @@ export class Subtitles {
     if (this.current === id) this.render();
   }
 
-  /** AudioWorklet 的回报。 @param {Report} report */
+  /** 宿主送来的呈现延迟；不是 0–300 的整数时忽略。 @param {unknown} delayMs */
+  setDelay(delayMs) {
+    if (typeof delayMs !== 'number' || !Number.isInteger(delayMs)) return;
+    if (delayMs < 0 || delayMs > MAX_DELAY_MS) return;
+    this.delayMs = delayMs;
+    this.flush();
+  }
+
+  /** AudioWorklet 的回报：截断立即清除，其余推迟呈现延迟后生效。 @param {Report} report */
   report(report) {
+    const id = report.sentenceId;
+    if (id === undefined) return;
+    if (report.kind === 'truncated') {
+      this.forget(id);
+      return;
+    }
+    if (!this.lines.has(id)) return;
+    this.queue.push({ at: this.timers.now(), report });
+    this.flush();
+  }
+
+  /** 让到期的回报生效，再为下一条排定时器。 */
+  flush() {
+    const now = this.timers.now();
+    for (;;) {
+      const next = this.queue[0];
+      if (!next || next.at + this.delayMs > now) break;
+      this.queue.shift();
+      this.apply(next.report);
+    }
+    const next = this.queue[0];
+    const due = next === undefined ? undefined : next.at + this.delayMs;
+    // 队首没变（例如又来了一条进度）就沿用已排的定时器。
+    if (due === this.due) return;
+    this.cancel();
+    if (due === undefined) return;
+    this.due = due;
+    this.timer = this.timers.set(() => {
+      this.timer = undefined;
+      this.due = undefined;
+      this.flush();
+    }, due - now);
+  }
+
+  /** 撤掉已排的定时器。 */
+  cancel() {
+    if (this.timer !== undefined) this.timers.clear(this.timer);
+    this.timer = undefined;
+    this.due = undefined;
+  }
+
+  /** 一条回报生效。 @param {Report} report */
+  apply(report) {
     const id = report.sentenceId;
     if (id === undefined) return;
     switch (report.kind) {
@@ -107,17 +191,26 @@ export class Subtitles {
     }
   }
 
-  /** 这一句已播完、被截断或不再有效：立即清除，之后它的回报与映射都忽略。 @param {string} id */
+  /**
+   * 这一句被截断或不再有效（推迟到期的播完也走这里）：立即清除，丢掉推迟中的回报，之后它的回报与映射都忽略。
+   * @param {string} id
+   */
   forget(id) {
     this.lines.delete(id);
+    if (this.queue.some((entry) => entry.report.sentenceId === id)) {
+      this.queue = this.queue.filter((entry) => entry.report.sentenceId !== id);
+      this.flush();
+    }
     if (this.current !== id) return;
     this.put('', '');
     this.current = null;
     this.shown = 0;
   }
 
-  /** 令牌变化：全部清除。 */
+  /** 令牌变化、页面静音：全部立即清除。 */
   clear() {
+    this.queue = [];
+    this.cancel();
     for (const id of [...this.lines.keys()]) this.forget(id);
     this.put('', '');
     this.current = null;
@@ -125,7 +218,8 @@ export class Subtitles {
   }
 
   /**
-   * 这一句的显示位置（原始采样）：字幕按它推进。目前就是已播采样数；要按输出时延推迟字幕时在这里减去。
+   * 这一句的显示位置（原始采样）：字幕按它推进。进度回报推迟呈现延迟才生效（见 `report`），
+   * 所以这就是呈现延迟之前的已播采样数。
    * @param {Line} line
    */
   position(line) {

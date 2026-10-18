@@ -1,6 +1,6 @@
 import { defineService } from '@bellis/kernel';
 import type { Envelope } from './envelope.ts';
-import type { PageTiming } from './page-wire.ts';
+import type { PagePresentation, PageTiming } from './page-wire.ts';
 
 /** Stage 音频输出许可对应的资源名。 */
 export const STAGE_AUDIO = 'stage.audio';
@@ -20,6 +20,8 @@ export type ToPage =
   | { kind: 'end'; sentenceId: string; token: number }
   /** 立即停止播放这一句。 */
   | { kind: 'truncate'; sentenceId: string }
+  /** 呈现延迟变化时发送，每句开始前也发一次（见 `PagePresentation`）。 */
+  | PagePresentation
   | { kind: 'heartbeat' };
 
 /** 页面回报的播放事件。`played` 为该句实际播出的采样数（欠载补零不计入）。 */
@@ -56,6 +58,21 @@ export interface SentenceInfo {
   subtitleStarts?: () => readonly number[] | undefined;
 }
 
+/**
+ * 呈现延迟 D（Stage 文档“对齐”）：页面播出的声音要再过约 D 才出现在 OBS 的输出里，字幕与口型据此推迟。
+ */
+export interface Presentation {
+  /** 0–300 的整数毫秒。 */
+  delayMs: number;
+  /** 估计用到的句子数。 */
+  samples: number;
+  /**
+   * none：没有估计插件，不推迟；initial：样本还不够，用配置的初值；meters：按音量表估计；
+   * held：音量表连接断开，沿用断开前的值。
+   */
+  source: 'none' | 'initial' | 'meters' | 'held';
+}
+
 /** 一句话的最终播放结果，以页面回报为准。 */
 export interface PlaybackResult {
   sentenceId: string;
@@ -83,6 +100,13 @@ export interface Stage {
    * 句子播完、被截断或不在 Stage 上时为 undefined。
    */
   envelope(sentenceId: string): Envelope | undefined;
+  /** 当前的呈现延迟；没有估计插件时为 0（source 为 none）。 */
+  readonly presentation: Presentation;
+  /**
+   * 估计插件（stage-sync）更新呈现延迟，变化时转告页面；不合格（不是 0–300 的整数、样本数不是非负整数）
+   * 时忽略并记日志。只影响字幕与口型显示的时刻，不影响音频与许可。
+   */
+  setPresentation(presentation: Presentation): void;
 }
 
 export const StageService = defineService<Stage>('stage', 1);

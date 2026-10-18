@@ -47,8 +47,14 @@ export class SimObs {
   readonly requests: Array<{ requestType: string; requestData: Record<string, unknown> }> = [];
   /** 为 true 时所有请求都以失败应答，模拟 OBS 出错。 */
   failing = false;
+  /** 各输入的音频同步偏移（毫秒），缺省 0。 */
+  readonly syncOffsets = new Map<string, number>();
+  /** 每个连接 Identify 时订阅的事件位，按连接的先后。 */
+  readonly subscriptions: number[] = [];
   readonly #password: string | undefined;
   readonly #connections = new Set<WebSocket>();
+  /** 已认证的连接与它订阅的事件位。 */
+  readonly #subscribed = new Map<WebSocket, number>();
   readonly #server: WebSocketServer;
 
   private constructor(options: SimObsOptions) {
@@ -81,6 +87,26 @@ export class SimObs {
   get url(): string {
     const { port } = this.#server.address() as AddressInfo;
     return `ws://127.0.0.1:${port}`;
+  }
+
+  /**
+   * 向订阅了 InputVolumeMeters（第 16 位）的连接发一次音量表事件。每个输入给各声道的
+   * [magnitude, peak, inputPeak]（线性值）。
+   */
+  emitMeters(inputs: ReadonlyArray<{ inputName: string; levels: number[][] }>): void {
+    const message = JSON.stringify({
+      op: OpCode.Event,
+      d: {
+        eventType: 'InputVolumeMeters',
+        eventIntent: 1 << 16,
+        eventData: {
+          inputs: inputs.map((i) => ({ inputName: i.inputName, inputLevelsMul: i.levels })),
+        },
+      },
+    });
+    for (const [connection, bits] of this.#subscribed) {
+      if (bits & (1 << 16)) connection.send(message);
+    }
   }
 
   /** 断开所有客户端，模拟 OBS 重启或网络中断。 */
@@ -123,6 +149,10 @@ export class SimObs {
           return;
         }
         identified = true;
+        const bits = Number(message.d.eventSubscriptions ?? 0);
+        this.subscriptions.push(bits);
+        this.#subscribed.set(connection, bits);
+        connection.on('close', () => this.#subscribed.delete(connection));
         connection.send(JSON.stringify({ op: OpCode.Identified, d: { negotiatedRpcVersion: 1 } }));
         return;
       }
@@ -229,6 +259,15 @@ export class SimObs {
           data.overlay === false ? { ...next } : { ...settings, ...next },
         );
         return { code: RequestStatus.Success };
+      }
+      case 'GetInputAudioSyncOffset': {
+        const input = String(data.inputName);
+        if (!this.muted.has(input))
+          return { code: RequestStatus.ResourceNotFound, comment: `没有输入 ${input}` };
+        return {
+          code: RequestStatus.Success,
+          data: { inputAudioSyncOffset: this.syncOffsets.get(input) ?? 0 },
+        };
       }
       case 'GetStreamStatus':
         return { code: RequestStatus.Success, data: { outputActive: this.streaming } };

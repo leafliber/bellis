@@ -22,7 +22,7 @@ import {
   SidecarHostService,
   systemClock,
 } from '@bellis/kernel';
-import { ObsClient } from '@bellis/obs';
+import { ObsClient, ObsMeters } from '@bellis/obs';
 import { builtinPlugins } from '@bellis/plugins';
 import {
   channelCredentialsFromEnv,
@@ -52,7 +52,15 @@ import {
   type TtsRouting,
   TtsRoutingService,
 } from '@bellis/speech';
-import { OBS_CONTROL, ObsConnectorService, type Stage, StageService } from '@bellis/stage';
+import {
+  OBS_CONTROL,
+  OBS_METERS,
+  ObsConnectorService,
+  ObsMetersService,
+  type Presentation,
+  type Stage,
+  StageService,
+} from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
 import { preflight } from './preflight.ts';
@@ -170,6 +178,14 @@ host.provideScoped(ObsConnectorService, ({ instanceId, permissions }) => ({
       ? ObsClient.connect(obsSecret.url, obsSecret.password, { timeoutMs: 2000 })
       : Promise.reject(new Error(`${instanceId} 没有权限 ${OBS_CONTROL}`)),
 }));
+// 只读的音量表连接（Stage 文档“对齐”）：同一份凭据，另开一条连接，只订阅音量表、只能读同步偏移；
+// 只有被授予 obs.meters 的实例能连接，与 obs.control 无关。
+host.provideScoped(ObsMetersService, ({ instanceId, permissions }) => ({
+  connect: () =>
+    permissions.has(OBS_METERS)
+      ? ObsMeters.connect(obsSecret.url, obsSecret.password, { timeoutMs: 2000 })
+      : Promise.reject(new Error(`${instanceId} 没有权限 ${OBS_METERS}`)),
+}));
 core.setModeration(!moderationEntry.disabled);
 
 let stopping = false;
@@ -259,6 +275,12 @@ function runPreflight(target: 'M1' | 'M2' | 'M3', withSafety: boolean): Promise<
   });
 }
 
+/** 当前的呈现延迟与样本数（Stage 文档“对齐”）；没有 Stage 服务时为 null。 */
+function presentation(): Presentation | null {
+  const stage = host.services.resolve(StageService.name, StageService.major);
+  return 'missing' in stage ? null : (stage.impl as Stage).presentation;
+}
+
 function serveOperator(rpc: RpcPeer): void {
   rpc.handle(OperatorMethod.Status, () => ({
     mode: core.mode,
@@ -266,6 +288,7 @@ function serveOperator(rpc: RpcPeer): void {
     maintenance: core.maintenance,
     moderationEnabled: core.moderationEnabled ?? null,
     presenceValid: core.presenceValid(),
+    presentation: presentation(),
     plugins: host
       .snapshot()
       .map((e) => ({ id: e.id, plugin: e.plugin, state: e.state, reason: e.reason ?? null })),

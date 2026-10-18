@@ -7,6 +7,7 @@ import {
   Kernel,
   ManualClock,
   type ResolvedEntry,
+  TraceService,
 } from '@bellis/kernel';
 import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
@@ -72,6 +73,11 @@ async function setup() {
   });
   kernel = new Kernel({ clock, safety: core.kernelHooks() });
   kernel.provideCore(ClockService, clock);
+  /** 模拟页面的追踪（字幕的每次写出与回报），带上时刻。 */
+  const traces: Array<{ at: number; kind: string; data: Record<string, unknown> }> = [];
+  kernel.provideCore(TraceService, {
+    record: (kind, data) => traces.push({ at: clock.now(), kind, data }),
+  });
   kernel.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(core, instanceId));
 
   let stage: Stage | undefined;
@@ -112,6 +118,7 @@ async function setup() {
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   return {
     stage: () => stage as Stage,
+    traces,
     token: () => (grant as () => number)(),
     flush,
     async run(ms: number) {
@@ -203,6 +210,58 @@ test('Stage 服务：转发音频时按句累计包络；播完或截断后不�
     assert.equal((await truncated).complete, false);
     assert.equal(stage.envelope('b'), undefined);
     assert.equal(stage.envelope('不存在'), undefined);
+  } finally {
+    await s.close();
+  }
+});
+
+test('呈现延迟：模拟页面的字幕按它推迟，播完后的清除也推迟；截断立即清除', async () => {
+  const s = await setup();
+  try {
+    const stage = s.stage();
+    stage.setPresentation({ delayMs: 100, samples: 0, source: 'initial' });
+    const first = feed();
+    const played = stage.play(
+      { id: 'a', subtitle: '你好', sampleRate: 16_000, subtitleStarts: () => [0, 1600] },
+      first.audio,
+      s.token(),
+    );
+    first.push(constant(3200, 1000));
+    first.end();
+    await s.run(600);
+    assert.equal((await played).complete, true);
+    const at = (kind: string, id: string) =>
+      s.traces.find((t) => t.kind === kind && t.data.sentenceId === id)?.at ?? Number.NaN;
+    const writes = (id: string, from: number) =>
+      s.traces
+        .filter(
+          (t) => t.kind === 'page.subtitle' && (t.data.sentenceId === id || t.data.text === ''),
+        )
+        .filter((t) => t.at >= from)
+        .map((t) => [t.at - from, t.data.text, t.data.hidden]);
+    const started = at('page.started', 'a');
+    // 模拟页面每 20ms 一拍、每拍 320 个采样：第 5 拍播到采样 1600，第 10 拍播完。
+    assert.deepEqual(writes('a', started), [
+      [100, '你', '好'],
+      [180, '你好', ''],
+      [280, '', ''],
+    ]);
+    assert.equal(at('page.ended', 'a') - started, 180);
+
+    const second = feed();
+    const truncated = stage.play(
+      { id: 'b', subtitle: '再见', sampleRate: 16_000 },
+      second.audio,
+      s.token(),
+    );
+    second.push(constant(16_000, 1000));
+    await s.run(300);
+    stage.truncate('b');
+    await s.run(20);
+    assert.equal((await truncated).complete, false);
+    const cut = at('page.truncated', 'b');
+    assert.deepEqual(writes('b', at('page.started', 'b')).at(-1)?.slice(1), ['', '']);
+    assert.equal(s.traces.filter((t) => t.kind === 'page.subtitle').at(-1)?.at, cut);
   } finally {
     await s.close();
   }

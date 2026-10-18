@@ -4,7 +4,8 @@
  *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 [--safe-scene Safe]
  *        [--sessions tone,speech] [--tone-seconds 100] [--speech-sentences 10] [--speaker vivian]
  *        [--speech-backend qwen3|fake] [--fps 60] [--repeat N] [--recordings M]
- *        [--latency-hint playback|interactive] [--stats-ms 500] [--sync-offset-ms=-80] [--out 结果文件前缀]
+ *        [--latency-hint interactive|playback] [--stats-ms 500] [--sync-offset-ms=-80] [--stage-sync]
+ *        [--k-sub-ms N] [--k-mouth-ms N] [--avatar-hz 30|60] [--out 结果文件前缀]
  *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 --preview [--out 前缀]
  *   node spikes/drill-av-offset.ts --reanalyze 结果文件前缀
  *
@@ -16,6 +17,10 @@
  * latencyHint、statsEveryMs），每段给出浏览器自报的输出时延（stage-page.stats）、OBS 音量表看到出声相对页面
  * 开始播的时长，以及测试音录像的连续性（同 S-01：相位跳变、音高、尖峰、时长不符）。--sync-offset-ms 临时改
  * Stage 源的音频同步偏移（负值让声音提前），结束时改回并读回核对。
+ *
+ * 对齐（Stage 文档“对齐”）：--stage-sync 加上呈现延迟的估计插件，每段给出录制开始与结束时的呈现延迟、窗内的
+ * 变化与每句的音量表样本，录像量出的就是补偿后的剩余偏差；--k-sub-ms、--k-mouth-ms、--avatar-hz 临时改两个
+ * 标定常数与口型的注入频率，用来重标。
  *
  * 前提：VTS 已开插件 API 并载入模型，形象插件「Bellis」的令牌已在 SecretStore（服务名 bellis）的 vts 条目里；
  * OBS 的直播场景里有 Stage 浏览器源与采集 VTS 的游戏采集源，安全场景里没有它们。语音会话还要求本 worktree
@@ -475,6 +480,37 @@ function meterDelaysOf(
   return summarize(delays);
 }
 
+/**
+ * 呈现延迟（stage-sync）：录制开始时与结束时的值、窗内的变化，以及窗内每句的音量表样本与没取样本的原因。
+ * 没有 stage-sync 时为 null。
+ */
+function presentationOf(lines: LogLine[], window: Window | undefined) {
+  const delays = lines.filter((l) => l.event === 'stage-sync.delay');
+  if (delays.length === 0) return null;
+  const at = (time: number) => delays.filter((l) => Date.parse(l.t) <= time).at(-1) ?? null;
+  const pick = (l: LogLine | null) =>
+    l && { delayMs: l.delayMs, source: l.source, samples: l.samples, medianMs: l.medianMs };
+  const run = lines.filter((l) => inWindow(l, window));
+  const samples = run.filter((l) => l.event === 'stage-sync.sample');
+  const reasons: Record<string, number> = {};
+  for (const l of samples.filter((s) => s.sampleMs === null)) {
+    const reason = String(l.reason);
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+  }
+  return {
+    atStart: pick(at(window?.start ?? Number.POSITIVE_INFINITY)),
+    atStop: pick(at(window?.stop ?? Number.POSITIVE_INFINITY)),
+    changes: run.filter((l) => l.event === 'stage-sync.delay').map(pick),
+    samplesMs: samples.filter((s) => typeof s.sampleMs === 'number').map((s) => s.sampleMs),
+    skipped: reasons,
+    metersEvents: run
+      .filter(
+        (l) => l.event.startsWith('stage-sync.meters') || l.event.startsWith('stage-sync.sync'),
+      )
+      .map((l) => ({ t: l.t, event: l.event, reason: l.reason ?? null })),
+  };
+}
+
 /** 测试音录像的连续性（同 S-01）：句内相位跳变、音高偏差、尖峰，以及时长与整字数不符的句段。 */
 async function continuityOf(path: string) {
   const analysis = await analyzeSegments(path, { toneHz: TONE_HZ, timeline: true });
@@ -574,12 +610,18 @@ async function main(): Promise<void> {
       repeat: { type: 'string', default: '1' },
       /** 每次宿主会话录几段（每段 OBS 重新开始录制）。 */
       recordings: { type: 'string', default: '1' },
-      /** 诊断：页面 AudioContext 的 latencyHint（缺省 playback，与正常运行一致）。 */
-      'latency-hint': { type: 'string', default: 'playback' },
+      /** 页面 AudioContext 的 latencyHint（缺省 interactive，与 stage-page-obs 的缺省一致）。 */
+      'latency-hint': { type: 'string', default: 'interactive' },
       /** 诊断：页面回报浏览器自报的音频输出时延的间隔（毫秒），0 为关闭。 */
       'stats-ms': { type: 'string', default: '0' },
       /** 实验：临时改 Stage 源的音频同步偏移（毫秒，负值让声音提前），结束时改回。 */
       'sync-offset-ms': { type: 'string' },
+      /** 加上 stage-sync：按音量表估计呈现延迟，字幕与口型据此推迟。 */
+      'stage-sync': { type: 'boolean', default: false },
+      /** 临时改 stage-sync 的 k_sub 与形象的 k_mouth、注入频率（重标与比较用）。 */
+      'k-sub-ms': { type: 'string' },
+      'k-mouth-ms': { type: 'string' },
+      'avatar-hz': { type: 'string' },
       out: { type: 'string' },
       reanalyze: { type: 'string' },
     },
@@ -618,6 +660,18 @@ async function main(): Promise<void> {
     !(Number.isInteger(syncOffsetMs) && Math.abs(syncOffsetMs) <= 950)
   )
     throw new Error('--sync-offset-ms 为 -950 到 950 的整数');
+  const stageSync = values['stage-sync'];
+  const integer = (name: string, value: string | undefined, min: number, max: number) => {
+    if (value === undefined) return undefined;
+    const n = Number(value);
+    if (!(Number.isInteger(n) && n >= min && n <= max))
+      throw new Error(`--${name} 为 ${min} 到 ${max} 的整数`);
+    return n;
+  };
+  const kSubMs = integer('k-sub-ms', values['k-sub-ms'], -100, 100);
+  const kMouthMs = integer('k-mouth-ms', values['k-mouth-ms'], 0, 300);
+  const avatarHz = integer('avatar-hz', values['avatar-hz'], 30, 60);
+  if (kSubMs !== undefined && !stageSync) throw new Error('--k-sub-ms 要与 --stage-sync 一起用');
   const started = new Date().toISOString();
   const out = resolve(
     values.out ?? join('reports', `drill-av-offset-${started.replace(/[:.]/g, '-')}`),
@@ -810,6 +864,19 @@ async function main(): Promise<void> {
                   config: { latencyHint, statsEveryMs },
                 },
                 { id: 'stage', plugin: 'stage-service' },
+                ...(stageSync
+                  ? [
+                      {
+                        id: 'stage-sync',
+                        plugin: 'stage-sync',
+                        grant: ['obs.meters'],
+                        config: {
+                          initialDelayMs: latencyHint === 'playback' ? 142 : 82,
+                          ...(kSubMs === undefined ? {} : { kSubMs }),
+                        },
+                      },
+                    ]
+                  : []),
                 ...tts,
                 { id: 'speech', plugin: 'speech-arbiter', grant: ['speech.output'] },
                 {
@@ -818,7 +885,15 @@ async function main(): Promise<void> {
                   config: { announcements, ttlMs: kind === 'tone' ? 2000 : 30_000 },
                 },
                 { id: 'moderation', plugin: 'moderation', disabled: true },
-                { id: 'avatar', plugin: 'avatar-vts', grant: ['secret:vts'] },
+                {
+                  id: 'avatar',
+                  plugin: 'avatar-vts',
+                  grant: ['secret:vts'],
+                  config: {
+                    ...(avatarHz === undefined ? {} : { rateHz: avatarHz }),
+                    ...(kMouthMs === undefined ? {} : { kMouthMs }),
+                  },
+                },
               ],
             },
           ],
@@ -962,6 +1037,7 @@ async function main(): Promise<void> {
           entry.page = pageSide(host.items, bounded);
           entry.stats = statsOf(host.items, bounded);
           entry.meterDelayMs = meterDelaysOf(host.items, meterReadings, bounded);
+          entry.presentation = presentationOf(host.items, bounded);
         }
       }
       ok(await obs.request('SetCurrentProgramScene', { sceneName: live }));
@@ -1050,6 +1126,10 @@ async function main(): Promise<void> {
         latencyHint,
         statsEveryMs,
         syncOffsetMs: syncOffsetMs ?? null,
+        stageSync,
+        kSubMs: kSubMs ?? null,
+        kMouthMs: kMouthMs ?? null,
+        avatarHz: avatarHz ?? null,
         ...result,
       },
       null,

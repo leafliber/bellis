@@ -22,6 +22,11 @@
         {
           "id": "stage",
           "plugin": "stage-service"
+        },
+        {
+          "id": "stage-sync",
+          "plugin": "stage-sync",
+          "grant": ["obs.meters"]
         }
       ]
     },
