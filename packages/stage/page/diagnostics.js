@@ -1,10 +1,10 @@
 // @ts-check
 /**
- * Stage 页面的诊断（缺省关闭）：宿主在 URL 片段里打开（stage-page-obs 的 latencyHint 与 statsEveryMs），
- * 用于音画对齐的实验，不改变正常运行的行为。
+ * Stage 页面从 URL 片段读的两项设置（宿主经 stage-page-obs 的 latencyHint 与 statsEveryMs 写入，只在与缺省
+ * 不同时写）：
  *
- * - `l=interactive`：AudioContext 改用 interactive 的 latencyHint（缺省 playback）。
- * - `s=<毫秒>`：认证后每隔这么久回报一次浏览器自报的音频输出时延（`stats` 消息，宿主只记日志）。
+ * - `l=playback`：AudioContext 改用 playback 的 latencyHint（缺省 interactive，见 Stage 文档“对齐”）。
+ * - `s=<毫秒>`：诊断，缺省关闭。认证后每隔这么久回报一次浏览器自报的音频输出时延（`stats` 消息，宿主只记日志）。
  */
 
 /** @typedef {'playback' | 'interactive'} LatencyHint */
@@ -17,7 +17,7 @@
 
 /** @param {URLSearchParams} fragment @returns {LatencyHint} */
 export function latencyHintOf(fragment) {
-  return fragment.get('l') === 'interactive' ? 'interactive' : 'playback';
+  return fragment.get('l') === 'playback' ? 'playback' : 'interactive';
 }
 
 /** 回报间隔（毫秒）；没有或不合法时为 0（关闭）。 @param {URLSearchParams} fragment */

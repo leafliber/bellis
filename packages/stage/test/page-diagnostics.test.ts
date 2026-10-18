@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import { latencyHintOf, latencyStats, statsEveryOf } from '../page/diagnostics.js';
 import { isPageStats } from '../src/index.ts';
 
-test('诊断片段：缺省 playback、不回报；只认 interactive 与 100–60000ms 的整数间隔', () => {
+test('片段：缺省 interactive、不回报；只认 playback 与 100–60000ms 的整数间隔', () => {
   const of = (hash: string) => new URLSearchParams(hash);
-  assert.equal(latencyHintOf(of('t=x')), 'playback');
-  assert.equal(latencyHintOf(of('t=x&l=interactive')), 'interactive');
-  assert.equal(latencyHintOf(of('t=x&l=balanced')), 'playback');
+  assert.equal(latencyHintOf(of('t=x')), 'interactive');
+  assert.equal(latencyHintOf(of('t=x&l=playback')), 'playback');
+  assert.equal(latencyHintOf(of('t=x&l=balanced')), 'interactive');
   assert.equal(statsEveryOf(of('t=x')), 0);
   assert.equal(statsEveryOf(of('s=500')), 500);
   assert.equal(statsEveryOf(of('s=50')), 0);

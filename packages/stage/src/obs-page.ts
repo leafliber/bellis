@@ -62,11 +62,11 @@ export const obsStagePage = definePlugin({
       /** 页面发来的单条消息上限。 */
       maxMessageBytes: Type.Integer({ minimum: 256, default: 4096 }),
       /**
-       * 诊断：页面 AudioContext 的 latencyHint。缺省 playback 即正常运行的取值；改成 interactive 只用于
-       * 音画对齐的实验，经 URL 片段告诉页面。
+       * 页面 AudioContext 的 latencyHint（Stage 文档“对齐”）：缺省 interactive，浏览器的输出缓冲约为
+       * playback 的一半，整条声音链路短约 60ms；playback 留作退路。与缺省不同时经 URL 片段告诉页面。
        */
       latencyHint: Type.Union([Type.Literal('playback'), Type.Literal('interactive')], {
-        default: 'playback',
+        default: 'interactive',
       }),
       /** 诊断：页面每隔这么久回报一次浏览器自报的音频输出时延（stage-page.stats 日志）；0 为关闭。 */
       statsEveryMs: Type.Union([Type.Literal(0), Type.Integer({ minimum: 100, maximum: 60_000 })], {
@@ -198,7 +198,7 @@ export const obsStagePage = definePlugin({
       distributions += 1;
       // 诊断项只在与缺省不同时写进片段，正常运行的 URL 不变。
       const diagnostics =
-        (config.latencyHint === 'playback' ? '' : `&l=${config.latencyHint}`) +
+        (config.latencyHint === 'interactive' ? '' : `&l=${config.latencyHint}`) +
         (config.statsEveryMs > 0 ? `&s=${config.statsEveryMs}` : '');
       const action: ObsAction = { kind: 'stage-url', url: `${origin}/#t=${token}${diagnostics}` };
       try {

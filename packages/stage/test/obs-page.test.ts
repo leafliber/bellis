@@ -360,7 +360,7 @@ test('首条消息超时或不合法、认证后发来不合法的消息，都�
   }
 });
 
-test('诊断：缺省 URL 只带令牌、不收 stats；打开后片段带上 latencyHint 与间隔，stats 只记日志', async () => {
+test('缺省 URL 只带令牌（interactive）、不收 stats；改用 playback 与打开诊断后片段带上它们，stats 只记日志', async () => {
   const stats = {
     kind: 'stats',
     latencyHint: 'interactive',
@@ -383,10 +383,10 @@ test('诊断：缺省 URL 只带令牌、不收 stats；打开后片段带上 la
   } finally {
     await plain.close();
   }
-  const s = await setup({ latencyHint: 'interactive', statsEveryMs: 500 });
+  const s = await setup({ latencyHint: 'playback', statsEveryMs: 500 });
   try {
     const fragment = new URLSearchParams(new URL(s.url()).hash.slice(1));
-    assert.equal(fragment.get('l'), 'interactive');
+    assert.equal(fragment.get('l'), 'playback');
     assert.equal(fragment.get('s'), '500');
     const page = await attempt(s, hello(fragment.get('t') as string));
     assert.equal(page.result, 'welcome');
