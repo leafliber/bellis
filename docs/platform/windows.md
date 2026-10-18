@@ -52,6 +52,8 @@ Windows 11 x64 是唯一的生产平台。P0 在 macOS 验收，P1 起只认 Win
 - libuv 在 Windows 上不调用 `timeBeginPeriod`，Node 定时器的粒度约为系统默认的 15.6ms（S-05 已在 Windows 11 真机上确认）：短于一个时钟周期的 `setTimeout` 也要等满一个周期，略长于整周期的要等两个。不要依赖小于 16ms 的 `setTimeout` 精度，调度一律用单调时钟加截止时间。事件循环延迟的测量值同样包含这一粒度，设异常阈值时要计入。
 - 音频播放时钟交给 Stage 的 AudioWorklet 和 OBS，宿主不逐样本定时。
 - Win11 起，进程的窗口被完全遮挡或最小化时，系统不再保证高分辨率定时器；后台进程还可能被系统归为 EcoQoS 降低调度优先级。[来源](https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod) 对 OBS 浏览器源音频和 sidecar 推理的影响由探针 S-01、S-05 实测。
+- S-05 在 Windows 11 台式机上（接电源，平衡计划与平衡电源模式）实测本地 TTS sidecar：缺省没有被节流，时延与显式 HighQoS 相同，直接拉起与按启动器方式隐藏窗口拉起都如此；显式 EcoQoS 时实时率约 +22%、短句首包约 +25%。生成卡在 CPU 侧，EcoQoS 把线程调度到效率核并选低频。[来源](https://learn.microsoft.com/en-us/windows/win32/procthread/quality-of-service)
+- 因此推理受 CPU 节流影响明显的 sidecar（目前是本地 TTS）在 Windows 上启动时给自己声明 HighQoS（`ProcessPowerThrottling` 的 ControlMask 含 `EXECUTION_SPEED`、StateMask 不含）。实测显式状态不被之后拉起的子进程继承，所以由真正做推理的解释器自己设置，不由宿主或 venv 的 `python.exe` 代设。健康检查每次读回节流状态（`sidecar.health` 的 `qos`）；本地 TTS 作主音频引擎时，开播预检要求读回为 HighQoS，被改成 EcoQoS（例如任务管理器的“效率模式”）、没有声明或读不到都不通过，非 Windows 不核对。
 - 不使用 REALTIME 优先级类，它可能让鼠标和磁盘缓存失去响应。
 
 ## GPU
