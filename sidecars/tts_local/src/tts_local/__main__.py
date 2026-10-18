@@ -23,6 +23,7 @@ from .backend import Backend
 from .fake import FakeBackend, FakeConfig
 from .qwen import QwenBackend, QwenConfig
 from .service import TtsService
+from .trim import TrimConfig
 
 PROVIDES = ('tts.local@1',)
 
@@ -53,6 +54,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     qwen.add_argument('--device', default='cuda:0')
     qwen.add_argument('--dtype', default='bfloat16')
     qwen.add_argument('--chunk-ms', type=int, default=100)
+    qwen.add_argument('--trim-threshold-dbfs', type=float, default=TrimConfig.threshold_dbfs)
+    qwen.add_argument('--trim-margin-ms', type=int, default=TrimConfig.margin_ms)
+    qwen.add_argument('--no-trim', action='store_true')
     return parser.parse_args(argv)
 
 
@@ -69,6 +73,11 @@ def build_backend(args: argparse.Namespace) -> Backend:
                 device=args.device,
                 dtype=args.dtype,
                 chunk_ms=args.chunk_ms,
+                trim=None
+                if args.no_trim
+                else TrimConfig(
+                    threshold_dbfs=args.trim_threshold_dbfs, margin_ms=args.trim_margin_ms
+                ),
             )
         )
     return FakeBackend(

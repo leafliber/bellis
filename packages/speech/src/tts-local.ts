@@ -101,6 +101,13 @@ const QwenBackend = Type.Object(
       },
     ),
     chunkMs: Type.Integer({ minimum: 10, maximum: 1000, default: 100 }),
+    /**
+     * 整句生成后修剪句首句尾近乎无声的部分（10ms 窗 RMS 低于门限），两端各留余量；
+     * 缺省值的依据见 `sidecars/tts_local` 的 trim。
+     */
+    trimSilence: Type.Boolean({ default: true }),
+    trimThresholdDbfs: Type.Number({ minimum: -90, maximum: -20, default: -55 }),
+    trimMarginMs: Type.Integer({ minimum: 0, maximum: 200, default: 30 }),
   },
   { default: {} },
 );
@@ -144,6 +151,11 @@ export function sidecarArgs(config: LocalTtsConfig): string[] | { error: string 
       q.dtype,
       '--chunk-ms',
       String(q.chunkMs),
+      // 负数写成 `=` 形式，不让 argparse 当成选项。
+      `--trim-threshold-dbfs=${q.trimThresholdDbfs}`,
+      '--trim-margin-ms',
+      String(q.trimMarginMs),
+      ...(q.trimSilence ? [] : ['--no-trim']),
     ];
   }
   const f = config.fake;
