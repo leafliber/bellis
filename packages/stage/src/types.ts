@@ -1,5 +1,6 @@
 import { defineService } from '@bellis/kernel';
 import type { Envelope } from './envelope.ts';
+import type { PageTiming } from './page-wire.ts';
 
 /** Stage 音频输出许可对应的资源名。 */
 export const STAGE_AUDIO = 'stage.audio';
@@ -12,6 +13,8 @@ export type ToPage =
    */
   | { kind: 'token'; token: number | null; ttlMs: number }
   | { kind: 'begin'; sentenceId: string; token: number; subtitle: string; sampleRate: number }
+  /** 这一句字幕的时间映射；句子开始时发一次，之后每次变化整份重发（见 `PageTiming`）。 */
+  | PageTiming
   | { kind: 'audio'; sentenceId: string; token: number; pcm: Int16Array }
   /** 这一句不会再有更多音频。 */
   | { kind: 'end'; sentenceId: string; token: number }
@@ -45,6 +48,12 @@ export interface SentenceInfo {
   id: string;
   subtitle: string;
   sampleRate: number;
+  /**
+   * 字幕的时间映射：字幕文本第 k 个码点从第 `starts[k]` 个原始采样开始显示，按 k 不减，可以比字幕的码点少。
+   * 映射是活的（两段式对齐，R-11）：Stage 服务在句子开始、每转发一块音频之后与音频流结束时现读，
+   * 有变化才发给页面。不提供或返回 undefined 表示没有映射，页面整句显示。
+   */
+  subtitleStarts?: () => readonly number[] | undefined;
 }
 
 /** 一句话的最终播放结果，以页面回报为准。 */

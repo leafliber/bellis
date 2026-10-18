@@ -103,7 +103,12 @@ async function setup(pageConfig: Record<string, unknown> = {}) {
             yield pcm.subarray(samples / 2);
           }
           return stage.play(
-            { id: `s${n}`, subtitle: '你好', sampleRate: 24_000 },
+            {
+              id: `s${n}`,
+              subtitle: '你好',
+              sampleRate: 24_000,
+              subtitleStarts: () => [0, samples / 2],
+            },
             audio(),
             granted.lease.token,
           );
@@ -221,6 +226,7 @@ test('Host 与 Origin：只放行本端地址；缺 Origin 只放行页面文档
     assert.equal((await get(s, '/', { host: s.host, ...iframe })).status, 403);
     assert.equal((await get(s, '/page.js', { host: s.host, ...navigate })).status, 403);
     assert.equal((await get(s, '/page.js', { host: s.host, origin: s.origin })).status, 200);
+    assert.equal((await get(s, '/subtitle.js', { host: s.host, origin: s.origin })).status, 200);
     assert.equal(
       (await get(s, '/worklet.js', { host: s.host, origin: 'http://evil' })).status,
       403,
@@ -353,6 +359,16 @@ test('认证后的页面收到心跳、令牌、句子与带头的二进制音�
       { ...(begin as object), token: 0 },
       { kind: 'begin', sentenceId: 's1', token: 0, subtitle: '你好', sampleRate: 24_000 },
     );
+    // 字幕映射以文本消息送达，带同一令牌；没有变化不重发。
+    const timing = page.messages.filter((m) => (m as { kind: string }).kind === 'timing');
+    assert.deepEqual(timing, [
+      {
+        kind: 'timing',
+        sentenceId: 's1',
+        token: (begin as { token: number }).token,
+        starts: [0, 240],
+      },
+    ]);
     const frames = page.binary.map((buffer) => {
       const copy = new Uint8Array(buffer).slice().buffer;
       return decodeAudio(copy);

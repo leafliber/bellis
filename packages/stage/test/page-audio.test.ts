@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { decodeAudio, Resampler } from '../page/audio.js';
 import { encodeAudio } from '../src/index.ts';
+import { WAKE_FRAMES, WAKE_PEAK, type Worklet, worklet } from './worklet-scope.ts';
 
 const toArrayBuffer = (buffer: Buffer) => new Uint8Array(buffer).slice().buffer;
 
@@ -32,50 +33,6 @@ test('重采样：跨块保持相位，与一次送入的结果一致；同采�
   );
 });
 
-interface Port {
-  onmessage: ((event: { data: unknown }) => void) | null;
-  postMessage(message: unknown): void;
-}
-interface Processor {
-  port: Port;
-  process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;
-}
-
-/** 在 Node 里模拟 AudioWorkletGlobalScope，加载 worklet.js，返回一个处理器实例与它的回报。 */
-async function worklet() {
-  const posted: Array<Record<string, unknown>> = [];
-  let registered: (new () => Processor) | undefined;
-  const scope = globalThis as Record<string, unknown>;
-  scope.sampleRate = 48_000;
-  scope.AudioWorkletProcessor = class {
-    port: Port = {
-      onmessage: null,
-      postMessage: (message: unknown) => posted.push(message as Record<string, unknown>),
-    };
-  };
-  scope.registerProcessor = (_name: string, processor: new () => Processor) => {
-    registered = processor;
-  };
-  await import(`../page/worklet.js?${Math.random()}`);
-  if (!registered) throw new Error('worklet.js 没有注册处理器');
-  const processor = new registered();
-  const send = (data: unknown) => processor.port.onmessage?.({ data });
-  const render = (quanta: number) => {
-    const out: number[] = [];
-    for (let q = 0; q < quanta; q++) {
-      const channels = [new Float32Array(128), new Float32Array(128)];
-      processor.process([], [channels]);
-      out.push(...(channels[0] as Float32Array));
-    }
-    return out;
-  };
-  const kinds = () => posted.map((message) => message.kind);
-  return { posted, send, render, kinds };
-}
-
-/** 唤醒信号：48kHz 下 150ms 的帧数与峰值（见 worklet.js 文件头）。 */
-const WAKE_FRAMES = 7200;
-const WAKE_PEAK = 10 ** (-50 / 20);
 const peak = (samples: number[]) => samples.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
 
 test('AudioWorklet：有许可时按句播放，回报开始、游标与以原始采样数计的结束；补零不推进游标', async () => {
@@ -92,9 +49,9 @@ test('AudioWorklet：有许可时按句播放，回报开始、游标与以原�
   // 数据耗尽但还没收到 end：欠载，补零。
   const gap = out.slice(WAKE_FRAMES + 256);
   assert.ok(gap.length > 0 && gap.every((value) => value === 0));
-  // 游标每渲染 100ms 回报一次（只在正文开始后），这里不核对；欠载回报的是正文已播出的原始采样数。
+  // 游标与字幕进度只在正文开始后回报，这里不核对；欠载回报的是正文已播出的原始采样数。
   assert.deepEqual(
-    w.kinds().filter((kind) => kind !== 'cursor'),
+    w.kinds().filter((kind) => kind !== 'cursor' && kind !== 'progress'),
     ['started', 'underrun'],
   );
   assert.equal(w.posted.find((m) => m.kind === 'underrun')?.played, 128);
@@ -144,7 +101,7 @@ test('AudioWorklet：按渲染帧计时，收不到心跳即自静音，许可�
 });
 
 /** 渲染 seconds 秒（按 128 帧一块），约每 0.25 秒送一次心跳，除非 heartbeat 为 false。 */
-function play(w: Awaited<ReturnType<typeof worklet>>, seconds: number, heartbeat = true) {
+function play(w: Worklet, seconds: number, heartbeat = true) {
   const out: number[] = [];
   const quanta = Math.ceil((seconds * 48_000) / 128);
   for (let q = 0; q < quanta; q++) {
@@ -155,7 +112,7 @@ function play(w: Awaited<ReturnType<typeof worklet>>, seconds: number, heartbeat
 }
 
 /** 一句 100ms、振幅 0.2 的音频（已在 AudioContext 采样率上），原始采样数记 2400。 */
-function sentence(w: Awaited<ReturnType<typeof worklet>>, id: string) {
+function sentence(w: Worklet, id: string) {
   w.send({ type: 'begin', id });
   w.send({ type: 'pcm', id, data: new Float32Array(4800).fill(0.2), src: 2400 });
   w.send({ type: 'end', id, src: 2400 });
@@ -255,4 +212,43 @@ test('AudioWorklet：句中欠载超过 1.5 秒后恢复时同样先放唤醒信
     reports.find((m) => m.kind === 'ended'),
     { kind: 'ended', sentenceId: 'a', played: 7200 },
   );
+});
+
+test('AudioWorklet：字幕进度只在正文播出时回报，至少隔 10ms 的渲染帧，唤醒与欠载期间不推进', async () => {
+  const w = await worklet();
+  w.send({ type: 'hb' });
+  w.send({ type: 'lease', ttlMs: 60_000 });
+  w.send({ type: 'begin', id: 'a' });
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(9600).fill(0.2), src: 4800 });
+  /** 从第 from 条回报起的进度：发出时已渲染的帧数与已播采样数。 */
+  const progress = (from = 0) =>
+    w.posted.flatMap((m, i) =>
+      i >= from && m.kind === 'progress'
+        ? [{ at: w.postedAt[i] as number, played: m.played as number }]
+        : [],
+    );
+  // 先放 150ms 唤醒信号，再放 200ms 正文，之后欠载。
+  play(w, 0.6);
+  const first = progress();
+  assert.ok(first.length >= 15, `200ms 正文约 19 次，实际 ${first.length} 次`);
+  assert.ok((first[0]?.at as number) >= WAKE_FRAMES - 128, '唤醒期间没有进度');
+  for (let i = 1; i < first.length; i++) {
+    assert.ok((first[i]?.at as number) - (first[i - 1]?.at as number) >= 480, '至少隔 10ms');
+    assert.ok((first[i]?.played as number) > (first[i - 1]?.played as number), '每次都有推进');
+  }
+  assert.equal(first.at(-1)?.played, 4800, '停在已收到的全部正文');
+
+  // 欠载共约 1.65 秒后补上：先放唤醒信号，期间没有进度；正文恢复后接着推进。
+  play(w, 1.4);
+  assert.equal(progress().length, first.length, '欠载期间没有新的进度');
+  const from = w.posted.length;
+  const sentAt = w.rendered();
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(4800).fill(0.3), src: 2400 });
+  w.send({ type: 'end', id: 'a', src: 7200 });
+  play(w, 0.4);
+  const later = progress(from);
+  assert.ok(later.length > 0);
+  assert.ok((later[0]?.at as number) - sentAt >= WAKE_FRAMES - 128, '唤醒期间没有进度');
+  assert.ok(later.every((p) => p.played > 4800 && p.played <= 7200));
+  assert.ok(w.posted.slice(from).some((m) => m.kind === 'ended'));
 });

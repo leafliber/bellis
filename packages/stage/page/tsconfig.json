@@ -12,5 +12,5 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true
   },
-  "include": ["page.js", "audio.js"]
+  "include": ["page.js", "audio.js", "subtitle.js"]
 }

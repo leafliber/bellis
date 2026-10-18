@@ -5,14 +5,17 @@
  * - 一次性令牌在 URL 片段里，读出后立即从地址中去掉，以首条消息出示，换成只存于内存的会话密钥；
  *   连接断开后用会话密钥重连。页面不在任何存储里保存密钥。
  * - 只播放带当前许可令牌的音频，令牌变化即丢弃旧缓冲；许可时长与心跳由 AudioWorklet 按渲染帧计时。
- * - 字幕只用 textContent 渲染。
+ * - 字幕按 AudioWorklet 回报的已播采样数与宿主送来的映射推进（subtitle.js），只用 textContent 渲染；
+ *   截断、令牌变化时立即清除。
  */
 import { decodeAudio, Resampler } from './audio.js';
+import { Subtitles } from './subtitle.js';
 
 /**
  * @typedef {{ kind: 'welcome', sessionKey: string }
  *   | { kind: 'token', token: number | null, ttlMs: number }
  *   | { kind: 'begin', sentenceId: string, token: number, subtitle: string, sampleRate: number }
+ *   | { kind: 'timing', sentenceId: string, token: number, starts: number[] }
  *   | { kind: 'end', sentenceId: string, token: number }
  *   | { kind: 'truncate', sentenceId: string }
  *   | { kind: 'heartbeat' }} FromHost
@@ -22,7 +25,6 @@ import { decodeAudio, Resampler } from './audio.js';
  * @typedef {object} Playing
  * @property {Resampler} resampler
  * @property {number} token
- * @property {string} subtitle
  * @property {number} source 已转给 AudioWorklet 的原始采样数
  */
 
@@ -40,8 +42,9 @@ let sessionKey = null;
 let leaseToken = null;
 /** @type {Map<string, Playing>} */
 const playing = new Map();
-/** 正在显示字幕的句子。 @type {string | null} */
-let shown = null;
+const subtitles = new Subtitles((text) => {
+  subtitle.textContent = text;
+});
 
 const context = new AudioContext({ latencyHint: 'playback' });
 await context.resume().catch(() => {});
@@ -65,21 +68,18 @@ function toWorklet(command, transfer = []) {
 /** @param {string} sentenceId */
 function forget(sentenceId) {
   playing.delete(sentenceId);
-  if (shown === sentenceId) {
-    shown = null;
-    subtitle.textContent = '';
-  }
+  subtitles.forget(sentenceId);
 }
 
 node.port.onmessage = (event) => {
-  const report = /** @type {{ kind: string, sentenceId?: string }} */ (event.data);
-  if (report.kind === 'started' && report.sentenceId) {
-    shown = report.sentenceId;
-    subtitle.textContent = playing.get(report.sentenceId)?.subtitle ?? '';
-  } else if ((report.kind === 'ended' || report.kind === 'truncated') && report.sentenceId) {
+  const report = /** @type {{ kind: string, sentenceId?: string, played?: number }} */ (event.data);
+  if ((report.kind === 'ended' || report.kind === 'truncated') && report.sentenceId) {
     forget(report.sentenceId);
+  } else {
+    subtitles.report(report);
   }
-  send(report);
+  // progress 只用来推进字幕，宿主不收。
+  if (report.kind !== 'progress') send(report);
 };
 
 /** @param {FromHost} message */
@@ -95,6 +95,9 @@ function receive(message) {
     case 'token':
       if (message.token !== leaseToken) {
         leaseToken = message.token;
+        // 旧令牌的句子作废：字幕立即清除，AudioWorklet 随后回报它们被截断。
+        playing.clear();
+        subtitles.clear();
         toWorklet({ type: 'revoke' });
       }
       if (message.token !== null) toWorklet({ type: 'lease', ttlMs: message.ttlMs });
@@ -107,10 +110,16 @@ function receive(message) {
       playing.set(message.sentenceId, {
         resampler: new Resampler(message.sampleRate, context.sampleRate),
         token: message.token,
-        subtitle: message.subtitle,
         source: 0,
       });
+      subtitles.begin(message.sentenceId, message.subtitle);
       toWorklet({ type: 'begin', id: message.sentenceId });
+      return;
+    case 'timing':
+      // 只收当前令牌、还在播放的句子的映射；旧令牌与已截断的句子丢弃。
+      if (message.token === leaseToken && playing.get(message.sentenceId)?.token === leaseToken) {
+        subtitles.timing(message.sentenceId, message.starts);
+      }
       return;
     case 'end': {
       const sentence = playing.get(message.sentenceId);
@@ -120,6 +129,8 @@ function receive(message) {
       return;
     }
     case 'truncate':
+      // 字幕立即清除，不等 AudioWorklet 回报。
+      forget(message.sentenceId);
       toWorklet({ type: 'truncate', id: message.sentenceId });
       return;
   }

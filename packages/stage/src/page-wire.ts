@@ -4,6 +4,7 @@
  * 文本消息是 JSON，`kind` 与 `ToPage` / `FromPage` 一致，另加认证用的 hello、resume、welcome。
  * 音频是二进制消息：2 字节大端的头长度 + UTF-8 JSON 头（句编号与许可令牌）+ 16 位小端 PCM。
  * 页面是半可信的：认证过，但它发来的每条消息仍按下面的 Schema 校验，不合格即断开。
+ * 发给页面的字幕映射（`PageTiming`）的内容来自 TTS 提供方，Stage 服务发送前同样按 Schema 校验。
  */
 import Type, { type Static } from 'typebox';
 import { Compile } from 'typebox/compile';
@@ -61,6 +62,26 @@ export type PageEvent = Static<typeof PageEvent>;
 
 export const isPageFirst = Compile(PageFirst);
 export const isPageEvent = Compile(PageEvent);
+
+/** 一句字幕映射的码点数上限；分句每句不超过 60 个码点，本地 TTS 每句不超过 500 个朗读码点。 */
+export const MAX_SUBTITLE_CHARS = 1000;
+
+/**
+ * 宿主发给页面的字幕时间映射（文本消息）：字幕文本第 k 个码点从这一句的第 `starts[k]` 个原始采样开始显示，
+ * 按 k 不减；可以比字幕的码点少，映射还没覆盖到的码点暂不显示。映射有变化时整份重发。
+ * 规则见 Stage 文档的“字幕”；Stage 服务发送前按此校验，只为令牌有效、还在 Stage 上的句子发送。
+ */
+export const PageTiming = Type.Object(
+  {
+    kind: Type.Literal('timing'),
+    sentenceId: SentenceId,
+    token: Type.Integer({ minimum: 0 }),
+    starts: Type.Array(Played, { maxItems: MAX_SUBTITLE_CHARS }),
+  },
+  closed,
+);
+export type PageTiming = Static<typeof PageTiming>;
+export const isPageTiming = Compile(PageTiming);
 
 /** 宿主认证页面后的答复；会话密钥只存在页面内存里。 */
 export interface Welcome {

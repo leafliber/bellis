@@ -1,0 +1,215 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { Subtitles, validStarts } from '../page/subtitle.js';
+import { WAKE_FRAMES, type Worklet, worklet } from './worklet-scope.ts';
+
+/** 代替页面里的字幕元素：记下每次写出的文本。 */
+function screen() {
+  const writes: string[] = [];
+  const subtitles = new Subtitles((text) => writes.push(text));
+  return {
+    subtitles,
+    writes,
+    get text() {
+      return writes.at(-1) ?? '';
+    },
+  };
+}
+
+test('没有映射：一开始播放就整句显示，播完清除', () => {
+  const s = screen();
+  s.subtitles.begin('a', '你好世界');
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 100 });
+  assert.deepEqual(s.writes, [], '开始播放之前不显示');
+  s.subtitles.report({ kind: 'started', sentenceId: 'a' });
+  assert.equal(s.text, '你好世界');
+  s.subtitles.report({ kind: 'ended', sentenceId: 'a', played: 400 });
+  assert.deepEqual(s.writes, ['你好世界', '']);
+});
+
+test('有映射：开始时刻不晚于已播采样数的字才显示，只在文本变化时写出', () => {
+  const s = screen();
+  s.subtitles.begin('a', '你好世界');
+  s.subtitles.timing('a', [0, 100, 200, 300]);
+  s.subtitles.report({ kind: 'started', sentenceId: 'a' });
+  assert.equal(s.text, '你');
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 99 });
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 100 });
+  s.subtitles.report({ kind: 'cursor', sentenceId: 'a', played: 250 });
+  // 欠载：游标停住，字幕也停住。
+  s.subtitles.report({ kind: 'underrun', sentenceId: 'a', played: 250 });
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 250 });
+  assert.equal(s.text, '你好世');
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 300 });
+  s.subtitles.report({ kind: 'ended', sentenceId: 'a', played: 400 });
+  assert.deepEqual(s.writes, ['你', '你好', '你好世', '你好世界', '']);
+});
+
+test('映射整份更新：细化后变晚的字不收回；映射只覆盖一部分时其余暂不显示', () => {
+  const s = screen();
+  s.subtitles.begin('a', '你好世界');
+  s.subtitles.timing('a', [0, 100]);
+  s.subtitles.report({ kind: 'started', sentenceId: 'a' });
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 1000 });
+  assert.equal(s.text, '你好', '映射还没覆盖到的字不显示');
+  // 细化：“好”其实从 300 开始，但已经显示了，不收回；新的映射覆盖了后面的字。
+  s.subtitles.timing('a', [0, 300, 1100, 1200]);
+  assert.equal(s.text, '你好');
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 1100 });
+  assert.equal(s.text, '你好世');
+  // 较早的游标回报不让进度倒退：按已回报的最大进度（1100）换算。
+  s.subtitles.report({ kind: 'cursor', sentenceId: 'a', played: 900 });
+  s.subtitles.timing('a', [0, 300, 1000, 1050]);
+  assert.equal(s.text, '你好世界');
+});
+
+test('截断、令牌变化即清除；之后这一句的回报与映射都忽略', () => {
+  const s = screen();
+  s.subtitles.begin('a', '你好');
+  s.subtitles.timing('a', [0, 100]);
+  s.subtitles.report({ kind: 'started', sentenceId: 'a' });
+  s.subtitles.forget('a');
+  assert.equal(s.text, '');
+  s.subtitles.report({ kind: 'progress', sentenceId: 'a', played: 200 });
+  s.subtitles.timing('a', [0, 0]);
+  s.subtitles.report({ kind: 'started', sentenceId: 'a' });
+  assert.deepEqual(s.writes, ['你', '']);
+
+  s.subtitles.begin('b', '再见');
+  s.subtitles.begin('c', '下一句');
+  s.subtitles.report({ kind: 'started', sentenceId: 'b' });
+  assert.equal(s.text, '再见');
+  s.subtitles.clear();
+  assert.equal(s.text, '');
+  s.subtitles.report({ kind: 'started', sentenceId: 'c' });
+  assert.equal(s.text, '', '令牌变化前排队的句子也作废');
+  // 回报截断同样清除。
+  s.subtitles.begin('d', '好');
+  s.subtitles.report({ kind: 'started', sentenceId: 'd' });
+  s.subtitles.report({ kind: 'truncated', sentenceId: 'd', played: 0 });
+  assert.equal(s.text, '');
+});
+
+test('不可用的映射与不认识的句子都忽略', () => {
+  assert.ok(validStarts([]));
+  assert.ok(validStarts([0, 0, 5]));
+  for (const bad of [null, '0,1', [0, -1], [5, 4], [0, 1.5], [0, Number.NaN], [0, '1']]) {
+    assert.equal(validStarts(bad), false, JSON.stringify(bad));
+  }
+  const s = screen();
+  s.subtitles.begin('a', '你好');
+  s.subtitles.timing('a', [0, 100, 200]);
+  s.subtitles.timing('a', [5, 4]);
+  s.subtitles.timing('x', [0, 0]);
+  s.subtitles.report({ kind: 'started', sentenceId: 'x' });
+  s.subtitles.report({ kind: 'progress', sentenceId: 'x', played: 1 });
+  assert.deepEqual(s.writes, []);
+  s.subtitles.report({ kind: 'started', sentenceId: 'a' });
+  assert.equal(s.text, '你好', '映射都不可用：整句显示');
+});
+
+/**
+ * 页面把 AudioWorklet 的回报交给字幕（与 page.js 的做法相同），逐个渲染块核对显示的字：
+ * 不早于 AudioWorklet 真实的游标，落后不超过 10ms 加一个渲染块（换算成原始采样）。
+ */
+function drive(w: Worklet, s: ReturnType<typeof screen>, starts: readonly number[]) {
+  let delivered = 0;
+  const lag = (480 + 128) / 2;
+  const visible = (played: number) => starts.filter((start) => start <= played).length;
+  return (quanta: number) => {
+    for (let q = 0; q < quanta; q++) {
+      if (q % 93 === 0) w.send({ type: 'hb' });
+      w.render(1);
+      for (; delivered < w.posted.length; delivered++)
+        s.subtitles.report(w.posted[delivered] as { kind: string });
+      const shown = [...s.text].length;
+      const cursor = w.cursor();
+      assert.ok(shown <= visible(cursor), `游标 ${cursor} 时显示了“${s.text}”`);
+      if (w.processor.queue[0]?.started)
+        assert.ok(shown >= visible(cursor - lag), `游标 ${cursor} 时只显示了“${s.text}”`);
+    }
+  };
+}
+
+for (const [name, fill] of [
+  ['有声', 0.2],
+  ['只出字幕的静音帧', 0],
+] as const) {
+  test(`AudioWorklet 驱动（${name}）：唤醒信号期间不显示，随后按渲染帧逐字推进，播完清除`, async () => {
+    const w = await worklet();
+    const s = screen();
+    // 原始 24kHz：各字从 0、71、163、271ms 开始，不与 100ms 的游标回报对齐。
+    const starts = [0, 1700, 3900, 6500];
+    w.send({ type: 'hb' });
+    w.send({ type: 'lease', ttlMs: 60_000 });
+    s.subtitles.begin('a', '你好世界');
+    s.subtitles.timing('a', starts);
+    w.send({ type: 'begin', id: 'a' });
+    w.send({ type: 'pcm', id: 'a', data: new Float32Array(16_800).fill(fill), src: 8400 });
+    w.send({ type: 'end', id: 'a', src: 8400 });
+    const step = drive(w, s, starts);
+    step(Math.floor(WAKE_FRAMES / 128));
+    assert.deepEqual(s.writes, [], '唤醒信号期间不显示');
+    step(2);
+    assert.equal(s.text, '你');
+    step(Math.ceil(16_800 / 128));
+    assert.deepEqual(s.writes, ['你', '你好', '你好世', '你好世界', '']);
+  });
+}
+
+test('AudioWorklet 驱动：欠载时字幕停住；欠载超过 1.5 秒恢复时先放唤醒信号，期间字幕不动', async () => {
+  const w = await worklet();
+  const s = screen();
+  const starts = [0, 1000, 3000, 3600];
+  w.send({ type: 'hb' });
+  w.send({ type: 'lease', ttlMs: 60_000 });
+  s.subtitles.begin('a', '你好世界');
+  s.subtitles.timing('a', starts);
+  w.send({ type: 'begin', id: 'a' });
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(4800).fill(0.2), src: 2400 });
+  const step = drive(w, s, starts);
+  // 唤醒 150ms + 正文 100ms，之后欠载约 1.65 秒。
+  step(Math.ceil((0.25 * 48_000) / 128));
+  assert.equal(s.text, '你好');
+  const writes = s.writes.length;
+  step(Math.ceil((1.65 * 48_000) / 128));
+  assert.equal(s.writes.length, writes, '欠载期间不再写出');
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(4800).fill(0.2), src: 2400 });
+  w.send({ type: 'end', id: 'a', src: 4800 });
+  step(Math.floor(WAKE_FRAMES / 128));
+  assert.equal(s.text, '你好', '唤醒信号期间字幕不动');
+  step(Math.ceil(4800 / 128) + 8);
+  assert.deepEqual(s.writes, ['你', '你好', '你好世', '你好世界', '']);
+});
+
+test('AudioWorklet 驱动：截断与自静音时字幕立即清除', async () => {
+  const w = await worklet();
+  const s = screen();
+  w.send({ type: 'hb' });
+  w.send({ type: 'lease', ttlMs: 60_000 });
+  s.subtitles.begin('a', '你好');
+  w.send({ type: 'begin', id: 'a' });
+  w.send({ type: 'pcm', id: 'a', data: new Float32Array(48_000).fill(0.2), src: 24_000 });
+  const step = drive(w, s, [0, 0]);
+  step(80);
+  assert.equal(s.text, '你好');
+  // 页面收到宿主的截断就清除，不等 AudioWorklet 回报（page.js 的做法）。
+  s.subtitles.forget('a');
+  w.send({ type: 'truncate', id: 'a' });
+  assert.equal(s.text, '');
+  step(2);
+  assert.equal(s.text, '');
+
+  // 收不到心跳：AudioWorklet 自静音并回报截断，字幕随之清除。
+  s.subtitles.begin('b', '再见');
+  w.send({ type: 'begin', id: 'b' });
+  w.send({ type: 'pcm', id: 'b', data: new Float32Array(96_000).fill(0.2), src: 48_000 });
+  let delivered = w.posted.length;
+  for (let q = 0; q < 400; q++) {
+    w.render(1);
+    for (; delivered < w.posted.length; delivered++)
+      s.subtitles.report(w.posted[delivered] as { kind: string });
+  }
+  assert.ok(w.kinds().includes('muted'));
+  assert.deepEqual(s.writes.slice(-2), ['再见', '']);
+});
