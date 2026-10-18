@@ -9,6 +9,7 @@
  *   未显示的字放在不可见的占位元素里，版面从一开始就固定；截断、令牌变化时立即清除。
  */
 import { decodeAudio, Resampler } from './audio.js';
+import { latencyHintOf, latencyStats, statsEveryOf } from './diagnostics.js';
 import { Subtitles } from './subtitle.js';
 
 /**
@@ -35,7 +36,11 @@ const REJECTED = new Set([4401, 4408]);
 /** 字幕的已显示前缀与不可见的其余部分（占位，固定版面）。 */
 const shownText = /** @type {HTMLElement} */ (document.getElementById('subtitle-shown'));
 const hiddenText = /** @type {HTMLElement} */ (document.getElementById('subtitle-hidden'));
-let token = new URLSearchParams(location.hash.slice(1)).get('t');
+const fragment = new URLSearchParams(location.hash.slice(1));
+let token = fragment.get('t');
+// 诊断项（缺省关闭，见 diagnostics.js）。
+const latencyHint = latencyHintOf(fragment);
+const statsEveryMs = statsEveryOf(fragment);
 history.replaceState(null, '', location.pathname);
 
 /** @type {string | null} */
@@ -49,7 +54,7 @@ const subtitles = new Subtitles((shown, hidden) => {
   if (hiddenText.textContent !== hidden) hiddenText.textContent = hidden;
 });
 
-const context = new AudioContext({ latencyHint: 'playback' });
+const context = new AudioContext({ latencyHint });
 await context.resume().catch(() => {});
 await context.audioWorklet.addModule('/worklet.js');
 const node = new AudioWorkletNode(context, 'bellis-stage', { outputChannelCount: [2] });
@@ -57,6 +62,8 @@ node.connect(context.destination);
 
 /** @type {WebSocket | null} */
 let socket = null;
+/** 诊断回报的定时器（重连后不重复开）。 @type {ReturnType<typeof setInterval> | undefined} */
+let statsTimer;
 
 /** @param {object} message */
 function send(message) {
@@ -90,6 +97,9 @@ function receive(message) {
   switch (message.kind) {
     case 'welcome':
       sessionKey = message.sessionKey;
+      if (statsEveryMs > 0 && statsTimer === undefined) {
+        statsTimer = setInterval(() => send(latencyStats(context, latencyHint)), statsEveryMs);
+      }
       return;
     case 'heartbeat':
       toWorklet({ type: 'hb' });

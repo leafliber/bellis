@@ -70,7 +70,13 @@ async function setup(pageConfig: Record<string, unknown> = {}) {
     permissionsOf: (holder) => kernel?.permissionsOf(holder),
     watchdogConnected: () => true,
   });
-  kernel = new Kernel({ clock, safety: core.kernelHooks(), quiesceTimeoutMs: 500 });
+  const logs: Array<{ event: string; fields: Record<string, unknown> }> = [];
+  kernel = new Kernel({
+    clock,
+    safety: core.kernelHooks(),
+    quiesceTimeoutMs: 500,
+    log: (event, fields) => logs.push({ event, fields }),
+  });
   kernel.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(core, instanceId));
   kernel.provideCore(ClockService, clock);
   kernel.provideCore(ObsConnectorService, { connect: () => ObsClient.connect(obs.url, undefined) });
@@ -138,6 +144,7 @@ async function setup(pageConfig: Record<string, unknown> = {}) {
   await until(() => url() !== '');
   const parsed = new URL(url());
   return {
+    logs,
     core,
     obs,
     store,
@@ -347,6 +354,51 @@ test('首条消息超时或不合法、认证后发来不合法的消息，都�
     assert.equal(page.result, 'welcome');
     const closed = new Promise<number>((done) => page.ws?.on('close', (code) => done(code)));
     page.ws?.send(JSON.stringify({ kind: 'ended', sentenceId: 'x', played: -1 }));
+    assert.equal(await closed, 1006);
+  } finally {
+    await s.close();
+  }
+});
+
+test('诊断：缺省 URL 只带令牌、不收 stats；打开后片段带上 latencyHint 与间隔，stats 只记日志', async () => {
+  const stats = {
+    kind: 'stats',
+    latencyHint: 'interactive',
+    sampleRate: 48_000,
+    baseLatency: 0.01,
+    outputLatency: 0,
+    currentTime: 1.5,
+    outputContextTime: 1.42,
+    outputPerformanceTime: 1234.5,
+    performanceNow: 1230.1,
+  };
+  const plain = await setup();
+  try {
+    assert.match(new URL(plain.url()).hash, /^#t=[A-Za-z0-9_-]{22}$/);
+    const page = await attempt(plain, hello(plain.token()));
+    assert.equal(page.result, 'welcome');
+    const closed = new Promise<number>((done) => page.ws?.on('close', (code) => done(code)));
+    page.ws?.send(JSON.stringify(stats));
+    assert.equal(await closed, 1006);
+  } finally {
+    await plain.close();
+  }
+  const s = await setup({ latencyHint: 'interactive', statsEveryMs: 500 });
+  try {
+    const fragment = new URLSearchParams(new URL(s.url()).hash.slice(1));
+    assert.equal(fragment.get('l'), 'interactive');
+    assert.equal(fragment.get('s'), '500');
+    const page = await attempt(s, hello(fragment.get('t') as string));
+    assert.equal(page.result, 'welcome');
+    page.ws?.send(JSON.stringify(stats));
+    await until(() => s.logs.some((l) => l.event === 'stage-page.stats'));
+    const logged = s.logs.find((l) => l.event === 'stage-page.stats')?.fields ?? {};
+    assert.equal(logged.latencyHint, 'interactive');
+    assert.equal(logged.outputContextTime, 1.42);
+    assert.equal(logged.kind, undefined);
+    // 不合格的 stats 与其它不合格的消息一样断开。
+    const closed = new Promise<number>((done) => page.ws?.on('close', (code) => done(code)));
+    page.ws?.send(JSON.stringify({ ...stats, latencyHint: 'fast' }));
     assert.equal(await closed, 1006);
   } finally {
     await s.close();
