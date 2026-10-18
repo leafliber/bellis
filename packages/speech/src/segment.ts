@@ -122,3 +122,37 @@ export function heardPrefix(
   const lastSubtitle = sentence.align[heardChars - 1] as number;
   return [...sentence.subtitle].slice(0, lastSubtitle + 1).join('');
 }
+
+/**
+ * 把时间映射换算到字幕文本，交给 Stage 推进字幕（规则见 Stage 文档的“字幕”）：返回字幕文本每个码点开始显示的
+ * 采样偏移，按码点不减。
+ * - 朗读码点的开始取映射中它及其后各码点的最早开始（映射按采样偏移不减时就是它自己的开始）；
+ *   它及其后都没有时间点的，从对应的字幕码点起不给出，页面暂不显示。
+ * - 有朗读码点的字幕码点取它第一个朗读码点的开始；不朗读的符号（引号、括号等）随后面第一个有朗读的码点显示，
+ *   句末的随最后一个有朗读的码点显示。
+ * 映射可以是插值、细化或修正后的，传入换算那一刻的映射；没有映射时返回 undefined（页面整句显示）。
+ */
+export function subtitleStarts(
+  sentence: Sentence,
+  timing: ReadonlyArray<TimingPoint> | undefined,
+): number[] | undefined {
+  if (!timing) return undefined;
+  const spoken = sentence.align.length;
+  const spokenStart: number[] = new Array(spoken).fill(Number.POSITIVE_INFINITY);
+  for (const point of timing) {
+    if (Number.isInteger(point.char) && point.char >= 0 && point.char < spoken)
+      spokenStart[point.char] = Math.min(spokenStart[point.char] as number, point.sample);
+  }
+  for (let i = spoken - 2; i >= 0; i -= 1)
+    spokenStart[i] = Math.min(spokenStart[i] as number, spokenStart[i + 1] as number);
+  const starts: number[] = [];
+  const chars = [...sentence.subtitle].length;
+  let i = 0;
+  for (let k = 0; k < chars && spoken > 0; k += 1) {
+    while (i < spoken && (sentence.align[i] as number) < k) i += 1;
+    const start = spokenStart[Math.min(i, spoken - 1)] as number;
+    if (!Number.isFinite(start)) break;
+    starts.push(Math.max(0, Math.round(start)));
+  }
+  return starts;
+}

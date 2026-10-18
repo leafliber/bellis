@@ -16,6 +16,7 @@ const FILES: Record<string, [file: string, type: string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/page.js': ['page.js', 'text/javascript; charset=utf-8'],
   '/audio.js': ['audio.js', 'text/javascript; charset=utf-8'],
+  '/subtitle.js': ['subtitle.js', 'text/javascript; charset=utf-8'],
   '/worklet.js': ['worklet.js', 'text/javascript; charset=utf-8'],
   '/stage.css': ['stage.css', 'text/css; charset=utf-8'],
 };

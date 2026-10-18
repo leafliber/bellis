@@ -11,7 +11,9 @@
  *   pcm { id, data, src }      一块已重采样的音频；src 是它对应的原始采样数
  *   end { id, src }            这一句不会再有音频；src 是原始采样总数
  *   truncate { id }            立即停止这一句
- * 回报：started、cursor、underrun、ended、truncated（played 均为原始采样数）、muted。
+ * 回报：started、cursor、underrun、ended、truncated（played 均为原始采样数）、muted。cursor 每渲染 100ms
+ * 一次，由页面转给宿主；另有只给页面推进字幕用的 progress（不转给宿主）：正文开始后，已播采样数有变化时
+ * 至多每渲染 10ms 一次，唤醒信号与欠载补零期间已播采样数不变，也就不发。
  *
  * 唤醒信号（见 Stage“播放”）：OBS 浏览器源只在页面“有声”时采集音频，静默约 2–3 秒后停止，再次有声时
  * 开头会丢 20–80ms。所以即将输出正文、而此前连续数字静音（按渲染帧计，含句中欠载的补零）已超过 1.5 秒时，
@@ -23,6 +25,7 @@
 
 const HEARTBEAT_TIMEOUT_SECONDS = 1;
 const CURSOR_EVERY_SECONDS = 0.1;
+const PROGRESS_EVERY_SECONDS = 0.01;
 const WAKE_AFTER_SECONDS = 1.5;
 const WAKE_SECONDS = 0.15;
 const WAKE_FADE_SECONDS = 0.01;
@@ -47,6 +50,7 @@ function wakeSample(k, length) {
  * @property {number | null} total 收到 end 后的原始采样总数
  * @property {boolean} started
  * @property {boolean} underrun
+ * @property {number} progressed 上一次以 started 或 progress 回报的已播采样数
  */
 
 /**
@@ -64,6 +68,8 @@ class StageProcessor extends AudioWorkletProcessor {
     this.leaseFrames = 0;
     this.sinceHeartbeat = 0;
     this.sinceCursor = 0;
+    this.sinceProgress = 0;
+    this.progressFrames = Math.max(1, Math.round(PROGRESS_EVERY_SECONDS * sampleRate));
     this.muted = false;
     /** 连续输出数字静音的渲染帧数（放到一半的唤醒信号也算静音）；页面刚加载时视为已静默很久。 */
     this.silentFrames = Number.POSITIVE_INFINITY;
@@ -102,6 +108,7 @@ class StageProcessor extends AudioWorkletProcessor {
           total: null,
           started: false,
           underrun: false,
+          progressed: 0,
         });
         return;
       case 'pcm': {
@@ -239,6 +246,18 @@ class StageProcessor extends AudioWorkletProcessor {
     this.silentFrames = silent + (frames - written);
     // 没有句子了或已静音：放到一半的唤醒信号作废。
     if (this.muted || this.queue.length === 0) this.wakeAt = null;
+
+    // 字幕按已播采样数推进：比 100ms 的游标细，只给页面。
+    this.sinceProgress += frames;
+    const current = this.queue[0];
+    if (current?.started && this.sinceProgress >= this.progressFrames) {
+      const played = this.played(current);
+      if (played !== current.progressed) {
+        current.progressed = played;
+        this.sinceProgress = 0;
+        this.port.postMessage({ kind: 'progress', sentenceId: current.id, played });
+      }
+    }
 
     this.sinceCursor += frames;
     if (this.sinceCursor >= sampleRate * CURSOR_EVERY_SECONDS) {

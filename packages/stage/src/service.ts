@@ -2,6 +2,7 @@ import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
 import { producesOutput, SafetyService } from '@bellis/safety';
 import Type from 'typebox';
 import { EnvelopeBuilder } from './envelope.ts';
+import { isPageTiming, type PageTiming } from './page-wire.ts';
 import {
   type FromPage,
   type PlaybackResult,
@@ -16,6 +17,8 @@ interface Playing {
   played: number;
   /** 已转发给页面的采样数；页面回报 ended 时据此判断是否完整。 */
   forwarded: number;
+  /** 已要求页面截断：之后不再给这一句发字幕映射。 */
+  truncating: boolean;
   envelope: EnvelopeBuilder;
   /** 逐句的回报摘要，句子结束时记入日志，供运维核对欠载与游标。 */
   report: {
@@ -28,10 +31,26 @@ interface Playing {
   };
 }
 
+/** 字幕映射不能发给页面的原因；能发时返回 undefined。 */
+function timingProblem(message: PageTiming, subtitleChars: number): string | undefined {
+  if (!isPageTiming.Check(message)) return '映射不合格式';
+  const { starts } = message;
+  if (starts.length > subtitleChars)
+    return `映射有 ${starts.length} 个码点，字幕只有 ${subtitleChars} 个`;
+  if (starts.some((start, k) => k > 0 && start < (starts[k - 1] as number)))
+    return '映射没有按码点不减';
+  return undefined;
+}
+
+const sameStarts = (a: readonly number[], b: readonly number[]) =>
+  a.length === b.length && a.every((value, k) => value === b[k]);
+
 /**
  * Stage 服务（关键平面）：只转发带有效 Stage 音频输出许可令牌的音频，把令牌变化告诉页面，
  * 定时发心跳；页面在截止时间内不应答心跳即报告失败，由安全核走急停路径（D-30）。
  * 转发音频时按句计算响度包络，供形象驱动口型。
+ * 字幕的时间映射是活的：句子开始、每转发一块音频之后与音频流结束时现读，有变化就校验后整份发给页面；
+ * 只发给令牌有效、还在 Stage 上且没有被要求截断的句子（字幕规则见 Stage 文档的“字幕”）。
  * 页面回报的欠载与静音即时记入日志；每句结束时记一条摘要（实际播出的采样数、欠载次数、游标回报的
  * 次数、首末两次游标与最大间隔），游标本身不逐条记录。
  */
@@ -80,6 +99,13 @@ export const stageService = definePlugin({
         maxCursorGapMs: report.maxCursorGapMs,
       });
       entry.resolve(result);
+    };
+
+    /** 要求页面截断这一句；结果仍以页面的回报为准。 */
+    const cut = (sentenceId: string) => {
+      const entry = playing.get(sentenceId);
+      if (entry) entry.truncating = true;
+      page.send({ kind: 'truncate', sentenceId });
     };
 
     /** 把页面的回报计入这一句的摘要；欠载与静音即时记录。 */
@@ -188,7 +214,7 @@ export const stageService = definePlugin({
     ctx.register(() => {
       if (timer) clock.clearTimeout(timer);
       for (const [id, entry] of [...playing]) {
-        page.send({ kind: 'truncate', sentenceId: id });
+        cut(id);
         finish(id, {
           sentenceId: id,
           played: entry.played,
@@ -212,6 +238,7 @@ export const stageService = definePlugin({
             resolve,
             played: 0,
             forwarded: 0,
+            truncating: false,
             envelope,
             report: {
               startedAt: undefined,
@@ -230,6 +257,39 @@ export const stageService = definePlugin({
           subtitle: sentence.subtitle,
           sampleRate: sentence.sampleRate,
         });
+        const subtitleChars = [...sentence.subtitle].length;
+        /** 上一次发给页面的字幕映射：没有变化就不重发。 */
+        let sentStarts: readonly number[] | undefined;
+        let problemLogged = false;
+        /** 现读字幕映射，有变化就发给页面；映射不合格时不发，页面沿用上一份（或整句显示），每句记一次日志。 */
+        const sendTiming = () => {
+          const read = sentence.subtitleStarts;
+          const entry = playing.get(sentence.id);
+          if (!read || !entry || entry.truncating || !safety.isValid(STAGE_AUDIO, token)) return;
+          let problem: string | undefined;
+          try {
+            const starts = read();
+            if (starts === undefined || (sentStarts && sameStarts(starts, sentStarts))) return;
+            const message: PageTiming = {
+              kind: 'timing',
+              sentenceId: sentence.id,
+              token,
+              starts: [...starts],
+            };
+            problem = timingProblem(message, subtitleChars);
+            if (problem === undefined) {
+              sentStarts = message.starts;
+              page.send(message);
+              return;
+            }
+          } catch (error) {
+            problem = `读取映射出错：${error instanceof Error ? error.message : String(error)}`;
+          }
+          if (problemLogged) return;
+          problemLogged = true;
+          ctx.log('stage.timing-invalid', { sentenceId: sentence.id, problem });
+        };
+        sendTiming();
         // 转发音频与等待结果分开：结果一旦确定（播完、截断、停用）就返回，不被卡住的音频流拖住；
         // 音频流出错时截断这一句并结束等待。
         void (async () => {
@@ -239,15 +299,19 @@ export const stageService = definePlugin({
               const next = await Promise.race([iterator.next(), result.then(() => undefined)]);
               if (next === undefined || next.done || !playing.has(sentence.id)) break;
               if (!safety.isValid(STAGE_AUDIO, token)) {
-                page.send({ kind: 'truncate', sentenceId: sentence.id });
+                cut(sentence.id);
                 break;
               }
               envelope.push(next.value);
               const entry = playing.get(sentence.id);
               if (entry) entry.forwarded += next.value.length;
               page.send({ kind: 'audio', sentenceId: sentence.id, token, pcm: next.value });
+              // 细化的时间戳随音频到达：读完这一块再看映射。
+              sendTiming();
             }
             if (playing.has(sentence.id)) {
+              // 流结束后提供方已按实际采样数修正映射。
+              sendTiming();
               envelope.finish();
               page.send({ kind: 'end', sentenceId: sentence.id, token });
             }
@@ -267,7 +331,7 @@ export const stageService = definePlugin({
         return result;
       },
       truncate(sentenceId) {
-        if (playing.has(sentenceId)) page.send({ kind: 'truncate', sentenceId });
+        if (playing.has(sentenceId)) cut(sentenceId);
       },
       onEvent(listener) {
         listeners.add(listener);

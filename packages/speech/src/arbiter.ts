@@ -2,7 +2,7 @@ import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
 import { type Lease, SafetyService } from '@bellis/safety';
 import { type PlaybackResult, STAGE_AUDIO, StageService } from '@bellis/stage';
 import Type from 'typebox';
-import { heardPrefix, Segmenter } from './segment.ts';
+import { heardPrefix, Segmenter, subtitleStarts } from './segment.ts';
 import {
   ModerationService,
   PREEMPTING,
@@ -294,9 +294,16 @@ export const speechArbiter = definePlugin({
               if (halted()) throw new Error('播出前被打断');
               const sentenceId = `${p.utteranceId}#${p.index}`;
               current.sentenceId = sentenceId;
+              const voiced = synthesis;
               playback = await stage.play(
-                { id: sentenceId, subtitle: p.subtitle, sampleRate: synthesis.sampleRate },
-                synthesis.frames,
+                {
+                  id: sentenceId,
+                  subtitle: p.subtitle,
+                  sampleRate: voiced.sampleRate,
+                  // 映射是活的（R-11）：Stage 服务转发音频时现读，换算到字幕码点后发给页面。
+                  subtitleStarts: () => subtitleStarts(sentence, voiced.timing),
+                },
+                voiced.frames,
                 token,
               );
               current.sentenceId = undefined;

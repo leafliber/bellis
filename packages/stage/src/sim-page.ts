@@ -1,5 +1,6 @@
 import { ClockService, definePlugin, type TimerHandle, TraceService } from '@bellis/kernel';
 import Type from 'typebox';
+import { Subtitles } from '../page/subtitle.js';
 import { type FromPage, type PageLink, StagePageService, type ToPage } from './types.ts';
 
 interface Buffered {
@@ -18,7 +19,8 @@ interface Buffered {
  * 模拟 Stage 页面（OBS 浏览器源）：按自己的时钟逐拍消耗音频。
  * - 欠载时补零，补零不推进播放游标；
  * - 只接受当前令牌的音频，令牌变化时丢弃旧令牌的全部缓冲；
- * - 收不到宿主心跳时自行静音并清空缓冲，再次收到心跳后恢复。
+ * - 收不到宿主心跳时自行静音并清空缓冲，再次收到心跳后恢复；
+ * - 字幕与真实页面用同一套推进规则（page/subtitle.js），每次显示变化记追踪 `page.subtitle`。
  */
 export const simStagePage = definePlugin({
   manifest: {
@@ -50,9 +52,13 @@ export const simStagePage = definePlugin({
       trace?.record(`page.${message.kind}`, { ...message });
       for (const listener of [...listeners]) listener(message);
     };
+    const subtitles = new Subtitles((text, sentenceId) => {
+      trace?.record('page.subtitle', { sentenceId, text });
+    });
     const drop = (predicate: (b: Buffered) => boolean, reason: string) => {
       for (const item of queue.filter(predicate)) {
         queue.splice(queue.indexOf(item), 1);
+        subtitles.forget(item.id);
         emit({ kind: 'truncated', sentenceId: item.id, played: item.played, reason });
       }
     };
@@ -89,14 +95,17 @@ export const simStagePage = definePlugin({
         if (!head.started) {
           head.started = true;
           emit({ kind: 'started', sentenceId: head.id });
+          subtitles.report({ kind: 'started', sentenceId: head.id });
         }
         head.played += consumed;
         head.underrun = false;
         emit({ kind: 'cursor', sentenceId: head.id, played: head.played });
+        subtitles.report({ kind: 'progress', sentenceId: head.id, played: head.played });
       }
       if (head.chunks.length === 0) {
         if (head.ended) {
           queue.shift();
+          subtitles.forget(head.id);
           emit({ kind: 'ended', sentenceId: head.id, played: head.played });
         } else if (consumed < budget && !head.underrun) {
           head.underrun = true;
@@ -146,7 +155,16 @@ export const simStagePage = definePlugin({
             started: false,
             underrun: false,
           });
+          subtitles.begin(message.sentenceId, message.subtitle);
           return;
+        case 'timing': {
+          // 旧令牌与已截断的句子的映射丢弃。
+          const item = find(message.sentenceId);
+          if (item && message.token === token && item.token === token) {
+            subtitles.timing(message.sentenceId, message.starts);
+          }
+          return;
+        }
         case 'audio': {
           const item = find(message.sentenceId);
           if (!item || message.token !== token || item.token !== token) return;

@@ -4,6 +4,7 @@
     python -P -m tts_local --backend qwen3 --model 仓库 --model-revision 提交 --speaker 音色 ...
 
 先用 Job Object 管住之后派生的全部进程（R-06），再连接宿主、完成握手；模型在后台加载。
+生成卡在 CPU 侧，受 EcoQoS 影响明显（S-05），所以在 Windows 上启动时声明 HighQoS。
 """
 
 from __future__ import annotations
@@ -103,7 +104,9 @@ def main(argv: list[str] | None = None) -> int:
         return await services[0].health()
 
     try:
-        return run_sidecar(SidecarOptions(provides=PROVIDES, health=health, setup=setup))
+        return run_sidecar(
+            SidecarOptions(provides=PROVIDES, health=health, setup=setup, high_qos=True)
+        )
     finally:
         backend.close()
 

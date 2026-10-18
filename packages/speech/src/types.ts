@@ -1,4 +1,5 @@
 import { defineExtension, defineService } from '@bellis/kernel';
+import type { SidecarQos } from '@bellis/protocol';
 
 /** 发声请求的来源，由确定性代码按触发来源填写，决策模型不能指定（D-33）。 */
 export type SpeechSource =
@@ -146,6 +147,8 @@ export interface TtsEngine extends Tts {
   readonly ready: boolean;
   /** 给操作员看的状态说明，例如“模型加载中”。 */
   readonly status: string;
+  /** 以 sidecar 运行的引擎：经 `sidecar.health` 重新读回 sidecar 进程的节流状态。 */
+  qos?(): Promise<SidecarQos>;
 }
 
 export const LocalTtsService = defineService<TtsEngine>('tts.local', 1);
@@ -167,9 +170,17 @@ export type TtsOption = 'local' | 'cloud' | 'subtitles';
 
 /** 路由插件的状态，供开播预检核对。 */
 export interface TtsRouting {
-  /** 配置中第一个音频引擎（只出字幕不算）此刻的状态；没有配置音频引擎时为 undefined。 */
+  /**
+   * 配置中第一个音频引擎（只出字幕不算）此刻的状态；没有配置音频引擎时为 undefined。
+   * 引擎以 sidecar 运行时带 `qos`，读回 sidecar 进程的节流状态。
+   */
   primary():
-    | { engine: Exclude<TtsOption, 'subtitles'>; ready: boolean; status: string }
+    | {
+        engine: Exclude<TtsOption, 'subtitles'>;
+        ready: boolean;
+        status: string;
+        qos?: () => Promise<SidecarQos>;
+      }
     | undefined;
 }
 

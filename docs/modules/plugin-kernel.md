@@ -108,7 +108,7 @@ WAITING ──依赖齐全──► LOADING ──► ACTIVE ──停用或依�
 启动子进程 → 握手（协议版本、提供的服务与主版本、申请的权限）→ 健康检查 → 注册服务
 ```
 
-- 子进程以 `sidecar.<条目 id>` 角色连接宿主；宿主先监听本机通道，再按 profile 加载插件。握手是 `sidecar.describe` 与 `sidecar.health` 两个 RPC：声明提供的服务须与清单一致，申请的权限须已授予，否则加载失败。
+- 子进程以 `sidecar.<条目 id>` 角色连接宿主；宿主先监听本机通道，再按 profile 加载插件。握手是 `sidecar.describe` 与 `sidecar.health` 两个 RPC：声明提供的服务须与清单一致，申请的权限须已授予，否则加载失败。Python sidecar 的健康检查另带本进程此刻的节流状态（`qos`，见 [Windows 平台](../platform/windows.md#定时与调度)）。
 - 代理插件可以把 sidecar 的方法原样转发成服务，也可以适配成具体的服务接口，例如 TTS 代理把 `tts.synthesize` 与二进制音频适配成本地 TTS 引擎（见[发声](speech.md#本地-tts-sidecar)）。
 - 握手不等重的初始化：sidecar 先完成握手、插件随即激活，模型加载等放在握手之后在后台进行，是否就绪由代理提供的服务自己报告（例如 TTS 引擎的 `ready`）。插件内核的激活时限不变，也不为此新增状态。
 - 子进程退出或连接断开时，代理撤回其服务，依赖方自动回到 WAITING；代理按 FAILED 的退避重启子进程。

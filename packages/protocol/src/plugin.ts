@@ -99,8 +99,27 @@ export const SidecarDescription = Type.Object(
 );
 export type SidecarDescription = Static<typeof SidecarDescription>;
 
+/**
+ * sidecar 进程的电源节流状态（Windows 的 QoS，见 Windows 平台“定时与调度”），每次健康检查时读回：
+ * `high` 显式 HighQoS；`eco` 显式 EcoQoS（例如任务管理器的“效率模式”）；`default` 没有显式设置、由系统管理；
+ * `unknown` 读取失败；`unsupported` 不是 Windows。
+ */
+export const SidecarQos = Type.Union([
+  Type.Literal('high'),
+  Type.Literal('eco'),
+  Type.Literal('default'),
+  Type.Literal('unknown'),
+  Type.Literal('unsupported'),
+]);
+export type SidecarQos = Static<typeof SidecarQos>;
+
+/** Python sidecar 运行时总是带 `qos`；不读节流状态的 sidecar（例如 Node 实现）不带。 */
 export const SidecarHealthResult = Type.Object(
-  { ok: Type.Boolean(), detail: Type.Optional(Type.String({ maxLength: 200 })) },
+  {
+    ok: Type.Boolean(),
+    detail: Type.Optional(Type.String({ maxLength: 200 })),
+    qos: Type.Optional(SidecarQos),
+  },
   closed,
 );
 export type SidecarHealthResult = Static<typeof SidecarHealthResult>;

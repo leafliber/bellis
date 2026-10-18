@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 
 from .channel import ChannelError, connect, decode_session_key
-from .protocol import ProcessShutdownParams, SidecarDescription, SidecarHealthResult
+from .protocol import ProcessShutdownParams, Qos, SidecarDescription, SidecarHealthResult
+from .qos import declare_high_qos, read_qos
 from .rpc import Params, RpcPeer
 
 ENV_CHANNEL_PATH = 'BELLIS_CHANNEL_PATH'
@@ -42,6 +43,8 @@ class SidecarOptions:
     health: Callable[[], Awaitable[SidecarHealthResult]] | None = None
     #: 在握手之前注册业务方法。
     setup: Callable[[RpcPeer], None] | None = None
+    #: 启动时在 Windows 上声明 HighQoS（见 `qos`）：推理受 CPU 节流影响明显的 sidecar 打开。
+    high_qos: bool = False
 
 
 def run_blocking[**P, T](fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> Awaitable[T]:
@@ -159,6 +162,9 @@ async def serve_sidecar(
 
     async def health(_params: Params) -> object:
         result = await options.health() if options.health else SidecarHealthResult(ok=True)
+        # 节流状态每次读回，不用启动时的结果：之后可能被别人改掉（例如“效率模式”）。
+        if result.qos is None:
+            result = result.model_copy(update={'qos': Qos(read_qos())})
         return result.model_dump(mode='json', exclude_none=True)
 
     async def shutdown(params: Params) -> object:
@@ -191,6 +197,9 @@ def run_sidecar(options: SidecarOptions) -> int:
     logging.basicConfig(
         level=logging.WARNING, stream=sys.stderr, format='%(name)s %(levelname)s %(message)s'
     )
+    if options.high_qos:
+        # 失败只记日志（declare_high_qos 内）；健康检查照常报告读回值。
+        declare_high_qos()
     try:
         reason = asyncio.run(serve_sidecar(options))
     except (ChannelError, RuntimeError) as error:

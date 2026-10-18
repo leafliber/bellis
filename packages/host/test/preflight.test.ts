@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { type EntrySnapshot, ManualClock } from '@bellis/kernel';
+import type { SidecarQos } from '@bellis/protocol';
 import { SafetyCore } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
 import { type PreflightInputs, preflight } from '../src/preflight.ts';
@@ -79,6 +80,40 @@ test('开播预检：M2 不要求放行环节；没有 Stage 服务或 OBS 核�
 
 test('开播预检：没有 TTS 路由（只用模拟 TTS）时不核对 TTS 主引擎', async () => {
   assert.deepEqual(await preflight({ ...ready, ttsPrimary: undefined }), []);
+});
+
+test('开播预检：本地 TTS 作主引擎时，sidecar 须处于 HighQoS；非 Windows 不核对', async () => {
+  const withQos = (engine: string, qos: () => Promise<SidecarQos>) =>
+    preflight({ ...ready, ttsPrimary: { engine, ready: true, status: '就绪', qos } });
+  const read = (qos: SidecarQos) => async () => qos;
+  assert.deepEqual(await withQos('local', read('high')), []);
+  assert.deepEqual(await withQos('local', read('unsupported')), []);
+  assert.deepEqual(await withQos('local', read('eco')), [
+    '本地 TTS 的 sidecar 被系统节流（EcoQoS），推理会变慢，先关掉效率模式',
+  ]);
+  assert.deepEqual(await withQos('local', read('default')), [
+    '本地 TTS 的 sidecar 没有声明 HighQoS（节流由系统管理），推理可能变慢',
+  ]);
+  assert.deepEqual(await withQos('local', read('unknown')), ['读不到本地 TTS sidecar 的节流状态']);
+  const failing = async (): Promise<SidecarQos> => {
+    throw new Error('RPC 超时');
+  };
+  assert.deepEqual(await withQos('local', failing), [
+    '读不到本地 TTS sidecar 的节流状态：RPC 超时',
+  ]);
+  // 只核对作主引擎的本地 TTS。
+  assert.deepEqual(await withQos('cloud', read('eco')), []);
+});
+
+test('开播预检：本地引擎未就绪时两项都报告', async () => {
+  const failures = await preflight({
+    ...ready,
+    ttsPrimary: { engine: 'local', ready: false, status: '模型加载中', qos: async () => 'eco' },
+  });
+  assert.deepEqual(failures, [
+    'TTS 主引擎 local 未就绪：模型加载中',
+    '本地 TTS 的 sidecar 被系统节流（EcoQoS），推理会变慢，先关掉效率模式',
+  ]);
 });
 
 /** 真实的安全核：只在内存里，OBS 应急连接视为可用，看门狗是否连接由调用方决定。 */

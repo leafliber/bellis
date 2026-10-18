@@ -76,11 +76,27 @@ function lowpass(cutoffHz: number) {
   };
 }
 
+export interface DecodeOptions {
+  /**
+   * 第一个样本对齐到录像时间线的 0 点：音轨晚于画面开始时在开头补静音，早于 0 的样本（编码器延迟）剪掉，
+   * 第 n 个样本即时间线上的 n/48000 秒，与 ffmpeg 给画面帧的时间戳同一个原点。音画对照时需要；
+   * 只看音频本身时不需要（OBS 的录像两条轨都从 0 开始）。
+   */
+  timeline?: boolean;
+}
+
 /** 把录制的第一条音轨解码成单声道 48kHz 浮点，逐块交给 onSamples。 */
-async function decode(file: string, onSamples: (samples: Float32Array) => void): Promise<void> {
+export async function decode(
+  file: string,
+  onSamples: (samples: Float32Array) => void,
+  options: DecodeOptions = {},
+): Promise<void> {
+  const resample = options.timeline
+    ? ['-af', `aresample=${SAMPLE_RATE}:async=1:first_pts=0`]
+    : ['-ar', String(SAMPLE_RATE)];
   const ffmpeg = spawn(
     'ffmpeg',
-    ['-v', 'error', '-i', file, '-map', '0:a:0', '-ac', '1', '-ar', String(SAMPLE_RATE)].concat([
+    ['-v', 'error', '-i', file, '-map', '0:a:0', '-ac', '1', ...resample].concat([
       '-f',
       'f32le',
       'pipe:1',
@@ -307,6 +323,8 @@ export interface SegmentOptions {
   trailingEdge?: boolean;
   /** 低于这个振幅视为无声，默认 0.05（见 SEGMENT_SILENCE）。 */
   silence?: number;
+  /** 句段时刻按录像时间线计（见 DecodeOptions.timeline）。 */
+  timeline?: boolean;
 }
 
 export async function analyzeSegments(
@@ -368,8 +386,10 @@ export async function analyzeSegments(
     lastEnd = end;
     current = undefined;
   };
+  const read = (onSamples: (samples: Float32Array) => void) =>
+    decode(file, onSamples, { timeline: options.timeline === true });
 
-  await decode(file, (samples) => {
+  await read((samples) => {
     for (const x of samples) {
       if (Math.abs(x) < silence) {
         silentRun += 1;
