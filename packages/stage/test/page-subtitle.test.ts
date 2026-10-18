@@ -93,7 +93,7 @@ test('映射整份更新：细化后变晚的字不收回；映射只覆盖一�
   assert.equal(s.text, '你好世界');
 });
 
-test('截断、令牌变化即清除；之后这一句的回报与映射都忽略', () => {
+test('截断、页面静音即清除；之后这一句的回报与映射都忽略', () => {
   const s = screen();
   s.subtitles.begin('a', '你好');
   s.subtitles.timing('a', [0, 100]);
@@ -112,7 +112,7 @@ test('截断、令牌变化即清除；之后这一句的回报与映射都忽�
   s.subtitles.clear();
   assert.deepEqual([s.text, s.hidden], ['', '']);
   s.subtitles.report({ kind: 'started', sentenceId: 'c' });
-  assert.equal(s.text, '', '令牌变化前排队的句子也作废');
+  assert.equal(s.text, '', '页面静音前排队的句子也作废');
   // 回报截断同样清除。
   s.subtitles.begin('d', '好');
   s.subtitles.report({ kind: 'started', sentenceId: 'd' });
@@ -330,7 +330,7 @@ test('呈现延迟：上一句的清除与下一句的开始按原来的先后�
   ]);
 });
 
-test('呈现延迟：截断、令牌变化与页面静音立即清除，丢掉推迟中的回报', () => {
+test('呈现延迟：截断、令牌变化时还在播放的句子与页面静音立即清除，丢掉推迟中的回报', () => {
   const { clock, subtitles, writes } = delayedScreen(100);
   subtitles.begin('a', '你好');
   subtitles.timing('a', [0, 50]);
@@ -345,14 +345,25 @@ test('呈现延迟：截断、令牌变化与页面静音立即清除，丢掉�
   clock.advance(1000);
   assert.equal(writes.length, 2, '推迟中的进度不再生效');
 
-  // 令牌变化（page.js 收到新令牌）与页面静音都走 clear()。
+  // 令牌变化（page.js 收到新令牌）：还在播放的句子逐句 forget，立即清除；已经播完、只差推迟清除的
+  // 句子照常到点清除（每段发言播完交还许可时令牌也会变）。
   subtitles.begin('b', '再见');
   subtitles.report({ kind: 'started', sentenceId: 'b' });
   clock.advance(150);
   subtitles.report({ kind: 'ended', sentenceId: 'b', played: 100 });
-  assert.deepEqual(writes.at(-1), [1225, '再见|']);
+  subtitles.begin('c', '下一句');
+  subtitles.forget('c');
+  assert.deepEqual(writes.at(-1), [1225, '再见|'], 'b 只差推迟的清除，不受影响');
+  clock.advance(100);
+  assert.deepEqual(writes.at(-1), [1375, '|']);
+  // 页面静音（clear）：连只差推迟清除的句子也立即清除。
+  subtitles.begin('d', '好');
+  subtitles.report({ kind: 'started', sentenceId: 'd' });
+  clock.advance(100);
+  subtitles.report({ kind: 'ended', sentenceId: 'd', played: 10 });
+  assert.deepEqual(writes.at(-1), [1475, '好|']);
   subtitles.clear();
-  assert.deepEqual(writes.at(-1), [1275, '|']);
+  assert.deepEqual(writes.at(-1), [1475, '|']);
   assert.equal(clock.pending, 0);
 });
 

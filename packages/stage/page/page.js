@@ -7,7 +7,7 @@
  * - 只播放带当前许可令牌的音频，令牌变化即丢弃旧缓冲；许可时长与心跳由 AudioWorklet 按渲染帧计时。
  * - 字幕按 AudioWorklet 回报的已播采样数与宿主送来的映射推进（subtitle.js），只用 textContent 渲染；
  *   未显示的字放在不可见的占位元素里，版面从一开始就固定；按宿主送来的呈现延迟推迟显示与播完后的清除，
- *   截断、令牌变化与页面静音时立即清除。
+ *   截断、页面静音以及令牌变化时还在播放的句子立即清除。
  */
 import { decodeAudio, Resampler } from './audio.js';
 import { latencyHintOf, latencyStats, statsEveryOf } from './diagnostics.js';
@@ -114,9 +114,11 @@ function receive(message) {
     case 'token':
       if (message.token !== leaseToken) {
         leaseToken = message.token;
-        // 旧令牌的句子作废：字幕立即清除，AudioWorklet 随后回报它们被截断。
+        // 旧令牌的句子作废：还在播放或排队的字幕立即清除，AudioWorklet 随后回报它们被截断。
+        // 已经播完的句子声音都已交给 OBS，只差推迟的呈现延迟，照常到点清除：每段发言播完、
+        // 许可交还时令牌也会变。
+        for (const id of playing.keys()) subtitles.forget(id);
         playing.clear();
-        subtitles.clear();
         toWorklet({ type: 'revoke' });
       }
       if (message.token !== null) toWorklet({ type: 'lease', ttlMs: message.ttlMs });
