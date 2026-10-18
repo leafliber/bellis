@@ -8,6 +8,7 @@ import pytest
 
 from bellis_sidecar.channel import b64url
 from bellis_sidecar.protocol import SidecarHealthResult
+from bellis_sidecar.qos import read_qos
 from bellis_sidecar.runtime import (
     ENV_CHANNEL_KEY,
     ENV_CHANNEL_PATH,
@@ -42,7 +43,8 @@ def test_answers_handshake_and_stops_on_shutdown():
                 'permissions': ['speech.output'],
             }
             health_reply = await host.request(2, 'sidecar.health')
-            assert health_reply['result'] == {'ok': True, 'detail': 'ready'}
+            # 节流状态由运行时补上，每次健康检查时读回。
+            assert health_reply['result'] == {'ok': True, 'detail': 'ready', 'qos': read_qos()}
             shutdown = await host.request(3, 'process.shutdown', {'reason': 'unload'})
             assert shutdown['result'] == {'accepted': True}
             assert await asyncio.wait_for(serving, 5) == 'shutdown'
@@ -58,7 +60,8 @@ def test_stops_when_the_host_disconnects():
                 serve_sidecar(SidecarOptions(provides=['tts@1']), env_for(path), lifeline=False)
             )
             host = await accepted.get()
-            assert (await host.request(1, 'sidecar.health'))['result'] == {'ok': True}
+            health = (await host.request(1, 'sidecar.health'))['result']
+            assert health == {'ok': True, 'qos': read_qos()}
             await host.close()
             assert await asyncio.wait_for(serving, 5) == 'closed'
 

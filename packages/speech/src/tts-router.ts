@@ -146,9 +146,9 @@ export const ttsRouter = definePlugin({
         const first = order.find((option) => option !== 'subtitles');
         if (first === undefined) return undefined;
         const found = engine(first);
-        return found
-          ? { engine: first, ready: found.ready, status: found.status }
-          : { engine: first, ready: false, status: '不在' };
+        if (!found) return { engine: first, ready: false, status: '不在' };
+        const qos = found.qos?.bind(found);
+        return { engine: first, ready: found.ready, status: found.status, ...(qos ? { qos } : {}) };
       },
     };
     ctx.provide(TtsService, tts);

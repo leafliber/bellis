@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -98,6 +99,14 @@ class ProcessShutdownResult(BaseModel):
 type Provide = Annotated[StrictStr, Field(pattern='^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*@[0-9]+$')]
 
 
+class Qos(StrEnum):
+    high = 'high'
+    eco = 'eco'
+    default = 'default'
+    unknown = 'unknown'
+    unsupported = 'unsupported'
+
+
 class RpcCancelParams(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -157,3 +166,4 @@ class SidecarHealthResult(BaseModel):
     )
     ok: StrictBool
     detail: Annotated[StrictStr | None, Field(max_length=200)] = None
+    qos: Qos | None = None

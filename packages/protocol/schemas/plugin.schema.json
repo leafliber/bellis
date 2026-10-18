@@ -342,6 +342,30 @@
         "detail": {
           "type": "string",
           "maxLength": 200
+        },
+        "qos": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "eco"
+            },
+            {
+              "type": "string",
+              "const": "default"
+            },
+            {
+              "type": "string",
+              "const": "unknown"
+            },
+            {
+              "type": "string",
+              "const": "unsupported"
+            }
+          ]
         }
       },
       "additionalProperties": false

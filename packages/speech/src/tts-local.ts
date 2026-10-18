@@ -4,6 +4,9 @@ import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { definePlugin, SidecarHostService, startSidecar } from '@bellis/kernel';
 import {
+  SidecarHealth,
+  SidecarHealthResult,
+  type SidecarQos,
   TTS_STREAM_HEADER_BYTES,
   TtsInfoResult,
   TtsMethod,
@@ -21,6 +24,7 @@ const isInfo = Compile(TtsInfoResult);
 const isStatus = Compile(TtsStatus);
 const isResult = Compile(TtsSynthesizeResult);
 const isWords = Compile(TtsWordsParams);
+const isHealth = Compile(SidecarHealthResult);
 const MAX_STREAM = 0xffff_ffff;
 
 /** 仓库根：sidecar 的源码与 uv 管理的虚拟环境都在这里。 */
@@ -254,6 +258,13 @@ function describe(status: TtsStatus): string {
   return status.detail ? `就绪（${status.detail}）` : '就绪';
 }
 
+/** 状态说明只在节流状态不是预期值时附上它：HighQoS 与非 Windows 不附。 */
+const QOS_NOTES: Partial<Record<SidecarQos, string>> = {
+  eco: 'sidecar 被系统节流（EcoQoS）',
+  default: 'sidecar 没有声明 HighQoS（节流由系统管理）',
+  unknown: '读不到 sidecar 的节流状态',
+};
+
 /**
  * 本地降级 TTS 的代理插件（R-10）：拉起 Python sidecar（`sidecars/tts_local`），
  * 把它的 `tts.synthesize`、二进制音频帧与字级时间戳适配成本地引擎 `tts.local@1`，由 `tts-router` 选用。
@@ -268,6 +279,8 @@ function describe(status: TtsStatus): string {
  * - 取消：调用方的中止信号或消费方停止读取都会中止请求，经 `rpc.cancel` 停止 sidecar 中的送出。
  * - sidecar 崩溃或连接断开：记入 `tts.degraded`，内核撤回 `tts.local@1`（路由跳过它，`tts@1` 不消失），
  *   按退避重启；模型就绪时记 `tts.started`。
+ * - 节流状态：sidecar 在 Windows 上启动时声明 HighQoS。激活时与每次 `qos()`（开播预检）经 `sidecar.health`
+ *   读回；不是 HighQoS（非 Windows 除外）时状态说明附上它。
  */
 export const localTts = definePlugin({
   manifest: {
@@ -371,12 +384,28 @@ export const localTts = definePlugin({
       entry.audio.push(pcm);
     });
 
+    /** 最近一次读回的节流状态；应答里没有 `qos` 或请求失败时为 `unknown`。 */
+    let qos: SidecarQos = 'unknown';
+    const readQos = async (): Promise<SidecarQos> => {
+      let next: SidecarQos = 'unknown';
+      try {
+        const health = await rpc.request(SidecarHealth);
+        if (isHealth.Check(health) && health.qos !== undefined) next = health.qos;
+      } finally {
+        qos = next;
+      }
+      return next;
+    };
+
     const info = await rpc.request(TtsMethod.Info);
     if (!isInfo.Check(info)) throw new Error('本地 TTS sidecar 的 tts.info 应答不合法');
+    // 读不到节流状态不影响激活：状态说明与开播预检会报告。
+    await readQos().catch(() => undefined);
     ctx.log('tts-local.ready', {
       pid: sidecar.pid,
       backend: info.backend,
       processes: info.processes,
+      qos,
     });
     update(info.status);
 
@@ -386,8 +415,10 @@ export const localTts = definePlugin({
         return status.state === 'ready' && !ctx.signal.aborted;
       },
       get status() {
-        return describe(status);
+        const note = QOS_NOTES[qos];
+        return note ? `${describe(status)}；${note}` : describe(status);
       },
+      qos: readQos,
       async synthesize(spoken, signal): Promise<Synthesis> {
         if (ctx.signal.aborted) throw new Error('本地 TTS 已停用');
         const sampleRate = status.sampleRate;

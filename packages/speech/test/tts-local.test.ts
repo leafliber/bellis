@@ -33,6 +33,7 @@ import {
   type Tts,
   type TtsEngine,
   type TtsOption,
+  type TtsRouting,
   TtsRoutingService,
   TtsService,
   ttsRouter,
@@ -77,6 +78,7 @@ function entry(id: string, plugin: string, config: unknown = {}): ResolvedEntry 
 interface Ready {
   pid: number;
   processes: number[];
+  qos: string;
 }
 
 /**
@@ -167,7 +169,7 @@ async function setup(fake: Record<string, unknown> = {}, order?: TtsOption[]) {
     transitions,
     logs,
     engine: () => resolve<TtsEngine>(LocalTtsService),
-    routing: () => resolve<{ primary(): unknown }>(TtsRoutingService),
+    routing: () => resolve<TtsRouting>(TtsRoutingService),
     state(id: string) {
       const found = host.snapshot().find((e) => e.id === id);
       if (!found) throw new Error(`没有条目 ${id}`);
@@ -366,12 +368,26 @@ test('模型加载失败：引擎报告原因并记入降级事件，路由的�
     const engine = s.engine() as TtsEngine;
     assert.equal(engine.ready, false);
     assert.equal(engine.status, '模型加载失败：显存不足');
-    assert.deepEqual(s.routing()?.primary(), {
-      engine: 'local',
-      ready: false,
-      status: '模型加载失败：显存不足',
-    });
+    const { qos, ...primary } = s.routing()?.primary() ?? {};
+    assert.deepEqual(primary, { engine: 'local', ready: false, status: '模型加载失败：显存不足' });
+    assert.equal(typeof qos, 'function');
     assert.equal(s.state('tts-local').state, 'active');
+  } finally {
+    await s.close();
+  }
+});
+
+test('节流状态：sidecar 在 Windows 上启动时声明 HighQoS，经健康检查读回，路由的主引擎带上读回函数', async () => {
+  const s = await setup({}, ['local', 'subtitles']);
+  try {
+    // Windows 上读回 HighQoS；其它平台没有这项设置。两者都不在状态说明里附注。
+    const expected = process.platform === 'win32' ? 'high' : 'unsupported';
+    assert.equal(s.ready()[0]?.qos, expected);
+    const engine = s.engine() as TtsEngine;
+    await waitUntil(() => engine.ready);
+    assert.equal(engine.status, '就绪');
+    assert.equal(await engine.qos?.(), expected);
+    assert.equal(await s.routing()?.primary()?.qos?.(), expected);
   } finally {
     await s.close();
   }

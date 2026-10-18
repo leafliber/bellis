@@ -9,8 +9,9 @@
  * 不用 shell；venv 的 python.exe 启动器再拉起真正的解释器），测量点与 S-07 一致，结果可以对照。
  *
  * 条件只作用于 sidecar 的这两个进程，用 SetProcessInformation(ProcessPowerThrottling)：
- *   default  不改设置。第一个 default 块之前从未设置过；之后的 default 块用 ControlMask=0、StateMask=0
- *            交还系统管理（文档中“让系统管理全部节流”的写法），两者分开汇总。
+ *   default  探针不改设置。第一个 default 块之前探针从未设置过（sidecar 在 Windows 上启动时自己声明 HighQoS，
+ *            读回照实记录）；之后的 default 块用 ControlMask=0、StateMask=0 交还系统管理（文档中
+ *            “让系统管理全部节流”的写法），两者分开汇总。
  *   eco      显式开启 EcoQoS：ControlMask=StateMask=PROCESS_POWER_THROTTLING_EXECUTION_SPEED。
  *   high     显式关闭（HighQoS）：ControlMask=EXECUTION_SPEED、StateMask=0。
  * 每轮把每种条件各测一遍固定短句（5 句），各轮的条件顺序轮换，以抵消温度与后台负载的漂移。
@@ -684,7 +685,9 @@ async function main(): Promise<void> {
   };
   console.log(`模型就绪 ${readyMs}ms；sidecar 进程 ${pids.join('、')}`);
   const pristine = await power.get(pids);
-  console.log('未设置时读回：', JSON.stringify(masks(pristine)));
+  // sidecar 经健康检查自报的节流状态（它在 Windows 上启动时声明 HighQoS）。
+  const healthQos = (await local.qos?.()) ?? null;
+  console.log('探针未设置时读回：', JSON.stringify(masks(pristine)), '健康检查：', healthQos);
 
   const measure = async (text: string): Promise<Sample> => {
     const before = await power.get(pids);
@@ -773,9 +776,11 @@ async function main(): Promise<void> {
       const applied = readBack.every(
         (s) => s.ok && s.controlMask === expected.control && s.stateMask === expected.state,
       );
-      if (!applied) throw new Error(`读回与设置不符：${JSON.stringify(readBack)}`);
+      // 从未设置的块不核对：sidecar 自己可能已声明 HighQoS，读回值照实记录。
+      if (!pristineBlock && !applied)
+        throw new Error(`读回与设置不符：${JSON.stringify(readBack)}`);
       console.log(
-        `第 ${r + 1} 轮 ${condition}${pristineBlock ? '（从未设置）' : ''}：读回 ${JSON.stringify(masks(readBack))}，背景 CPU ${backgroundCpuPercent}%`,
+        `第 ${r + 1} 轮 ${condition}${pristineBlock ? '（探针未设置）' : ''}：读回 ${JSON.stringify(masks(readBack))}，背景 CPU ${backgroundCpuPercent}%`,
       );
       const samples: Sample[] = [];
       for (const text of SENTENCES) {
@@ -866,6 +871,7 @@ async function main(): Promise<void> {
         probeThrottling: probeState,
         helperPid: power.pid,
         pristineThrottling: pristine,
+        healthQos,
         loadBefore,
         loadAfter,
         gpuIdleBefore,
