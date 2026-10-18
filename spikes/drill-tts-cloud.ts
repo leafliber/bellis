@@ -244,7 +244,6 @@ async function main(): Promise<void> {
       atMs: FIRST_AT_MS + i * everyMs,
       text: TEXTS[i % TEXTS.length] as string,
     }));
-    const byId = (id: string) => announcements.find((a) => `scheduled:${a.id}` === id);
     const cloudConfig = {
       primary,
       fallback: [fallback],
@@ -340,7 +339,6 @@ async function main(): Promise<void> {
       60_000,
     );
     const scheduleStart = at(scheduleActive);
-    const dueOf = (id: string) => scheduleStart + (byId(id)?.atMs ?? Number.NaN);
     await call(OperatorMethod.Presence);
     const seen: string[][] = [];
     const deadline = Date.now() + 60_000;
@@ -457,8 +455,6 @@ async function main(): Promise<void> {
         voiced.map((s) => s.dueToFirstSoundMs as number).filter((v) => typeof v === 'number'),
       ),
     };
-    void byId;
-    void dueOf;
     operator.connection.close();
   } finally {
     setFaults([]);
