@@ -2,10 +2,16 @@ import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
 import { producesOutput, SafetyService } from '@bellis/safety';
 import Type from 'typebox';
 import { EnvelopeBuilder } from './envelope.ts';
-import { isPageTiming, type PageTiming } from './page-wire.ts';
+import {
+  isPagePresentation,
+  isPageTiming,
+  type PagePresentation,
+  type PageTiming,
+} from './page-wire.ts';
 import {
   type FromPage,
   type PlaybackResult,
+  type Presentation,
   STAGE_AUDIO,
   type Stage,
   StagePageService,
@@ -53,6 +59,7 @@ const sameStarts = (a: readonly number[], b: readonly number[]) =>
  * 只发给令牌有效、还在 Stage 上且没有被要求截断的句子（字幕规则见 Stage 文档的“字幕”）。
  * 页面回报的欠载与静音即时记入日志；每句结束时记一条摘要（实际播出的采样数、欠载次数、游标回报的
  * 次数、首末两次游标与最大间隔），游标本身不逐条记录。
+ * 呈现延迟（Stage 文档“对齐”）由估计插件写进来，校验后在变化时与每句开始前发给页面；没有估计插件时为 0。
  */
 export const stageService = definePlugin({
   manifest: {
@@ -79,6 +86,11 @@ export const stageService = definePlugin({
     const playing = new Map<string, Playing>();
     let lastAck = clock.now();
     let timer: TimerHandle | undefined;
+    let presentation: Presentation = { delayMs: 0, samples: 0, source: 'none' };
+    const sendPresentation = () => {
+      const message: PagePresentation = { kind: 'presentation', delayMs: presentation.delayMs };
+      page.send(message);
+    };
 
     const finish = (sentenceId: string, result: PlaybackResult) => {
       const entry = playing.get(sentenceId);
@@ -250,6 +262,8 @@ export const stageService = definePlugin({
             },
           });
         });
+        // 页面可能刚重连（重连后的页面不知道呈现延迟）：每句开始前都带上。
+        if (presentation.source !== 'none') sendPresentation();
         page.send({
           kind: 'begin',
           sentenceId: sentence.id,
@@ -339,6 +353,24 @@ export const stageService = definePlugin({
       },
       envelope(sentenceId) {
         return playing.get(sentenceId)?.envelope;
+      },
+      get presentation() {
+        return presentation;
+      },
+      setPresentation(next) {
+        const { delayMs, samples, source } = next;
+        if (
+          !isPagePresentation.Check({ kind: 'presentation', delayMs }) ||
+          !Number.isInteger(samples) ||
+          samples < 0 ||
+          !['none', 'initial', 'meters', 'held'].includes(source)
+        ) {
+          ctx.log('stage.presentation-invalid', { delayMs, samples, source });
+          return;
+        }
+        const changed = delayMs !== presentation.delayMs;
+        presentation = { delayMs, samples, source };
+        if (changed) sendPresentation();
       },
     };
     ctx.provide(StageService, stage);

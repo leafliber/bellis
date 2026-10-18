@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { connect, decodeSessionKey, RpcPeer } from '@bellis/channel';
 import { SIM_OBS_SECRET, writeObsSecret } from '@bellis/config';
-import { SimObs } from '@bellis/obs';
+import { INPUT_VOLUME_METERS, SimObs } from '@bellis/obs';
 import { OperatorMethod, Role } from '@bellis/protocol';
 import { KeyringSecretStore, readSessionInfo } from '@bellis/secret-store';
 import { launch } from '../src/launch.ts';
@@ -267,6 +267,41 @@ test('操作员切到 M0 后，录制弹幕经全模拟链路得到回应', asyn
       15_000,
     );
     assert.equal((fact.data as { heard: string }).heard, '你好，欢迎。');
+    connection.close();
+  } finally {
+    await s.session.stop();
+    await s.cleanup();
+  }
+});
+
+test('呈现延迟：宿主另开只订阅音量表的连接交给被授予 obs.meters 的 stage-sync，操作员状态里能看到 D 与样本数', async () => {
+  const s = await start({
+    moderationDisabled: false,
+    extra: [
+      { id: 'sync', plugin: 'stage-sync', grant: ['obs.meters'] },
+      { id: 'sync-ungranted', plugin: 'stage-sync' },
+    ],
+  });
+  try {
+    await s.host.wait('host.ready');
+    await s.host.waitFor((line) => line.event === 'stage-sync.meters-connected', 5000);
+    // 安全核的应急连接与 OBS 控制的连接都不订阅事件；音量表连接只订阅 InputVolumeMeters。
+    assert.deepEqual(
+      s.obs.subscriptions.filter((bits) => bits !== 0),
+      [INPUT_VOLUME_METERS],
+    );
+    const connection = await connect(s.session.info.channelPath, Role.Operator, {
+      key: decodeSessionKey(s.session.info.channelKey),
+    });
+    const operator = new RpcPeer(connection, { timeoutMs: 5000 });
+    const status = (await operator.request(OperatorMethod.Status)) as {
+      presentation: unknown;
+      plugins: Array<{ id: string; state: string; reason: string | null }>;
+    };
+    assert.deepEqual(status.presentation, { delayMs: 82, samples: 0, source: 'initial' });
+    const ungranted = status.plugins.find((plugin) => plugin.id === 'sync-ungranted');
+    assert.equal(ungranted?.state, 'waiting');
+    assert.match(String(ungranted?.reason), /未授予权限 obs\.meters/);
     connection.close();
   } finally {
     await s.session.stop();

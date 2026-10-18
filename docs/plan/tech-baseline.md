@@ -57,7 +57,7 @@
 | R-06 | 子进程寿命 | 停止顺序：RPC shutdown → 关闭 stdin（子进程读到 EOF 后自退）→ 超时 kill。直接子进程由 Node 自带的 Job 保证父进程退出即终止；sidecar 用 Job Object 管住自己派生的孙进程 | 2026-10-14 |
 | R-07 | 确定性仿真 | 自研：时钟、随机数、传输与外部服务都作为插件服务，`sim` profile 用种子驱动调度；用 fast-check 生成与收缩失败轨迹，失败以“种子 + 提交”复现 | 2026-10-14 |
 | R-08 | Stage 连接与认证 | 宿主用 `node:http` 只在 `127.0.0.1` 上提供页面（每次会话随机端口），WebSocket 服务端用 `ws`（`noServer`，在升级阶段认证）；每个请求与升级都要求 Host 与本端地址严格相等，Origin 也须严格相等，唯一例外是页面文档的顶层导航（浏览器不为它带 Origin，S-01 确认），它只在 Sec-Fetch-Mode 为 navigate 且 Sec-Fetch-Dest 为 document 时放行；每次会话生成 128 位一次性令牌，经 obs-websocket 写进浏览器源 URL 的片段，页面以首条消息出示后换成只存于内存的会话密钥；同时只允许一个已认证会话 | 2026-10-16 |
-| R-09 | Stage 音频路由 | OBS 浏览器源开启“Control audio via OBS”，页面用 AudioWorklet 播放；不用虚拟声卡或 sidecar 直接出声。长时间最小化或遮挡下的表现以探针 S-01 为准 | 2026-10-15 |
+| R-09 | Stage 音频路由 | OBS 浏览器源开启“Control audio via OBS”，页面用 AudioWorklet 播放；不用虚拟声卡或 sidecar 直接出声。长时间最小化或遮挡下的表现以探针 S-01 为准。2026-10-18 批准：页面的 AudioContext 用 `interactive` 的 latencyHint，`playback` 留作退路；字幕与口型按 OBS 音量表实测的呈现延迟推迟（见 [Stage](../modules/stage.md#对齐)） | 2026-10-15 |
 | R-10 | TTS 引擎 | 云端优先：自写不绑定厂商的 TTS 插件，接 MiniMax 与火山引擎的双向流式接口（中途取消、字/词级时间戳），主备由探针 S-07 定；外发须在 profile 中按厂商显式开启；2026-10-17 维护者决定不再要求厂商的算法备案编号。本地 Qwen3-TTS 作降级，以 sidecar 接入。2026-10-17 批准：各引擎由 TTS 路由按 profile 配置的顺序选用，只出字幕也由路由提供；云端 TTS 等需要带请求头、读取握手 HTTP 状态码或发 ping 的 WebSocket 客户端用 `ws`（R-08 中的 `ws` 用于服务端）；2026-10-17 批准：对端与 Node 自带客户端不兼容时也用 `ws`，例如 VTube Studio（见 [Stage](../modules/stage.md#形象)） | 2026-10-15 |
 | R-11 | 字幕时间对齐 | 两段式：句段一到即按字数（标点处加权）线性铺开，字幕立即可用；随后用 TTS 返回的时间戳细化，本地 TTS 用 Qwen3-ForcedAligner 对齐，对不齐的片段保留插值。结束时刻不晚于播放游标的字算已播出 | 2026-10-15 |
 | R-14 | 外部看门狗 | 独立 Node 小进程；宿主心跳丢失时经 obs-websocket 5 用一次 RequestBatch 静音 Stage 源、切安全场景（按策略决定是否停流），然后呼叫操作员；P0 对接模拟 OBS | 2026-10-14 |

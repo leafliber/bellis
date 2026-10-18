@@ -8,6 +8,8 @@
 - 它也不把停止条件传给生成循环：取消时立即停止送出音频，但 GPU 上的这一句会生成完，
   下一句等它结束。
 - 注意力用 PyTorch SDPA，不用 FlashAttention（R-24）。生成与对齐共用一把锁，同一时刻只有一个用 GPU。
+- 整句生成后先修剪句首句尾近乎无声的部分（见 `trim`），再送出与对齐：
+  送出的、对齐的与应答里的总采样数都是修剪后的，时间戳相对修剪后的开头。
 """
 
 from __future__ import annotations
@@ -16,12 +18,13 @@ import asyncio
 import importlib
 import threading
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from bellis_sidecar.runtime import run_blocking
 
 from .backend import Loaded, Stamp
+from .trim import TrimConfig, trim_silence
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,8 @@ class QwenConfig:
     dtype: str = 'bfloat16'
     #: 送出音频的块长。
     chunk_ms: int = 100
+    #: 修剪句首句尾近乎无声的部分；None 表示不修剪。
+    trim: TrimConfig | None = field(default_factory=TrimConfig)
 
 
 def _module(name: str) -> Any:
@@ -108,7 +113,9 @@ class QwenBackend:
                 text=text, speaker=self.config.speaker, language=self.config.language
             )
         wav = np.clip(np.asarray(wavs[0], dtype=np.float32), -1.0, 1.0)
-        return bytes((np.round(wav * 32767)).astype('<i2').tobytes())
+        pcm = bytes((np.round(wav * 32767)).astype('<i2').tobytes())
+        trim = self.config.trim
+        return pcm if trim is None else trim_silence(pcm, self._sample_rate, trim)
 
     async def synthesize(self, text: str) -> AsyncGenerator[bytes]:
         if self._tts is None:

@@ -127,6 +127,11 @@ WAITING ──依赖齐全──► LOADING ──► ACTIVE ──停用或依�
 
 插件需要凭据（云端 TTS 的密钥、VTube Studio 的插件令牌）时，经宿主按实例提供的凭据服务（`secrets@1`）读写 SecretStore，只能访问 profile 授予它的条目，权限写成 `secret:<名字>`。会话连接信息与 OBS 凭据由宿主管理，授予了也拿不到。凭据的值不写日志、不进事件；处理观众输入的插件不授予任何凭据（Rule of Two，见[安全核](safety-core.md#执行闸门)）。
 
+宿主提供的 OBS 连接也按权限交出，凭据都留在宿主：
+
+- `obs.control`：OBS 控制的连接（见 [Stage](stage.md#obs-控制)）。
+- `obs.meters`：只读的音量表连接，只订阅 InputVolumeMeters，只能读输入的音频同步偏移，发不出控制请求（见 [Stage](stage.md#对齐)）。它改变不了 OBS，不是对外动作，不经执行闸门；也不是 Rule of Two 所说的 OBS 管理能力，安全核的禁止能力清单不变。
+
 ## 验收（P0）
 
 - 依赖消失时，消费方经过 QUIESCING 回到 WAITING；依赖恢复后重新激活。

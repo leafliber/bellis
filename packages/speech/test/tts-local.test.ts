@@ -442,3 +442,16 @@ test('qwen3 后端须选定音色；按平台定位 uv 工作区虚拟环境里�
   assert.match(venvPython('root', 'win32'), /\.venv[\\/]Scripts[\\/]python\.exe$/);
   assert.match(venvPython('root', 'linux'), /\.venv[\\/]bin[\\/]python$/);
 });
+
+test('qwen3 后端缺省修剪句首句尾静音，门限与余量传给 sidecar；可以关掉', () => {
+  const config = Value.Default(LocalTtsConfig, {
+    backend: 'qwen3',
+    qwen3: { speaker: 'vivian' },
+  }) as LocalTtsConfig;
+  const args = sidecarArgs(config) as string[];
+  assert.ok(args.includes('--trim-threshold-dbfs=-55'));
+  assert.equal(args[args.indexOf('--trim-margin-ms') + 1], '30');
+  assert.ok(!args.includes('--no-trim'));
+  const off = sidecarArgs({ ...config, qwen3: { ...config.qwen3, trimSilence: false } });
+  assert.ok((off as string[]).includes('--no-trim'));
+});

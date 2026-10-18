@@ -11,7 +11,14 @@ import {
 import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
 import Type from 'typebox';
-import { type FromPage, StagePageService, stageService, type ToPage } from '../src/index.ts';
+import {
+  type FromPage,
+  type Stage,
+  StagePageService,
+  StageService,
+  stageService,
+  type ToPage,
+} from '../src/index.ts';
 
 /**
  * 可控时钟：advance 按到期时刻准点触发定时器；jump 让时间一下跳过去，期间到期的定时器都在跳到的那一刻
@@ -86,7 +93,7 @@ async function setup() {
     watchdogConnected: () => true,
   });
   // 已认证的页面：收到心跳即应答（answering 关掉时不应答）。
-  const page = { answering: true, heartbeats: [] as number[] };
+  const page = { answering: true, heartbeats: [] as number[], sent: [] as ToPage[] };
   const listeners = new Set<(message: FromPage) => void>();
   const fakePage = definePlugin({
     manifest: {
@@ -103,7 +110,10 @@ async function setup() {
       ctx.provide(StagePageService, {
         ready: true,
         send(message: ToPage) {
-          if (message.kind !== 'heartbeat') return;
+          if (message.kind !== 'heartbeat') {
+            page.sent.push(message);
+            return;
+          }
           page.heartbeats.push(clock.now());
           if (page.answering) for (const listener of listeners) listener({ kind: 'heartbeat-ack' });
         },
@@ -135,6 +145,11 @@ async function setup() {
     clock,
     page,
     logs,
+    stage: () => {
+      const found = active.services.resolve(StageService.name, StageService.major);
+      if ('missing' in found) throw new Error(found.missing);
+      return found.impl as Stage;
+    },
     failures: () => logs.filter((l) => l.event === 'plugin.failed' && l.fields.entry === 'stage'),
     late: () => logs.filter((l) => l.event === 'stage.heartbeat-late'),
     async close() {
@@ -197,6 +212,34 @@ test('卡住期间页面也真的停了：恢复后重新计时，再过一个�
     assert.equal(failure?.fields.error, 'Stage 页面无响应');
     const after = (failure?.at ?? 0) - resumedAt;
     assert.ok(after > 1000 && after <= 1250, `恢复后 ${after}ms 判失败`);
+  } finally {
+    await s.close();
+  }
+});
+
+test('呈现延迟：缺省 0；变化时按线上格式发给页面，不变不重发；不合格的忽略并记日志', async () => {
+  const s = await setup();
+  try {
+    const stage = s.stage();
+    assert.deepEqual(stage.presentation, { delayMs: 0, samples: 0, source: 'none' });
+    const presentations = () => s.page.sent.filter((m) => m.kind === 'presentation');
+    stage.setPresentation({ delayMs: 82, samples: 0, source: 'initial' });
+    stage.setPresentation({ delayMs: 82, samples: 5, source: 'meters' });
+    assert.deepEqual(stage.presentation, { delayMs: 82, samples: 5, source: 'meters' });
+    assert.deepEqual(presentations(), [{ kind: 'presentation', delayMs: 82 }]);
+    for (const bad of [
+      { delayMs: 301, samples: 0, source: 'meters' },
+      { delayMs: 80.5, samples: 0, source: 'meters' },
+      { delayMs: -1, samples: 0, source: 'meters' },
+      { delayMs: 90, samples: -1, source: 'meters' },
+      { delayMs: 90, samples: 0, source: 'guess' },
+    ] as const) {
+      stage.setPresentation(bad as unknown as Parameters<Stage['setPresentation']>[0]);
+    }
+    assert.equal(s.logs.filter((l) => l.event === 'stage.presentation-invalid').length, 5);
+    assert.deepEqual(stage.presentation, { delayMs: 82, samples: 5, source: 'meters' });
+    stage.setPresentation({ delayMs: 0, samples: 0, source: 'none' });
+    assert.deepEqual(presentations().at(-1), { kind: 'presentation', delayMs: 0 });
   } finally {
     await s.close();
   }

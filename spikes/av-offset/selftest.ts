@@ -7,11 +7,11 @@
  * 的几何由 layout.ts 按 stage.css 算出，与演练用的是同一段代码），形象占满画面。合成的内容：
  *   - 音频：与模拟 TTS 一样的 440Hz、振幅 0.2 测试音，按句出声，每字 0.15 秒；静默超过 1.5 秒的句前有
  *     150ms、-50dBFS 的 20Hz 唤醒信号。语音变体改用 220Hz 载波乘音节状的包络（约 4.2 个音节每秒）。
- *   - 字幕：逐字推进。第 k 个字（白块，带黑边，居中，宽度随字数增长）在 出声 + Δ字幕 + k·每字秒数·速率
+ *   - 字幕：逐字推进。第 k 个字（白块带黑边；与页面一样占位固定：整句按字数居中排好，字在自己的格子里出现）在 出声 + Δ字幕 + k·每字秒数·速率
  *     出现，句尾加 Δ字幕（再加 ±30ms）后清除。Δ字幕 在 -200…+80ms，速率在 0.98–1.02（推进比声音快或慢）。
  *     语音变体的字均匀铺在句内，每字至少 0.1 秒。
  *   - 遮挡变体：后一半的句子，字幕行中间 ±1.7 个字宽被一块不透明的“形象”盖住（画在字幕之上），
- *     头 3 个字的出现与 3 个字以内的整句都看不到。
+ *     格子落在遮挡块里的字看不到，3 个字以内的整句全看不到。
  *   - 嘴：脸上一小块，测试音变体在句首、句尾各加 Δ嘴 后张开、闭合（阶跃）；语音变体的张开程度按形象插件的
  *     映射跟随包络，整体偏移 Δ嘴。Δ嘴 在 -200…+200ms。
  *   - 干扰：全画面时变噪声、周期眨眼、来回移动的彩色块，都与音频无关。
@@ -243,13 +243,17 @@ const LINE: SubtitleLine = lineToVideo(
   VIDEO,
 );
 
-/** n 个字时画出的白块（录像像素，不含黑边）。 */
-function textBox(n: number): Rect {
-  const width = Math.round(Math.min(LINE.maxWidth, n * LINE.charWidth));
+/**
+ * 一句 chars 个字里第 k 个字画出的白块（录像像素，不含黑边）。与页面一样占位固定：整句按全部字数居中
+ * 排好，第 k 个字在自己的格子里出现，已有的字不移动。白块比格子左右各窄 3 像素，像一个个分开的字。
+ */
+function charBox(chars: number, k: number): Rect {
+  const width = Math.min(LINE.maxWidth, chars * LINE.charWidth);
+  const left = LINE.centerX - width / 2 + k * LINE.charWidth;
   return {
-    x: Math.round(LINE.centerX - width / 2),
+    x: Math.round(left + 3),
     y: Math.round(LINE.top + (LINE.height - LINE.charWidth) / 2),
-    w: width,
+    w: Math.round(LINE.charWidth - 6),
     h: Math.round(LINE.charWidth),
   };
 }
@@ -268,12 +272,26 @@ function occluderBox(): Rect {
   };
 }
 
-/** 被遮挡时第 k 个字的出现（或 k = chars 时的清除）是否看得到：新增或去掉的边条伸出遮挡块至少 2 像素。 */
-function visibleChange(n: number, occluded: boolean): boolean {
-  if (!occluded) return true;
-  const box = textBox(n);
+/** 被遮挡时第 k 个字是否看得到：它的白块连同黑边伸出遮挡块至少 2 像素。 */
+function charVisible(chars: number, k: number, occluded: boolean): 'yes' | 'no' | 'partial' {
+  if (!occluded) return 'yes';
+  const box = charBox(chars, k);
   const occ = occluderBox();
-  return box.x - SHADOW <= occ.x - 2 || box.x + box.w + SHADOW >= occ.x + occ.w + 2;
+  const left = box.x - SHADOW;
+  const right = box.x + box.w + SHADOW;
+  const covered = Math.max(0, Math.min(right, occ.x + occ.w) - Math.max(left, occ.x));
+  const shown = 1 - covered / (right - left);
+  // 只露出一条边的字算不清（分析器按加字典型大小的 8% 过滤，露出的部分越小越难测出），自检不判它看得到与否。
+  if (shown >= 0.5) return 'yes';
+  if (shown <= 0.1) return 'no';
+  return 'partial';
+}
+
+/** 清除看得到：至少有一个字看得到。 */
+function clearVisible(chars: number, occluded: boolean): boolean {
+  return Array.from({ length: chars }, (_, k) => charVisible(chars, k, occluded)).some(
+    (v) => v === 'yes',
+  );
 }
 
 function filterScript(variant: Variant, sentences: Sentence[], withAudio: boolean): string {
@@ -282,11 +300,9 @@ function filterScript(variant: Variant, sentences: Sentence[], withAudio: boolea
   const boxes: string[] = [];
   if (variant.kind !== 'none') {
     for (const s of sentences) {
-      for (let n = 1; n <= s.chars; n++) {
-        const from = s.shows[n - 1] ?? 0;
-        const to = n < s.chars ? (s.shows[n] ?? 0) : s.clear;
-        const r = textBox(n);
-        const enable = `enable='gte(t,${n6(from)})*lt(t,${n6(to)})'`;
+      for (let k = 0; k < s.chars; k++) {
+        const r = charBox(s.chars, k);
+        const enable = `enable='gte(t,${n6(s.shows[k] ?? 0)})*lt(t,${n6(s.clear)})'`;
         boxes.push(
           `drawbox=x=${r.x - SHADOW}:y=${r.y - SHADOW}:w=${r.w + 2 * SHADOW}:h=${r.h + 2 * SHADOW}:color=black:t=fill:${enable}`,
           `drawbox=x=${r.x}:y=${r.y}:w=${r.w}:h=${r.h}:color=white:t=fill:${enable}`,
@@ -389,6 +405,8 @@ interface Item {
   truth: number | null;
   /** 名义偏差（未量化）。 */
   nominal: number | null;
+  /** 只露出一条边的字：报为看不到也可以，测到时须与真值一致。 */
+  optional?: boolean;
 }
 
 interface Check {
@@ -400,6 +418,7 @@ interface Check {
   maxErrorVsFrameTruthMs: number | null;
   /** 与名义偏差之差的范围（毫秒）。 */
   errorVsNominalMs: [number, number] | null;
+  worst?: Array<{ i: number; measured: number | null; truth: number | null }>;
   pass: boolean;
 }
 
@@ -417,6 +436,7 @@ function check(
       continue;
     }
     if (item.measured === null) {
+      if (item.optional) continue;
       ok = false;
       continue;
     }
@@ -448,6 +468,16 @@ function check(
     },
     maxErrorVsFrameTruthMs: maxError === null ? null : r1(maxError),
     errorVsNominalMs: range ? [r1(range[0]), r1(range[1])] : null,
+    /** 与真值相差最大的几项（下标、测得、真值），排查用。 */
+    worst: items
+      .map((item, i) => ({ i, measured: item.measured, truth: item.truth }))
+      .filter((x) => x.measured !== null && x.truth !== null)
+      .sort(
+        (a, b) =>
+          Math.abs((b.measured as number) - (b.truth as number)) -
+          Math.abs((a.measured as number) - (a.truth as number)),
+      )
+      .slice(0, 3),
     pass: ok,
   };
 }
@@ -505,37 +535,32 @@ function checks(variant: Variant, sentences: Sentence[], result: Analysis): Chec
     const rateItems: Item[] = [];
     for (const { truth, got } of pairs) {
       const sound = (k: number) => truth.onset + k * SECONDS_PER_CHAR;
-      const visible = (k: number) => visibleChange(k + 1, truth.occluded);
+      const visible = (k: number) => charVisible(truth.chars, k, truth.occluded);
       const charTruth = truth.shows.map((show, k) =>
-        visible(k) ? ms(frameAt(show, fps) - sound(k)) : null,
+        visible(k) === 'no' ? null : ms(frameAt(show, fps) - sound(k)),
       );
       const charNominal = truth.shows.map((show, k) => ms(show - sound(k)));
       const offsets = got?.subtitle?.charOffsetsMs ?? [];
+      const item = (k: number, measured: number | null): Item => ({
+        measured,
+        truth: charTruth[k] ?? null,
+        nominal: charNominal[k] ?? null,
+        optional: visible(k) === 'partial',
+      });
       truth.shows.forEach((_, k) => {
-        charItems.push({
-          measured: offsets[k] ?? null,
-          truth: charTruth[k] ?? null,
-          nominal: charNominal[k] ?? null,
-        });
+        charItems.push(item(k, offsets[k] ?? null));
       });
-      firstItems.push({
-        measured: got?.subtitle?.firstCharMs ?? null,
-        truth: charTruth[0] ?? null,
-        nominal: charNominal[0] ?? null,
-      });
-      lastItems.push({
-        measured: got?.subtitle?.lastCharMs ?? null,
-        truth: charTruth[truth.chars - 1] ?? null,
-        nominal: charNominal[truth.chars - 1] ?? null,
-      });
-      const clearVisible = visibleChange(truth.chars, truth.occluded);
+      firstItems.push(item(0, got?.subtitle?.firstCharMs ?? null));
+      lastItems.push(item(truth.chars - 1, got?.subtitle?.lastCharMs ?? null));
+      const clearSeen = clearVisible(truth.chars, truth.occluded);
       clearItems.push({
         measured: got?.subtitle?.clearedMs ?? null,
-        truth: clearVisible ? ms(frameAt(truth.clear, fps) - truth.end) : null,
+        truth: clearSeen ? ms(frameAt(truth.clear, fps) - truth.end) : null,
         nominal: ms(truth.clear - truth.end),
       });
+      // 回归用分析器实际配上的字（只露一条边的字可能没测出）。
       const points = truth.shows.flatMap((show, k) =>
-        visible(k) ? [[sound(k), frameAt(show, fps)] as const] : [],
+        visible(k) !== 'no' && offsets[k] != null ? [[sound(k), frameAt(show, fps)] as const] : [],
       );
       const expectedSlope = slopePercent(points);
       rateItems.push({

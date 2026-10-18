@@ -16,6 +16,7 @@ import {
   type Envelope,
   type FromPage,
   type PlaybackResult,
+  type Presentation,
   type Stage,
   StageService,
 } from '@bellis/stage';
@@ -27,6 +28,11 @@ import { type Avatar, AvatarService, VTS_SECRET, vtsAvatar } from '../src/index.
 export class FakeStage implements Stage {
   readonly ready = true;
   readonly envelopes = new Map<string, Envelope>();
+  presentation: Presentation = { delayMs: 0, samples: 0, source: 'none' };
+
+  setPresentation(presentation: Presentation): void {
+    this.presentation = presentation;
+  }
   readonly #listeners = new Set<(event: FromPage) => void>();
 
   async play(): Promise<PlaybackResult> {

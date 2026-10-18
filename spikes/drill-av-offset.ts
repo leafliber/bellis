@@ -3,12 +3,24 @@
  *
  *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 [--safe-scene Safe]
  *        [--sessions tone,speech] [--tone-seconds 100] [--speech-sentences 10] [--speaker vivian]
- *        [--speech-backend qwen3|fake] [--fps 60] [--out 结果文件前缀]
+ *        [--speech-backend qwen3|fake] [--fps 60] [--repeat N] [--recordings M]
+ *        [--latency-hint interactive|playback] [--stats-ms 500] [--sync-offset-ms=-80] [--stage-sync]
+ *        [--k-sub-ms N] [--k-mouth-ms N] [--avatar-hz 30|60] [--out 结果文件前缀]
  *   node spikes/drill-av-offset.ts --stage-source 名字 --avatar-source 名字 --preview [--out 前缀]
  *   node spikes/drill-av-offset.ts --reanalyze 结果文件前缀
  *
  * --preview 只读：盘点布局与来源设置，截取节目场景与形象源的画面（<前缀>-preview-*.png），不改 OBS、不拉起宿主，
  * 用来在录制前核对嘴部大小、透明背景与 VTS 设置面板是否关闭。
+ *
+ * 音画对齐的实验：--repeat 每种会话拉起几次宿主（每次页面重新加载、新的 AudioContext），--recordings 每次
+ * 宿主会话录几段（每段 OBS 重新开始录制）；--latency-hint、--stats-ms 打开页面的诊断（stage-page-obs 的
+ * latencyHint、statsEveryMs），每段给出浏览器自报的输出时延（stage-page.stats）、OBS 音量表看到出声相对页面
+ * 开始播的时长，以及测试音录像的连续性（同 S-01：相位跳变、音高、尖峰、时长不符）。--sync-offset-ms 临时改
+ * Stage 源的音频同步偏移（负值让声音提前），结束时改回并读回核对。
+ *
+ * 对齐（Stage 文档“对齐”）：--stage-sync 加上呈现延迟的估计插件，每段给出录制开始与结束时的呈现延迟、窗内的
+ * 变化与每句的音量表样本，录像量出的就是补偿后的剩余偏差；--k-sub-ms、--k-mouth-ms、--avatar-hz 临时改两个
+ * 标定常数与口型的注入频率，用来重标。
  *
  * 前提：VTS 已开插件 API 并载入模型，形象插件「Bellis」的令牌已在 SecretStore（服务名 bellis）的 vts 条目里；
  * OBS 的直播场景里有 Stage 浏览器源与采集 VTS 的游戏采集源，安全场景里没有它们。语音会话还要求本 worktree
@@ -33,7 +45,15 @@
  * 结束时恢复浏览器源设置（含 URL）、节目场景、静音与帧率，并读回比对（含场景项顺序）。录制文件留在 OBS 的录制目录。
  * 结果写 <前缀>.json，各会话的宿主日志写 <前缀>-<会话>.jsonl，定位图写 <前缀>-debug/。
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -62,6 +82,8 @@ import {
 } from './av-offset/layout.ts';
 import { waitForNoOtherBellis } from './bellis-processes.ts';
 import { differences, type ObsSnapshot, restoreSnapshot, snapshot } from './obs-snapshot.ts';
+import { analyzeSegments } from './s01-stage/analyze-recording.ts';
+import { type MeterReading, ObsMeters } from './s01-stage/meters.ts';
 
 const file = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 const hostMain = file('../packages/host/src/main.ts');
@@ -92,6 +114,8 @@ const SPEECH_FIRST_AT_MS = 20_000;
 const MAX_SENTENCES_PER_MINUTE = 27;
 /** 字幕带四周再排除这么多画布像素，找嘴部时不碰字幕。 */
 const EXCLUDE_MARGIN = 12;
+/** 音量表峰值高于它算出声：测试音约 -14dBFS，唤醒信号 -50dBFS。 */
+const METER_ONSET_DB = -30;
 
 type Kind = 'tone' | 'speech';
 type LogLine = { t: string; event: string; [field: string]: unknown };
@@ -311,10 +335,15 @@ function runLines(lines: LogLine[]): LogLine[] {
   return from < 0 ? [] : lines.slice(from);
 }
 
-/** 页面侧的摘要：Stage 服务记下的每句回报、欠载、发言结果与 TTS 切换。 */
-function pageSide(lines: LogLine[]) {
-  const run = runLines(lines);
-  const sentences = run.filter((l) => l.event === 'stage.sentence');
+/**
+ * 页面侧的摘要：Stage 服务记下的每句回报、欠载、发言结果与 TTS 切换。给出录制的时间窗时只算窗内的，
+ * 句子须在窗内开始并结束（与录像里完整的句段对应）。
+ */
+function pageSide(lines: LogLine[], window?: Window) {
+  const run = runLines(lines).filter((l) => inWindow(l, window));
+  const sentences = run.filter(
+    (l) => l.event === 'stage.sentence' && (!window || sentenceStart(l) >= window.start),
+  );
   const ends: Record<string, number> = {};
   for (const l of run.filter(fact('utterance.played'))) {
     const end = (l.data as { end: string }).end;
@@ -374,15 +403,157 @@ function spanOf(analysis: Analysis, page: { playedSamples: number[]; sampleRate:
   };
 }
 
+/** 一次录制的时间窗（墙钟毫秒）。 */
+interface Window {
+  start: number;
+  stop: number;
+}
+
+const inWindow = (line: LogLine, window: Window | undefined) => {
+  if (!window) return true;
+  const t = Date.parse(line.t);
+  return t >= window.start && t <= window.stop;
+};
+
+/** 完整播出的句子（stage.sentence）开始的墙钟时刻：日志时刻减去页面回报的句长（宿主时钟）。 */
+function sentenceStart(line: LogLine): number {
+  return Date.parse(line.t) - (Number(line.endedAt) - Number(line.startedAt));
+}
+
+/**
+ * 诊断回报（stage-page.stats）的摘要：浏览器自报的“已渲染的位置要再过多久才被呈现”，
+ * = (currentTime − outputContextTime)·1000 + (outputPerformanceTime − performanceNow)，以及两部分各自的值。
+ */
+function statsOf(lines: LogLine[], window: Window | undefined) {
+  const stats = lines.filter((l) => l.event === 'stage-page.stats' && inWindow(l, window));
+  const num = (v: unknown) => (typeof v === 'number' ? v : null);
+  const rows = stats.map((l) => {
+    const current = num(l.currentTime);
+    const outputContext = num(l.outputContextTime);
+    const outputPerf = num(l.outputPerformanceTime);
+    const now = num(l.performanceNow);
+    const rendered =
+      current !== null && outputContext !== null ? (current - outputContext) * 1000 : null;
+    const ahead = outputPerf !== null && now !== null ? outputPerf - now : null;
+    return {
+      rendered,
+      ahead,
+      total: rendered !== null && ahead !== null ? rendered + ahead : null,
+      base: num(l.baseLatency),
+      output: num(l.outputLatency),
+      hint: l.latencyHint,
+      sampleRate: num(l.sampleRate),
+    };
+  });
+  return {
+    samples: rows.length,
+    latencyHint: rows[0]?.hint ?? null,
+    sampleRate: rows[0]?.sampleRate ?? null,
+    baseLatencyMs: summarize(rows.map((r) => (r.base === null ? null : r.base * 1000))),
+    outputLatencyMs: summarize(rows.map((r) => (r.output === null ? null : r.output * 1000))),
+    /** 渲染位置到正在呈现的帧之间的时长（AudioContext 时间线）。 */
+    renderedAheadMs: summarize(rows.map((r) => r.rendered)),
+    /** 正在呈现的帧的呈现时刻比此刻晚多少（performance.now() 时间线）。 */
+    stampAheadMs: summarize(rows.map((r) => r.ahead)),
+    /** 两者之和：此刻渲染的样本预计多久后被呈现。 */
+    outputDelayMs: summarize(rows.map((r) => r.total)),
+  };
+}
+
+/**
+ * OBS 音量表看到每句出声的时刻，相对页面开始播这一句的时刻（宿主日志，墙钟）：音量表约每 50ms 一次，
+ * 单句有 ±25ms 的量化，看中位数。只用到时间窗内完整播出的句子。
+ */
+function meterDelaysOf(
+  lines: LogLine[],
+  meters: ReadonlyArray<readonly [number, number]>,
+  window: Window | undefined,
+) {
+  const delays = runLines(lines)
+    .filter((l) => l.event === 'stage.sentence' && l.complete === true && inWindow(l, window))
+    .map((l) => sentenceStart(l))
+    .filter((start) => !window || start >= window.start)
+    .map((start) => {
+      const onset = meters.find(([t, db]) => t >= start - 100 && db > METER_ONSET_DB);
+      return onset && onset[0] < start + 1000 ? onset[0] - start : null;
+    });
+  return summarize(delays);
+}
+
+/**
+ * 呈现延迟（stage-sync）：录制开始时与结束时的值、窗内的变化，以及窗内每句的音量表样本与没取样本的原因。
+ * 没有 stage-sync 时为 null。
+ */
+function presentationOf(lines: LogLine[], window: Window | undefined) {
+  const delays = lines.filter((l) => l.event === 'stage-sync.delay');
+  if (delays.length === 0) return null;
+  const at = (time: number) => delays.filter((l) => Date.parse(l.t) <= time).at(-1) ?? null;
+  const pick = (l: LogLine | null) =>
+    l && { delayMs: l.delayMs, source: l.source, samples: l.samples, medianMs: l.medianMs };
+  const run = lines.filter((l) => inWindow(l, window));
+  const samples = run.filter((l) => l.event === 'stage-sync.sample');
+  const reasons: Record<string, number> = {};
+  for (const l of samples.filter((s) => s.sampleMs === null)) {
+    const reason = String(l.reason);
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+  }
+  return {
+    atStart: pick(at(window?.start ?? Number.POSITIVE_INFINITY)),
+    atStop: pick(at(window?.stop ?? Number.POSITIVE_INFINITY)),
+    changes: run.filter((l) => l.event === 'stage-sync.delay').map(pick),
+    samplesMs: samples.filter((s) => typeof s.sampleMs === 'number').map((s) => s.sampleMs),
+    skipped: reasons,
+    metersEvents: run
+      .filter(
+        (l) => l.event.startsWith('stage-sync.meters') || l.event.startsWith('stage-sync.sync'),
+      )
+      .map((l) => ({ t: l.t, event: l.event, reason: l.reason ?? null })),
+  };
+}
+
+/** 测试音录像的连续性（同 S-01）：句内相位跳变、音高偏差、尖峰，以及时长与整字数不符的句段。 */
+async function continuityOf(path: string) {
+  const analysis = await analyzeSegments(path, { toneHz: TONE_HZ, timeline: true });
+  const spc = SAMPLES_PER_CHAR / SAMPLE_RATE;
+  const inner = analysis.segments.listed.filter((s) => !s.edge && s.seconds >= 0.1);
+  return {
+    segments: inner.length,
+    discontinuities: analysis.discontinuities.count,
+    maxCentsOff: analysis.hz?.maxCentsOff ?? null,
+    spikes: analysis.spikes.count,
+    durationMismatch: inner.filter(
+      (s) => Math.abs(s.seconds - Math.round(s.seconds / spc) * spc) > 0.005,
+    ).length,
+  };
+}
+
+/** OBS 当前日志里关于音频缓冲的行（只读本机文件，只取这几行）。 */
+function obsAudioBuffering(): string[] {
+  const dir = join(process.env.APPDATA ?? '', 'obs-studio', 'logs');
+  if (!existsSync(dir)) return [];
+  const newest = readdirSync(dir)
+    .filter((f) => f.endsWith('.txt'))
+    .map((f) => ({ f, t: statSync(join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.t - a.t)[0];
+  if (!newest) return [];
+  return readFileSync(join(dir, newest.f), 'utf8')
+    .split(/\r?\n/)
+    .filter((line) => /audio buffering/i.test(line));
+}
+
 async function reanalyze(prefix: string): Promise<void> {
   const report = JSON.parse(readFileSync(`${prefix}.json`, 'utf8')) as {
     layout?: Layout;
     sessions?: Array<{
       kind: Kind;
       recording?: { path: string };
+      window?: { start: string; stop: string };
+      hostLog?: string;
       analysis?: Analysis;
       page?: { playedSamples: number[]; sampleRate: number };
+      stats?: unknown;
       span?: unknown;
+      continuity?: unknown;
     }>;
     reanalyzedAt?: string;
   };
@@ -396,8 +567,8 @@ async function reanalyze(prefix: string): Promise<void> {
       report.layout,
       `${prefix}-debug`,
     );
-    // 页面侧的摘要按保存的宿主日志重算（旧结果里可能没有逐句的采样数）。
-    const log = `${prefix}-${session.kind}.jsonl`;
+    // 页面侧的摘要按保存的宿主日志重算（旧结果里可能没有逐句的采样数）；有时间窗时只算窗内的。
+    const log = session.hostLog ?? `${prefix}-${session.kind}.jsonl`;
     if (existsSync(log)) {
       const lines = readFileSync(log, 'utf8')
         .split('\n')
@@ -408,9 +579,14 @@ async function reanalyze(prefix: string): Promise<void> {
             return [];
           }
         });
-      session.page = pageSide(lines);
+      const window = session.window
+        ? { start: Date.parse(session.window.start), stop: Date.parse(session.window.stop) }
+        : undefined;
+      session.page = pageSide(lines, window);
+      session.stats = statsOf(lines, window);
     }
     if (session.page) session.span = spanOf(session.analysis, session.page);
+    if (session.kind === 'tone') session.continuity = await continuityOf(session.recording.path);
   }
   report.reanalyzedAt = new Date().toISOString();
   writeFileSync(`${prefix}.json`, `${JSON.stringify(report, null, 2)}\n`);
@@ -430,6 +606,22 @@ async function main(): Promise<void> {
       'speech-backend': { type: 'string', default: 'qwen3' },
       preview: { type: 'boolean', default: false },
       fps: { type: 'string' },
+      /** 每种会话拉起几次宿主（每次页面重新加载）。 */
+      repeat: { type: 'string', default: '1' },
+      /** 每次宿主会话录几段（每段 OBS 重新开始录制）。 */
+      recordings: { type: 'string', default: '1' },
+      /** 页面 AudioContext 的 latencyHint（缺省 interactive，与 stage-page-obs 的缺省一致）。 */
+      'latency-hint': { type: 'string', default: 'interactive' },
+      /** 诊断：页面回报浏览器自报的音频输出时延的间隔（毫秒），0 为关闭。 */
+      'stats-ms': { type: 'string', default: '0' },
+      /** 实验：临时改 Stage 源的音频同步偏移（毫秒，负值让声音提前），结束时改回。 */
+      'sync-offset-ms': { type: 'string' },
+      /** 加上 stage-sync：按音量表估计呈现延迟，字幕与口型据此推迟。 */
+      'stage-sync': { type: 'boolean', default: false },
+      /** 临时改 stage-sync 的 k_sub 与形象的 k_mouth、注入频率（重标与比较用）。 */
+      'k-sub-ms': { type: 'string' },
+      'k-mouth-ms': { type: 'string' },
+      'avatar-hz': { type: 'string' },
       out: { type: 'string' },
       reanalyze: { type: 'string' },
     },
@@ -451,6 +643,35 @@ async function main(): Promise<void> {
   const backend = values['speech-backend'];
   if (backend !== 'qwen3' && backend !== 'fake')
     throw new Error('--speech-backend 为 qwen3 或 fake');
+  const repeat = Number(values.repeat);
+  const recordings = Number(values.recordings);
+  if (!(Number.isInteger(repeat) && repeat >= 1 && Number.isInteger(recordings) && recordings >= 1))
+    throw new Error('--repeat 与 --recordings 为正整数');
+  const latencyHint = values['latency-hint'];
+  if (latencyHint !== 'playback' && latencyHint !== 'interactive')
+    throw new Error('--latency-hint 为 playback 或 interactive');
+  const statsEveryMs = Number(values['stats-ms']);
+  if (!(statsEveryMs === 0 || (Number.isInteger(statsEveryMs) && statsEveryMs >= 100)))
+    throw new Error('--stats-ms 为 0 或不小于 100 的整数');
+  const syncOffsetMs =
+    values['sync-offset-ms'] === undefined ? undefined : Number(values['sync-offset-ms']);
+  if (
+    syncOffsetMs !== undefined &&
+    !(Number.isInteger(syncOffsetMs) && Math.abs(syncOffsetMs) <= 950)
+  )
+    throw new Error('--sync-offset-ms 为 -950 到 950 的整数');
+  const stageSync = values['stage-sync'];
+  const integer = (name: string, value: string | undefined, min: number, max: number) => {
+    if (value === undefined) return undefined;
+    const n = Number(value);
+    if (!(Number.isInteger(n) && n >= min && n <= max))
+      throw new Error(`--${name} 为 ${min} 到 ${max} 的整数`);
+    return n;
+  };
+  const kSubMs = integer('k-sub-ms', values['k-sub-ms'], -100, 100);
+  const kMouthMs = integer('k-mouth-ms', values['k-mouth-ms'], 0, 300);
+  const avatarHz = integer('avatar-hz', values['avatar-hz'], 30, 60);
+  if (kSubMs !== undefined && !stageSync) throw new Error('--k-sub-ms 要与 --stage-sync 一起用');
   const started = new Date().toISOString();
   const out = resolve(
     values.out ?? join('reports', `drill-av-offset-${started.replace(/[:.]/g, '-')}`),
@@ -460,6 +681,16 @@ async function main(): Promise<void> {
   await waitForNoOtherBellis({ log: say });
   const secret = await readObsSecret(new KeyringSecretStore(SECRET_SERVICE), OBS_SECRET);
   const obs = await ObsClient.connect(secret.url, secret.password);
+  /** Stage 源的音量表读数：[墙钟毫秒, 峰值 dBFS]（只读订阅）。 */
+  const meterReadings: Array<readonly [number, number]> = [];
+  const meters = await ObsMeters.connect(
+    secret.url,
+    secret.password,
+    (readings: MeterReading[]) => {
+      const reading = readings.find((r) => r.name === stageSource);
+      if (reading) meterReadings.push([Date.now(), reading.peakDb]);
+    },
+  );
   const id = Date.now().toString(36);
   let original: ObsSnapshot | undefined;
   let originalItems: Array<{ sceneItemId: number; sceneItemIndex: number; enabled: boolean }> = [];
@@ -467,6 +698,8 @@ async function main(): Promise<void> {
   let changed = false;
   /** 改过帧率时的原值。 */
   let originalFps: { fpsNumerator: number; fpsDenominator: number } | undefined;
+  /** 改过 Stage 源音频同步偏移时的原值。 */
+  let originalSyncOffset: number | undefined;
   let session: Session | undefined;
   let recording = false;
   const temporary: string[] = [];
@@ -541,6 +774,18 @@ async function main(): Promise<void> {
       throw new Error(`字幕带被 Stage 源之上的 ${blocking.join('、')} 盖住，录像里看不到字幕`);
 
     changed = true;
+    if (syncOffsetMs !== undefined) {
+      const before = sync.ok ? sync.data?.inputAudioSyncOffset : undefined;
+      if (typeof before !== 'number') throw new Error('读不出 Stage 源的音频同步偏移');
+      originalSyncOffset = before;
+      ok(
+        await obs.request('SetInputAudioSyncOffset', {
+          inputName: stageSource,
+          inputAudioSyncOffset: syncOffsetMs,
+        }),
+      );
+      say(`已把「${stageSource}」的音频同步偏移临时改为 ${syncOffsetMs}ms（原为 ${before}ms）`);
+    }
     if (values.fps !== undefined) {
       const fps = Number(values.fps);
       if (!(Number.isInteger(fps) && fps > 0 && fps <= 120))
@@ -557,15 +802,20 @@ async function main(): Promise<void> {
       );
     }
 
-    for (const kind of kinds) {
+    // 每种会话拉起 repeat 次宿主（每次页面重新加载、新的 AudioContext），每次录 recordings 段。
+    const runs = kinds.flatMap((kind) =>
+      Array.from({ length: repeat }, (_, rep) => [kind, rep] as const),
+    );
+    for (const [kind, rep] of runs) {
       // 上一个会话停止后宿主切到了安全场景并静音：像操作员一样切回直播场景、取消静音。
       ok(await obs.request('SetCurrentProgramScene', { sceneName: live }));
       ok(await obs.request('SetInputMute', { inputName: stageSource, inputMuted: false }));
-      const entry: Record<string, unknown> = { kind };
-      sessions.push(entry);
-      const profilePath = join(tmpdir(), `bellis-drill-av-${id}-${kind}.profile.json`);
-      const configPath = join(tmpdir(), `bellis-drill-av-${id}-${kind}.json`);
-      const storePath = join(tmpdir(), `bellis-drill-av-${id}-${kind}.db`);
+      const tag = `${kind}${repeat > 1 ? `-${rep + 1}` : ''}`;
+      const entries: Array<{ entry: Record<string, unknown>; window: Window }> = [];
+      let current: Record<string, unknown> | undefined;
+      const profilePath = join(tmpdir(), `bellis-drill-av-${id}-${tag}.profile.json`);
+      const configPath = join(tmpdir(), `bellis-drill-av-${id}-${tag}.json`);
+      const storePath = join(tmpdir(), `bellis-drill-av-${id}-${tag}.db`);
       temporary.push(profilePath, configPath, storePath, `${storePath}-wal`, `${storePath}-shm`);
       const horizonMs =
         kind === 'tone'
@@ -607,8 +857,26 @@ async function main(): Promise<void> {
               name: 'all',
               entries: [
                 { id: 'obs', plugin: 'obs-control', grant: ['obs.control'] },
-                { id: 'stage-page', plugin: 'stage-page-obs', grant: ['obs.stage-url'] },
+                {
+                  id: 'stage-page',
+                  plugin: 'stage-page-obs',
+                  grant: ['obs.stage-url'],
+                  config: { latencyHint, statsEveryMs },
+                },
                 { id: 'stage', plugin: 'stage-service' },
+                ...(stageSync
+                  ? [
+                      {
+                        id: 'stage-sync',
+                        plugin: 'stage-sync',
+                        grant: ['obs.meters'],
+                        config: {
+                          initialDelayMs: latencyHint === 'playback' ? 142 : 82,
+                          ...(kSubMs === undefined ? {} : { kSubMs }),
+                        },
+                      },
+                    ]
+                  : []),
                 ...tts,
                 { id: 'speech', plugin: 'speech-arbiter', grant: ['speech.output'] },
                 {
@@ -617,7 +885,15 @@ async function main(): Promise<void> {
                   config: { announcements, ttlMs: kind === 'tone' ? 2000 : 30_000 },
                 },
                 { id: 'moderation', plugin: 'moderation', disabled: true },
-                { id: 'avatar', plugin: 'avatar-vts', grant: ['secret:vts'] },
+                {
+                  id: 'avatar',
+                  plugin: 'avatar-vts',
+                  grant: ['secret:vts'],
+                  config: {
+                    ...(avatarHz === undefined ? {} : { rateHz: avatarHz }),
+                    ...(kMouthMs === undefined ? {} : { kMouthMs }),
+                  },
+                },
               ],
             },
           ],
@@ -659,7 +935,7 @@ async function main(): Promise<void> {
           say('等本地 TTS 模型就绪……');
           await host.wait(fact('tts.started'), 600_000);
         }
-        entry.readyAfterLaunchMs = Date.now() - launchedAt;
+        const readyAfterLaunchMs = Date.now() - launchedAt;
         await call(OperatorMethod.Presence);
         for (const deadline = Date.now() + 60_000; ; ) {
           const failures = (await call(OperatorMethod.Preflight, { target: 'M2' }))
@@ -673,70 +949,96 @@ async function main(): Promise<void> {
           1000,
         );
         const scheduleAt = Date.parse(schedule.t);
-        ok(await obs.request('StartRecord'));
-        recording = true;
-        await sleep(1000);
-        await call(OperatorMethod.Presence);
-        const m2 = await call(OperatorMethod.Mode, { target: 'M2' });
-        if (m2.ok !== true) throw new Error(`进入 M2 失败：${JSON.stringify(m2)}`);
-        const m2At = Date.now();
-        const firstDue = announcements.find((a) => scheduleAt + a.atMs > m2At);
-        if (!firstDue) throw new Error('排期里没有切到 M2 之后到点的句子');
-        entry.m2At = new Date(m2At).toISOString();
-        entry.firstDueAfterM2Ms = scheduleAt + firstDue.atMs - m2At;
-        say(`${kind}：已切到 M2，首句 ${firstDue.id} 在 ${entry.firstDueAfterM2Ms}ms 后到点`);
-
-        const fromLine = host.items.length;
-        const playedSince = () =>
-          host.items
-            .slice(fromLine)
-            .filter(fact('utterance.played'))
-            .filter((l) => (l.data as { end?: string }).end === 'complete');
-        if (kind === 'tone') {
-          await sleep(toneSeconds * 1000);
-          const before = host.items.length;
-          await host.wait(fact('utterance.played'), 15_000, before).catch(() => undefined);
-        } else {
-          const deadline = Date.now() + (speechSentences + 10) * SPEECH_EVERY_MS * 2;
-          // 在场确认 10 分钟过期（presenceTtlMs），语音会话可能更长：每 2 分钟确认一次。
-          let presenceAt = Date.now();
-          while (playedSince().length < speechSentences && Date.now() < deadline) {
-            await sleep(500);
-            if (Date.now() - presenceAt > 120_000) {
-              await call(OperatorMethod.Presence);
-              presenceAt = Date.now();
-            }
-          }
-          // 正在播的一句播完。
-          await host
-            .wait(fact('utterance.played'), 30_000, host.items.length)
-            .catch(() => undefined);
-        }
-        // 留出口型闭合与字幕清除的时间再停录制。
-        await sleep(1500);
-        const path = ok(await obs.request('StopRecord')).outputPath as string;
-        recording = false;
-        for (let size = -1; ; ) {
+        for (let rec = 0; rec < recordings; rec++) {
+          const entry: Record<string, unknown> = { kind, rep: rep + 1, rec: rec + 1 };
+          current = entry;
+          sessions.push(entry);
+          entry.readyAfterLaunchMs = readyAfterLaunchMs;
+          ok(await obs.request('StartRecord'));
+          recording = true;
+          const window: Window = { start: Date.now(), stop: Number.POSITIVE_INFINITY };
+          entries.push({ entry, window });
           await sleep(1000);
-          const active = ok(await obs.request('GetRecordStatus')).outputActive;
-          const now = statSync(path).size;
-          if (!active && now === size) break;
-          size = now;
+          await call(OperatorMethod.Presence);
+          if (rec === 0) {
+            // 第一段：录制先开始，再切到 M2，静默之后的第一句也录进来。
+            const m2 = await call(OperatorMethod.Mode, { target: 'M2' });
+            if (m2.ok !== true) throw new Error(`进入 M2 失败：${JSON.stringify(m2)}`);
+            const m2At = Date.now();
+            const firstDue = announcements.find((a) => scheduleAt + a.atMs > m2At);
+            if (!firstDue) throw new Error('排期里没有切到 M2 之后到点的句子');
+            entry.m2At = new Date(m2At).toISOString();
+            entry.firstDueAfterM2Ms = scheduleAt + firstDue.atMs - m2At;
+            say(`${tag}：已切到 M2，首句 ${firstDue.id} 在 ${entry.firstDueAfterM2Ms}ms 后到点`);
+          } else {
+            say(`${tag}：第 ${rec + 1} 段录制开始`);
+          }
+
+          const fromLine = host.items.length;
+          const playedSince = () =>
+            host.items
+              .slice(fromLine)
+              .filter(fact('utterance.played'))
+              .filter((l) => (l.data as { end?: string }).end === 'complete');
+          if (kind === 'tone') {
+            await sleep(toneSeconds * 1000);
+            const before = host.items.length;
+            await host.wait(fact('utterance.played'), 15_000, before).catch(() => undefined);
+          } else {
+            const deadline = Date.now() + (speechSentences + 10) * SPEECH_EVERY_MS * 2;
+            // 在场确认 10 分钟过期（presenceTtlMs），语音会话可能更长：每 2 分钟确认一次。
+            let presenceAt = Date.now();
+            while (playedSince().length < speechSentences && Date.now() < deadline) {
+              await sleep(500);
+              if (Date.now() - presenceAt > 120_000) {
+                await call(OperatorMethod.Presence);
+                presenceAt = Date.now();
+              }
+            }
+            // 正在播的一句播完。
+            await host
+              .wait(fact('utterance.played'), 30_000, host.items.length)
+              .catch(() => undefined);
+          }
+          // 留出口型闭合与字幕清除的时间再停录制。
+          await sleep(1500);
+          window.stop = Date.now();
+          const path = ok(await obs.request('StopRecord')).outputPath as string;
+          recording = false;
+          for (let size = -1; ; ) {
+            await sleep(1000);
+            const active = ok(await obs.request('GetRecordStatus')).outputActive;
+            const now = statSync(path).size;
+            if (!active && now === size) break;
+            size = now;
+          }
+          entry.recording = { path, bytes: statSync(path).size };
+          entry.window = {
+            start: new Date(window.start).toISOString(),
+            stop: new Date(window.stop).toISOString(),
+          };
+          entry.playedComplete = playedSince().length;
+          say(`${tag}：录制已停止 ${path}（${statSync(path).size} 字节）`);
         }
-        entry.recording = { path, bytes: statSync(path).size };
-        entry.playedComplete = playedSince().length;
-        say(`${kind}：录制已停止 ${path}（${statSync(path).size} 字节）`);
       } finally {
         operator.connection.close();
         if (recording) {
           const stopped = await obs.request('StopRecord').catch(() => undefined);
           recording = false;
-          entry.recordingStoppedAfterError = stopped?.data?.outputPath ?? true;
+          if (current) current.recordingStoppedAfterError = stopped?.data?.outputPath ?? true;
         }
         await session.stop();
         session = undefined;
-        writeFileSync(`${out}-${kind}.jsonl`, `${host.raw.join('\n')}\n`);
-        entry.page = pageSide(host.items);
+        const hostLog = `${out}-${tag}.jsonl`;
+        writeFileSync(hostLog, `${host.raw.join('\n')}\n`);
+        for (const { entry, window } of entries) {
+          const bounded = Number.isFinite(window.stop) ? window : { ...window, stop: Date.now() };
+          entry.hostLog = hostLog;
+          entry.page = pageSide(host.items, bounded);
+          entry.stats = statsOf(host.items, bounded);
+          entry.meterDelayMs = meterDelaysOf(host.items, meterReadings, bounded);
+          entry.presentation = presentationOf(host.items, bounded);
+        }
       }
       ok(await obs.request('SetCurrentProgramScene', { sceneName: live }));
       ok(await obs.request('SetInputMute', { inputName: stageSource, inputMuted: false }));
@@ -745,11 +1047,13 @@ async function main(): Promise<void> {
     for (const entry of sessions) {
       const path = (entry.recording as { path?: string } | undefined)?.path;
       if (!path) continue;
-      say(`分析 ${entry.kind} 录像……`);
+      say(`分析 ${entry.kind} 录像 ${path}……`);
       const analysis = await analyzeRecording(path, entry.kind as Kind, layout, `${out}-debug`);
       entry.analysis = analysis;
       entry.span = spanOf(analysis, entry.page as ReturnType<typeof pageSide>);
+      if (entry.kind === 'tone') entry.continuity = await continuityOf(path);
     }
+    result.obsAudioBuffering = obsAudioBuffering();
   } catch (error) {
     result.error = (error as Error).stack ?? String(error);
     say(`实测中止：${(error as Error).message}`);
@@ -762,7 +1066,19 @@ async function main(): Promise<void> {
         const back = await obs.request('SetVideoSettings', originalFps);
         if (!back.ok) steps.push(`改回帧率失败：${back.code} ${back.comment ?? ''}`);
       }
+      if (originalSyncOffset !== undefined) {
+        const back = await obs.request('SetInputAudioSyncOffset', {
+          inputName: stageSource,
+          inputAudioSyncOffset: originalSyncOffset,
+        });
+        if (!back.ok) steps.push(`改回同步偏移失败：${back.code} ${back.comment ?? ''}`);
+      }
       const diffs = differences(original, await snapshot(obs, stageSource, safeScene));
+      if (originalSyncOffset !== undefined) {
+        const now = await obs.request('GetInputAudioSyncOffset', { inputName: stageSource });
+        const value = now.ok ? now.data?.inputAudioSyncOffset : undefined;
+        if (value !== originalSyncOffset) diffs.push(`同步偏移 ${value} 与开始时不同`);
+      }
       if (originalFps) {
         const now = ok(await obs.request('GetVideoSettings'));
         if (
@@ -786,6 +1102,7 @@ async function main(): Promise<void> {
       result.obsRestored = { ok: steps.length === 0 && diffs.length === 0, steps, diffs };
       say(`OBS 恢复：${JSON.stringify(result.obsRestored)}`);
     }
+    meters.close();
     obs.close();
     for (const path of temporary) rmSync(path, { force: true });
   }
@@ -804,6 +1121,15 @@ async function main(): Promise<void> {
         toneSeconds,
         speechSentences,
         speechBackend: backend,
+        repeat,
+        recordings,
+        latencyHint,
+        statsEveryMs,
+        syncOffsetMs: syncOffsetMs ?? null,
+        stageSync,
+        kSubMs: kSubMs ?? null,
+        kMouthMs: kMouthMs ?? null,
+        avatarHz: avatarHz ?? null,
         ...result,
       },
       null,

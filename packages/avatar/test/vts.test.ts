@@ -156,6 +156,44 @@ test('按游标与包络注入口型：频率、外推上限、欠载闭嘴、�
   }
 });
 
+test('口型推迟（呈现延迟 − k_mouth）：呈现延迟 100ms、k_mouth 40ms 时取 60ms 之前的位置，播完也晚 60ms 闭嘴', async () => {
+  const vts = await FakeVts.start({ tokens: ['t'] });
+  const s = await setup({
+    url: vts.url,
+    token: 't',
+    config: { rateHz: 50, rmsFloor: 0.1, rmsCeiling: 0.5, extrapolateMaxMs: 200, kMouthMs: 40 },
+  });
+  try {
+    await until(() => s.avatar().ready);
+    s.stage.envelopes.set('s1', RAMP);
+    s.stage.setPresentation({ delayMs: 100, samples: 21, source: 'meters' });
+    const events = new Map<number, FromPage>([
+      [0, { kind: 'started', sentenceId: 's1' }],
+      [200, { kind: 'cursor', sentenceId: 's1', played: 200 }],
+      [400, { kind: 'ended', sentenceId: 's1', played: 400 }],
+    ]);
+    for (let t = 0; t <= 600; t += 20) {
+      if (t > 0) await s.run(20, 20);
+      const event = events.get(t);
+      if (event) s.stage.emit(event);
+      // 播完后 Stage 不再提供包络：推迟的那 60ms 用形象开始时留下的。
+      if (t === 400) s.stage.envelopes.delete('s1');
+    }
+    await until(() => vts.injections().length === 31);
+    const expected = (t: number) => (t <= 60 || t >= 460 ? 0 : (t - 60) / 1000);
+    vts.injections().forEach((injection, k) => {
+      const want = expected(k * 20);
+      assert.ok(
+        Math.abs((injection.value as number) - want) < 1e-9,
+        `t=${k * 20} 期望 ${want}，实际 ${injection.value}`,
+      );
+    });
+  } finally {
+    await s.close();
+    await vts.close();
+  }
+});
+
 test('不说话时照常以配置的频率注入 0，任一秒内都有重发', async () => {
   let clock: Clock | undefined;
   const vts = await FakeVts.start({ tokens: ['t'], now: () => clock?.now() ?? 0 });

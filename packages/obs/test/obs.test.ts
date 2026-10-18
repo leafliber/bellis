@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inspectObsTargets, ObsClient, runEmergency, SimObs } from '../src/index.ts';
+import {
+  INPUT_VOLUME_METERS,
+  inspectObsTargets,
+  type MeterLevel,
+  ObsClient,
+  ObsMeters,
+  runEmergency,
+  SimObs,
+} from '../src/index.ts';
 
 const policy = { stageSource: 'Stage', safeScene: 'Safe', stopStream: true };
 
@@ -127,6 +135,43 @@ test('开播预检核对急停后的状态：节目场景是安全场景、Stage
     assert.deepEqual(await inspectObsTargets(client, policy), []);
   } finally {
     client.close();
+    await obs.close();
+  }
+});
+
+test('只读音量表连接：只订阅 InputVolumeMeters，读推子前的峰值，只发同步偏移的读请求', async () => {
+  const obs = await SimObs.start({ password: 'secret' });
+  obs.syncOffsets.set('Stage', -20);
+  const meters = await ObsMeters.connect(obs.url, 'secret');
+  try {
+    assert.deepEqual(obs.subscriptions, [INPUT_VOLUME_METERS]);
+    const seen: MeterLevel[][] = [];
+    meters.onLevels((levels) => seen.push(levels));
+    obs.emitMeters([
+      // 两个声道的 [magnitude, peak, inputPeak]：取推子前（inputPeak）的最大值。
+      {
+        inputName: 'Stage',
+        levels: [
+          [0.01, 0.05, 0.1],
+          [0.02, 0.04, 0.2],
+        ],
+      },
+      { inputName: 'Mic', levels: [[0, 0, 0]] },
+    ]);
+    while (seen.length === 0) await new Promise((done) => setTimeout(done, 5));
+    const [stage, mic] = seen[0] ?? [];
+    assert.equal(stage?.inputName, 'Stage');
+    assert.ok(Math.abs((stage?.peakDb ?? 0) - 20 * Math.log10(0.2)) < 1e-9);
+    assert.equal(mic?.peakDb, -Infinity);
+    assert.equal(await meters.audioSyncOffset('Stage'), -20);
+    assert.equal(await meters.audioSyncOffset('Nope'), null);
+    // 除了读同步偏移，没有任何请求（更没有控制请求）。
+    assert.deepEqual(
+      [...new Set(obs.requests.map((r) => r.requestType))],
+      ['GetInputAudioSyncOffset'],
+    );
+  } finally {
+    meters.close();
     await obs.close();
   }
 });

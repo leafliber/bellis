@@ -109,7 +109,7 @@ test('急停：页面回报截断之前字幕已清除，之后不再显示', as
   }
 });
 
-test('不变量：字幕超前于游标、播完时没有清除，都被报告', () => {
+test('不变量：字幕超前于游标、版面没有固定、播完时没有清除，都被报告', () => {
   let seq = 0;
   const at = (kind: string, data: Record<string, unknown>): TraceEntry => ({
     seq: seq++,
@@ -122,13 +122,14 @@ test('不变量：字幕超前于游标、播完时没有清除，都被报告',
     at('control.mode', { mode: 'M0' }),
     at('page.begin', { sentenceId: 'u#0', subtitle: '你好', token: 1 }),
     at('page.played', { sentenceId: 'u#0', token: 1, samples: 320 }),
-    at('page.subtitle', { sentenceId: 'u#0', text: '你好' }),
-    at('page.subtitle', { sentenceId: 'u#0', text: '你们' }),
+    at('page.subtitle', { sentenceId: 'u#0', text: '你好', hidden: '' }),
+    // 占位缺了一段：版面没有从一开始固定。
+    at('page.subtitle', { sentenceId: 'u#0', text: '你', hidden: '' }),
     at('page.ended', { sentenceId: 'u#0', played: 3200 }),
   ];
   const violations = checkHistory({ trace, events: [], moderationEnabled: false });
   assert.equal(violations.length, 3, violations.join('\n'));
   assert.match(violations[0] ?? '', /最后一个字从第 1600 个采样才开始/);
-  assert.match(violations[1] ?? '', /不是字幕“你好”的前缀/);
+  assert.match(violations[1] ?? '', /拼起来不是整句“你好”/);
   assert.match(violations[2] ?? '', /播完或截断时字幕没有清除/);
 });

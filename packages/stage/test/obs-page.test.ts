@@ -70,7 +70,13 @@ async function setup(pageConfig: Record<string, unknown> = {}) {
     permissionsOf: (holder) => kernel?.permissionsOf(holder),
     watchdogConnected: () => true,
   });
-  kernel = new Kernel({ clock, safety: core.kernelHooks(), quiesceTimeoutMs: 500 });
+  const logs: Array<{ event: string; fields: Record<string, unknown> }> = [];
+  kernel = new Kernel({
+    clock,
+    safety: core.kernelHooks(),
+    quiesceTimeoutMs: 500,
+    log: (event, fields) => logs.push({ event, fields }),
+  });
   kernel.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(core, instanceId));
   kernel.provideCore(ClockService, clock);
   kernel.provideCore(ObsConnectorService, { connect: () => ObsClient.connect(obs.url, undefined) });
@@ -138,6 +144,7 @@ async function setup(pageConfig: Record<string, unknown> = {}) {
   await until(() => url() !== '');
   const parsed = new URL(url());
   return {
+    logs,
     core,
     obs,
     store,
@@ -163,17 +170,26 @@ async function setup(pageConfig: Record<string, unknown> = {}) {
 type Setup = Awaited<ReturnType<typeof setup>>;
 
 function get(s: Setup, path: string, headers: Record<string, string>) {
-  return new Promise<{ status: number; headers: Record<string, unknown> }>((done, fail) => {
-    const req = httpRequest(
-      { host: '127.0.0.1', port: s.port, path, headers, setHost: false },
-      (res) => {
-        res.resume();
-        done({ status: res.statusCode ?? 0, headers: res.headers });
-      },
-    );
-    req.on('error', fail);
-    req.end();
-  });
+  return new Promise<{ status: number; headers: Record<string, unknown>; body: string }>(
+    (done, fail) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port: s.port, path, headers, setHost: false },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () =>
+            done({
+              status: res.statusCode ?? 0,
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString('utf8'),
+            }),
+          );
+        },
+      );
+      req.on('error', fail);
+      req.end();
+    },
+  );
 }
 
 /** 模拟页面：建立 WebSocket 并发出首条消息，返回结果与连接。 */
@@ -234,6 +250,20 @@ test('Host 与 Origin：只放行本端地址；缺 Origin 只放行页面文档
     assert.equal((await get(s, '/nope', { host: s.host, origin: s.origin })).status, 404);
     const page = await get(s, '/', { host: s.host, ...navigate });
     assert.match(String(page.headers['content-security-policy']), /frame-ancestors 'none'/);
+    assert.match(String(page.headers['content-security-policy']), /style-src 'self';/);
+    // 样式表带 crossorigin（请求才带 Origin）；字幕两段的样式都在样式表里，没有被 CSP 拦下的内联样式。
+    assert.match(
+      page.body,
+      /<link rel="stylesheet" href="\/stage.css" crossorigin="anonymous" \/>/,
+    );
+    assert.match(
+      page.body,
+      /<span id="subtitle-shown"><\/span><span id="subtitle-hidden"><\/span>/,
+    );
+    assert.doesNotMatch(page.body, /\sstyle=|<style/);
+    const css = await get(s, '/stage.css', { host: s.host, origin: s.origin });
+    assert.equal(css.status, 200);
+    assert.match(css.body, /#subtitle-hidden \{\s*visibility: hidden;\s*\}/);
 
     const token = s.token();
     assert.equal((await attempt(s, hello(token), {})).result, 'http-403');
@@ -324,6 +354,51 @@ test('首条消息超时或不合法、认证后发来不合法的消息，都�
     assert.equal(page.result, 'welcome');
     const closed = new Promise<number>((done) => page.ws?.on('close', (code) => done(code)));
     page.ws?.send(JSON.stringify({ kind: 'ended', sentenceId: 'x', played: -1 }));
+    assert.equal(await closed, 1006);
+  } finally {
+    await s.close();
+  }
+});
+
+test('缺省 URL 只带令牌（interactive）、不收 stats；改用 playback 与打开诊断后片段带上它们，stats 只记日志', async () => {
+  const stats = {
+    kind: 'stats',
+    latencyHint: 'interactive',
+    sampleRate: 48_000,
+    baseLatency: 0.01,
+    outputLatency: 0,
+    currentTime: 1.5,
+    outputContextTime: 1.42,
+    outputPerformanceTime: 1234.5,
+    performanceNow: 1230.1,
+  };
+  const plain = await setup();
+  try {
+    assert.match(new URL(plain.url()).hash, /^#t=[A-Za-z0-9_-]{22}$/);
+    const page = await attempt(plain, hello(plain.token()));
+    assert.equal(page.result, 'welcome');
+    const closed = new Promise<number>((done) => page.ws?.on('close', (code) => done(code)));
+    page.ws?.send(JSON.stringify(stats));
+    assert.equal(await closed, 1006);
+  } finally {
+    await plain.close();
+  }
+  const s = await setup({ latencyHint: 'playback', statsEveryMs: 500 });
+  try {
+    const fragment = new URLSearchParams(new URL(s.url()).hash.slice(1));
+    assert.equal(fragment.get('l'), 'playback');
+    assert.equal(fragment.get('s'), '500');
+    const page = await attempt(s, hello(fragment.get('t') as string));
+    assert.equal(page.result, 'welcome');
+    page.ws?.send(JSON.stringify(stats));
+    await until(() => s.logs.some((l) => l.event === 'stage-page.stats'));
+    const logged = s.logs.find((l) => l.event === 'stage-page.stats')?.fields ?? {};
+    assert.equal(logged.latencyHint, 'interactive');
+    assert.equal(logged.outputContextTime, 1.42);
+    assert.equal(logged.kind, undefined);
+    // 不合格的 stats 与其它不合格的消息一样断开。
+    const closed = new Promise<number>((done) => page.ws?.on('close', (code) => done(code)));
+    page.ws?.send(JSON.stringify({ ...stats, latencyHint: 'fast' }));
     assert.equal(await closed, 1006);
   } finally {
     await s.close();

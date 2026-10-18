@@ -63,6 +63,54 @@ export type PageEvent = Static<typeof PageEvent>;
 export const isPageFirst = Compile(PageFirst);
 export const isPageEvent = Compile(PageEvent);
 
+/** 呈现延迟的上限（毫秒）。 */
+export const MAX_PRESENTATION_DELAY_MS = 300;
+
+/**
+ * 宿主发给页面的呈现延迟（Stage 文档“对齐”）：页面把字幕按播放游标推进的时刻整体推迟这么多毫秒，
+ * 播完后的清除同样推迟；截断、令牌变化与自静音仍立即清除。Stage 服务发送前按此校验。
+ */
+export const PagePresentation = Type.Object(
+  {
+    kind: Type.Literal('presentation'),
+    delayMs: Type.Integer({ minimum: 0, maximum: MAX_PRESENTATION_DELAY_MS }),
+  },
+  closed,
+);
+export type PagePresentation = Static<typeof PagePresentation>;
+export const isPagePresentation = Compile(PagePresentation);
+
+/** 页面 AudioContext 的 latencyHint：缺省 interactive，playback 留作退路（见 stage-page-obs）。 */
+export const LatencyHint = Type.Union([Type.Literal('playback'), Type.Literal('interactive')]);
+export type LatencyHint = Static<typeof LatencyHint>;
+
+const Seconds = Type.Union([Type.Number({ minimum: 0, maximum: 1e9 }), Type.Null()]);
+const Millis = Type.Union([Type.Number({ minimum: -1e12, maximum: 1e12 }), Type.Null()]);
+
+/**
+ * 诊断（缺省关闭，见 stage-page-obs 的 statsEveryMs）：页面按间隔回报浏览器自报的音频输出时延，
+ * 供音画对齐的实验与录像实测对照。只记日志，不转给 Stage 服务，与 `FromPage` 无关。
+ * 时间都是页面自己的：AudioContext 的秒与 performance.now() 的毫秒；浏览器不提供的为 null。
+ */
+export const PageStats = Type.Object(
+  {
+    kind: Type.Literal('stats'),
+    latencyHint: LatencyHint,
+    sampleRate: Type.Number({ minimum: 1 }),
+    baseLatency: Seconds,
+    outputLatency: Seconds,
+    /** AudioContext.currentTime：已渲染到的位置。 */
+    currentTime: Type.Number({ minimum: 0, maximum: 1e9 }),
+    /** getOutputTimestamp()：正由输出设备呈现的那一帧在 AudioContext 时间线上的位置与呈现时刻。 */
+    outputContextTime: Seconds,
+    outputPerformanceTime: Millis,
+    performanceNow: Type.Number({ minimum: 0, maximum: 1e12 }),
+  },
+  closed,
+);
+export type PageStats = Static<typeof PageStats>;
+export const isPageStats = Compile(PageStats);
+
 /** 一句字幕映射的码点数上限；分句每句不超过 60 个码点，本地 TTS 每句不超过 500 个朗读码点。 */
 export const MAX_SUBTITLE_CHARS = 1000;
 

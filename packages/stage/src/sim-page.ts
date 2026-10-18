@@ -20,7 +20,8 @@ interface Buffered {
  * - 欠载时补零，补零不推进播放游标；
  * - 只接受当前令牌的音频，令牌变化时丢弃旧令牌的全部缓冲；
  * - 收不到宿主心跳时自行静音并清空缓冲，再次收到心跳后恢复；
- * - 字幕与真实页面用同一套推进规则（page/subtitle.js），每次显示变化记追踪 `page.subtitle`。
+ * - 字幕与真实页面用同一套推进规则（page/subtitle.js，含呈现延迟，按宿主时钟推迟），
+ *   每次显示变化记追踪 `page.subtitle`（`text` 为已显示的前缀，`hidden` 为占位的其余部分）。
  */
 export const simStagePage = definePlugin({
   manifest: {
@@ -52,9 +53,16 @@ export const simStagePage = definePlugin({
       trace?.record(`page.${message.kind}`, { ...message });
       for (const listener of [...listeners]) listener(message);
     };
-    const subtitles = new Subtitles((text, sentenceId) => {
-      trace?.record('page.subtitle', { sentenceId, text });
-    });
+    const subtitles = new Subtitles(
+      (text, hidden, sentenceId) => {
+        trace?.record('page.subtitle', { sentenceId, text, hidden });
+      },
+      {
+        now: () => clock.now(),
+        set: (callback, ms) => clock.setTimeout(callback, ms),
+        clear: (handle) => clock.clearTimeout(handle as TimerHandle),
+      },
+    );
     const drop = (predicate: (b: Buffered) => boolean, reason: string) => {
       for (const item of queue.filter(predicate)) {
         queue.splice(queue.indexOf(item), 1);
@@ -105,7 +113,7 @@ export const simStagePage = definePlugin({
       if (head.chunks.length === 0) {
         if (head.ended) {
           queue.shift();
-          subtitles.forget(head.id);
+          subtitles.report({ kind: 'ended', sentenceId: head.id, played: head.played });
           emit({ kind: 'ended', sentenceId: head.id, played: head.played });
         } else if (consumed < budget && !head.underrun) {
           head.underrun = true;
@@ -179,12 +187,16 @@ export const simStagePage = definePlugin({
         case 'truncate':
           drop((item) => item.id === message.sentenceId, '要求截断');
           return;
+        case 'presentation':
+          subtitles.setDelay(message.delayMs);
+          return;
       }
     };
 
     tick();
     ctx.register(() => {
       if (timer) clock.clearTimeout(timer);
+      subtitles.cancel();
     });
     const link: PageLink = {
       send: receive,

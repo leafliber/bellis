@@ -33,7 +33,7 @@
 - 守卫只能拒绝或弃权，任何一个拒绝即拒绝；异常、超时、依赖缺失都按拒绝处理。守卫判定期间若进入了安全停止，结果仍为拒绝。
 - 每次判定都写入状态存储。
 - 决策模型采用“动作选择”模式：只能从枚举的意图类型里选，参数由确定性代码校验（见[决策模型](director.md)）。
-- **Rule of Two 约束**：决策模型读取弹幕（不可信输入），又要公开发声（对外通信），所以它的上下文里不得出现凭据、OBS 管理能力和私密记忆。闸门据此拒绝来源含不可信输入、却申请 `obs.scene`、`obs.audio`、`obs.source`、`obs.stage-url`、`obs.stream`、`secret.read`、`memory.private` 的意图。
+- **Rule of Two 约束**：决策模型读取弹幕（不可信输入），又要公开发声（对外通信），所以它的上下文里不得出现凭据、OBS 管理能力和私密记忆。闸门据此拒绝来源含不可信输入、却申请 `obs.scene`、`obs.audio`、`obs.source`、`obs.stage-url`、`obs.stream`、`secret.read`、`memory.private` 的意图。读 OBS 音量表的插件权限 `obs.meters` 不在此列（见[插件内核](plugin-kernel.md#权限)）。
 
 ## 执行许可与急停
 

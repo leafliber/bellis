@@ -6,9 +6,11 @@
  *   连接断开后用会话密钥重连。页面不在任何存储里保存密钥。
  * - 只播放带当前许可令牌的音频，令牌变化即丢弃旧缓冲；许可时长与心跳由 AudioWorklet 按渲染帧计时。
  * - 字幕按 AudioWorklet 回报的已播采样数与宿主送来的映射推进（subtitle.js），只用 textContent 渲染；
- *   截断、令牌变化时立即清除。
+ *   未显示的字放在不可见的占位元素里，版面从一开始就固定；按宿主送来的呈现延迟推迟显示与播完后的清除，
+ *   截断、页面静音以及令牌变化时还在播放的句子立即清除。
  */
 import { decodeAudio, Resampler } from './audio.js';
+import { latencyHintOf, latencyStats, statsEveryOf } from './diagnostics.js';
 import { Subtitles } from './subtitle.js';
 
 /**
@@ -18,6 +20,7 @@ import { Subtitles } from './subtitle.js';
  *   | { kind: 'timing', sentenceId: string, token: number, starts: number[] }
  *   | { kind: 'end', sentenceId: string, token: number }
  *   | { kind: 'truncate', sentenceId: string }
+ *   | { kind: 'presentation', delayMs: number }
  *   | { kind: 'heartbeat' }} FromHost
  */
 
@@ -32,8 +35,14 @@ const RECONNECT_MS = 500;
 /** 宿主拒绝认证的关闭码：不再重连，等宿主重新下发 URL。 */
 const REJECTED = new Set([4401, 4408]);
 
-const subtitle = /** @type {HTMLElement} */ (document.getElementById('subtitle'));
-let token = new URLSearchParams(location.hash.slice(1)).get('t');
+/** 字幕的已显示前缀与不可见的其余部分（占位，固定版面）。 */
+const shownText = /** @type {HTMLElement} */ (document.getElementById('subtitle-shown'));
+const hiddenText = /** @type {HTMLElement} */ (document.getElementById('subtitle-hidden'));
+const fragment = new URLSearchParams(location.hash.slice(1));
+let token = fragment.get('t');
+// 诊断项（缺省关闭，见 diagnostics.js）。
+const latencyHint = latencyHintOf(fragment);
+const statsEveryMs = statsEveryOf(fragment);
 history.replaceState(null, '', location.pathname);
 
 /** @type {string | null} */
@@ -42,11 +51,12 @@ let sessionKey = null;
 let leaseToken = null;
 /** @type {Map<string, Playing>} */
 const playing = new Map();
-const subtitles = new Subtitles((text) => {
-  subtitle.textContent = text;
+const subtitles = new Subtitles((shown, hidden) => {
+  if (shownText.textContent !== shown) shownText.textContent = shown;
+  if (hiddenText.textContent !== hidden) hiddenText.textContent = hidden;
 });
 
-const context = new AudioContext({ latencyHint: 'playback' });
+const context = new AudioContext({ latencyHint });
 await context.resume().catch(() => {});
 await context.audioWorklet.addModule('/worklet.js');
 const node = new AudioWorkletNode(context, 'bellis-stage', { outputChannelCount: [2] });
@@ -54,6 +64,8 @@ node.connect(context.destination);
 
 /** @type {WebSocket | null} */
 let socket = null;
+/** 诊断回报的定时器（重连后不重复开）。 @type {ReturnType<typeof setInterval> | undefined} */
+let statsTimer;
 
 /** @param {object} message */
 function send(message) {
@@ -73,9 +85,13 @@ function forget(sentenceId) {
 
 node.port.onmessage = (event) => {
   const report = /** @type {{ kind: string, sentenceId?: string, played?: number }} */ (event.data);
-  if ((report.kind === 'ended' || report.kind === 'truncated') && report.sentenceId) {
+  if (report.kind === 'truncated' && report.sentenceId) {
     forget(report.sentenceId);
+  } else if (report.kind === 'muted') {
+    subtitles.clear();
   } else {
+    // 播完的句子不会再有音频；字幕推迟呈现延迟后再清除。
+    if (report.kind === 'ended' && report.sentenceId) playing.delete(report.sentenceId);
     subtitles.report(report);
   }
   // progress 只用来推进字幕，宿主不收。
@@ -87,6 +103,9 @@ function receive(message) {
   switch (message.kind) {
     case 'welcome':
       sessionKey = message.sessionKey;
+      if (statsEveryMs > 0 && statsTimer === undefined) {
+        statsTimer = setInterval(() => send(latencyStats(context, latencyHint)), statsEveryMs);
+      }
       return;
     case 'heartbeat':
       toWorklet({ type: 'hb' });
@@ -95,9 +114,11 @@ function receive(message) {
     case 'token':
       if (message.token !== leaseToken) {
         leaseToken = message.token;
-        // 旧令牌的句子作废：字幕立即清除，AudioWorklet 随后回报它们被截断。
+        // 旧令牌的句子作废：还在播放或排队的字幕立即清除，AudioWorklet 随后回报它们被截断。
+        // 已经播完的句子声音都已交给 OBS，只差推迟的呈现延迟，照常到点清除：每段发言播完、
+        // 许可交还时令牌也会变。
+        for (const id of playing.keys()) subtitles.forget(id);
         playing.clear();
-        subtitles.clear();
         toWorklet({ type: 'revoke' });
       }
       if (message.token !== null) toWorklet({ type: 'lease', ttlMs: message.ttlMs });
@@ -132,6 +153,9 @@ function receive(message) {
       // 字幕立即清除，不等 AudioWorklet 回报。
       forget(message.sentenceId);
       toWorklet({ type: 'truncate', id: message.sentenceId });
+      return;
+    case 'presentation':
+      subtitles.setDelay(message.delayMs);
       return;
   }
 }

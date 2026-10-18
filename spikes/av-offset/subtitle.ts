@@ -5,10 +5,12 @@
  * - 区域：给了单行字幕的几何（layout.ts）时只看这一句整行的行框（居中，宽度按字数），否则看整个字幕带。
  * - 每句只看与前后句段之间的中点为界的时间窗；窗口开头那一帧（此时不该有字幕）作这一句的局部参考。
  * - 事件：相邻两帧之间行框里亮度差超过 32 级的像素占比超过阈值（安静帧里这个占比的 p99 的 1.5 倍、
- *   6 倍稳健标准差与 0.3% 中最大的那个）的帧；相邻几帧都超过时合成一个事件，时刻取第一帧（两个字在相邻
- *   两帧出现时会被并成一个；测试音每字 150ms，不会发生）。字幕居中，每多一个字整行左移半个字，所以每个字
- *   的出现都是一次明显的事件。与局部参考相差的像素占比变大的事件是“加字”，降到第一个字出现之前的水平
- *   附近的是“清除”。用局部参考而不是全局参考：形象挡住或移动、背景变化时全局参考不对。
+ *   6 倍稳健标准差与 0.3% 中最大的那个）的帧；相邻几帧都超过时合成一个事件，时刻取其中第一个达到这次
+ *   最大变化一半的帧：x264 的 B 帧会把变化淡淡地提前带进前几帧，编码器也会在之后几帧零星补改（两个字在
+ *   相邻两帧出现时会被并成一个；测试音每字 150ms，不会发生）。页面占位固定，每个字在自己的格子里出现，
+ *   一次加字只改这一个字的像素。与局部参考相差的像素占比变大、且变化不小于加字典型大小 8% 的事件是
+ *   “加字”，降到第一个字出现之前的水平附近的是“清除”。用局部参考而不是全局参考：形象挡住或移动、
+ *   背景变化时全局参考不对。
  * - 运动掩码：安静时（离句段 0.4 秒以上）相邻两帧之间常变（超过 1% 的帧对）的像素，例如字幕带后面飘动的
  *   头发，不计入上面的占比。
  * - 全局参考（离句段 0.4 秒以上的安静帧逐像素取中位数）只用来输出整段的曲线供核对。
@@ -44,6 +46,11 @@ const NOISE_FRAMES = 300;
 const REFERENCE_FRAMES = 61;
 /** 安静帧对里变化超过这个比例的像素算“在动”，不计入字幕的变化。 */
 const MASK_ACTIVITY = 0.01;
+/**
+ * 加字事件至少要有典型加字变化的这么大比例。真机上最小的字「。」约为典型的 10–20%，编码器零星补改的
+ * 像素大多低于事件阈值（0.3%）。
+ */
+const MIN_ADDITION_FRACTION = 0.08;
 
 export interface SubtitleFrames {
   /** 实际裁出的字幕带（录像像素）。 */
@@ -82,6 +89,8 @@ export interface SubtitleSentence {
   rate: { slopePercent: number; residualMaxMs: number; points: number } | null;
   /** 字幕推进跨度（第一个到最后一个加字事件）占音频时长的百分数（语音）。 */
   revealRatio: number | null;
+  /** 时间窗内测到的全部变化：相对出声的毫秒、相邻帧变化占比的最大值、判定（加字、清除、忽略），排查用。 */
+  events: Array<{ ms: number; size: number; kind: 'add' | 'clear' | 'other' }>;
   note?: string;
 }
 
@@ -165,6 +174,8 @@ interface Event {
   t: number;
   before: number;
   after: number;
+  /** 这次变化里相邻两帧之间变了的像素占比的最大值。 */
+  size: number;
 }
 
 export function analyzeSubtitles(
@@ -236,35 +247,59 @@ export function analyzeSubtitles(
     const from = prev ? (prev.end + s.onset) / 2 : s.onset - 1;
     const to = next ? (s.end + next.onset) / 2 : s.end + 1;
     const events: Event[] = [];
-    let run: { start: number; before: number; last: number } | undefined;
+    let run:
+      | { start: number; before: number; last: number; size: number; moves: number[] }
+      | undefined;
     const k0 = Math.max(1, firstIndexAtOrAfter(times, from));
     const local = frame(k0 - 1);
+    // 时刻取这次变化里第一个达到峰值一半的帧：x264 的 B 帧会把变化淡淡地提前带进前几帧，
+    // 编码器也会在之后几帧零星补改，这些都连成一段，但都远小于真正变化的那一帧。
+    const close = (r: NonNullable<typeof run>) => {
+      const at = r.moves.findIndex((m) => m >= 0.5 * r.size);
+      events.push({
+        t: times[r.start + Math.max(0, at)] ?? 0,
+        before: r.before,
+        after: changed(frame(r.last), local, width, region, mask),
+        size: r.size,
+      });
+    };
     for (let k = k0; k < times.length && (times[k] ?? 0) <= to; k++) {
       const moved = changed(frame(k), frame(k - 1), width, region, mask);
       if (moved >= threshold) {
-        run ??= { start: k, before: changed(frame(k - 1), local, width, region, mask), last: k };
+        run ??= {
+          start: k,
+          before: changed(frame(k - 1), local, width, region, mask),
+          last: k,
+          size: 0,
+          moves: [],
+        };
         run.last = k;
+        run.size = Math.max(run.size, moved);
+        run.moves.push(moved);
       } else if (run) {
-        events.push({
-          t: times[run.start] ?? 0,
-          before: run.before,
-          after: changed(frame(run.last), local, width, region, mask),
-        });
+        close(run);
         run = undefined;
       }
     }
-    if (run)
-      events.push({
-        t: times[run.start] ?? 0,
-        before: run.before,
-        after: changed(frame(run.last), local, width, region, mask),
-      });
+    if (run) close(run);
+    return { s, chars, events };
+  });
+
+  // 编码器在一个字出现前后的几帧里还会零星改几个像素（占位固定之后一个字只改它自己的格子，这些零星改动
+  // 相对更显眼）：变化小于加字事件典型大小的 8% 的不算加字。
+  const typical =
+    median(
+      raw.flatMap(({ events }) => events.filter((e) => e.after > e.before).map((e) => e.size)),
+    ) ?? 0;
+  const minSize = MIN_ADDITION_FRACTION * typical;
+  const classified = raw.map(({ s, chars, events }) => {
     // 清除：降到第一个字出现之前的水平附近（局部的“关”，形象挡住或移动时比全局参考可靠）。
     const additions: Event[] = [];
     let clear: Event | undefined;
     for (const e of events) {
-      if (e.after > e.before) additions.push(e);
-      else if (additions.length > 0) {
+      if (e.after > e.before) {
+        if (e.size >= minSize) additions.push(e);
+      } else if (additions.length > 0) {
         const base = additions[0]?.before ?? 0;
         if (e.after <= base + 0.3 * (e.before - base)) {
           clear = e;
@@ -272,13 +307,22 @@ export function analyzeSubtitles(
         }
       }
     }
-    return { s, chars, additions, clear };
+    const log = events.map((e) => ({
+      ms: round((e.t - s.onset) * 1000),
+      size: round(e.size, 4),
+      kind: additions.includes(e)
+        ? ('add' as const)
+        : e === clear
+          ? ('clear' as const)
+          : ('other' as const),
+    }));
+    return { s, chars, additions, clear, log };
   });
 
   // 测试音：全字可见的句子按顺序配对，求全局偏差。
   let offset: number | null = null;
   if (spc) {
-    const complete = raw.flatMap(({ s, chars, additions }) =>
+    const complete = classified.flatMap(({ s, chars, additions }) =>
       chars !== null && additions.length === chars
         ? [median(additions.map((a, k) => a.t - (s.onset + k * spc))) ?? 0]
         : [],
@@ -287,9 +331,9 @@ export function analyzeSubtitles(
   }
 
   const ms = (v: number) => round(v * 1000);
-  const sentences: SubtitleSentence[] = raw.map(({ s, chars, additions, clear }) => {
+  const sentences: SubtitleSentence[] = classified.map(({ s, chars, additions, clear, log }) => {
     const clearedMs = clear ? ms(clear.t - s.end) : null;
-    const base = { chars, additions: additions.length, clearedMs };
+    const base = { chars, additions: additions.length, clearedMs, events: log };
     if (spc && chars !== null) {
       const expected = (k: number) => s.onset + k * spc;
       const matched: Array<number | null> = new Array(chars).fill(null);

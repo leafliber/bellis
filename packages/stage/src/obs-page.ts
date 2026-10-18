@@ -8,7 +8,7 @@ import { SafetyService, STAGE_URL } from '@bellis/safety';
 import Type from 'typebox';
 import { type WebSocket, WebSocketServer } from 'ws';
 import { type ObsAction, ObsControlService } from './obs-control.ts';
-import { encodeAudio, isPageEvent, isPageFirst, type Welcome } from './page-wire.ts';
+import { encodeAudio, isPageEvent, isPageFirst, isPageStats, type Welcome } from './page-wire.ts';
 import { type FromPage, type PageLink, StagePageService, type ToPage } from './types.ts';
 
 const PAGE_DIR = new URL('../page/', import.meta.url);
@@ -17,6 +17,7 @@ const FILES: Record<string, [file: string, type: string]> = {
   '/page.js': ['page.js', 'text/javascript; charset=utf-8'],
   '/audio.js': ['audio.js', 'text/javascript; charset=utf-8'],
   '/subtitle.js': ['subtitle.js', 'text/javascript; charset=utf-8'],
+  '/diagnostics.js': ['diagnostics.js', 'text/javascript; charset=utf-8'],
   '/worklet.js': ['worklet.js', 'text/javascript; charset=utf-8'],
   '/stage.css': ['stage.css', 'text/css; charset=utf-8'],
 };
@@ -60,6 +61,17 @@ export const obsStagePage = definePlugin({
       redistributeMinMs: Type.Integer({ minimum: 0, default: 5000 }),
       /** 页面发来的单条消息上限。 */
       maxMessageBytes: Type.Integer({ minimum: 256, default: 4096 }),
+      /**
+       * 页面 AudioContext 的 latencyHint（Stage 文档“对齐”）：缺省 interactive，浏览器的输出缓冲约为
+       * playback 的一半，整条声音链路短约 60ms；playback 留作退路。与缺省不同时经 URL 片段告诉页面。
+       */
+      latencyHint: Type.Union([Type.Literal('playback'), Type.Literal('interactive')], {
+        default: 'interactive',
+      }),
+      /** 诊断：页面每隔这么久回报一次浏览器自报的音频输出时延（stage-page.stats 日志）；0 为关闭。 */
+      statsEveryMs: Type.Union([Type.Literal(0), Type.Integer({ minimum: 100, maximum: 60_000 })], {
+        default: 0,
+      }),
     }),
   },
   async activate(ctx) {
@@ -184,7 +196,11 @@ export const obsStagePage = definePlugin({
       token = randomBytes(16).toString('base64url');
       tokenUsed = false;
       distributions += 1;
-      const action: ObsAction = { kind: 'stage-url', url: `${origin}/#t=${token}` };
+      // 诊断项只在与缺省不同时写进片段，正常运行的 URL 不变。
+      const diagnostics =
+        (config.latencyHint === 'interactive' ? '' : `&l=${config.latencyHint}`) +
+        (config.statsEveryMs > 0 ? `&s=${config.statsEveryMs}` : '');
+      const action: ObsAction = { kind: 'stage-url', url: `${origin}/#t=${token}${diagnostics}` };
       try {
         const decision = await safety.authorize({
           key: `stage-url:${ctx.instanceId}:${distributions}`,
@@ -291,6 +307,12 @@ export const obsStagePage = definePlugin({
           message = isBinary ? undefined : JSON.parse(String(data));
         } catch {
           message = undefined;
+        }
+        // 诊断回报只在打开时接受，只记日志，不转给 Stage 服务。
+        if (config.statsEveryMs > 0 && isPageStats.Check(message)) {
+          const { kind: _kind, ...stats } = message;
+          ctx.log('stage-page.stats', stats);
+          return;
         }
         if (!isPageEvent.Check(message)) {
           ctx.log('stage-page.invalid-message');

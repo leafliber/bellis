@@ -13,6 +13,8 @@ import {
 export interface ObsConnectOptions {
   /** 握手与认证的截止时间，默认 2000ms。 */
   timeoutMs?: number;
+  /** Identify 时订阅的事件（obs-websocket 的 EventSubscription 位），缺省 0，即不订阅。 */
+  eventSubscriptions?: number;
 }
 
 export interface ObsRequestOptions {
@@ -47,13 +49,14 @@ function toResult(raw: Record<string, unknown>): ObsResult {
 }
 
 /**
- * obs-websocket 5 客户端（JSON 子协议）。不订阅事件，只发请求与批量请求。
- * 安全核的 OBS 应急连接与外部看门狗都用它（D-30、R-14）。
+ * obs-websocket 5 客户端（JSON 子协议）。缺省不订阅事件，只发请求与批量请求；
+ * 安全核的 OBS 应急连接与外部看门狗都这样用（D-30、R-14）。连接时给出 `eventSubscriptions` 才收事件。
  */
 export class ObsClient {
   readonly #socket: WebSocket;
   readonly #pending = new Map<string, Pending>();
   readonly #closeListeners = new Set<(reason: string) => void>();
+  readonly #eventListeners = new Set<(type: string, data: Record<string, unknown>) => void>();
   #closed = false;
 
   private constructor(socket: WebSocket) {
@@ -106,7 +109,7 @@ export class ObsClient {
               op: OpCode.Identify,
               d: {
                 rpcVersion: 1,
-                eventSubscriptions: 0,
+                eventSubscriptions: options.eventSubscriptions ?? 0,
                 ...(auth && password !== undefined
                   ? { authentication: authenticationString(password, auth.salt, auth.challenge) }
                   : {}),
@@ -135,6 +138,12 @@ export class ObsClient {
   onClose(listener: (reason: string) => void): () => void {
     this.#closeListeners.add(listener);
     return () => this.#closeListeners.delete(listener);
+  }
+
+  /** 已订阅的事件（见 `eventSubscriptions`）。 */
+  onEvent(listener: (type: string, data: Record<string, unknown>) => void): () => void {
+    this.#eventListeners.add(listener);
+    return () => this.#eventListeners.delete(listener);
   }
 
   async request(
@@ -194,6 +203,12 @@ export class ObsClient {
 
   #onMessage(text: string): void {
     const message = JSON.parse(text) as Message;
+    if (message.op === OpCode.Event) {
+      const type = String(message.d.eventType);
+      const data = (message.d.eventData ?? {}) as Record<string, unknown>;
+      for (const listener of [...this.#eventListeners]) listener(type, data);
+      return;
+    }
     if (message.op !== OpCode.RequestResponse && message.op !== OpCode.RequestBatchResponse) return;
     const id = String(message.d.requestId);
     const pending = this.#pending.get(id);
