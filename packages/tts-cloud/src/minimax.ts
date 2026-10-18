@@ -26,8 +26,9 @@ import { Link } from './link.ts';
  *   收到 `task_started` 后会话可用；一条连接只有一个会话，多句复用。
  * - 每句发 `task_continue`（文本）与 `task_flush`；音频（十六进制 PCM）与字幕随 `task_continued` 到达，
  *   `task_flushed` 表示这一句的音频已全部发出。
- * - 取消发 `task_cancel`，收到 `task_canceled` 后会话回到可用状态。取消时若还有未确认的 flush，
- *   被取消的 flush 之后会不会再确认文档没有写，缺省直接断开、下一句重新建连（S-07 核对后可开启复用）。
+ * - 取消发 `task_cancel`，收到 `task_canceled` 后会话回到可用状态。被取消的 flush 仍会确认：
+ *   `task_flushed` 紧跟在 `task_canceled` 之后到达（S-07 实测）。等这些确认到齐才把连接留给下一句，
+ *   免得迟到的确认被当成下一句的结束；取消的截止时间内没到齐就断开，下一句重新建连。
  * - 字幕的时间与文本偏移相对当前句（`sentence_start` 到 `sentence_end`）从 0 起算；时间戳按 `sentence_start`
  *   时已收到的采样数换算成相对整句音频开头的毫秒，文本按字词本身与朗读文本对照，不用厂商的字符偏移。
  * - 约 120 秒无活动服务端以 2201 断开，且不主动 ping：空闲时客户端定时 ping，空闲过久主动断开。
@@ -46,8 +47,6 @@ export interface MinimaxOptions {
   languageBoost: string;
   subtitleType: 'word_streaming' | 'word' | 'sentence';
   pingIntervalMs: number;
-  /** 取消时还有未确认的 flush 也复用连接（缺省 false：断开重连）。探针用来核对会话能否复用。 */
-  reuseAfterCancel?: boolean;
 }
 
 interface Subtitle {
@@ -197,6 +196,7 @@ export class MinimaxEngine implements Engine {
       timeoutMs: this.#timeouts.connectTimeoutMs,
       maxPayload: MAX_MESSAGE_BYTES,
     });
+    this.#observe('open', { ms: clock.now() - startedAt });
     const connection: Connection = {
       link,
       secret,
@@ -216,6 +216,7 @@ export class MinimaxEngine implements Engine {
     link.onMessage((data, binary) => this.#dispatch(connection, data, binary));
     try {
       await hello;
+      this.#observe('hello', { ms: clock.now() - startedAt });
       link.send(JSON.stringify(this.#taskStart()));
       await this.#expect(connection, 'task_started');
     } catch (error) {
@@ -334,7 +335,8 @@ export class MinimaxEngine implements Engine {
     const sentences: number[] = [];
     /** 各句各字幕片段的最新结果（按出现顺序）。 */
     const segments = new Map<string, WordStamp[]>();
-    let state: 'running' | 'canceling' | 'done' = 'running';
+    /** canceling：已发取消、等确认；draining：取消已确认，等被取消的 flush 的确认。 */
+    let state: 'running' | 'canceling' | 'draining' | 'done' = 'running';
     let flushes = 0;
     let retrying = false;
     let samples = 0;
@@ -361,8 +363,8 @@ export class MinimaxEngine implements Engine {
       if (timer) clock.clearTimeout(timer);
       timer = clock.setTimeout(() => {
         if (state === 'running') fail(new EngineError(`${what}超时（${ms}ms）`));
-        else if (state === 'canceling') {
-          this.#observe('cancel-timeout');
+        else if (state === 'canceling' || state === 'draining') {
+          this.#observe(state === 'canceling' ? 'cancel-timeout' : 'flush-timeout');
           finish(false);
         }
       }, ms);
@@ -417,14 +419,26 @@ export class MinimaxEngine implements Engine {
     };
     connection.handler = (message) => {
       const code = codeOf(message);
-      if (state === 'canceling') {
+      if (state === 'canceling' || state === 'draining') {
         if (message.data?.audio) {
           this.#observe('audio-after-cancel', { bytes: message.data.audio.length / 2 });
         }
-        if (message.event === 'task_flushed') flushes -= 1;
-        if (message.event === 'task_canceled') {
+        if (message.extra_info?.usage_characters !== undefined) {
+          this.#observe('usage-after-cancel', {
+            usageCharacters: message.extra_info.usage_characters,
+          });
+        }
+        if (message.event === 'task_flushed') {
+          flushes -= 1;
+          this.#observe('flushed-after-cancel', { pendingFlushes: flushes });
+          if (state === 'draining' && flushes <= 0) finish(true);
+        } else if (message.event === 'task_canceled') {
           this.#observe('cancel-acked', { pendingFlushes: flushes });
-          finish(flushes <= 0 || this.#options.reuseAfterCancel === true);
+          if (flushes <= 0) finish(true);
+          else {
+            state = 'draining';
+            arm(this.#timeouts.cancelTimeoutMs, '取消');
+          }
         } else if (code !== 0 || message.event === 'task_failed') {
           finish(false);
         }

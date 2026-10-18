@@ -35,6 +35,11 @@ export interface FakeMinimaxOptions {
   audioAfterCancel?: number;
   /** 收到取消后不确认。 */
   ignoreCancel?: boolean;
+  /**
+   * 被取消的 flush 在 task_canceled 之后仍发 task_flushed（缺省 true，与 S-07 实测的真实服务一致）；
+   * 数值表示晚这么多毫秒再发。false 表示不发。
+   */
+  confirmCanceledFlush?: boolean | number;
   /** 不发送 task_flushed。 */
   neverFlush?: boolean;
   /** 收到 task_flush 后什么也不发（模拟服务端卡住）。 */
@@ -76,6 +81,7 @@ export class FakeMinimax {
       backpressureOnce: false,
       audioAfterCancel: 0,
       ignoreCancel: false,
+      confirmCanceledFlush: true,
       neverFlush: false,
       mute: false,
       ...options,
@@ -236,7 +242,12 @@ export class FakeMinimax {
       synthesizing = false;
       if (canceled) {
         canceled = false;
-        if (!o.ignoreCancel) send({ event: 'task_canceled', base_resp: ok });
+        if (o.ignoreCancel) return;
+        send({ event: 'task_canceled', base_resp: ok });
+        const confirm = o.confirmCanceledFlush;
+        if (confirm === false || o.neverFlush) return;
+        if (confirm === true) send({ event: 'task_flushed', base_resp: ok });
+        else setTimeout(() => send({ event: 'task_flushed', base_resp: ok }), confirm);
         return;
       }
       if (!o.neverFlush) send({ event: 'task_flushed', base_resp: ok });
