@@ -28,6 +28,16 @@
 - [MiniMax 双向流式 TTS](https://platform.minimax.io/docs/api-reference/speech-t2a-websocket-bidi.md)（[中国大陆版](https://platform.minimax.cn/docs/api-reference/speech-t2a-websocket-bidi.md)；鉴权见[同步 WebSocket 指南](https://platform.minimax.io/docs/guides/speech-t2a-websocket.md)，限流见[速率限制](https://platform.minimax.cn/docs/guides/rate-limits.md)）、[火山引擎双向流式 TTS](https://docs.volcengine.com/docs/DoubaoVoice/bidirectional-streaming-text-to-speech-websocket?lang=zh)（二进制帧、事件号与鉴权头见 [WebSocket 双向流式-V3](https://docs.volcengine.com/docs/6561/1329505)）、[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS)。
 - [Qwen3-ForcedAligner](https://arxiv.org/abs/2601.21337)：非自回归强制对齐，中日文字级时间戳。
 
+## 直播平台
+
+- B 站直播开放平台：[快速开始](https://open-live.bilibili.com/document/849b924b-b421-8586-3e5e-765a72ec3840)、[应用 API](https://open-live.bilibili.com/document/eba8e2e1-847d-e908-2e5c-7a1ec7d9266f)、[签名鉴权](https://open-live.bilibili.com/document/74eec767-e594-7ddd-6aba-257e8317c05d)、[长连接数据协议](https://open-live.bilibili.com/document/657d8e34-f926-a133-16c0-300c1afc6e6b)、[消息命令](https://open-live.bilibili.com/document/f9ce25be-312e-1f4a-85fd-fef21f1637f8)、[常见问题](https://open-live.bilibili.com/document/5dffc297-6fd2-41ff-bd45-6e8b89e2a68e)。
+
+## 模型与记忆
+
+- 火山方舟：[模型列表](https://docs.volcengine.com/docs/ark/model-list)、[深度思考](https://docs.volcengine.com/docs/ark/deep-thinking)、[Chat API](https://ark.volcengine.com/region:cn-beijing/docs/chat-api.md)、[Base URL 与鉴权](https://ark.volcengine.com/region:cn-beijing/docs/base-url-and-authentication.md)、[GLM-5.3-flash 模型卡](https://ark.volcengine.com/models/glm-5-3-flash.md)。
+- [iris-core 宿主接口契约](https://github.com/AirObject/iris-core/blob/main/docs/host-api.md)。
+- [W3C Trace Context](https://www.w3.org/TR/trace-context/)、[OTLP 文件格式](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/file-exporter.md)、[OpenTelemetry GenAI 语义约定](https://github.com/open-telemetry/semantic-conventions-genai)。
+
 ## VLA 与游戏控制
 
 - [Real-Time Chunking](https://arxiv.org/abs/2506.07339)、[Training-time RTC](https://arxiv.org/abs/2512.05964)、[FASTER](https://arxiv.org/abs/2603.19199)：动作块的实时执行与首动作时间。
