@@ -32,7 +32,7 @@
 | D-20 | 插件信任 | 宿主进程内只加载本项目插件；第三方代码一律作为 sidecar 进程接入 | 2026-10-14 |
 | D-21 | 协议 Schema | TypeScript 为源，生成 JSON Schema 2020-12 与 Python Pydantic 模型；控制面 JSON-RPC 2.0；音频走独立二进制流 | 2026-10-14 |
 | D-22 | 部署拓扑 | 先单机；在真机测出 GPU 争用后再决定是否加推理机 | 2026-10-14 |
-| D-23 | 运行环境 | 全部 Windows 原生运行，包括 Python sidecar 与 Iris | 2026-10-14 |
+| D-23 | 运行环境 | 全部 Windows 原生运行，包括 Python sidecar；2026-10-19 改：Iris 例外，以 Docker 部署在本机（Docker Desktop），端口只映射到 127.0.0.1 | 2026-10-14 |
 | D-24 | OBS 基线 | 锁定 OBS Studio 32.2.x；33 正式版发布并复测浏览器源音频后再迁移；Bellis 只用 obs-websocket 与浏览器源，不写 OBS 插件 | 2026-10-14 |
 | D-25 | 路线图 | P0 内核与安全核 → P1 真实媒体 → P2 真实互动 → P3 游戏桥与魔女审判 → T1 公开试播；VLA 研究并行；之后原神分步上线，再到无人值守。详见[路线图](roadmap.md) | 2026-10-14 |
 | D-26 | P0 范围 | 含一条全模拟的端到端发声链路（录制弹幕 → 回放模型输出 → 模拟审核插件 → 模拟 TTS → 模拟 Stage），并配固定种子的确定性仿真 | 2026-10-14 |
@@ -58,15 +58,21 @@
 | R-07 | 确定性仿真 | 自研：时钟、随机数、传输与外部服务都作为插件服务，`sim` profile 用种子驱动调度；用 fast-check 生成与收缩失败轨迹，失败以“种子 + 提交”复现 | 2026-10-14 |
 | R-08 | Stage 连接与认证 | 宿主用 `node:http` 只在 `127.0.0.1` 上提供页面（每次会话随机端口），WebSocket 服务端用 `ws`（`noServer`，在升级阶段认证）；每个请求与升级都要求 Host 与本端地址严格相等，Origin 也须严格相等，唯一例外是页面文档的顶层导航（浏览器不为它带 Origin，S-01 确认），它只在 Sec-Fetch-Mode 为 navigate 且 Sec-Fetch-Dest 为 document 时放行；每次会话生成 128 位一次性令牌，经 obs-websocket 写进浏览器源 URL 的片段，页面以首条消息出示后换成只存于内存的会话密钥；同时只允许一个已认证会话 | 2026-10-16 |
 | R-09 | Stage 音频路由 | OBS 浏览器源开启“Control audio via OBS”，页面用 AudioWorklet 播放；不用虚拟声卡或 sidecar 直接出声。长时间最小化或遮挡下的表现以探针 S-01 为准。2026-10-18 批准：页面的 AudioContext 用 `interactive` 的 latencyHint，`playback` 留作退路；字幕与口型按 OBS 音量表实测的呈现延迟推迟（见 [Stage](../modules/stage.md#对齐)） | 2026-10-15 |
-| R-10 | TTS 引擎 | 云端优先：自写不绑定厂商的 TTS 插件，接 MiniMax 与火山引擎的双向流式接口（中途取消、字/词级时间戳），主备由探针 S-07 定；外发须在 profile 中按厂商显式开启；2026-10-17 维护者决定不再要求厂商的算法备案编号。本地 Qwen3-TTS 作降级，以 sidecar 接入。2026-10-17 批准：各引擎由 TTS 路由按 profile 配置的顺序选用，只出字幕也由路由提供；云端 TTS 等需要带请求头、读取握手 HTTP 状态码或发 ping 的 WebSocket 客户端用 `ws`（R-08 中的 `ws` 用于服务端）；2026-10-17 批准：对端与 Node 自带客户端不兼容时也用 `ws`，例如 VTube Studio（见 [Stage](../modules/stage.md#形象)） | 2026-10-15 |
+| R-10 | TTS 引擎 | 云端优先：自写不绑定厂商的 TTS 插件，接 MiniMax 与火山引擎的双向流式接口（中途取消、字/词级时间戳），主备由探针 S-07 定；外发须在 profile 中按厂商显式开启；2026-10-17 维护者决定不再要求厂商的算法备案编号。本地 Qwen3-TTS 作降级，以 sidecar 接入。2026-10-17 批准：各引擎由 TTS 路由按 profile 配置的顺序选用，只出字幕也由路由提供；云端 TTS 等需要带请求头、读取握手 HTTP 状态码或发 ping 的 WebSocket 客户端用 `ws`（R-08 中的 `ws` 用于服务端）；2026-10-17 批准：对端与 Node 自带客户端不兼容时也用 `ws`，例如 VTube Studio（见 [Stage](../modules/stage.md#形象)）；2026-10-19 维护者决定：MiniMax 到了每分钟请求数上限时不换厂商、不降级，安静等到额度恢复（见[发声](../modules/speech.md#云端-tts)），火山引擎与云端主备仍暂缓 | 2026-10-15 |
 | R-11 | 字幕时间对齐 | 两段式：句段一到即按字数（标点处加权）线性铺开，字幕立即可用；随后用 TTS 返回的时间戳细化，本地 TTS 用 Qwen3-ForcedAligner 对齐，对不齐的片段保留插值。结束时刻不晚于播放游标的字算已播出 | 2026-10-15 |
 | R-14 | 外部看门狗 | 独立 Node 小进程；宿主心跳丢失时经 obs-websocket 5 用一次 RequestBatch 静音 Stage 源、切安全场景（按策略决定是否停流），然后呼叫操作员；P0 对接模拟 OBS | 2026-10-14 |
 | R-15 | 形象 | VTube Studio 插件 API：按播放游标以 30–60Hz 注入嘴型参数（每个参数至少每秒重发一次），表情经表情或热键接口；VTS 画面用 OBS 自带的游戏采集（允许透明）接入，不装 OBS 插件。Bellis 不含 Live2D 代码 | 2026-10-15 |
 | R-16 | SecretStore 实现库 | @napi-rs/keyring 覆盖 Windows 凭据管理器与 macOS Keychain；出现超出凭据管理器单条上限的条目时，再为大块数据的 DPAPI 加密加一个原生绑定，绑定库届时登记审核 | 2026-10-16 |
+| R-17 | 决策 LLM | 火山方舟提供的 GLM-5.3-flash（`glm-5-3-flash-260828`）。方舟文档写明它始终启用思考、不能关闭，因此用 `reasoning_effort: low`；结构化输出能否使用，方舟的文档与模型页说法矛盾。这两点由 S-11 实测，用方舟上一款可关思考、支持结构化输出的型号作对照，不达标时由维护者决定是否换型号。客户端按 OpenAI 兼容的 Chat Completions 自写薄客户端（fetch + SSE 解析），超时、重试与取消由宿主控制，不引入厂商 SDK；端点与型号写在插件配置里，换型号只改配置 | 2026-10-19 |
+| R-18 | 弹幕接入 | B 站直播开放平台，以 `open_id` 作观众的稳定身份（同一应用内稳定，换应用会变）。自写薄客户端：HTTP 接口用 fetch 与 HMAC-SHA256 签名，长连接用 `ws`，解包用 Node 内置的 zlib，不引入第三方 SDK；不用非官方接口 | 2026-10-19 |
+| R-19 | Iris 客户端 | 按 iris-core 宿主接口契约自写 HTTP 薄客户端，不引入它的客户端（iris-core 为 AGPL-3.0）；P2 用消息写入、召回准备、定向查询与使用反馈，事件流（SSE）等需要消费提醒时再做 | 2026-10-19 |
+| R-20 | 操作台 | 本机网页，由宿主在 127.0.0.1 上另开一个随机端口提供（与 Stage 不同源）；页面写法同 R-25（带 JSDoc 的 JS，不用前端框架）。认证：`pnpm operator console` 打开带一次性令牌的地址（令牌放在 URL 片段），页面用它换取 HttpOnly、SameSite=Strict 的会话 cookie；每个请求与升级都严格核对 Host 与 Origin（含端口），写请求另带自定义请求头里的 CSRF 令牌。急停不只依赖操作台 | 2026-10-19 |
+| R-21 | 遥测 | 自写最小实现，不引入 OpenTelemetry SDK：生成并透传 W3C `traceparent`（跨进程时放在 JSON-RPC 参数里），span 与直方图写入单独的 JSONL 文件（不进事件库），字段按 OTLP 的结构命名，GenAI 属性按锁定到某一提交的语义约定，自定义属性用 `bellis.*`，内容默认不采集；需要可视化时由进程外的 OTel Collector 导入 | 2026-10-19 |
 | R-23 | 进程启动与连接信息分发 | “登录时运行”的计划任务启动一个轻量启动器，由它分别拉起宿主与看门狗（看门狗不是宿主的子进程）；本次会话的管道名与密钥写入 SecretStore，供看门狗和单独启动的 Game Runtime 读取；macOS 开发机用同一启动器脚本 | 2026-10-14 |
 | R-24 | Python sidecar 工具链 | Python 3.12，解释器、虚拟环境与依赖都由 uv 管理，锁文件入库，不依赖系统 Python；PyTorch 2.11.0 配 CUDA 13.0，uv 按平台标记把 torch、torchaudio 指向 PyTorch 的 CUDA 索引；PyTorch 与模型依赖单独成组，只在 Windows 真机安装，三平台 CI 只装协议与检查所需的部分；注意力用 PyTorch SDPA，不用 FlashAttention（官方没有 Windows 轮子）；Qwen3-TTS 与 Qwen3-ForcedAligner 放在同一环境，用 uv 的依赖覆盖把 transformers 统一到 4.57.6，qwen-tts 在该版本下是否正常由 S-07 本地部分验证，不正常再拆成两个 sidecar（2026-10-17 实测 qwen-tts 0.1.1 在 transformers 4.57.6 下合成正常，同一 sidecar）；Pydantic 模型由 TypeBox 生成的 JSON Schema 经 datamodel-code-generator 生成，生成物与源一起提交，`gen` 与 `gen:check` 因此依赖 uv；Python 侧检查用 ruff、pyright、pytest | 2026-10-16 |
 | R-25 | Stage 页面脚本 | 页面与 AudioWorklet 模块写成带 JSDoc 类型的 JS，由单独的 tsconfig 以 `checkJs` 检查并纳入 `pnpm run typecheck`，宿主按原样提供；页面可经 `@import` 复用协议包的类型；AudioWorklet 全局作用域的类型用 `@types/audioworklet` | 2026-10-17 |
 | R-26 | “登录时运行”计划任务的注册 | 以 `spawn` 调用系统自带的 `schtasks.exe`，`/Create /XML` 注册、`/Delete` 注销，不经 shell；任务 XML 由代码生成，显式写明登录触发器只针对当前用户、交互令牌、最低权限、`ExecutionTimeLimit` 为 `PT0S`、`Priority` 在 4–6；输出随系统语言本地化，只以退出码判断，必要时用 `/Query /XML` 读回核对。XML 文件的编码与非提权进程能否为当前用户注册登录触发的任务为 PENDING，在真机验证 | 2026-10-17 |
+| R-27 | 物理急停 | 用 OBS 自带的热键把“切到安全场景”“静音 Stage 源”绑到键盘上，动作在 OBS 内完成，不依赖宿主与看门狗；宿主经安全核的 OBS 应急连接订阅 `CurrentProgramSceneChanged` 与 `InputMuteStateChanged`，真实输出模式下节目场景变为安全场景或 Stage 源被静音，即按急停处理、进入安全停止。游戏提权运行时 OBS 也须提权运行，否则 OBS 收不到热键 | 2026-10-19 |
 
 ## 待审核路线
 
@@ -74,12 +80,7 @@
 
 | 编号 | 模块 | 候选（首项为推荐） | 依据与取舍 | 何时需要 |
 | --- | --- | --- | --- | --- |
-| R-12 | 审核模型 | 本地小模型（如 Qwen3Guard-Gen）/ 云端中文审核接口 / 通用 LLM 加审核提示词 | 只在审核插件启用时需要；本地模型与游戏、OBS 争 GPU，云端需外发许可 | P2 |
-| R-17 | 决策 LLM | 已备案的云端模型 / 本地开源模型 | 合规要求对公众输出使用已备案模型；本地模型与游戏、OBS 争 GPU | P2 |
-| R-18 | 弹幕接入 | B 站直播开放平台（open_id、HMAC 签名、项目心跳） | 官方接口；不提供 uid，以 open_id 作稳定身份 | P2 |
-| R-19 | Iris 客户端 | 按 iris-core HTTP 契约自写薄客户端（HTTP + SSE） | iris-connectors 的 TS 客户端为 AGPL-3.0，直接引入会影响 Bellis 的许可 | P2 |
-| R-20 | 操作台 | 本机 Web 页（独立 Origin）/ 桌面壳 | Web 页最轻；急停不能只依赖操作台 | P2 |
-| R-21 | 遥测 | OpenTelemetry，GenAI 语义约定锁定版本，自定义属性用 `bellis.*` | agent 相关 span 仍处于 Development 状态 | P2 |
+| R-12 | 审核模型 | 云端：阿里云内容安全的大模型输出审核 / 本地：Qwen3Guard-Gen，另加补齐涉政类别的模型（如 OpenGuardrails）/ 通用 LLM 加审核提示词 | 只在审核插件启用时需要；2026-10-19 维护者决定暂缓，P2 只保留审核开关接口、不启用。阿里云明确覆盖大陆意义上的涉政，文档称通常 50ms 内返回，需外发许可；Qwen3Guard 的“政治敏感”类别只指可证伪的虚假信息，不等于涉政，且本地模型与游戏、OBS 争 GPU | 启用审核插件前（最晚进入 M3 前） |
 | R-22 | 打包与分发 | 暂不定（候选：Node 单可执行文件、安装器、签名） | 个人开发者的代码签名渠道受地区限制；试播前再定 | T1 前 |
 
 Game Runtime 的采集、OCR、VLM、输入代理与 VLA 路线在其仓库登记和审核，不在本表。

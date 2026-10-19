@@ -6,18 +6,18 @@
 
 ## 当前状态
 
-当前阶段是 [P0 内核与安全核](docs/plan/P0.md)，在全模拟环境中实现插件内核与安全核。工程命令见 [AGENTS.md](AGENTS.md#常用命令)。
+当前阶段是 [P2 真实互动](docs/plan/P2.md)：接入 B 站弹幕、决策模型、投票、Iris 记忆与操作台。工程命令见 [AGENTS.md](AGENTS.md#常用命令)。
 
 ## 从哪里读
 
 | 你要做的事 | 入口 |
 | --- | --- |
 | 了解项目 | [愿景与目标](docs/vision.md)、[总体架构](docs/architecture.md) |
-| 实现当前阶段 | [P0 任务卡](docs/plan/P0.md) |
+| 实现当前阶段 | [P2 任务卡](docs/plan/P2.md) |
 | 查选型是否已批准 | [技术基线与路线审核](docs/plan/tech-baseline.md) |
 | 以 agent 身份修改仓库 | [AGENTS.md](AGENTS.md) |
 
 ## 相关仓库
 
 - [bellis-game-runtime](https://github.com/leafliber/bellis-game-runtime)（私有）：游戏采集、感知、VLA 控制与输入代理。
-- iris-core：长期记忆服务。Bellis 只召回直播间的公开事实，写入经隐私网关。
+- [iris-core](https://github.com/AirObject/iris-core)：长期记忆服务。Bellis 只召回直播间的公开事实，写入经隐私网关。

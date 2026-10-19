@@ -2,7 +2,7 @@
 
 本文件是 agent 的唯一规则入口；其它 README 只做介绍和索引。
 
-当前阶段是 [P1 真实媒体](docs/plan/P1.md)。
+当前阶段是 [P2 真实互动](docs/plan/P2.md)。
 
 ## 常用命令
 
