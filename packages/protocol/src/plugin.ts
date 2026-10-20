@@ -18,9 +18,13 @@ export const InjectRef = Type.String({
   pattern: '^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*@[0-9]+\\??$',
 });
 
-/** 权限，例如 `speech.output`、`net.egress:api.example.com`。 */
+/**
+ * 权限，例如 `speech.output`、`net.egress:api.example.com`；外发权限另可写成子域名通配
+ * `net.egress:*.example.com`（匹配规则见 `egressAllowed`）。
+ */
 export const Permission = Type.String({
-  pattern: '^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*(:[A-Za-z0-9.-]+)?$',
+  pattern:
+    '^(?:[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*(:[A-Za-z0-9.-]+)?|net\\.egress:\\*\\.[A-Za-z0-9.-]+)$',
 });
 
 export const PluginTier = Type.Union([Type.Literal('critical'), Type.Literal('ordinary')]);

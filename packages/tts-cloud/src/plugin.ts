@@ -1,4 +1,11 @@
-import { ClockService, definePlugin, SecretsService, secretPermission } from '@bellis/kernel';
+import {
+  ClockService,
+  definePlugin,
+  egressAllowed,
+  egressPermission,
+  SecretsService,
+  secretPermission,
+} from '@bellis/kernel';
 import { SafetyService } from '@bellis/safety';
 import { Alignment, CloudTtsService, type Synthesis, type TtsEngine } from '@bellis/speech';
 import Type, { type Static } from 'typebox';
@@ -16,11 +23,6 @@ import { VolcengineEngine } from './volcengine.ts';
 /** 中国大陆的官方端点。清单按这两个主机申请外发权限；改用别的端点须另行授予该主机。 */
 export const MINIMAX_ENDPOINT = 'wss://api.minimax.cn/ws/v1/t2a_v2_bidi';
 export const VOLCENGINE_ENDPOINT = 'wss://openspeech.bytedance.com/api/v3/tts/bidirection';
-
-/** 外发权限名。 */
-export function egressPermission(host: string): string {
-  return `net.egress:${host}`;
-}
 
 const LOOPBACK = new Set(['127.0.0.1', '[::1]', 'localhost']);
 
@@ -122,8 +124,9 @@ export function vendorBlocker(
   if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && LOOPBACK.has(url.hostname))) {
     return '端点须为 wss://（本机测试除外）';
   }
-  const permission = egressPermission(url.hostname);
-  if (!permissions.has(permission)) return `未授予权限 ${permission}`;
+  if (!egressAllowed(url.hostname, permissions)) {
+    return `未授予权限 ${egressPermission(url.hostname)}`;
+  }
   return undefined;
 }
 

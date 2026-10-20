@@ -114,6 +114,30 @@
           }
         }
       ]
+    },
+    {
+      "name": "audience",
+      "entries": [
+        {
+          "id": "danmaku",
+          "plugin": "danmaku-bilibili",
+          "disabled": true,
+          "grant": [
+            "net.egress:live-open.biliapi.com",
+            "net.egress:*.chat.bilibili.com",
+            "secret:bilibili",
+            "secret:bilibili-code"
+          ],
+          "config": {
+            "appId": 0
+          }
+        },
+        {
+          "id": "triage",
+          "plugin": "audience-triage",
+          "disabled": true
+        }
+      ]
     }
   ]
 }

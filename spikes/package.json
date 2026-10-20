@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@bellis/avatar": "workspace:*",
+    "@bellis/bilibili": "workspace:*",
     "@bellis/channel": "workspace:*",
     "@bellis/config": "workspace:*",
     "@bellis/kernel": "workspace:*",

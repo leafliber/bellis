@@ -78,7 +78,10 @@ type Id7 = Id1
 
 
 type Permission = Annotated[
-    StrictStr, Field(pattern='^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*(:[A-Za-z0-9.-]+)?$')
+    StrictStr,
+    Field(
+        pattern='^(?:[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*(:[A-Za-z0-9.-]+)?|net\\.egress:\\*\\.[A-Za-z0-9.-]+)$'
+    ),
 ]
 
 
