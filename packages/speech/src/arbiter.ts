@@ -15,6 +15,7 @@ import {
   SpeechService,
   type SpeechSource,
   type Synthesis,
+  TtsExpiredError,
   TtsService,
   type UtteranceOutcome,
 } from './types.ts';
@@ -340,17 +341,40 @@ export const speechArbiter = definePlugin({
           // 不让云端 TTS 继续合成没人听的部分。
           const sentenceAbort = new AbortController();
           const ttsSignal = AbortSignal.any([current.abort.signal, sentenceAbort.signal]);
+          /** 这一句因发言过期而没有播出时的原因。 */
+          let expired: string | undefined;
           await safety.execute(decision.intent, payload, async (p) => {
             try {
               // 授权的等待期间可能已被打断：此时这一句一个采样都没有播出，按失败记录。
               if (halted()) throw new Error('播出前被打断');
+              // 合成中（例如云端 TTS 等限流）被停止、软收尾、抢占，或等到发言过期：立即取消这一句的合成，不再播出。
+              let synthesizing = true;
+              void current.interrupted.promise.then(() => {
+                if (synthesizing) sentenceAbort.abort(new Error('播出前被打断'));
+              });
+              const untilExpiry = request.expiresAt - clock.now();
+              const expiry =
+                Number.isFinite(untilExpiry) && untilExpiry > 0
+                  ? clock.setTimeout(() => {
+                      expired = '合成中发言已过期';
+                      sentenceAbort.abort(new Error('发言已过期'));
+                    }, untilExpiry)
+                  : undefined;
               try {
-                synthesis = await tts.synthesize(p.spoken, ttsSignal);
+                // 带上发言的过期时刻：要等限流、而额度恢复时发言已过期的，引擎不等（TtsExpiredError）。
+                synthesis = await tts.synthesize(p.spoken, ttsSignal, {
+                  expiresAt: request.expiresAt,
+                });
               } catch (error) {
-                ttsError = error instanceof Error ? error.message : String(error);
+                if (error instanceof TtsExpiredError) expired = error.message;
+                else ttsError = error instanceof Error ? error.message : String(error);
                 throw error;
+              } finally {
+                synthesizing = false;
+                if (expiry) clock.clearTimeout(expiry);
               }
               if (halted()) throw new Error('播出前被打断');
+              if (expired !== undefined) throw new Error(expired);
               const sentenceId = `${p.utteranceId}#${p.index}`;
               current.sentenceId = sentenceId;
               const voiced = synthesis;
@@ -377,6 +401,8 @@ export const speechArbiter = definePlugin({
             previous = sentence.subtitle;
             continue;
           }
+          // 合成中等到过期，或要等的限流额度到过期之后才恢复：这一句与剩下的句子都不播。
+          if (expired !== undefined) return finish(halted() ?? { end: 'expired', reason: expired });
           // 没有任何可用的 TTS 引擎：这一句一个采样都没有播出。
           if (ttsError !== undefined && !halted())
             return finish({ end: 'unavailable', reason: `TTS 不可用：${ttsError}` });

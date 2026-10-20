@@ -41,6 +41,26 @@ export function sleep(clock: Clock, ms: number): Promise<void> {
   return new Promise((resolve) => clock.setTimeout(resolve, ms));
 }
 
+/** 在时钟上等待一段时间，可被中止：到时返回 true，中止时立即返回 false（已中止时不等待）。 */
+export function sleepUnlessAborted(
+  clock: Clock,
+  ms: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clock.clearTimeout(timer);
+      resolve(false);
+    };
+    const timer = clock.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(true);
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 /** 截止时间内未完成则以 DeadlineError 失败；原任务不会被取消，调用方需自行处理。 */
 export function withDeadline<T>(
   clock: Clock,

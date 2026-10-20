@@ -1,11 +1,11 @@
 import type { Clock } from '@bellis/kernel';
-import { TtsRequestError, type WordStamp } from '@bellis/speech';
+import { type SynthesisOptions, TtsRequestError, type WordStamp } from '@bellis/speech';
 
 export type Vendor = 'minimax' | 'volcengine';
 
 /**
- * 引擎不可用：连接失败、鉴权失败、超时、限流或服务端出错。插件据此按 profile 切到下一个引擎，
- * 并在冷却时间内不再尝试这一家。
+ * 引擎不可用：连接失败、鉴权失败、超时或服务端出错。插件据此按 profile 切到下一个引擎，
+ * 并在冷却时间内不再尝试这一家（限流除外，见 {@link RateLimitError}）。
  */
 export class EngineError extends Error {
   readonly auth: boolean;
@@ -15,6 +15,25 @@ export class EngineError extends Error {
     this.name = 'EngineError';
     this.auth = options.auth ?? false;
   }
+}
+
+/**
+ * 厂商按每分钟请求数限流（MiniMax 1002）：不是故障，不冷却、不换厂商（R-10）。还没出声时适配器自己等到下一个窗口
+ * 重发同一句（届时发言已过期就以 `TtsExpiredError` 结束），不会抛出它；只有已经出声之后才被限流时，这一句以它结束。
+ */
+export class RateLimitError extends EngineError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
+}
+
+/** 正在等限流的那一句：等待的原因与预计可以发出的时刻。 */
+export interface RateWait {
+  /** `rpm`：本地计数到了配置的每分钟上限；`1002`：厂商以限流拒绝。 */
+  reason: 'rpm' | '1002';
+  /** 时钟上预计可以发出的时刻。 */
+  until: number;
 }
 
 /**
@@ -43,11 +62,14 @@ export interface Engine {
   readonly vendor: Vendor;
   /**
    * 开始合成一句：收到第一段音频（或合成结束、或已中止）时返回。
-   * 在此之前的失败以 {@link EngineError} 或 {@link RequestError} 拒绝。同一引擎一次只合成一句。
+   * 在此之前的失败以 {@link EngineError} 或 {@link RequestError} 拒绝；要等限流、而额度恢复时发言已过期
+   * （`options.expiresAt`）时不等，以 `TtsExpiredError` 拒绝。同一引擎一次只合成一句。
    */
-  start(text: string, signal: AbortSignal): Promise<EngineStream>;
+  start(text: string, signal: AbortSignal, options?: SynthesisOptions): Promise<EngineStream>;
   /** 关闭连接，中止进行中的合成。 */
   close(): void;
+  /** 正在等限流时的原因与预计可以发出的时刻（按每分钟请求数限流的厂商才有）。 */
+  readonly waiting?: RateWait | undefined;
 }
 
 /** 线路上的观测（探针用）。不含凭据，也不含朗读文本。 */

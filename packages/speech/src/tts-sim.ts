@@ -1,7 +1,16 @@
-import { ClockService, definePlugin, sleep } from '@bellis/kernel';
+import {
+  ClockService,
+  definePlugin,
+  sleep,
+  sleepUnlessAborted,
+  TraceService,
+} from '@bellis/kernel';
 import Type from 'typebox';
 import { Alignment } from './timing.ts';
-import { type Synthesis, TtsService } from './types.ts';
+import { type Synthesis, TtsExpiredError, TtsService } from './types.ts';
+
+/** 模拟限流的计数窗口。 */
+const RATE_WINDOW_MS = 60_000;
 
 /**
  * 模拟 TTS：每个朗读码点固定若干采样，给出精确的时间映射，用于验证截断与写回逻辑。
@@ -9,6 +18,9 @@ import { type Synthesis, TtsService } from './types.ts';
  * `twoStage` 时模拟云端 TTS 的两段式对齐（R-11）：句段一到先给插值映射，每产出一帧，
  * 用已经开始的码点的精确时间戳细化，合成完成后填上总采样数。
  * 缺省输出静音；给出 `toneHz` 时输出正弦测试音，用于在真实 OBS 里听到、测到 Stage 的声音。
+ * 给出 `rpm` 时模拟云端 TTS 按每分钟请求数限流时的等待：最近 60 秒内已开始合成这么多句时，下一句在返回之前
+ * 安静等到窗口里空出名额；等待受中止信号约束（中止即返回空的合成），不计入首包延迟；额度恢复时所属发言已过期
+ * （`expiresAt`，含此刻已过期）就不等，以 `TtsExpiredError` 结束。
  */
 export const simTts = definePlugin({
   manifest: {
@@ -16,7 +28,7 @@ export const simTts = definePlugin({
     version: '0.1.0',
     tier: 'ordinary',
     provides: [TtsService.ref],
-    inject: [ClockService.ref],
+    inject: [ClockService.ref, `${TraceService.ref}?`],
     permissions: [],
     process: 'in-process',
     config: Type.Object({
@@ -36,10 +48,13 @@ export const simTts = definePlugin({
       failOn: Type.Array(Type.String({ minLength: 1 }), { default: [] }),
       /** 大于 0 时输出该频率、振幅 0.2 的正弦测试音。 */
       toneHz: Type.Number({ minimum: 0, default: 0 }),
+      /** 大于 0 时模拟每分钟请求数上限（按句计，窗口 60 秒）。 */
+      rpm: Type.Integer({ minimum: 0, default: 0 }),
     }),
   },
   activate(ctx) {
     const clock = ctx.service(ClockService);
+    const trace = ctx.optional(TraceService);
     const {
       sampleRate,
       samplesPerChar,
@@ -51,10 +66,52 @@ export const simTts = definePlugin({
       estimateMsPerChar,
       failOn,
       toneHz,
+      rpm,
     } = ctx.config;
+    /** 最近一个窗口内开始合成的时刻（升序）。 */
+    const started: number[] = [];
+    /**
+     * 到了每分钟上限就等到窗口里空出名额：可以开始时返回 true，等待中被中止时返回 false；
+     * 额度恢复时发言已过期（含此刻已过期）就不等，以 TtsExpiredError 结束。
+     */
+    const slot = async (signal: AbortSignal, expiresAt: number | undefined): Promise<boolean> => {
+      let waited = false;
+      for (;;) {
+        const now = clock.now();
+        while (started.length > 0 && (started[0] as number) <= now - RATE_WINDOW_MS) {
+          started.shift();
+        }
+        if (started.length < rpm) {
+          if (waited) trace?.record('tts.rate-wait-ended', { canceled: false });
+          return true;
+        }
+        const ms = (started[started.length - rpm] as number) + RATE_WINDOW_MS - now;
+        if (expiresAt !== undefined && now + ms >= expiresAt) {
+          trace?.record('tts.rate-expired', { ms, expiresInMs: expiresAt - now });
+          throw new TtsExpiredError(`限流额度 ${ms}ms 后才恢复，发言届时已过期`);
+        }
+        if (!waited) trace?.record('tts.rate-wait', { ms });
+        waited = true;
+        if (!(await sleepUnlessAborted(clock, ms, signal))) {
+          trace?.record('tts.rate-wait-ended', { canceled: true });
+          return false;
+        }
+      }
+    };
     const msOf = (samples: number) => (samples * 1000) / sampleRate;
     ctx.provide(TtsService, {
-      async synthesize(spoken, signal): Promise<Synthesis> {
+      async synthesize(spoken, signal, options): Promise<Synthesis> {
+        if (rpm > 0) {
+          if (!(await slot(signal, options?.expiresAt))) {
+            return {
+              sampleRate,
+              totalSamples: undefined,
+              timing: undefined,
+              frames: (async function* () {})(),
+            };
+          }
+          started.push(clock.now());
+        }
         const chars = [...spoken];
         const total = chars.length * samplesPerChar;
         const frameMs = (frameSamples * 1000) / sampleRate;

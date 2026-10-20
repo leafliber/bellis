@@ -1,5 +1,5 @@
-import type { TimerHandle } from '@bellis/kernel';
-import type { WordStamp } from '@bellis/speech';
+import { sleepUnlessAborted, type TimerHandle } from '@bellis/kernel';
+import { type SynthesisOptions, TtsExpiredError, type WordStamp } from '@bellis/speech';
 import {
   aborted,
   type Engine,
@@ -11,6 +11,8 @@ import {
   Job,
   MAX_MESSAGE_BYTES,
   PcmDecoder,
+  RateLimitError,
+  type RateWait,
   RequestError,
   redact,
   Serial,
@@ -32,6 +34,10 @@ import { Link } from './link.ts';
  * - 字幕的时间与文本偏移相对当前句（`sentence_start` 到 `sentence_end`）从 0 起算；时间戳按 `sentence_start`
  *   时已收到的采样数换算成相对整句音频开头的毫秒，文本按字词本身与朗读文本对照，不用厂商的字符偏移。
  * - 约 120 秒无活动服务端以 2201 断开，且不主动 ping：空闲时客户端定时 ping，空闲过久主动断开。
+ * - 按每分钟请求数限流，超出时以 1002 拒绝；请求按句计，流式分片不另算（S-07）。适配器记下最近一个窗口（60 秒）内
+ *   每次发出文本的时刻，到了 `rpm` 就让这一句安静等到窗口里空出名额再发；仍被 1002 拒绝时，从被拒时起等满一个窗口，
+ *   再在新的连接上重发同一句。等待受这一句的中止信号约束，不计入首包等时限（它们从发出文本时起算），也不算故障。
+ *   要等、而额度恢复时这一句所属的发言已过期（含此刻已过期）时不等，以 `TtsExpiredError` 结束，不发请求。
  */
 export interface MinimaxOptions {
   endpoint: string;
@@ -47,6 +53,8 @@ export interface MinimaxOptions {
   languageBoost: string;
   subtitleType: 'word_streaming' | 'word' | 'sentence';
   pingIntervalMs: number;
+  /** 每分钟请求数上限：最近 60 秒内已发出这么多句时，下一句等到窗口里空出名额再发。 */
+  rpm: number;
 }
 
 interface Subtitle {
@@ -85,6 +93,10 @@ interface Connection {
 /** 这一句的文本有问题，换引擎也无济于事：单条文本过长、非法字符超过 10%。 */
 const REQUEST_CODES = new Set([2204, 1042]);
 const AUTH_CODE = 1004;
+/** 每分钟请求数超限：等到下一个窗口重发同一句，不算故障。 */
+const RATE_LIMIT_CODE = 1002;
+/** 每分钟请求数的计数窗口。 */
+export const RATE_WINDOW_MS = 60_000;
 /** 排队的文本太多（2205）：稍后重发同一句。 */
 const BACKPRESSURE = 2205;
 const BACKPRESSURE_RETRY_MS = 300;
@@ -100,6 +112,13 @@ export class MinimaxEngine implements Engine {
   readonly #timeouts: EngineTimeouts;
   readonly #env: EngineEnv;
   readonly #serial = new Serial();
+  /** 关闭引擎时取消限流等待。 */
+  readonly #closing = new AbortController();
+  /** 最近一个窗口内每次发出文本的时刻（升序）。 */
+  readonly #sent: number[] = [];
+  /** 收到 1002 后，到这个时刻之前不再发出。 */
+  #blockedUntil = Number.NEGATIVE_INFINITY;
+  #waiting: RateWait | undefined;
   #connection: Promise<Connection> | undefined;
   #closed = false;
   #current: Job | undefined;
@@ -110,39 +129,76 @@ export class MinimaxEngine implements Engine {
     this.#env = env;
   }
 
-  async start(text: string, signal: AbortSignal): Promise<EngineStream> {
+  /** 正在等限流时的原因与预计可以发出的时刻。 */
+  get waiting(): RateWait | undefined {
+    return this.#waiting;
+  }
+
+  async start(
+    text: string,
+    signal: AbortSignal,
+    options: SynthesisOptions = {},
+  ): Promise<EngineStream> {
     const release = await this.#serial.acquire();
-    if (signal.aborted || this.#closed) {
-      release();
-      return emptyStream(this.#options.sampleRate);
+    for (;;) {
+      // 到了每分钟上限：安静等到窗口里空出名额再发；等待中被中止就不再发出；额度恢复时发言已过期就不等。
+      let free: boolean;
+      try {
+        free = !signal.aborted && !this.#closed && (await this.#slot(signal, options.expiresAt));
+      } catch (error) {
+        release();
+        throw error;
+      }
+      if (!free) {
+        release();
+        return emptyStream(this.#options.sampleRate);
+      }
+      // 建连期间被中止：立即返回，连接在后台建完后照常留用。
+      const connecting = this.#ensure();
+      let winner: { connection: Connection } | undefined;
+      try {
+        winner = await Promise.race([
+          connecting.then((connection) => ({ connection })),
+          aborted(signal).then(() => undefined),
+        ]);
+      } catch (error) {
+        // 开始会话时就被限流：等到下一个窗口再试同一句。
+        if (error instanceof RateLimitError) continue;
+        release();
+        throw error;
+      }
+      if (!winner) {
+        connecting.then(release, release);
+        return emptyStream(this.#options.sampleRate);
+      }
+      const job = new Job(signal);
+      const rate = { value: this.#options.sampleRate };
+      const attempt = Promise.withResolvers<void>();
+      this.#current = job;
+      this.#run(winner.connection, job, text, rate, () => {
+        if (this.#current === job) this.#current = undefined;
+        attempt.resolve();
+      });
+      try {
+        await job.ready();
+      } catch (error) {
+        // 还没出声就被 1002 拒绝：这一次已收尾（连接已断开），等到下一个窗口在新连接上重发同一句。
+        if (error instanceof RateLimitError) {
+          await attempt.promise;
+          continue;
+        }
+        void attempt.promise.then(release);
+        throw error;
+      }
+      void attempt.promise.then(release);
+      if (job.stopped && !job.hasAudio) return emptyStream(rate.value);
+      return { sampleRate: rate.value, chunks: job.chunks() };
     }
-    // 建连期间被中止：立即返回，连接在后台建完后照常留用。
-    const connecting = this.#ensure();
-    const winner = await Promise.race([
-      connecting.then((connection) => ({ connection })),
-      aborted(signal).then(() => undefined),
-    ]).catch((error: unknown) => {
-      release();
-      throw error;
-    });
-    if (!winner) {
-      connecting.then(release, release);
-      return emptyStream(this.#options.sampleRate);
-    }
-    const job = new Job(signal);
-    const rate = { value: this.#options.sampleRate };
-    this.#current = job;
-    this.#run(winner.connection, job, text, rate, () => {
-      if (this.#current === job) this.#current = undefined;
-      release();
-    });
-    await job.ready();
-    if (job.stopped && !job.hasAudio) return emptyStream(rate.value);
-    return { sampleRate: rate.value, chunks: job.chunks() };
   }
 
   close(): void {
     this.#closed = true;
+    this.#closing.abort();
     this.#current?.fail(new EngineError('引擎已关闭'));
     void this.#connection?.then(
       (connection) => connection.link.close(),
@@ -159,7 +215,83 @@ export class MinimaxEngine implements Engine {
     const code = codeOf(message);
     const text = `MiniMax ${message.event ?? '响应'} 错误 ${code}：${redact(message.base_resp?.status_msg ?? '', [secret])}`;
     if (REQUEST_CODES.has(code)) return new RequestError(text);
+    if (code === RATE_LIMIT_CODE) {
+      // 厂商说窗口已满：从现在起等满一个窗口，这一句与之后的句子都不早于它发出。
+      this.#blockedUntil = Math.max(this.#blockedUntil, this.#env.clock.now() + RATE_WINDOW_MS);
+      this.#observe('rate-limited', { event: message.event });
+      return new RateLimitError(text);
+    }
     return new EngineError(text, { auth: code === AUTH_CODE });
+  }
+
+  /** 最早可以发出下一句的时刻与原因；不晚于 now 表示现在就可以发。 */
+  #nextSend(now: number): RateWait {
+    const sent = this.#sent;
+    while (sent.length > 0 && (sent[0] as number) <= now - RATE_WINDOW_MS) sent.shift();
+    const { rpm } = this.#options;
+    const local =
+      sent.length >= rpm
+        ? (sent[sent.length - rpm] as number) + RATE_WINDOW_MS
+        : Number.NEGATIVE_INFINITY;
+    return this.#blockedUntil > local
+      ? { reason: '1002', until: this.#blockedUntil }
+      : { reason: 'rpm', until: local };
+  }
+
+  /**
+   * 到了每分钟上限（本地计数到 `rpm`，或厂商以 1002 拒绝）时安静等到窗口里空出名额：可以发出时返回 true；
+   * 这一句被中止或引擎关闭时取消等待，返回 false。额度恢复时发言已过期（`expiresAt`，含此刻已过期）就不等，
+   * 以 TtsExpiredError 结束；不需要等时不看它。日志只记原因与时长，不记文本。
+   */
+  async #slot(signal: AbortSignal, expiresAt: number | undefined): Promise<boolean> {
+    const { clock } = this.#env;
+    if (this.#nextSend(clock.now()).until <= clock.now()) return true;
+    const stop = AbortSignal.any([signal, this.#closing.signal]);
+    const began = clock.now();
+    let logged = false;
+    try {
+      for (;;) {
+        const now = clock.now();
+        const next = this.#nextSend(now);
+        if (next.until <= now) {
+          this.#observe('rate-resumed', { waitedMs: now - began });
+          this.#env.log?.('tts.rate-limit-resumed', { engine: 'minimax', waitedMs: now - began });
+          return true;
+        }
+        if (expiresAt !== undefined && next.until >= expiresAt) {
+          const fields = {
+            reason: next.reason,
+            waitMs: Math.ceil(next.until - now),
+            expiresInMs: Math.ceil(expiresAt - now),
+          };
+          this.#observe('rate-expired', fields);
+          this.#env.log?.('tts.rate-limit-expired', { engine: 'minimax', ...fields });
+          throw new TtsExpiredError(
+            `MiniMax 限流额度约 ${fields.waitMs}ms 后才恢复，发言届时已过期，不等`,
+          );
+        }
+        if (!logged) {
+          logged = true;
+          const fields = {
+            reason: next.reason,
+            waitMs: Math.ceil(next.until - now),
+            rpm: this.#options.rpm,
+            sent: this.#sent.length,
+          };
+          this.#observe('rate-wait', fields);
+          this.#env.log?.('tts.rate-limit-wait', { engine: 'minimax', ...fields });
+        }
+        this.#waiting = next;
+        if (!(await sleepUnlessAborted(clock, next.until - now, stop))) {
+          const waitedMs = clock.now() - began;
+          this.#observe('rate-canceled', { waitedMs });
+          this.#env.log?.('tts.rate-limit-canceled', { engine: 'minimax', waitedMs });
+          return false;
+        }
+      }
+    } finally {
+      this.#waiting = undefined;
+    }
   }
 
   /** 取得可用的连接；没有就建连并开始会话。 */
@@ -380,6 +512,8 @@ export class MinimaxEngine implements Engine {
       send({ event: 'task_continue', text });
       send({ event: 'task_flush' });
       flushes += 1;
+      // 每发出一次文本计一次请求（含重发）。
+      this.#sent.push(clock.now());
       this.#observe('text-sent', { chars: [...text].length });
     };
     const subtitle = (sub: Subtitle) => {

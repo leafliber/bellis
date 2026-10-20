@@ -32,6 +32,7 @@ async function setup(
       languageBoost: 'Chinese',
       subtitleType: 'word_streaming',
       pingIntervalMs: 30_000,
+      rpm: 20,
       ...options,
     },
     timeouts,
