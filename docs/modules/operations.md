@@ -50,10 +50,124 @@
 
 ## 观测
 
-- **事件日志是事实来源**，遥测是可以丢失的派生数据。
-- 链路追踪覆盖：弹幕接入 → 分诊 → 决策 → 审核（启用时，逐句）→ TTS → 播出；跨进程调用在 JSON-RPC 参数中携带 `traceparent`。
-- 按 R-21 自写最小实现：宿主生成 W3C `traceparent` 并沿链路透传；span 与直方图写入单独的 JSONL 文件，不进事件库，写不进时直接丢弃，不阻塞直播；字段按 OTLP 的结构命名，GenAI 属性按锁定到某一提交的语义约定，自定义属性用 `bellis.*` 前缀；模型与观众的内容默认不采集。需要可视化时，由进程外的 OTel Collector 导入。
-- 关键直方图：弹幕到首音、逐句审核耗时、TTS 首包、停止到静音、许可续约滞后、事件循环延迟、游戏首动作时间。
+**事件日志是事实来源**，遥测是可以丢失的派生数据：span 与直方图写进单独的 JSONL 文件，不进事件库，写不进就丢，不阻塞直播。按 R-21 自写最小实现，不引入 OpenTelemetry SDK；需要可视化时由进程外的 OTel Collector 导入。
+
+### 遥测服务
+
+- 遥测是普通插件，提供 `telemetry@1`（`packages/telemetry`）：
+  - `telemetry`：写 JSONL 文件，并按 `eventLoopIntervalMs` 采样宿主的事件循环延迟；
+  - `telemetry-memory`：写内存，另提供 `telemetry.memory@1` 读出写出的行，供确定性仿真与测试用；缺省在本轮同步代码结束后就写，不设定时器，不改变仿真里定时器的交错。
+- 其它插件以可选依赖使用：inject 写 `telemetry@1?`，代码里用 `useTracer(ctx, 插件 id)`。每次调用时现查，遥测晚于使用方激活、热替换或停用都不影响使用方；不在时是空实现，不分配、不计时。
+- 接口：
+  - `tracer(scope)`：按插件 id 取记录器，作为 OTLP 的 instrumentation scope；
+  - `startSpan(名字, { parent, kind, attributes, links })`：`parent` 可以是本进程的 span、W3C `traceparent`，或随数据传下来的 `TraceRef`；不给或不合格时开一条新的 trace。span 有 `traceparent`（交给下游作父）、`setAttributes`、`addEvent`、`addLink`、`fail(错误类别)`（状态记为 ERROR，类别写进 `error.type`）与 `end`，只有结束的 span 才写出；
+  - `record(名字, 值, 单位, 属性, 关联的 span)`：直方图的一个样本；
+  - `sidecarEnv()`：拉起 sidecar 时加进它环境的变量（见下文[跨进程](#跨进程)）。
+- trace ID 与 span ID 取自 `random@1`，时间取自 `clock@1`：时间戳是 Unix 纳秒，即时钟零点对应的 Unix 毫秒加单调时钟。确定性仿真里同一种子两次运行的遥测完全相同。
+- `traceparent` 按 W3C Trace Context Level 1 解析：接受更高的版本（只读前四段），拒绝版本 ff、全零的 ID 与不合格的写法；生成的总是版本 00、flags 01。
+- 随数据传递的链路上下文 `TraceRef`（上游 span 的 `traceparent`、链路起点的时刻 `originAt`、要关联的上游 span）是可选字段，放在 `Danmaku`、分诊候选、投票请求与发声请求上；模型调用的 `traceparent` 放在 `LlmRequest` 上，不放进交给模型的上下文；发声前检查的输入、合成选项与 Stage 的句子信息带 `traceparent`。没有遥测时这些字段都不出现。
+
+### 文件与格式
+
+- **位置**：状态存储所在目录（宿主提供 `data-dir@1`）下、`telemetry` 插件配置 `dir` 给出的子目录；`dir` 是相对路径，跳不出这个目录。仓库的 sim profile 用 `telemetry/sim`，live 样例用 `telemetry/live`。
+- **文件名**：`<进程>-<UTC 时刻>-<序号>.jsonl`。宿主的进程名是 `host`，sidecar 用它的通道角色（例如 `sidecar.tts-local`）。
+- **轮转与保留**：当前文件写到 `maxFileBytes`（缺省 8 MiB），或写满 `maxFileAgeMs`（缺省 1 小时），下一批就换新文件；每个进程只留最新的 `maxFiles` 个（缺省 24），更早的删除，别的进程的文件不动。磁盘占用因此有上限。
+- **写出**：
+  - 等待写出的记录放在有界队列里（`maxQueue`，缺省 4096），满了丢弃最旧的并计数；
+  - 每 `flushIntervalMs`（缺省 2 秒）或攒够 `batchSize`（缺省 512）写一批，同时只有一批在写；
+  - 写失败丢弃这一批并计数，下一批重新打开新文件；
+  - 队列满与写失败各只记一次日志（`telemetry.queue-full`、`telemetry.write-failed`），停用时写完剩下的再关闭，并在 `telemetry.stopped` 里记下各项计数。
+- **格式**：每行一个 OTLP/JSON 导出请求，一批至多两行：`{"resourceSpans":[…]}`（`ExportTraceServiceRequest`）与 `{"resourceMetrics":[…]}`（`ExportMetricsServiceRequest`）。trace ID 与 span ID 是小写十六进制，纳秒时刻与 64 位整数写成十进制字符串，枚举写整数值（span 种类 1–5，状态 0 或 2，不写状态说明）。
+  - resource：`service.name`（宿主为 `bellis.host`，sidecar 为 `bellis.<通道角色>`）、`service.instance.id`、`process.pid`（仿真里不写）、`telemetry.sdk.*`，宿主另有 `bellis.semconv.gen_ai`（锁定的 GenAI 约定提交）；scope 为插件 id，sidecar 为它的模块名。
+  - 直方图：每批里同一指标、同一组属性的样本合成一个增量（DELTA）数据点，区间从上一批写出到这一批；桶边界按单位取（秒按 OpenTelemetry 语义约定建议的 0.005–10，token 数按 GenAI 约定，其余用 SDK 的缺省）。每个样本另作一个 exemplar（原值、时刻与关联的 span），查看工具据此算精确的分位数。
+- 仓库的 live 样例缺省启用遥测：不外发、不持凭据、不含内容，磁盘占用有上限，写不进也不影响直播。
+
+### 内容不采集
+
+只记结构、编号、计数、耗时与枚举的结果。模型与观众的内容不采集：弹幕正文、昵称、观众身份（open_id）、模型的输入与输出、字幕与朗读文本、投票的题目与选项、审核与否决的理由。准入规则在宿主与 Python sidecar 里各实现一份，两边的测试对照：
+
+- 属性名只收 `bellis.*`、`gen_ai.*` 与 `error.type`；
+- GenAI 约定里承载内容的属性一律拒绝：`gen_ai.input.messages`、`gen_ai.output.messages`、`gen_ai.system_instructions`、`gen_ai.prompt`、`gen_ai.completion`、`gen_ai.tool.definitions`、`gen_ai.tool.call.arguments`、`gen_ai.tool.call.result`；
+- 名字的任何一段是表示内容或观众身份的词也拒绝，例如 text、content、message、body、prompt、subtitle、spoken、nickname、viewer、user、open_id、question、option、reason；
+- 值只收有限的数值、布尔，以及只含可打印 ASCII、不超过 128 个字符的字符串，中文内容因此进不来；超长的整条拒绝，不截断；
+- span、事件与指标的名字只收可打印 ASCII；
+- 被拒绝的属性不写出，计入 OTLP 的 `droppedAttributesCount`。
+
+自定义属性一律用 `bellis.*`。GenAI 属性按 open-telemetry/semantic-conventions-genai 锁定的提交 `547934afa90a34298441caf80c43b27255c3a292`（2026-10-18），只用不含内容的部分：`gen_ai.operation.name`、`gen_ai.provider.name`、`gen_ai.request.model`、`gen_ai.response.model`、`gen_ai.usage.input_tokens`、`gen_ai.usage.output_tokens`、`gen_ai.token.type`，以及指标 `gen_ai.client.operation.duration`、`gen_ai.client.token.usage`。升级约定时改这个提交并核对名字（`packages/telemetry` 的 semconv.ts）。
+
+### 链路
+
+一条弹幕从接入到播出在同一个 trace 里：
+
+| 环节 | span | 父与关联 | 记什么 |
+| --- | --- | --- | --- |
+| 接入 | `danmaku.receive`（根，consumer） | — | 平台与平台的消息编号；写成事实、交给分诊后结束，开始时刻即链路起点 |
+| 分诊 | `triage.candidate` | 第一条弹幕；合并进来的其余弹幕以 links 关联 | 候选编号；取走、过期、挤出或停用时结束，记去向、合并数、是否命中注入检测 |
+| | `triage.drop` | 被丢弃的弹幕 | 丢弃的原因（净化后为空、注入） |
+| 决策 | `chat <型号>`（GenAI，client） | 排第一的候选；其余候选以 links 关联 | GenAI 属性（回放模型填 `bellis.replay` 与 `replay`）、候选数、意图类型；模型客户端报来时另记 token 用量与应答的型号；超时、调用失败、非法输出、回应对象不在上下文时出错 |
+| 发声 | `speech.utterance` | 回应弹幕：被回应的候选，以 link 关联这次模型调用；闲聊与开票说明：模型调用；其余来源：根 | 发言编号、来源、可抢占点、是否含不可信输入；出队为事件；结束方式、听到的字数、跳过的句数 |
+| 每句 | `speech.sentence` | 发言 | 句键、句序号、去向（播出、截断、跳过、拒绝、过期等） |
+| | `speech.pre_check`，其下 `moderation.check` | 这一句 | 是否拦下；审核的结论（allow、block、error）与 `error.type`（例如 timeout） |
+| | `speech.review` | 这一句（M1） | 放行方式、是否放行 |
+| | `speech.authorize` | 这一句 | 是否授权、是否重复 |
+| | `tts.synthesize`，其下 sidecar 的 `tts_local.synthesize`（server）与 `tts_local.align` | 这一句 | 第一帧为事件；结束方式；sidecar 记后端、流编号、字数、采样数，出队与第一块音频为事件 |
+| 播出 | `stage.play` | 这一句 | 句编号、采样率、开始时的呈现延迟；页面回报的开始与欠载为事件；播出的采样数、是否完整、是否截断 |
+
+### 跨进程
+
+- 宿主调用 sidecar 的 JSON-RPC 在参数里带 W3C `traceparent`（版本 00），sidecar 以它为父写自己的 span，与宿主在同一个 trace 里；本地 TTS 的 `tts.synthesize` 带的是这一句合成的 span（协议见 `packages/protocol` 的 tts.ts）。代理插件只转发解析合格的值，并统一成版本 00。
+- 目录与轮转规则经环境变量 `BELLIS_TELEMETRY`（`SidecarTelemetry` 的 JSON）在拉起时交给 sidecar（见[插件内核](plugin-kernel.md#sidecar-代理)），sidecar 写进同一目录里自己的文件，格式与准入规则相同。没有这个变量、不合格或没有通道角色时，sidecar 不写遥测，其余照常；遥测插件晚于代理插件激活时，这个 sidecar 进程不写遥测，下次重启补上。
+- Python 运行时（`bellis_sidecar.telemetry`）在守护线程里写：有界队列满了丢弃最旧的，按间隔分批写，写失败丢弃并计数、只记一次日志；进程退出前在截止时间内尽量写完。
+
+### 直方图
+
+时长一律以秒为单位（UCUM 写作 `s`），查看工具换成毫秒显示。
+
+| 指标 | 口径 |
+| --- | --- |
+| `bellis.danmaku.time_to_first_audio` | 弹幕到首音：从宿主收到这条弹幕（接入的根 span 开始），到回应它的发言第一句在 Stage 开始播出（宿主收到页面回报 started 的时刻）；只记回应弹幕的发言，每段发言一次，样本关联到那一句 |
+| `bellis.danmaku.time_to_first_audio.presented` | 同上，再加上那一刻的呈现延迟 D：声音出现在 OBS 输出里的估计；仍不含推流与观众端的延迟 |
+| `bellis.moderation.check.duration` | 逐句审核耗时（审核启用时）：审核插件从开始判定到得出结论，含超时与出错，按 `bellis.moderation.outcome` 分 |
+| `bellis.tts.time_to_first_audio` | TTS 首包：发声仲裁发出合成（调用 `tts@1`）到拿到第一个 PCM 帧；含路由选择、引擎内的排队与限流等待。sidecar 内部第一块音频的时刻见 `tts_local.synthesize` 的事件 |
+| `bellis.stage.stop_to_silence.duration` | 停止到静音：Stage 服务要求页面截断一句（或转告许可令牌变化）到页面回报这一句已截断，按 `bellis.stage.stop_by`（truncate、token）分。页面停止输出后才回报；不含浏览器的输出缓冲、OBS 的缓冲与呈现延迟，不同于[时延目标](../architecture.md#时延目标)里按录音测的停止到静音 |
+| `bellis.lease.renew.lag` | 许可续约滞后：发声仲裁续约 Stage 音频输出许可的实际时刻相对计划时刻（上次续约后许可时长的三分之一）的滞后 |
+| `bellis.host.event_loop.delay` | 宿主事件循环延迟：`perf_hooks.monitorEventLoopDelay`（分辨率 20ms）在每个采样周期（缺省 10 秒）里的最大值减去分辨率；Windows 的定时器粒度也算在里面 |
+| `gen_ai.client.operation.duration` | 一次模型调用的耗时，超时与出错的带 `error.type` |
+| `gen_ai.client.token.usage` | 模型客户端报来的 token 数，按 `gen_ai.token.type` 分输入与输出 |
+
+游戏首动作时间在 P3 加入。
+
+### 查看
+
+- `pnpm telemetry summary`：各直方图的样本数与 p50/p95/p99（最近秩法，失败样本不剔除），以及最近的弹幕链路；
+- `pnpm telemetry trace <trace 编号或至少 8 位前缀>`：按 trace 打印 span 树，含 sidecar 的 span：进程、相对开始、耗时、属性、事件与关联；
+- 两者都可以加 `--config 配置文件`（缺省 `config/sim.json`，按状态存储所在目录与 profile 里的 `dir` 找目录）或 `--dir 目录`。只读文件，不连接宿主；文件里本来就没有内容。
+
+### 用 OTel Collector 导入
+
+需要可视化时，在进程外运行 OpenTelemetry Collector（contrib 发行版）读这些文件，再转发到 Jaeger、Tempo、Prometheus 等后端；Bellis 自己不连接任何遥测后端。示例配置如下（未实测，PENDING），用 `otlpjsonfile` 接收器读 JSONL，端点按所用后端改：
+
+```yaml
+receivers:
+  otlpjsonfile:
+    include: ['<状态存储所在目录>/telemetry/live/*.jsonl']
+    start_at: beginning
+exporters:
+  otlp:
+    endpoint: 127.0.0.1:4317
+    tls:
+      insecure: true
+service:
+  pipelines:
+    traces:
+      receivers: [otlpjsonfile]
+      exporters: [otlp]
+    metrics:
+      receivers: [otlpjsonfile]
+      exporters: [otlp]
+```
+
+直方图是增量的；导出到只收累计值的后端（例如 Prometheus）之前，在 metrics 管线里加 `deltatocumulative` 处理器。
 
 ## 确定性仿真
 
@@ -64,8 +178,9 @@
   - 每一步：每个资源的执行许可至多一个持有者；许可令牌不回退。
   - 追踪上：审核插件启用时被判不可说的句子从未在 Stage 上开始；安全停止期间 Stage 没有播出任何采样；写回恰好是 Stage 回报已播出的部分（由页面回报的采样数独立推出，急停且应急动作成功时扣掉呈现延迟，见[发声](speech.md#播放游标与写回)）；页面显示的字幕不早于游标，页面回报一句截断时它的字幕已清除，播完时至迟在呈现延迟之后清除；同一句与同一意图从未执行两次（含跨重启）。
   - 投票（见[投票](audience.md#投票)）：同时最多一个，安全停止期间不开票，同一投票只开一次、恰好以结束或中止收尾；开票说明完整播出之后才开始倒计时，截止之前不出结果；结果等于按冻结的规则对开票之后、截止之前送达的弹幕独立重算的结果（截止后的弹幕不计票，每人只计第一票），与投票时段重叠的缺口次数与时长一致；开票说明与结果播报各至多播一次（含跨重启），只有正常结束的投票播报结果。
+  - 遥测（见[观测](#观测)）：仿真启用写内存的遥测，它不设定时器，也不挪动其它插件的实例编号；启用与不启用遥测，追踪与事件完全相同。每一行都是合格的 OTLP/JSON，span ID 不重复；属性名都过准入规则，属性值不含送出的弹幕正文、昵称与 Stage 上的字幕。回应了弹幕、已经写回、且有句子在 Stage 上开始播出的发言（含开票说明），它开始播出的每一句都能沿父 span 在同一 trace 里追到那条弹幕（意图来源里的第一条输入）的根 span，途中的 span 都已写出，这一句的播出 span 带“开始播出”事件；回应弹幕的发言第一句开始播出时恰好记一个“弹幕到首音”样本，值等于这一刻与根 span 开始之差，“加呈现延迟”的样本再多出当时的呈现延迟。崩溃时还没写出的遥测随进程丢失，不计入检查。
   - 结束时：排空后没有卡住的意图与插件，没有进行中的投票。
-  - 同一场景与种子两次运行得到完全相同的追踪与事件。
+  - 同一场景与种子两次运行得到完全相同的追踪、事件与遥测。
 - 每次提交在固定种子集上运行；收缩出的失败场景加入回归用例。
 - `pnpm sim [--seed N] [--runs N]` 做更大规模的探索；失败时打印收缩后的场景，并给出“种子 + 路径”的复现命令，配合提交即可复现。
 

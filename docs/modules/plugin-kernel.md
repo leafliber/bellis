@@ -113,6 +113,7 @@ WAITING ──依赖齐全──► LOADING ──► ACTIVE ──停用或依�
 - 握手不等重的初始化：sidecar 先完成握手、插件随即激活，模型加载等放在握手之后在后台进行，是否就绪由代理提供的服务自己报告（例如 TTS 引擎的 `ready`）。插件内核的激活时限不变，也不为此新增状态。
 - 子进程退出或连接断开时，代理撤回其服务，依赖方自动回到 WAITING；代理按 FAILED 的退避重启子进程。
 - sidecar 只返回数据，不直接驱动扬声器、OBS 或游戏。
+- 链路追踪：宿主调用 sidecar 的 JSON-RPC 在参数里带 W3C `traceparent`；遥测在场时，代理插件把遥测服务给的环境变量（`BELLIS_TELEMETRY`）加进子进程的环境，Python 运行时（`bellis_sidecar.telemetry`）据此在同一 trace 下把 span 写进宿主的遥测目录（见[运维的观测](operations.md#跨进程)）。
 - 停止方式：先发 RPC 关闭，再关 stdin 让子进程读到 EOF 后退出，超时再强制终止（R-06）；子进程在哪一步退出记入日志。
 - sidecar 管住自己派生的进程（R-06）：Windows 上启动时先把自己放进设了 KILL_ON_JOB_CLOSE 的 Job Object，此后派生的全部子孙进程（含第三方库自己起的）都在其中，不能脱离；句柄不被继承、不主动关闭，sidecar 无论怎样退出它们都随之终止。其它平台跳过，派生的进程以 stdin 为生命线。
 - Python sidecar 的运行时在 `python/bellis_sidecar`：本机通道客户端、JSON-RPC 对端、握手与停止、Job Object；消息模型由 `packages/protocol` 经 `pnpm run gen` 生成（D-21、R-24）。宿主直接启动 uv 工作区虚拟环境里的解释器，不经 `uv run`（见 [Windows 平台](../platform/windows.md#进程)），以 PYTHONPATH 指向各包的源码目录。
