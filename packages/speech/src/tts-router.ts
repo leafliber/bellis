@@ -8,6 +8,7 @@ import {
   type Synthesis,
   type Tts,
   type TtsEngine,
+  TtsExpiredError,
   type TtsOption,
   TtsRequestError,
   type TtsRouting,
@@ -38,7 +39,8 @@ function empty(sampleRate: number): Synthesis {
  *
  * - 引擎是可选依赖（`tts.local@1`、`tts.cloud@1`）：引擎崩溃、未就绪或不在时跳过它，`tts@1` 不消失，
  *   发声仲裁照常运行，不因此急停。
- * - 引擎合成失败时这一句改用下一个；引擎以文本本身为由拒绝的句子（`TtsRequestError`）不换引擎，这一句失败。
+ * - 引擎合成失败时这一句改用下一个；引擎以文本本身为由拒绝的句子（`TtsRequestError`）不换引擎，这一句失败；
+ *   要等限流、而额度恢复时发言已过期的句子（`TtsExpiredError`）也不换引擎（限流不降级，R-10），这一句失败。
  * - `subtitles` 表示只出字幕：给出与估计朗读时长等长的静音帧和对应的插值映射，Stage 照常显示字幕、
  *   回报游标，仲裁与 Stage 不区分这种模式。
  * - 每次换用都记事件 `tts.switched`（从哪个到哪个、原因）并写日志提示操作员，不暗中换音色。
@@ -105,7 +107,7 @@ export const ttsRouter = definePlugin({
     };
 
     const tts: Tts = {
-      async synthesize(spoken, signal) {
+      async synthesize(spoken, signal, options) {
         const skipped: string[] = [];
         for (const option of order) {
           if (signal.aborted || ctx.signal.aborted) return empty(config.subtitleSampleRate);
@@ -125,9 +127,9 @@ export const ttsRouter = definePlugin({
           }
           let synthesis: Synthesis;
           try {
-            synthesis = await found.synthesize(spoken, signal);
+            synthesis = await found.synthesize(spoken, signal, options);
           } catch (error) {
-            if (error instanceof TtsRequestError) throw error;
+            if (error instanceof TtsRequestError || error instanceof TtsExpiredError) throw error;
             skipped.push(`${option} ${message(error)}`);
             continue;
           }

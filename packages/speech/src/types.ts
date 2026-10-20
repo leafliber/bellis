@@ -128,12 +128,21 @@ export interface Synthesis {
   readonly frames: AsyncIterable<Int16Array>;
 }
 
+/** 合成一句时附带的信息。 */
+export interface SynthesisOptions {
+  /**
+   * 这一句所属发言的过期时刻（时钟上）。引擎要等限流、而额度恢复时发言已过期（含此刻已过期）时不等，
+   * 以 {@link TtsExpiredError} 结束这一句、不发请求；不需要等时不看它。
+   */
+  readonly expiresAt?: number;
+}
+
 export interface Tts {
   /**
    * 合成一句已通过发声前检查的朗读文本。没有任何可用引擎时以错误拒绝；
    * 中止后返回的 `frames` 立即结束。
    */
-  synthesize(spoken: string, signal: AbortSignal): Promise<Synthesis>;
+  synthesize(spoken: string, signal: AbortSignal, options?: SynthesisOptions): Promise<Synthesis>;
 }
 
 export const TtsService = defineService<Tts>('tts', 1);
@@ -162,6 +171,17 @@ export class TtsRequestError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'TtsRequestError';
+  }
+}
+
+/**
+ * 这一句要等限流，而额度恢复时所属发言已经过期：引擎不等、不发请求，这一句合成失败。不是引擎故障：
+ * 路由不换引擎（换引擎会换音色，限流不降级，R-10），引擎不冷却；仲裁按“过期”结束发言。
+ */
+export class TtsExpiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TtsExpiredError';
   }
 }
 

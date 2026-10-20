@@ -6,6 +6,7 @@ import {
   SpeechService,
   type Synthesis,
   type TtsEngine,
+  TtsExpiredError,
   TtsService,
 } from '@bellis/speech';
 import { type FromPage, StageService } from '@bellis/stage';
@@ -193,6 +194,54 @@ test('MiniMax 限流：等待中被中止或引擎关闭时立即取消等待，
   }
 });
 
+test('MiniMax 限流：要等、而额度恢复时发言已过期（含此刻已过期）就不等，不发请求；不用等时不看过期', async () => {
+  const t = await setup({}, 1);
+  try {
+    // 不用等：发言已过期也照常发出（已开口的发言照常说完）。
+    await collect(await t.engine.start('一。', signal(), { expiresAt: -1 }));
+    // 这一分钟的名额已用掉，60 000ms 才恢复：恰在那时过期、此刻已过期，都不等。
+    await assert.rejects(t.engine.start('二。', signal(), { expiresAt: 60_000 }), TtsExpiredError);
+    await assert.rejects(t.engine.start('三。', signal(), { expiresAt: 0 }), TtsExpiredError);
+    assert.deepEqual(t.texts(), ['一。']);
+    assert.equal(t.kinds('rate-wait').length, 0);
+    assert.deepEqual(
+      t.kinds('rate-expired').map((w) => [w.reason, w.waitMs, w.expiresInMs]),
+      [
+        ['rpm', 60_000, 60_000],
+        ['rpm', 60_000, 0],
+      ],
+    );
+    assert.equal(t.logs.filter((l) => l.event === 'tts.rate-limit-expired').length, 2);
+    assert.equal(t.engine.waiting, undefined);
+    // 等完前不会过期：照常等、照常发。
+    const pending = t.engine.start('四。', signal(), { expiresAt: 60_001 });
+    await until(() => t.kinds('rate-wait').length === 1);
+    t.clock.advance(60_000);
+    assert.equal((await collect(await pending)).pcm.length, 2 * 80);
+    assert.deepEqual(t.texts(), ['一。', '四。']);
+  } finally {
+    await t.close();
+  }
+});
+
+test('MiniMax 限流：被 1002 拒绝后要等满一个窗口，而发言届时已过期：不再重发', async () => {
+  const t = await setup({ rateLimitTexts: 1 }, 20);
+  try {
+    await assert.rejects(
+      t.engine.start('你好。', signal(), { expiresAt: 30_000 }),
+      TtsExpiredError,
+    );
+    assert.deepEqual(t.texts(), ['你好。']);
+    assert.equal(t.kinds('rate-expired')[0]?.reason, '1002');
+    // 窗口过去之后，下一句照常发出。
+    t.clock.advance(60_000);
+    assert.equal((await collect(await t.engine.start('再见。', signal()))).pcm.length, 3 * 80);
+    assert.deepEqual(t.texts(), ['你好。', '再见。']);
+  } finally {
+    await t.close();
+  }
+});
+
 async function drain(synthesis: Synthesis): Promise<number> {
   let samples = 0;
   for await (const frame of synthesis.frames) samples += frame.length;
@@ -269,6 +318,45 @@ for (const [name, fakeOptions, rpm, why] of cases) {
   });
 }
 
+test('云端 TTS 插件：要等限流、额度恢复时发言已过期：不等，不换厂商、不冷却，路由不改用只出字幕', async () => {
+  const minimax = await FakeMinimax.start({ apiKey: KEY });
+  const volcengine = await FakeVolcengine.start({ apiKey: VOLC_KEY });
+  const clock = new ManualClock();
+  const w = await world(
+    [
+      entry('tts', 'tts-cloud', {
+        config: cloudConfig(minimax, volcengine, 1),
+        grant: CLOUD_GRANT,
+      }),
+      entry('router', 'tts-router', { config: { order: ['cloud', 'subtitles'] } }),
+    ],
+    { minimax: KEY, volcengine: VOLC_KEY },
+    clock,
+  );
+  try {
+    const tts = w.service(TtsService);
+    const engine = w.service<TtsEngine>(CloudTtsService);
+    await drain(await tts.synthesize('一。', signal()));
+    await assert.rejects(
+      tts.synthesize('你好。', signal(), { expiresAt: 5000 }),
+      (error) => error instanceof TtsExpiredError && /发言届时已过期/.test(error.message),
+    );
+    assert.equal(volcengine.connections, 0, '不换厂商');
+    assert.deepEqual(w.events('tts.switched'), [], '路由不改用只出字幕');
+    assert.ok(!w.logs.some((l) => l.event === 'tts.engine-failed'), '不算故障、不冷却');
+    assert.equal(engine.ready, true);
+    assert.equal(engine.status, '可用：minimax、volcengine');
+    assert.deepEqual(
+      minimax.events('task_continue').map((r) => r.text),
+      ['一。'],
+    );
+  } finally {
+    await w.close();
+    await minimax.close();
+    await volcengine.close();
+  }
+});
+
 test('云端 TTS 插件（回归）：服务端出错与首包超时仍按原规则冷却并改用另一家', async () => {
   for (const fakeOptions of [{ failStart: 1000 }, { mute: true }] as const) {
     const minimax = await FakeMinimax.start({ apiKey: KEY, ...fakeOptions });
@@ -303,7 +391,8 @@ test('云端 TTS 插件（回归）：服务端出错与首包超时仍按原规
 });
 
 /**
- * 推进手动时钟，每步之间让异步流程跑一轮，直到条件成立。`io` 时每步再让出一点真实时间，等本机网络送来的音频。
+ * 推进手动时钟，每步（10ms）之间让异步流程跑一轮，直到条件成立。`io` 时每 200ms 模拟时间再让出一点真实时间，
+ * 等本机网络送来的音频。
  */
 async function advanceUntil(
   clock: ManualClock,
@@ -314,7 +403,7 @@ async function advanceUntil(
   for (let elapsed = 0; !condition(); elapsed += 10) {
     if (elapsed > limitMs) throw new Error(`条件未在模拟时间 ${limitMs}ms 内满足`);
     clock.advance(10);
-    await (io ? wait(1) : tick());
+    await (io && elapsed % 200 === 0 ? wait(1) : tick());
   }
 }
 
@@ -322,7 +411,7 @@ async function advanceUntil(
  * 手动时钟下的发声链路。播放要推进时钟，而音频经本机网络按真实时间到达：建连与合成的时限放宽到测试推进不到的长度，
  * 免得推进时钟时误判超时。
  */
-async function speechWorld(minimax: FakeMinimax, volcengine: FakeVolcengine) {
+async function speechWorld(minimax: FakeMinimax, volcengine: FakeVolcengine, consume = true) {
   const clock = new ManualClock();
   const w = await world(
     [
@@ -339,7 +428,8 @@ async function speechWorld(minimax: FakeMinimax, volcengine: FakeVolcengine) {
         },
         grant: CLOUD_GRANT,
       }),
-      entry('router', 'tts-router', { config: { order: ['cloud'] } }),
+      // 只出字幕排在后面：用来核对限流不会让路由降级。
+      entry('router', 'tts-router', { config: { order: ['cloud', 'subtitles'] } }),
       entry('speech', 'speech-arbiter', { grant: ['speech.output'] }),
     ],
     { minimax: KEY },
@@ -351,44 +441,110 @@ async function speechWorld(minimax: FakeMinimax, volcengine: FakeVolcengine) {
     if (event.kind === 'started') started.push(event.sentenceId);
   });
   // 先用掉这一分钟的名额（rpm 为 1）。
-  await drain(await w.service(CloudTtsService).synthesize('一。', signal()));
-  return { w, clock, started };
-}
-
-test('发声链路：等限流时发言过期，等待随之取消，这一句不播出，发言按过期结束', async () => {
-  const minimax = await FakeMinimax.start({ apiKey: KEY });
-  const volcengine = await FakeVolcengine.start({ apiKey: VOLC_KEY });
-  const { w, clock, started } = await speechWorld(minimax, volcengine);
-  try {
-    let done = false;
-    const outcome = w
+  if (consume) await drain(await w.service(CloudTtsService).synthesize('一。', signal()));
+  const speak = (id: string, text: string, expiresAt: number) => {
+    const outcome = { done: false };
+    const promise = w
       .service(SpeechService)
       .request({
-        id: 'u1',
+        id,
         source: 'danmaku-reply',
-        text: '你好。',
-        expiresAt: clock.now() + 5000,
+        text,
+        expiresAt,
         preempt: 'sentence',
         inputs: [],
         untrusted: false,
       })
       .finally(() => {
-        done = true;
+        outcome.done = true;
       });
-    await until(() => w.logs.some((l) => l.event === 'tts.rate-limit-wait'));
-    await advanceUntil(clock, () => done, 6000);
-    const result = await outcome;
-    assert.equal(result.end, 'expired');
-    assert.equal(result.heard, '');
-    assert.ok(clock.now() >= 5000 && clock.now() < 5100, '过期那一刻就结束，不等窗口');
-    assert.ok(w.logs.some((l) => l.event === 'tts.rate-limit-canceled'));
-    // 窗口过去之后也不再发出这一句。
-    await advanceUntil(clock, () => clock.now() >= 70_000, 70_000);
-    assert.deepEqual(
-      minimax.events('task_continue').map((r) => r.text),
-      ['一。'],
+    return Object.assign(outcome, { promise });
+  };
+  return { w, clock, started, speak };
+}
+
+test('发声链路：已开口的发言，后一句要等限流而发言已过期或等完会过期：不等、不发请求、不换引擎，按过期结束', async () => {
+  // 每字 2 秒：“你好。”约 6 秒播完，首包经本机网络到达时手动时钟远没走到过期。
+  // 发言在播第一句时过期（3 秒），或此刻未过期、但等完之前会过期（30 秒）。
+  for (const ttl of [3000, 30_000]) {
+    const minimax = await FakeMinimax.start({ apiKey: KEY, samplesPerChar: 16_000 });
+    const volcengine = await FakeVolcengine.start({ apiKey: VOLC_KEY });
+    const { w, clock, started, speak } = await speechWorld(minimax, volcengine, false);
+    try {
+      const reply = speak('u1', '你好。再见。', clock.now() + ttl);
+      // 音频经本机网络按真实时间到达：每推进一步也让出一点真实时间。
+      await advanceUntil(clock, () => reply.done, 10_000, true);
+      const result = await reply.promise;
+      assert.equal(result.end, 'expired', `ttl ${ttl}`);
+      assert.match(result.reason ?? '', /发言届时已过期/);
+      assert.equal(result.heard, '你好。', '写回只含已播出的第一句');
+      assert.ok(clock.now() < 10_000, '不等窗口');
+      assert.deepEqual(started, ['u1#0']);
+      assert.deepEqual(
+        minimax.events('task_continue').map((r) => r.text),
+        ['你好。'],
+      );
+      assert.deepEqual(w.events('tts.switched'), [], '不改用只出字幕');
+      assert.ok(w.logs.some((l) => l.event === 'tts.rate-limit-expired'));
+      assert.ok(!w.logs.some((l) => l.event === 'tts.rate-limit-wait'));
+      assert.ok(!w.logs.some((l) => l.event === 'tts.engine-failed'));
+    } finally {
+      await w.close();
+      await minimax.close();
+      await volcengine.close();
+    }
+  }
+});
+
+test('发声链路：已开口的发言，后一句要等限流、等完前不会过期：照常等，额度恢复后照常播出', async () => {
+  const minimax = await FakeMinimax.start({ apiKey: KEY });
+  const volcengine = await FakeVolcengine.start({ apiKey: VOLC_KEY });
+  const { w, clock, started, speak } = await speechWorld(minimax, volcengine, false);
+  try {
+    const reply = speak('u1', '你好。再见。', 120_000);
+    await advanceUntil(
+      clock,
+      () => w.logs.some((l) => l.event === 'tts.rate-limit-wait'),
+      5000,
+      true,
     );
+    assert.deepEqual(started, ['u1#0']);
+    // 等待期间不需要网络：照常推进到额度恢复。
+    await advanceUntil(
+      clock,
+      () => w.logs.some((l) => l.event === 'tts.rate-limit-resumed'),
+      61_000,
+    );
+    await until(() => minimax.events('task_continue').length === 2);
+    await advanceUntil(clock, () => reply.done, 5000, true);
+    const result = await reply.promise;
+    assert.equal(result.end, 'complete');
+    assert.equal(result.heard, '你好。再见。');
+    assert.deepEqual(started, ['u1#0', 'u1#1']);
+    assert.deepEqual(w.events('tts.switched'), []);
+  } finally {
+    await w.close();
+    await minimax.close();
+    await volcengine.close();
+  }
+});
+
+test('发声链路：合成中（首包迟迟不到）等到发言过期：取消合成，这一句不播出，发言按过期结束', async () => {
+  // 服务端收到文本后不出声；不碰限流，过期由仲裁的定时器在合成中取消。
+  const minimax = await FakeMinimax.start({ apiKey: KEY, mute: true });
+  const volcengine = await FakeVolcengine.start({ apiKey: VOLC_KEY });
+  const { w, clock, started, speak } = await speechWorld(minimax, volcengine, false);
+  try {
+    const reply = speak('u1', '你好。', clock.now() + 5000);
+    await until(() => minimax.events('task_flush').length === 1);
+    await advanceUntil(clock, () => reply.done, 6000);
+    const result = await reply.promise;
+    assert.equal(result.end, 'expired');
+    assert.equal(result.reason, '合成中发言已过期');
+    assert.equal(result.heard, '');
+    assert.ok(clock.now() >= 5000 && clock.now() < 5100, '过期那一刻就结束');
     assert.deepEqual(started, []);
+    await until(() => minimax.events('task_cancel').length === 1);
   } finally {
     await w.close();
     await minimax.close();

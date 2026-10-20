@@ -15,8 +15,10 @@ import {
   CloudTtsService,
   LocalTtsService,
   type Synthesis,
+  type SynthesisOptions,
   type Tts,
   type TtsEngine,
+  TtsExpiredError,
   type TtsOption,
   TtsRequestError,
   type TtsRouting,
@@ -32,6 +34,8 @@ interface FakeEngine {
   /** 设置后下一次合成抛出它。 */
   error: Error | undefined;
   calls: number;
+  /** 最近一次合成收到的附带信息。 */
+  options?: SynthesisOptions | undefined;
 }
 
 function fakeEngine(id: string, token: ServiceToken<TtsEngine>, state: FakeEngine) {
@@ -54,8 +58,9 @@ function fakeEngine(id: string, token: ServiceToken<TtsEngine>, state: FakeEngin
         get status() {
           return state.status;
         },
-        async synthesize(spoken): Promise<Synthesis> {
+        async synthesize(spoken, _signal, options): Promise<Synthesis> {
           state.calls += 1;
+          state.options = options;
           if (state.error) throw state.error;
           const samples = [...spoken].length * 10;
           return {
@@ -210,6 +215,23 @@ test('引擎以文本本身为由拒绝的句子不换引擎，这一句失败',
     await assert.rejects(w.tts().synthesize('你好', signal()), /文本过长/);
     assert.equal(w.local.calls, 0);
     assert.deepEqual(w.switched(), []);
+  } finally {
+    await w.close();
+  }
+});
+
+test('发言的过期时刻原样转交引擎；要等限流而届时已过期的句子不换引擎（限流不降级），这一句失败', async () => {
+  const w = await world(['cloud', 'local', 'subtitles']);
+  try {
+    await drain(await w.tts().synthesize('你好', signal(), { expiresAt: 1234 }));
+    assert.deepEqual(w.cloud.options, { expiresAt: 1234 });
+    w.cloud.error = new TtsExpiredError('限流额度到发言过期之后才恢复');
+    await assert.rejects(
+      w.tts().synthesize('你好', signal(), { expiresAt: 1234 }),
+      (error) => error instanceof TtsExpiredError,
+    );
+    assert.equal(w.local.calls, 0, '不改用本地引擎');
+    assert.deepEqual(w.switched(), [], '也不改用只出字幕');
   } finally {
     await w.close();
   }

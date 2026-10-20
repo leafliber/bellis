@@ -64,7 +64,7 @@ test('限流等待：等待期间什么也不播，窗口空出名额后照常�
   }
 });
 
-test('限流等待中发言过期：等待随之取消，这一句不播出，发言按过期结束', async () => {
+test('要等限流、额度恢复时发言已过期：不等，这一句不播出，发言按过期结束', async () => {
   const world = await startChain({ tts: { rpm: 1 } });
   try {
     const speech = world.service(SpeechService);
@@ -75,9 +75,10 @@ test('限流等待中发言过期：等待随之取消，这一句不播出，�
     assert.equal(second?.id, 'u2');
     assert.equal(second?.end, 'expired');
     assert.equal(second?.heard, '');
-    const [ended] = entries(world, 'tts.rate-wait-ended');
-    assert.equal(ended?.data.canceled, true);
-    assert.ok(ended && ended.at >= 5000 && ended.at < 5100, '过期那一刻取消等待');
+    // 额度约 60 秒后才恢复，5 秒就过期：轮到它时就放弃，不开始等。
+    const [expired] = entries(world, 'tts.rate-expired');
+    assert.ok(expired && expired.at < 5000);
+    assert.deepEqual(entries(world, 'tts.rate-wait'), []);
     await world.run(70_000, 100);
     assert.equal(
       entries(world, 'page.begin').filter((e) => String(e.data.sentenceId).startsWith('u2#'))
@@ -111,7 +112,7 @@ test('限流等待中急停：等待随之取消，安全停止期间不播', as
   }
 });
 
-test('限流等待中被定时播报抢占：等待立即取消；播报也要等名额，等到过期就不播', async () => {
+test('限流等待中被定时播报抢占：等待立即取消；播报要等的名额到它过期之后才恢复，不等、不播', async () => {
   // 定时播报到点后 30 秒内没播出就过期，短于这一分钟剩下的等待。
   const world = await startChain({
     tts: { rpm: 1 },
@@ -130,12 +131,75 @@ test('限流等待中被定时播报抢占：等待立即取消；播报也要�
     const ended = entries(world, 'tts.rate-wait-ended');
     assert.deepEqual(
       ended.map((e) => e.data.canceled),
-      [true, true],
+      [true],
     );
     assert.equal(ended[0]?.at, 2000, '抢占那一刻取消等待');
-    assert.ok((ended[1]?.at ?? 0) >= 32_000, '播报等到过期才取消');
+    const [expired] = entries(world, 'tts.rate-expired');
+    assert.ok(expired && expired.at >= 2000 && expired.at < 2100, '播报轮到它时就放弃');
     noViolations(world);
   } finally {
     await world.close();
+  }
+});
+
+const reply = '谢谢你来！今天我们一起玩魔女审判。等会儿再聊。';
+
+test('已开口的发言，后一句要等限流、发言已过期：不等，剩下的句子全部放弃，写回是已播部分', async () => {
+  const world = await startChain({ tts: { rpm: 1 } });
+  try {
+    // 第一句用掉这一分钟的名额，播到一半发言就过期了；第二句轮到时额度约 60 秒后才恢复。
+    void world.service(SpeechService).request(request({ id: 'u1', text: reply, expiresAt: 500 }));
+    await world.until(() => played(world).length === 1, 10_000);
+    const [result] = played(world);
+    assert.equal(result?.end, 'expired');
+    assert.match(result?.reason ?? '', /发言届时已过期/);
+    assert.equal(result?.heard, '谢谢你来！');
+    assert.deepEqual(
+      entries(world, 'page.begin').map((e) => e.data.sentenceId),
+      ['u1#0'],
+    );
+    assert.equal(entries(world, 'tts.rate-expired').length, 1);
+    assert.deepEqual(entries(world, 'tts.rate-wait'), []);
+    await world.run(70_000, 100);
+    assert.equal(entries(world, 'page.begin').length, 1, '剩下的句子不再开始');
+    noViolations(world);
+  } finally {
+    await world.close();
+  }
+});
+
+test('已开口的发言，后一句要等限流、等完前不会过期：照常等，额度恢复后照常播出', async () => {
+  const world = await startChain({ tts: { rpm: 1 } });
+  try {
+    void world
+      .service(SpeechService)
+      .request(request({ id: 'u1', text: '谢谢你来！大家觉得呢？', expiresAt: 100_000 }));
+    await world.until(() => played(world).length === 1, 70_000);
+    const [result] = played(world);
+    assert.equal(result?.end, 'complete');
+    assert.equal(result?.heard, '谢谢你来！大家觉得呢？');
+    const second = entries(world, 'page.begin').find((e) => e.data.sentenceId === 'u1#1');
+    assert.ok(second && second.at >= 60_000, '第二句等到额度恢复才开始');
+    assert.equal(playedWhileWaiting(world), 0);
+    noViolations(world);
+  } finally {
+    await world.close();
+  }
+});
+
+test('回归：不碰上限流时，已开口的发言过期之后的句子照旧说完', async () => {
+  for (const tts of [{}, { rpm: 10 }]) {
+    const world = await startChain({ tts });
+    try {
+      void world.service(SpeechService).request(request({ id: 'u1', text: reply, expiresAt: 300 }));
+      await world.until(() => played(world).length === 1, 20_000);
+      const [result] = played(world);
+      assert.equal(result?.end, 'complete', JSON.stringify(tts));
+      assert.equal(result?.heard, reply);
+      assert.deepEqual(entries(world, 'tts.rate-expired'), []);
+      noViolations(world);
+    } finally {
+      await world.close();
+    }
   }
 });

@@ -7,7 +7,13 @@ import {
   secretPermission,
 } from '@bellis/kernel';
 import { SafetyService } from '@bellis/safety';
-import { Alignment, CloudTtsService, type Synthesis, type TtsEngine } from '@bellis/speech';
+import {
+  Alignment,
+  CloudTtsService,
+  type Synthesis,
+  type TtsEngine,
+  TtsExpiredError,
+} from '@bellis/speech';
 import Type, { type Static } from 'typebox';
 import {
   type Engine,
@@ -170,7 +176,8 @@ function empty(sampleRate: number): Synthesis {
  *   这一家进入冷却（`retryAfterMs`），这一句改用另一家。换了一家（音色会变化）时记事件 `tts.switched`
  *   并写日志提示操作员。两家都不可用时合成以错误结束、引擎报告未就绪，由路由改用下一个引擎或只出字幕。
  * - **限流**：MiniMax 到了每分钟请求数上限时，这一句在适配器里安静等到额度恢复（R-10）：不冷却、不换厂商，
- *   引擎照常报告就绪，状态里写明正在等待；已经出声之后才被限流的那一句以错误结束，同样不冷却。
+ *   引擎照常报告就绪，状态里写明正在等待；已经出声之后才被限流的那一句以错误结束，同样不冷却。额度恢复时
+ *   这一句所属的发言已过期就不等，以 `TtsExpiredError` 结束，不换厂商、不冷却。
  * - **两段式对齐**（R-11）：句段一到即按字数插值，随后用厂商返回的字/词时间戳细化，合成完成后按实际采样数修正；
  *   `Synthesis` 的映射是活的，仲裁按播放游标换算时读到的就是细化后的结果。
  * - **取消**：中止信号或提前停止读取音频即向厂商发取消指令，之后到达的音频一律丢弃。
@@ -319,7 +326,7 @@ export const cloudTts = definePlugin({
         });
         return [`可用：${available.join('、')}`, ...waiting].join('；');
       },
-      async synthesize(spoken, signal) {
+      async synthesize(spoken, signal, options) {
         const skipped: string[] = [];
         for (const vendor of chain) {
           if (signal.aborted || ctx.signal.aborted) return empty(config[vendor].sampleRate);
@@ -331,9 +338,10 @@ export const cloudTts = definePlugin({
           }
           let stream: EngineStream;
           try {
-            stream = await found.start(spoken, signal);
+            stream = await found.start(spoken, signal, options);
           } catch (error) {
-            if (error instanceof RequestError) throw error;
+            // 文本被拒、限流额度到发言过期之后才恢复：都不换厂商、不冷却。
+            if (error instanceof RequestError || error instanceof TtsExpiredError) throw error;
             fail(vendor, error);
             skipped.push(`${vendor} ${message(error)}`);
             continue;

@@ -1,5 +1,5 @@
 import { sleepUnlessAborted, type TimerHandle } from '@bellis/kernel';
-import type { WordStamp } from '@bellis/speech';
+import { type SynthesisOptions, TtsExpiredError, type WordStamp } from '@bellis/speech';
 import {
   aborted,
   type Engine,
@@ -37,6 +37,7 @@ import { Link } from './link.ts';
  * - 按每分钟请求数限流，超出时以 1002 拒绝；请求按句计，流式分片不另算（S-07）。适配器记下最近一个窗口（60 秒）内
  *   每次发出文本的时刻，到了 `rpm` 就让这一句安静等到窗口里空出名额再发；仍被 1002 拒绝时，从被拒时起等满一个窗口，
  *   再在新的连接上重发同一句。等待受这一句的中止信号约束，不计入首包等时限（它们从发出文本时起算），也不算故障。
+ *   要等、而额度恢复时这一句所属的发言已过期（含此刻已过期）时不等，以 `TtsExpiredError` 结束，不发请求。
  */
 export interface MinimaxOptions {
   endpoint: string;
@@ -133,11 +134,22 @@ export class MinimaxEngine implements Engine {
     return this.#waiting;
   }
 
-  async start(text: string, signal: AbortSignal): Promise<EngineStream> {
+  async start(
+    text: string,
+    signal: AbortSignal,
+    options: SynthesisOptions = {},
+  ): Promise<EngineStream> {
     const release = await this.#serial.acquire();
     for (;;) {
-      // 到了每分钟上限：安静等到窗口里空出名额再发；等待中被中止就不再发出。
-      if (signal.aborted || this.#closed || !(await this.#slot(signal))) {
+      // 到了每分钟上限：安静等到窗口里空出名额再发；等待中被中止就不再发出；额度恢复时发言已过期就不等。
+      let free: boolean;
+      try {
+        free = !signal.aborted && !this.#closed && (await this.#slot(signal, options.expiresAt));
+      } catch (error) {
+        release();
+        throw error;
+      }
+      if (!free) {
         release();
         return emptyStream(this.#options.sampleRate);
       }
@@ -228,9 +240,10 @@ export class MinimaxEngine implements Engine {
 
   /**
    * 到了每分钟上限（本地计数到 `rpm`，或厂商以 1002 拒绝）时安静等到窗口里空出名额：可以发出时返回 true；
-   * 这一句被中止或引擎关闭时取消等待，返回 false。日志只记原因与时长，不记文本。
+   * 这一句被中止或引擎关闭时取消等待，返回 false。额度恢复时发言已过期（`expiresAt`，含此刻已过期）就不等，
+   * 以 TtsExpiredError 结束；不需要等时不看它。日志只记原因与时长，不记文本。
    */
-  async #slot(signal: AbortSignal): Promise<boolean> {
+  async #slot(signal: AbortSignal, expiresAt: number | undefined): Promise<boolean> {
     const { clock } = this.#env;
     if (this.#nextSend(clock.now()).until <= clock.now()) return true;
     const stop = AbortSignal.any([signal, this.#closing.signal]);
@@ -244,6 +257,18 @@ export class MinimaxEngine implements Engine {
           this.#observe('rate-resumed', { waitedMs: now - began });
           this.#env.log?.('tts.rate-limit-resumed', { engine: 'minimax', waitedMs: now - began });
           return true;
+        }
+        if (expiresAt !== undefined && next.until >= expiresAt) {
+          const fields = {
+            reason: next.reason,
+            waitMs: Math.ceil(next.until - now),
+            expiresInMs: Math.ceil(expiresAt - now),
+          };
+          this.#observe('rate-expired', fields);
+          this.#env.log?.('tts.rate-limit-expired', { engine: 'minimax', ...fields });
+          throw new TtsExpiredError(
+            `MiniMax 限流额度约 ${fields.waitMs}ms 后才恢复，发言届时已过期，不等`,
+          );
         }
         if (!logged) {
           logged = true;

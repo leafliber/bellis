@@ -7,7 +7,7 @@ import {
 } from '@bellis/kernel';
 import Type from 'typebox';
 import { Alignment } from './timing.ts';
-import { type Synthesis, TtsService } from './types.ts';
+import { type Synthesis, TtsExpiredError, TtsService } from './types.ts';
 
 /** 模拟限流的计数窗口。 */
 const RATE_WINDOW_MS = 60_000;
@@ -19,7 +19,8 @@ const RATE_WINDOW_MS = 60_000;
  * 用已经开始的码点的精确时间戳细化，合成完成后填上总采样数。
  * 缺省输出静音；给出 `toneHz` 时输出正弦测试音，用于在真实 OBS 里听到、测到 Stage 的声音。
  * 给出 `rpm` 时模拟云端 TTS 按每分钟请求数限流时的等待：最近 60 秒内已开始合成这么多句时，下一句在返回之前
- * 安静等到窗口里空出名额；等待受中止信号约束（中止即返回空的合成），不计入首包延迟。
+ * 安静等到窗口里空出名额；等待受中止信号约束（中止即返回空的合成），不计入首包延迟；额度恢复时所属发言已过期
+ * （`expiresAt`，含此刻已过期）就不等，以 `TtsExpiredError` 结束。
  */
 export const simTts = definePlugin({
   manifest: {
@@ -69,8 +70,11 @@ export const simTts = definePlugin({
     } = ctx.config;
     /** 最近一个窗口内开始合成的时刻（升序）。 */
     const started: number[] = [];
-    /** 到了每分钟上限就等到窗口里空出名额：可以开始时返回 true，等待中被中止时返回 false。 */
-    const slot = async (signal: AbortSignal): Promise<boolean> => {
+    /**
+     * 到了每分钟上限就等到窗口里空出名额：可以开始时返回 true，等待中被中止时返回 false；
+     * 额度恢复时发言已过期（含此刻已过期）就不等，以 TtsExpiredError 结束。
+     */
+    const slot = async (signal: AbortSignal, expiresAt: number | undefined): Promise<boolean> => {
       let waited = false;
       for (;;) {
         const now = clock.now();
@@ -82,6 +86,10 @@ export const simTts = definePlugin({
           return true;
         }
         const ms = (started[started.length - rpm] as number) + RATE_WINDOW_MS - now;
+        if (expiresAt !== undefined && now + ms >= expiresAt) {
+          trace?.record('tts.rate-expired', { ms, expiresInMs: expiresAt - now });
+          throw new TtsExpiredError(`限流额度 ${ms}ms 后才恢复，发言届时已过期`);
+        }
         if (!waited) trace?.record('tts.rate-wait', { ms });
         waited = true;
         if (!(await sleepUnlessAborted(clock, ms, signal))) {
@@ -92,9 +100,9 @@ export const simTts = definePlugin({
     };
     const msOf = (samples: number) => (samples * 1000) / sampleRate;
     ctx.provide(TtsService, {
-      async synthesize(spoken, signal): Promise<Synthesis> {
+      async synthesize(spoken, signal, options): Promise<Synthesis> {
         if (rpm > 0) {
-          if (!(await slot(signal))) {
+          if (!(await slot(signal, options?.expiresAt))) {
             return {
               sampleRate,
               totalSamples: undefined,
