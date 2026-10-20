@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bellis:schema:telemetry",
+  "$defs": {
+    "Traceparent": {
+      "type": "string",
+      "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"
+    },
+    "SidecarTelemetry": {
+      "type": "object",
+      "required": [
+        "v",
+        "dir",
+        "maxFileBytes",
+        "maxFileAgeMs",
+        "maxFiles",
+        "maxQueue",
+        "flushIntervalMs"
+      ],
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "maxFileBytes": {
+          "type": "integer",
+          "minimum": 65536
+        },
+        "maxFileAgeMs": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "maxFiles": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "maxQueue": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "flushIntervalMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

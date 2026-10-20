@@ -9,6 +9,16 @@ export const ClockService = defineService<Clock>('clock', 1);
 export const RandomService = defineService<Random>('random', 1);
 
 /**
+ * 宿主的数据目录：状态存储文件所在的目录。插件只在它下面自己的子目录里写可以丢失的派生数据
+ * （目前只有遥测的 JSONL）；状态与事实只进状态存储。仿真里不提供。
+ */
+export interface DataDir {
+  readonly path: string;
+}
+
+export const DataDirService = defineService<DataDir>('data-dir', 1);
+
+/**
  * 仿真追踪：确定性仿真里各部分按发生顺序写入同一条追踪，供不变量检查。
  * 只在仿真中提供；插件以可选依赖使用，真实运行时不存在。
  */

@@ -2,6 +2,7 @@ import { ballotKeys, decide, matchBallot } from '@bellis/audience';
 import { speakable } from '@bellis/speech';
 import type { StoredEvent } from '@bellis/store';
 import { BLOCKED, SAMPLE_RATE, SAMPLES_PER_CHAR } from './scenario.ts';
+import { checkTelemetry } from './telemetry-check.ts';
 import type { TraceEntry } from './world.ts';
 
 /** 全部世界（含重启前后）的追踪与最终的事件，供不变量检查。 */
@@ -10,6 +11,8 @@ export interface History {
   trace: TraceEntry[];
   events: StoredEvent[];
   moderationEnabled: boolean;
+  /** 各次启动写出的遥测（JSONL 行）；没有启用遥测时不给，不检查遥测的不变量。 */
+  telemetry?: readonly string[];
 }
 
 /**
@@ -22,7 +25,8 @@ export interface History {
  * 5. 字幕不早于游标：页面显示的是这一句字幕的前缀，其中有朗读的码点都已开始播出（按模拟 TTS 每码点的
  *    采样数，与页面当时已播出的采样数比较）；版面固定：已显示与占位的两段拼起来总是整句；
  * 6. 页面回报一句截断时，这一句的字幕（两段）已经清除；回报播完时，至迟在呈现延迟之后清除；
- * 7. 投票的不变量（见 {@link checkVotes}）。
+ * 7. 投票的不变量（见 {@link checkVotes}）；
+ * 8. 遥测的不变量（见 {@link checkTelemetry}）。
  */
 export function checkHistory(history: History): string[] {
   const violations: string[] = [];
@@ -172,6 +176,7 @@ export function checkHistory(history: History): string[] {
     if (times > 1) violations.push(`意图 ${intentId} 执行了 ${times} 次`);
   }
   violations.push(...checkVotes(history));
+  violations.push(...checkTelemetry(history));
   return violations;
 }
 

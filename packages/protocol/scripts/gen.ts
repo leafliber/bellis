@@ -24,6 +24,7 @@ import {
   RpcSuccess,
   SidecarDescription,
   SidecarHealthResult,
+  SidecarTelemetry,
   schemaModules,
   TtsInfoResult,
   TtsStatus,
@@ -57,6 +58,7 @@ const pythonModules = [
       SidecarHealthResult,
       ProcessShutdownParams,
       ProcessShutdownResult,
+      SidecarTelemetry,
     },
   },
   {

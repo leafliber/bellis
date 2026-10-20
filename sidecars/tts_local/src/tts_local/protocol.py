@@ -44,6 +44,9 @@ class TtsSynthesizeParams(BaseModel):
     )
     stream: Annotated[StrictInt, Field(ge=1, le=4294967295)]
     text: Annotated[StrictStr, Field(max_length=500, min_length=1)]
+    traceparent: Annotated[
+        StrictStr | None, Field(pattern='^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$')
+    ] = None
 
 
 class TtsSynthesizeResult(BaseModel):

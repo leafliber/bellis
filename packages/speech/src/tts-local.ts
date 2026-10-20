@@ -15,6 +15,7 @@ import {
   TtsWordsParams,
 } from '@bellis/protocol';
 import { SafetyService } from '@bellis/safety';
+import { formatTraceparent, parseTraceparent, TelemetryService } from '@bellis/telemetry';
 import Type, { type Static } from 'typebox';
 import { Compile } from 'typebox/compile';
 import { Alignment } from './timing.ts';
@@ -293,6 +294,8 @@ const QOS_NOTES: Partial<Record<SidecarQos, string>> = {
  *   按退避重启；模型就绪时记 `tts.started`。
  * - 节流状态：sidecar 在 Windows 上启动时声明 HighQoS。激活时与每次 `qos()`（开播预检）经 `sidecar.health`
  *   读回；不是 HighQoS（非 Windows 除外）时状态说明附上它。
+ * - 遥测（R-21）：遥测在场时把它给的环境变量加进 sidecar 的环境，`tts.synthesize` 的参数带这一句合成的
+ *   `traceparent`，sidecar 在同一 trace 下写自己的 span。
  */
 export const localTts = definePlugin({
   manifest: {
@@ -300,12 +303,15 @@ export const localTts = definePlugin({
     version: '0.2.0',
     tier: 'ordinary',
     provides: [LocalTtsService.ref],
-    inject: [SidecarHostService.ref, SafetyService.ref],
+    inject: [SidecarHostService.ref, SafetyService.ref, `${TelemetryService.ref}?`],
     permissions: [],
     process: 'sidecar',
     config: LocalTtsConfig,
   },
   async activate(ctx) {
+    // 遥测在场时 sidecar 把自己的 span 写进同一目录（启动时取得；遥测插件晚于本插件激活时，
+    // 这个 sidecar 进程不写遥测，下次重启时补上）。
+    const telemetryEnv = ctx.optional(TelemetryService)?.sidecarEnv() ?? {};
     if (endianness() !== 'LE') throw new Error('本地 TTS 的 PCM 为小端，宿主须运行在小端平台');
     const safety = ctx.service(SafetyService);
     const config = ctx.config;
@@ -344,6 +350,7 @@ export const localTts = definePlugin({
           HF_HUB_OFFLINE: '1',
           HF_HUB_DISABLE_SYMLINKS_WARNING: '1',
           ...(hfHome ? { HF_HOME: hfHome } : {}),
+          ...telemetryEnv,
         },
         cwd: ROOT,
       },
@@ -431,7 +438,7 @@ export const localTts = definePlugin({
         return note ? `${describe(status)}；${note}` : describe(status);
       },
       qos: readQos,
-      async synthesize(spoken, signal): Promise<Synthesis> {
+      async synthesize(spoken, signal, options): Promise<Synthesis> {
         if (ctx.signal.aborted) throw new Error('本地 TTS 已停用');
         const sampleRate = status.sampleRate;
         if (status.state !== 'ready' || sampleRate === undefined) throw new Error(describe(status));
@@ -444,10 +451,13 @@ export const localTts = definePlugin({
         const audio = new AudioStream(() => abort.abort(new Error('消费方已停止读取')));
         const alignment = new Alignment(spoken, sampleRate, { msPerChar: config.msPerChar });
         streams.set(stream, { audio, alignment });
+        // 链路上下文按版本 00 放进 JSON-RPC 参数，sidecar 以它为父写自己的 span；不合格的不带，不影响合成。
+        const parent = parseTraceparent(options?.traceparent);
+        const traceparent = parent ? formatTraceparent(parent) : undefined;
         rpc
           .request(
             TtsMethod.Synthesize,
-            { stream, text: spoken },
+            { stream, text: spoken, ...(traceparent ? { traceparent } : {}) },
             { signal: abort.signal, timeoutMs: config.synthesizeTimeoutMs },
           )
           .then(

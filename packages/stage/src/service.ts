@@ -1,5 +1,6 @@
 import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
 import { producesOutput, SafetyService } from '@bellis/safety';
+import { Metric, type Span, TelemetryService, useTracer } from '@bellis/telemetry';
 import Type from 'typebox';
 import { EnvelopeBuilder } from './envelope.ts';
 import {
@@ -20,6 +21,12 @@ import {
 
 interface Playing {
   resolve(result: PlaybackResult): void;
+  /** 这一句用的许可令牌：令牌变了，页面就会停下这一句。 */
+  token: number;
+  /** 播出的 span（见运维“观测”）。 */
+  span: Span;
+  /** 第一次要求页面停下这一句的时刻与方式，用于“停止到静音”。 */
+  stopRequested: { at: number; by: 'truncate' | 'token' } | undefined;
   played: number;
   /** 已转发给页面的采样数；页面回报 ended 时据此判断是否完整。 */
   forwarded: number;
@@ -60,6 +67,8 @@ const sameStarts = (a: readonly number[], b: readonly number[]) =>
  * 页面回报的欠载与静音即时记入日志；每句结束时记一条摘要（实际播出的采样数、欠载次数、游标回报的
  * 次数、首末两次游标与最大间隔），游标本身不逐条记录。
  * 呈现延迟（Stage 文档“对齐”）由估计插件写进来，校验后在变化时与每句开始前发给页面；没有估计插件时为 0。
+ * 有遥测时每句一个播出 span（`stage.play`，页面回报的开始与欠载记为事件），并记“停止到静音”：
+ * 从要求页面截断（或转告许可令牌变化）到页面回报这一句已截断。
  */
 export const stageService = definePlugin({
   manifest: {
@@ -67,7 +76,7 @@ export const stageService = definePlugin({
     version: '0.1.0',
     tier: 'critical',
     provides: [StageService.ref],
-    inject: [SafetyService.ref, ClockService.ref, StagePageService.ref],
+    inject: [SafetyService.ref, ClockService.ref, StagePageService.ref, `${TelemetryService.ref}?`],
     permissions: [],
     process: 'in-process',
     config: Type.Object({
@@ -82,6 +91,7 @@ export const stageService = definePlugin({
     const safety = ctx.service(SafetyService);
     const clock = ctx.service(ClockService);
     const page = ctx.service(StagePageService);
+    const tracer = useTracer(ctx, 'stage-service');
     const listeners = new Set<(event: FromPage) => void>();
     const playing = new Map<string, Playing>();
     let lastAck = clock.now();
@@ -110,13 +120,22 @@ export const stageService = definePlugin({
         lastCursor: report.last ?? null,
         maxCursorGapMs: report.maxCursorGapMs,
       });
+      entry.span.setAttributes({
+        'bellis.stage.played_samples': result.played,
+        'bellis.stage.complete': result.complete,
+        'bellis.stage.underruns': report.underruns,
+      });
+      entry.span.end();
       entry.resolve(result);
     };
 
     /** 要求页面截断这一句；结果仍以页面的回报为准。 */
     const cut = (sentenceId: string) => {
       const entry = playing.get(sentenceId);
-      if (entry) entry.truncating = true;
+      if (entry) {
+        entry.truncating = true;
+        entry.stopRequested ??= { at: clock.now(), by: 'truncate' };
+      }
       page.send({ kind: 'truncate', sentenceId });
     };
 
@@ -126,10 +145,25 @@ export const stageService = definePlugin({
       if (message.kind === 'muted') ctx.log('stage.muted', { reason: message.reason });
       if (!entry) return;
       const { report } = entry;
-      if (message.kind === 'started') report.startedAt = now;
-      else if (message.kind === 'underrun') {
+      if (message.kind === 'started') {
+        report.startedAt = now;
+        entry.span.addEvent('bellis.stage.started');
+      } else if (message.kind === 'underrun') {
         report.underruns += 1;
+        entry.span.addEvent('bellis.stage.underrun');
         ctx.log('stage.underrun', { sentenceId: message.sentenceId, played: message.played });
+      } else if (message.kind === 'truncated') {
+        entry.span.setAttributes({ 'bellis.stage.truncated': true });
+        const stop = entry.stopRequested;
+        if (stop) {
+          tracer.record(
+            Metric.StopToSilence,
+            (now - stop.at) / 1000,
+            's',
+            { 'bellis.stage.stop_by': stop.by },
+            entry.span,
+          );
+        }
       } else if (message.kind === 'cursor') {
         if (report.last)
           report.maxCursorGapMs = Math.max(report.maxCursorGapMs, now - report.last[0]);
@@ -180,6 +214,11 @@ export const stageService = definePlugin({
     ctx.register(
       safety.onLease((update) => {
         if (update.resource !== STAGE_AUDIO) return;
+        // 令牌变了（吊销、急停、换持有者）：页面会停下持旧令牌的句子，从这一刻起算停止到静音。
+        const now = clock.now();
+        for (const entry of playing.values()) {
+          if (entry.token !== update.lease?.token) entry.stopRequested ??= { at: now, by: 'token' };
+        }
         page.send({
           kind: 'token',
           token: update.lease?.token ?? null,
@@ -245,9 +284,20 @@ export const stageService = definePlugin({
           return { sentenceId: sentence.id, played: 0, complete: false, reason: '许可无效' };
         }
         const envelope = new EnvelopeBuilder(sentence.sampleRate, ctx.config.envelopeWindowMs);
+        const span = tracer.startSpan('stage.play', {
+          parent: sentence.traceparent,
+          attributes: {
+            'bellis.stage.sentence_id': sentence.id,
+            'bellis.stage.sample_rate': sentence.sampleRate,
+            'bellis.stage.presentation_delay_ms': presentation.delayMs,
+          },
+        });
         const result = new Promise<PlaybackResult>((resolve) => {
           playing.set(sentence.id, {
             resolve,
+            token,
+            span,
+            stopRequested: undefined,
             played: 0,
             forwarded: 0,
             truncating: false,

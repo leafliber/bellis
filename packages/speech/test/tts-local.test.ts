@@ -3,24 +3,38 @@
  */
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createChannelPath, createSessionKey, listen } from '@bellis/channel';
 import {
   ChannelHub,
+  ClockService,
   catalog,
+  DataDirService,
   definePlugin,
   Kernel,
+  RandomService,
   type ResolvedEntry,
   readJsonFile,
   resolveProfile,
   SidecarHostService,
   systemClock,
+  systemRandom,
   type Transition,
 } from '@bellis/kernel';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
+import {
+  otlpLineProblems,
+  parseLines,
+  type Telemetry,
+  TelemetryService,
+  telemetry,
+} from '@bellis/telemetry';
 import Type from 'typebox';
 import { Compile } from 'typebox/compile';
 import Value from 'typebox/value';
@@ -83,9 +97,9 @@ interface Ready {
 
 /**
  * 内核、安全核（内存存储）与本机通道，加上本地 TTS 条目。给出 `order` 时再加上 TTS 路由，
- * 依赖方改为使用 `tts@1`；否则依赖方直接使用 `tts.local@1`。
+ * 依赖方改为使用 `tts@1`；否则依赖方直接使用 `tts.local@1`。给出 `dataDir` 时先加上写文件的遥测。
  */
-async function setup(fake: Record<string, unknown> = {}, order?: TtsOption[]) {
+async function setup(fake: Record<string, unknown> = {}, order?: TtsOption[], dataDir?: string) {
   const logs: Array<{ event: string; fields: Record<string, unknown> }> = [];
   const transitions: Transition[] = [];
   const store = StateStore.open({ path: ':memory:' });
@@ -126,6 +140,11 @@ async function setup(fake: Record<string, unknown> = {}, order?: TtsOption[]) {
     },
   });
   host.provideCore(SidecarHostService, { credentials, hub });
+  if (dataDir) {
+    host.provideCore(ClockService, clock);
+    host.provideCore(RandomService, systemRandom());
+    host.provideCore(DataDirService, { path: dataDir });
+  }
 
   /** 依赖方：每次激活时记下拿到的服务。 */
   const users: Tts[] = [];
@@ -151,11 +170,14 @@ async function setup(fake: Record<string, unknown> = {}, order?: TtsOption[]) {
   };
   host.add(
     [
+      ...(dataDir
+        ? [entry('telemetry', 'telemetry', { flushIntervalMs: 50, eventLoopIntervalMs: 0 })]
+        : []),
       entry('tts-local', 'tts-local', config),
       ...(order ? [entry('tts', 'tts-router', { order })] : []),
       entry('user', 'tts-user'),
     ],
-    catalog(localTts, ttsRouter, user),
+    catalog(telemetry, localTts, ttsRouter, user),
   );
   await host.settled();
 
@@ -229,6 +251,50 @@ test('握手后即激活、模型在后台加载；就绪后音频经二进制�
     const started = s.events('tts.started');
     assert.equal(started.length, 1);
     assert.equal((started[0]?.data as { sampleRate?: number } | undefined)?.sampleRate, 16_000);
+  } finally {
+    await s.close();
+  }
+});
+
+test('跨进程链路：tts.synthesize 带 traceparent，sidecar 在同一 trace 下把 span 写进宿主给的目录', async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), 'bellis-tts-telemetry-'));
+  t.after(() => rmSync(dataDir, { recursive: true, force: true }));
+  const s = await setup({ sampleRate: 16_000, aligned: true }, undefined, dataDir);
+  try {
+    const engine = s.engine() as TtsEngine;
+    await waitUntil(() => engine.ready);
+    const found = s.kernel.services.resolve(TelemetryService.name, TelemetryService.major);
+    assert.ok(!('missing' in found));
+    const span = (found.impl as Telemetry).tracer('test').startSpan('tts.synthesize');
+    const traceparent = span.traceparent as string;
+    const synthesis = await engine.synthesize('你好', new AbortController().signal, {
+      traceparent,
+    });
+    assert.equal(await samplesOf(synthesis), 2 * SAMPLES_PER_CHAR);
+    span.end();
+
+    const dir = join(dataDir, 'telemetry');
+    // 目录在第一次写时才创建。
+    const sidecarLines = () =>
+      (existsSync(dir) ? readdirSync(dir) : [])
+        .filter((name) => name.startsWith('sidecar.tts-local-'))
+        .flatMap((name) => readFileSync(join(dir, name), 'utf8').split('\n'))
+        .filter(Boolean);
+    await waitUntil(() =>
+      parseLines(sidecarLines()).spans.some((s) => s.name === 'tts_local.align'),
+    );
+    const lines = sidecarLines();
+    for (const line of lines) assert.deepEqual(otlpLineProblems(line), []);
+    assert.ok(!lines.join('\n').includes('你好'), 'sidecar 不写朗读文本');
+    const view = parseLines(lines);
+    const [, traceId, spanId] = traceparent.split('-');
+    const server = view.spans.find((s) => s.name === 'tts_local.synthesize');
+    assert.equal(server?.traceId, traceId);
+    assert.equal(server?.parentSpanId, spanId);
+    assert.equal(server?.service, 'bellis.sidecar.tts-local');
+    assert.equal(server?.attributes['bellis.tts.samples'], 2 * SAMPLES_PER_CHAR);
+    const align = view.spans.find((s) => s.name === 'tts_local.align');
+    assert.equal(align?.parentSpanId, server?.spanId);
   } finally {
     await s.close();
   }

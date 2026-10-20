@@ -13,10 +13,13 @@ import {
   ttsRouter,
 } from '@bellis/speech';
 import { obsControl, obsStagePage, simStagePage, stageService, stageSync } from '@bellis/stage';
+import { memoryTelemetry, telemetry } from '@bellis/telemetry';
 import { cloudTts } from '@bellis/tts-cloud';
 
 /** 宿主内置的全部插件（本项目插件；第三方代码只能以 sidecar 接入）。 */
 export const builtinPlugins = catalog(
+  telemetry,
+  memoryTelemetry,
   stageService,
   simStagePage,
   obsStagePage,

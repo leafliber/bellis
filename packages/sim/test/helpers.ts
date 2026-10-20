@@ -28,6 +28,8 @@ export interface ChainOptions {
   withoutModerationModel?: boolean;
   /** 加上投票插件（给出它的配置）。 */
   vote?: Record<string, unknown>;
+  /** 加上写内存的遥测（`telemetry-memory`）。 */
+  telemetry?: boolean;
   /** 状态存储文件（重启用）与本次启动的标识。 */
   storePath?: string;
   bootId?: string;
@@ -72,6 +74,7 @@ export function chain(options: ChainOptions = {}): ResolvedEntry[] {
         preempt: options.preempt ?? 'sentence',
       },
     }),
+    ...(options.telemetry ? [entry('telemetry', 'telemetry-memory')] : []),
   ];
 }
 

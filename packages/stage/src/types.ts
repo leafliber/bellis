@@ -56,6 +56,8 @@ export interface SentenceInfo {
    * 有变化才发给页面。不提供或返回 undefined 表示没有映射，页面整句显示。
    */
   subtitleStarts?: () => readonly number[] | undefined;
+  /** 这一句的 span（W3C traceparent）：Stage 服务的播出 span 以它为父。没有遥测时不出现。 */
+  traceparent?: string;
 }
 
 /**

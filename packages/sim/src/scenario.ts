@@ -181,8 +181,14 @@ function entry(id: string, plugin: string, extra: Partial<ResolvedEntry> = {}): 
 
 /**
  * 场景对应的 sim profile。`fromMs` 之后的输入相对重启时刻重新计时，`outputsUsed` 之前的模型输出已经用掉。
+ * 缺省最后加上写内存的遥测（不设定时器，不改变定时器的交错，也不挪动其它插件的实例编号）。
  */
-export function scenarioEntries(scenario: Scenario, fromMs = 0, outputsUsed = 0): ResolvedEntry[] {
+export function scenarioEntries(
+  scenario: Scenario,
+  fromMs = 0,
+  outputsUsed = 0,
+  options: { telemetry?: boolean } = {},
+): ResolvedEntry[] {
   return [
     entry('stage-page', 'stage-page-sim'),
     entry('stage', 'stage-service'),
@@ -244,5 +250,6 @@ export function scenarioEntries(scenario: Scenario, fromMs = 0, outputsUsed = 0)
         preempt: 'sentence',
       },
     }),
+    ...(options.telemetry === false ? [] : [entry('telemetry', 'telemetry-memory')]),
   ];
 }

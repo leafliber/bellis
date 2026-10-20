@@ -1,5 +1,12 @@
-import { ClockService, definePlugin, defineService, withDeadline } from '@bellis/kernel';
-import { ModerationService, PreCheck, type Sentence } from '@bellis/speech';
+import {
+  ClockService,
+  DeadlineError,
+  definePlugin,
+  defineService,
+  withDeadline,
+} from '@bellis/kernel';
+import { ModerationService, PreCheck, type PreCheckInput } from '@bellis/speech';
+import { Metric, TelemetryService, useTracer } from '@bellis/telemetry';
 import Type from 'typebox';
 
 export interface ModerationInput {
@@ -24,6 +31,8 @@ export const ModerationModelService = defineService<ModerationModel>('moderation
 /**
  * 审核插件（普通插件，可关闭）：在发声前检查扩展点上，对每句的字幕文本与朗读文本一起判定一次。
  * 不可说即跳过该句；判定超时或出错时按 `onError` 处理（默认跳过，可改为放行）；连续失败告警。
+ * 有遥测时每句一个 `moderation.check` span（挂在仲裁的发声前检查下），并记“逐句审核耗时”：
+ * 从开始判定到得出结论（含超时与出错），按结论分 allow、block、error。不记句子与判定理由。
  */
 export const moderation = definePlugin({
   manifest: {
@@ -31,7 +40,7 @@ export const moderation = definePlugin({
     version: '0.1.0',
     tier: 'ordinary',
     provides: [ModerationService.ref],
-    inject: [ModerationModelService.ref, ClockService.ref],
+    inject: [ModerationModelService.ref, ClockService.ref, `${TelemetryService.ref}?`],
     permissions: [],
     process: 'in-process',
     config: Type.Object({
@@ -44,11 +53,26 @@ export const moderation = definePlugin({
   activate(ctx) {
     const model = ctx.service(ModerationModelService);
     const clock = ctx.service(ClockService);
+    const tracer = useTracer(ctx, 'moderation');
     const { onError, timeoutMs, alarmAfter } = ctx.config;
     let failures = 0;
 
-    const judge = async (sentence: Sentence, previous: string | undefined) => {
+    const judge = async ({ sentence, previous, traceparent }: PreCheckInput) => {
       const controller = new AbortController();
+      const span = tracer.startSpan('moderation.check', { parent: traceparent });
+      const startedAt = clock.now();
+      const done = (outcome: 'allow' | 'block' | 'error', errorType?: string) => {
+        span.setAttributes({ 'bellis.moderation.outcome': outcome });
+        if (errorType) span.fail(errorType);
+        tracer.record(
+          Metric.ModerationDuration,
+          (clock.now() - startedAt) / 1000,
+          's',
+          { 'bellis.moderation.outcome': outcome },
+          span,
+        );
+        span.end();
+      };
       try {
         const verdict = await withDeadline(
           clock,
@@ -60,10 +84,12 @@ export const moderation = definePlugin({
           '审核判定',
         );
         failures = 0;
+        done(verdict.allowed ? 'allow' : 'block');
         return verdict.allowed ? undefined : { block: `审核不可说：${verdict.reason ?? '未说明'}` };
       } catch (error) {
         controller.abort();
         failures += 1;
+        done('error', error instanceof DeadlineError ? 'timeout' : 'model_error');
         ctx.log('moderation.failed', { error: (error as Error).message, failures });
         if (failures >= alarmAfter) ctx.log('moderation.alarm', { failures });
         return onError === 'skip'
@@ -72,7 +98,7 @@ export const moderation = definePlugin({
       }
     };
 
-    ctx.on(PreCheck, (input) => judge(input.sentence, input.previous));
+    ctx.on(PreCheck, judge);
     ctx.provide(ModerationService, { onError });
   },
 });
