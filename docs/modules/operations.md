@@ -79,7 +79,7 @@
   - 队列满与写失败各只记一次日志（`telemetry.queue-full`、`telemetry.write-failed`），停用时写完剩下的再关闭，并在 `telemetry.stopped` 里记下各项计数。
 - **格式**：每行一个 OTLP/JSON 导出请求，一批至多两行：`{"resourceSpans":[…]}`（`ExportTraceServiceRequest`）与 `{"resourceMetrics":[…]}`（`ExportMetricsServiceRequest`）。trace ID 与 span ID 是小写十六进制，纳秒时刻与 64 位整数写成十进制字符串，枚举写整数值（span 种类 1–5，状态 0 或 2，不写状态说明）。
   - resource：`service.name`（宿主为 `bellis.host`，sidecar 为 `bellis.<通道角色>`）、`service.instance.id`、`process.pid`（仿真里不写）、`telemetry.sdk.*`，宿主另有 `bellis.semconv.gen_ai`（锁定的 GenAI 约定提交）；scope 为插件 id，sidecar 为它的模块名。
-  - 直方图：每批里同一指标、同一组属性的样本合成一个增量（DELTA）数据点，区间从上一批写出到这一批；桶边界按单位取（秒按 OpenTelemetry 语义约定建议的 0.005–10，token 数按 GenAI 约定，其余用 SDK 的缺省）。每个样本另作一个 exemplar（原值、时刻与关联的 span），查看工具据此算精确的分位数。
+  - 直方图：每批里同一指标、同一组属性的样本合成一个增量（DELTA）数据点，区间从上一批写出到这一批；桶边界按单位取（秒按 OpenTelemetry 语义约定建议的 0.005–10，其余用 SDK 的缺省）。每个样本另作一个 exemplar（原值、时刻与关联的 span），查看工具据此算精确的分位数。
 - 仓库的 live 样例缺省启用遥测：不外发、不持凭据、不含内容，磁盘占用有上限，写不进也不影响直播。
 
 ### 内容不采集
@@ -93,7 +93,7 @@
 - span、事件与指标的名字只收可打印 ASCII；
 - 被拒绝的属性不写出，计入 OTLP 的 `droppedAttributesCount`。
 
-自定义属性一律用 `bellis.*`。GenAI 属性按 open-telemetry/semantic-conventions-genai 锁定的提交 `547934afa90a34298441caf80c43b27255c3a292`（2026-10-18），只用不含内容的部分：`gen_ai.operation.name`、`gen_ai.provider.name`、`gen_ai.request.model`、`gen_ai.response.model`、`gen_ai.usage.input_tokens`、`gen_ai.usage.output_tokens`、`gen_ai.token.type`，以及指标 `gen_ai.client.operation.duration`、`gen_ai.client.token.usage`。升级约定时改这个提交并核对名字（`packages/telemetry` 的 semconv.ts）。
+自定义属性一律用 `bellis.*`。GenAI 属性按 open-telemetry/semantic-conventions-genai 锁定的提交 `547934afa90a34298441caf80c43b27255c3a292`（2026-10-18），只用不含内容的部分：属性 `gen_ai.operation.name`、`gen_ai.provider.name`、`gen_ai.request.model`、`gen_ai.response.model`、`gen_ai.usage.input_tokens`、`gen_ai.usage.output_tokens`、`gen_ai.usage.reasoning.output_tokens`，指标 `gen_ai.client.inference.duration`、`gen_ai.client.inference.time_to_first_chunk`（口径见下文[直方图](#直方图)）。推理调用按该约定不记 `gen_ai.client.operation.duration`。该约定里 token 用量的指标是计数器（`gen_ai.client.inference.usage.input_tokens` 与 `.output_tokens`，必填 `gen_ai.token.modality`），本实现只写直方图，所以 P2 不写用量指标，用量只记在模型调用的 span 上。升级约定时改这个提交并核对名字（`packages/telemetry` 的 semconv.ts）。
 
 ### 链路
 
@@ -104,7 +104,7 @@
 | 接入 | `danmaku.receive`（根，consumer） | — | 平台与平台的消息编号；写成事实、交给分诊后结束，开始时刻即链路起点 |
 | 分诊 | `triage.candidate` | 第一条弹幕；合并进来的其余弹幕以 links 关联 | 候选编号；取走、过期、挤出或停用时结束，记去向、合并数、是否命中注入检测 |
 | | `triage.drop` | 被丢弃的弹幕 | 丢弃的原因（净化后为空、注入） |
-| 决策 | `chat <型号>`（GenAI，client） | 排第一的候选；其余候选以 links 关联 | GenAI 属性（回放模型填 `bellis.replay` 与 `replay`）、候选数、意图类型；模型客户端报来时另记 token 用量与应答的型号；超时、调用失败、非法输出、回应对象不在上下文时出错 |
+| 决策 | `chat <型号>`（GenAI，client） | 排第一的候选；其余候选以 links 关联 | GenAI 属性（回放模型填 `bellis.replay` 与 `replay`）、候选数、意图类型；模型客户端报来时另记 token 用量（输入、输出，能拿到时含推理）与应答的型号；超时、调用失败、非法输出、回应对象不在上下文时出错 |
 | 发声 | `speech.utterance` | 回应弹幕：被回应的候选，以 link 关联这次模型调用；闲聊与开票说明：模型调用；其余来源：根 | 发言编号、来源、可抢占点、是否含不可信输入；出队为事件；结束方式、听到的字数、跳过的句数 |
 | 每句 | `speech.sentence` | 发言 | 句键、句序号、去向（播出、截断、跳过、拒绝、过期等） |
 | | `speech.pre_check`，其下 `moderation.check` | 这一句 | 是否拦下；审核的结论（allow、block、error）与 `error.type`（例如 timeout） |
@@ -132,8 +132,8 @@
 | `bellis.stage.stop_to_silence.duration` | 停止到静音：Stage 服务要求页面截断一句（或转告许可令牌变化）到页面回报这一句已截断，按 `bellis.stage.stop_by`（truncate、token）分。页面停止输出后才回报；不含浏览器的输出缓冲、OBS 的缓冲与呈现延迟，不同于[时延目标](../architecture.md#时延目标)里按录音测的停止到静音 |
 | `bellis.lease.renew.lag` | 许可续约滞后：发声仲裁续约 Stage 音频输出许可的实际时刻相对计划时刻（上次续约后许可时长的三分之一）的滞后 |
 | `bellis.host.event_loop.delay` | 宿主事件循环延迟：`perf_hooks.monitorEventLoopDelay`（分辨率 20ms）在每个采样周期（缺省 10 秒）里的最大值减去分辨率；Windows 的定时器粒度也算在里面 |
-| `gen_ai.client.operation.duration` | 一次模型调用的耗时，超时与出错的带 `error.type` |
-| `gen_ai.client.token.usage` | 模型客户端报来的 token 数，按 `gen_ai.token.type` 分输入与输出 |
+| `gen_ai.client.inference.duration` | 一次推理调用（决策的 chat）的耗时：决策插件发出调用到拿到完整输出，含超时与出错。属性只有 `gen_ai.provider.name`、知道时的 `gen_ai.response.model` 与出错时的 `error.type` |
+| `gen_ai.client.inference.time_to_first_chunk` | 流式推理调用从发出到收到第一块：模型客户端收到第一块时经调用选项 `onFirstChunk` 报给决策插件，属性同上。只对流式调用记；回放模型不流式，没有样本，第 3 步的真实模型客户端接入后才有 |
 
 游戏首动作时间在 P3 加入。
 
