@@ -16,7 +16,7 @@
     "check": "pnpm run lint && pnpm run typecheck && pnpm run gen:check && pnpm run test",
     "lint": "biome ci . && uv run --locked ruff check && uv run --locked ruff format --check",
     "format": "biome check --write . && uv run --locked ruff check --fix && uv run --locked ruff format",
-    "typecheck": "tsc -p tsconfig.json && tsc -p packages/stage/page/tsconfig.json && tsc -p packages/stage/page/tsconfig.worklet.json && pyright",
+    "typecheck": "tsc -p tsconfig.json && tsc -p packages/stage/page/tsconfig.json && tsc -p packages/stage/page/tsconfig.worklet.json && tsc -p packages/console/page/tsconfig.json && pyright",
     "gen": "node packages/protocol/scripts/gen.ts",
     "gen:check": "node packages/protocol/scripts/gen.ts --check",
     "test": "node --test --test-timeout=60000 \"packages/*/test/**/*.test.ts\" && uv run --locked pytest"

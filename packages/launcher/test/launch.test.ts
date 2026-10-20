@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -9,9 +10,10 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { connect, decodeSessionKey, RpcPeer } from '@bellis/channel';
 import { SIM_OBS_SECRET, writeObsSecret } from '@bellis/config';
-import { INPUT_VOLUME_METERS, SimObs } from '@bellis/obs';
-import { OperatorMethod, Role } from '@bellis/protocol';
+import { EventSubscription, INPUT_VOLUME_METERS, SimObs } from '@bellis/obs';
+import { OperatorConsoleLoginResult, OperatorMethod, Role } from '@bellis/protocol';
 import { KeyringSecretStore, readSessionInfo } from '@bellis/secret-store';
+import { Compile } from 'typebox/compile';
 import { launch } from '../src/launch.ts';
 
 type LogLine = { event: string; [field: string]: unknown };
@@ -285,10 +287,11 @@ test('呈现延迟：宿主另开只订阅音量表的连接交给被授予 obs.
   try {
     await s.host.wait('host.ready');
     await s.host.waitFor((line) => line.event === 'stage-sync.meters-connected', 5000);
-    // 安全核的应急连接与 OBS 控制的连接都不订阅事件；音量表连接只订阅 InputVolumeMeters。
+    // 安全核的应急连接只订阅场景与输入（R-27），OBS 控制与看门狗的连接不订阅事件，
+    // 音量表连接只订阅 InputVolumeMeters。
     assert.deepEqual(
-      s.obs.subscriptions.filter((bits) => bits !== 0),
-      [INPUT_VOLUME_METERS],
+      s.obs.subscriptions.filter((bits) => bits !== 0).sort((a, b) => a - b),
+      [EventSubscription.Scenes | EventSubscription.Inputs, INPUT_VOLUME_METERS],
     );
     const connection = await connect(s.session.info.channelPath, Role.Operator, {
       key: decodeSessionKey(s.session.info.channelKey),
@@ -307,6 +310,104 @@ test('呈现延迟：宿主另开只订阅音量表的连接交给被授予 obs.
     await s.session.stop();
     await s.cleanup();
   }
+});
+
+/** 以操作台页面的身份发请求（同源）。 */
+function consoleRequest(
+  url: string,
+  method: 'GET' | 'POST',
+  path: string,
+  headers: Record<string, string>,
+  body?: unknown,
+): Promise<{ status: number; body: unknown; setCookie: string[] }> {
+  const { host, port } = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = request(
+      {
+        host: '127.0.0.1',
+        port: Number(port),
+        method,
+        path,
+        agent: false,
+        headers: {
+          host,
+          origin: `http://${host}`,
+          'sec-fetch-site': 'same-origin',
+          ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+          ...headers,
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          resolve({
+            status: res.statusCode ?? 0,
+            body: text ? JSON.parse(text) : null,
+            setCookie: ([] as string[]).concat(res.headers['set-cookie'] ?? []),
+          });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.end(body === undefined ? undefined : JSON.stringify(body));
+  });
+}
+
+test('宿主启动时开启操作台：命令行取一次性令牌登录后，经操作台看状态、确认在场；宿主停止时关闭', async () => {
+  const s = await start();
+  let url: string | undefined;
+  try {
+    await s.host.wait('host.ready');
+    const listening = await s.host.wait('console.listening');
+    const connection = await connect(s.session.info.channelPath, Role.Operator, {
+      key: decodeSessionKey(s.session.info.channelKey),
+    });
+    const operator = new RpcPeer(connection, { timeoutMs: 5000 });
+    const login = await operator.request(OperatorMethod.ConsoleLogin, {});
+    assert.ok(Compile(OperatorConsoleLoginResult).Check(login));
+    url = login.url;
+    assert.equal(url, `http://127.0.0.1:${listening.port}/`);
+    connection.close();
+
+    const loggedIn = await consoleRequest(url, 'POST', '/api/login', {}, { token: login.token });
+    assert.equal(loggedIn.status, 200);
+    const cookie = loggedIn.setCookie[0]?.split(';')[0] ?? '';
+    const csrf = (loggedIn.body as { csrf: string }).csrf;
+    const status = await consoleRequest(url, 'GET', '/api/status', { cookie });
+    assert.equal(status.status, 200);
+    const body = status.body as {
+      mode: string;
+      moderationEnabled: boolean;
+      alerts: Array<{ type: string; text: string }>;
+    };
+    assert.equal(body.mode, 'safe-stop');
+    assert.equal(body.moderationEnabled, true);
+    // 宿主启动时报告的审核开关也在近期告警里。
+    assert.deepEqual(
+      body.alerts.filter((a) => a.type === 'moderation.switched').map((a) => a.text),
+      ['审核插件已启用'],
+    );
+    const presence = await consoleRequest(
+      url,
+      'POST',
+      '/api/presence',
+      { cookie, 'x-bellis-csrf': csrf },
+      {},
+    );
+    assert.deepEqual(presence.body, { ok: true });
+    // 令牌用过即作废。
+    assert.equal(
+      (await consoleRequest(url, 'POST', '/api/login', {}, { token: login.token })).status,
+      403,
+    );
+  } finally {
+    await s.session.stop();
+    await s.cleanup();
+  }
+  assert.ok(url);
+  await assert.rejects(consoleRequest(url, 'GET', '/api/status', {}));
 });
 
 test('profile 没有显式设置审核插件的开关时，宿主拒绝启动', async () => {

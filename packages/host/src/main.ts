@@ -1,7 +1,8 @@
 /**
  * 宿主进程入口。由启动器拉起（R-23），从环境变量获得本次会话的通道地址与密钥，作为本机通道的服务端。
- * 装配顺序：状态存储（并恢复）→ OBS 应急连接 → 安全核 → 插件内核 → 按 profile 加载插件；之后向看门狗发送心跳。
- * 启动后总处于安全停止，由操作员显式切换模式。
+ * 装配顺序：状态存储（并恢复）→ OBS 应急连接 → 安全核 → 插件内核 → 操作员动作 → 本机通道 → 操作台
+ * → 按 profile 加载插件；看门狗的心跳在加载插件之前开始。
+ * 启动后总处于安全停止，由操作员显式切换模式。操作员动作由命令行与操作台共用（operator.ts）。
  */
 import { type Avatar, AvatarService } from '@bellis/avatar';
 import { listen, RpcPeer } from '@bellis/channel';
@@ -12,6 +13,7 @@ import {
   readObsSecret,
   SIM_OBS_SECRET,
 } from '@bellis/config';
+import { ConsoleServer } from '@bellis/console';
 import {
   ChannelHub,
   ClockService,
@@ -35,23 +37,13 @@ import {
   HostHeartbeat,
   HostStatus,
   HostStopping,
-  OperatorEmergencyParams,
-  OperatorMethod,
-  OperatorModeParams,
-  OperatorPreflightParams,
-  OperatorVetoParams,
   Role,
   WatchdogActed,
   WatchdogActedParams,
 } from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { KeyringSecretStore, SESSION_SECRET } from '@bellis/secret-store';
-import {
-  type HeldSentence,
-  ReviewService,
-  type TtsRouting,
-  TtsRoutingService,
-} from '@bellis/speech';
+import { type Review, ReviewService, type TtsRouting, TtsRoutingService } from '@bellis/speech';
 import {
   OBS_CONTROL,
   OBS_METERS,
@@ -63,6 +55,7 @@ import {
 } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
+import { consoleRoutes, createOperator, serveOperator, type Target } from './operator.ts';
 import { preflight } from './preflight.ts';
 import { pluginSecrets } from './secrets.ts';
 
@@ -79,16 +72,15 @@ const LOGGED_FACTS = new Set([
   'watchdog.acted',
   'stage.connected',
   'speech.held',
+  'speech.released',
   'speech.vetoed',
+  'speech.withdrawn',
+  'safety.obs-external',
   'tts.switched',
   'tts.started',
   'tts.degraded',
 ]);
-const isModeParams = Compile(OperatorModeParams);
-const isEmergencyParams = Compile(OperatorEmergencyParams);
 const isWatchdogActed = Compile(WatchdogActedParams);
-const isVetoParams = Compile(OperatorVetoParams);
-const isPreflightParams = Compile(OperatorPreflightParams);
 
 const configPath = process.env[ChildEnv.Config];
 if (!configPath) throw new Error(`缺少环境变量 ${ChildEnv.Config}`);
@@ -114,15 +106,8 @@ const store = StateStore.open({
     safety?.downgrade('状态存储不可用');
   },
 });
-/** M1 中等待放行的句子，供操作员查看与否决。 */
-const held = new Map<string, HeldSentence & { delayMs: number; heldAt: string }>();
 store.subscribe((event) => {
   if (LOGGED_FACTS.has(event.type)) logEvent('fact', { type: event.type, data: event.data });
-  const data = event.data as HeldSentence & { delayMs: number };
-  if (event.type === 'speech.held')
-    held.set(data.key, { ...data, heldAt: new Date().toISOString() });
-  else if (['speech.released', 'speech.vetoed', 'speech.withdrawn'].includes(event.type))
-    held.delete(data.key);
 });
 const recovery = store.recover();
 logEvent('host.recovered', {
@@ -186,6 +171,22 @@ host.provideScoped(ObsMetersService, ({ instanceId, permissions }) => ({
       ? ObsMeters.connect(obsSecret.url, obsSecret.password, { timeoutMs: 2000 })
       : Promise.reject(new Error(`${instanceId} 没有权限 ${OBS_METERS}`)),
 }));
+
+// 操作员动作：命令行与操作台共用（R-20）。操作台与命令行一样由宿主装配，不是插件。
+let consoleServer: ConsoleServer | undefined;
+const operator = createOperator({
+  core,
+  subscribe: (listener) => store.subscribe(listener),
+  plugins: () => host.snapshot(),
+  presentation,
+  review: () => {
+    const review = host.services.resolve(ReviewService.name, ReviewService.major);
+    return 'missing' in review ? null : (review.impl as Review).settings;
+  },
+  preflight: runPreflight,
+  consoleLogin: () => consoleServer?.issueLogin(),
+});
+// 在操作员动作订阅状态存储之后报告审核开关，开关状态也进近期告警。
 core.setModeration(!moderationEntry.disabled);
 
 let stopping = false;
@@ -216,7 +217,7 @@ const server = await listen(credentials.path, {
       handleShutdown(rpc, (reason) => void stop(reason ?? Role.Launcher));
       rpc.handle(HostStatus, () => ({ watchdogConnected: watchdogs().length > 0 }));
     }
-    if (connection.role === Role.Operator) serveOperator(rpc);
+    if (connection.role === Role.Operator) serveOperator(rpc, operator);
     if (connection.role === Role.Watchdog) {
       // 看门狗已静音并切了安全场景：宿主据此进入安全停止（断开即急停只是兜底）。
       rpc.onNotification(WatchdogActed, (params) => {
@@ -241,6 +242,13 @@ const heartbeat = setInterval(() => {
   for (const peer of watchdogs()) peer.notify(HostHeartbeat, { seq, ...core.heartbeat() });
 }, config.heartbeatIntervalMs);
 
+// 操作台在加载插件之前开启：插件加载卡住或出错时照样可用。
+try {
+  consoleServer = await ConsoleServer.start({ routes: consoleRoutes(operator), log: logEvent });
+} catch (error) {
+  logEvent('console.start-failed', { error: (error as Error).message });
+}
+
 host.add(entries, builtinPlugins);
 await host.settled();
 
@@ -249,12 +257,11 @@ watchLifeline(() => void stop('stdin-eof'));
 process.on('SIGINT', () => {});
 logEvent('host.ready', { pid: process.pid, ppid: process.ppid, mode: core.mode });
 
-/** 操作员命令：查看状态、切换模式（升级只能经这里显式发起）、确认在场、急停。 */
 /**
  * 开播预检（见 preflight.ts）。withSafety 时先问安全核目标模式的前置条件（已处于该模式不算未通过），
  * 把原因列为一项；切换时安全核已先核对过，不再重复。
  */
-function runPreflight(target: 'M1' | 'M2' | 'M3', withSafety: boolean): Promise<string[]> {
+function runPreflight(target: Target, withSafety: boolean): Promise<string[]> {
   const stage = host.services.resolve(StageService.name, StageService.major);
   const review = host.services.resolve(ReviewService.name, ReviewService.major);
   const avatar = host.services.resolve(AvatarService.name, AvatarService.major);
@@ -281,57 +288,6 @@ function presentation(): Presentation | null {
   return 'missing' in stage ? null : (stage.impl as Stage).presentation;
 }
 
-function serveOperator(rpc: RpcPeer): void {
-  rpc.handle(OperatorMethod.Status, () => ({
-    mode: core.mode,
-    held: [...held.values()],
-    maintenance: core.maintenance,
-    moderationEnabled: core.moderationEnabled ?? null,
-    presenceValid: core.presenceValid(),
-    presentation: presentation(),
-    plugins: host
-      .snapshot()
-      .map((e) => ({ id: e.id, plugin: e.plugin, state: e.state, reason: e.reason ?? null })),
-  }));
-  rpc.handle(OperatorMethod.Mode, async (params) => {
-    if (!isModeParams.Check(params)) return { ok: false, reason: '参数不合法' };
-    const { target } = params;
-    // 进入真实输出模式前先过开播预检，任一项未通过都不切换（降级与安全停止不受影响）。
-    // 安全核的前置条件先核对（未满足时由 requestMode 记录并拒绝），满足后再过开播预检。
-    if ((target === 'M1' || target === 'M2' || target === 'M3') && !core.modeBlocker(target)) {
-      const failures = await runPreflight(target, false);
-      if (failures.length > 0) {
-        core.record('supervision.refused', {
-          from: core.mode,
-          to: target,
-          reason: '开播预检未通过',
-          failures,
-        });
-        return { ok: false, reason: '开播预检未通过', failures };
-      }
-    }
-    return core.requestMode(target);
-  });
-  rpc.handle(OperatorMethod.Preflight, async (params) => {
-    const target = isPreflightParams.Check(params) ? (params.target ?? 'M1') : 'M1';
-    return { target, failures: await runPreflight(target, true) };
-  });
-  rpc.handle(OperatorMethod.Veto, (params) => {
-    if (!isVetoParams.Check(params)) return { ok: false, reason: '参数不合法' };
-    const keys = params.key === undefined ? [...held.keys()] : [params.key];
-    core.veto(params.key);
-    return { ok: true, vetoed: keys.filter((key) => !held.has(key)) };
-  });
-  rpc.handle(OperatorMethod.Presence, () => {
-    core.confirmPresence();
-    return { ok: true };
-  });
-  rpc.handle(OperatorMethod.EmergencyStop, async (params) => {
-    const reason = isEmergencyParams.Check(params) ? params.reason : '操作员急停';
-    return core.emergencyStop(reason);
-  });
-}
-
 /** 计划内停止：先走急停路径（吊销许可、切安全场景），再通知对端、卸载插件、关闭存储。 */
 async function stop(reason: string): Promise<void> {
   if (stopping) return;
@@ -342,7 +298,9 @@ async function stop(reason: string): Promise<void> {
   for (const peer of peers) {
     if (peer.connection.isOpen) peer.notify(HostStopping, { reason });
   }
+  await consoleServer?.close();
   await host.shutdown();
+  operator.dispose();
   emergency.close();
   store.close();
   await server.close();

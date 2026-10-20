@@ -10,6 +10,7 @@
     "@bellis/avatar": "workspace:*",
     "@bellis/channel": "workspace:*",
     "@bellis/config": "workspace:*",
+    "@bellis/console": "workspace:*",
     "@bellis/kernel": "workspace:*",
     "@bellis/obs": "workspace:*",
     "@bellis/plugins": "workspace:*",

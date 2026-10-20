@@ -299,6 +299,12 @@ importers:
         specifier: 1.3.37
         version: 1.3.37
 
+  packages/console:
+    dependencies:
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/director:
     dependencies:
       '@bellis/audience':
@@ -328,6 +334,9 @@ importers:
       '@bellis/config':
         specifier: workspace:*
         version: link:../config
+      '@bellis/console':
+        specifier: workspace:*
+        version: link:../console
       '@bellis/kernel':
         specifier: workspace:*
         version: link:../kernel

@@ -1,0 +1,183 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  font-size: 15px;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 1100px;
+  padding: 0 16px 32px;
+}
+
+.banner {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 -16px;
+  padding: 8px 16px;
+  font-weight: 600;
+  background: #555;
+  color: #fff;
+}
+
+.banner.moderation-off,
+.banner.moderation-unset {
+  background: #b45309;
+}
+
+.banner.moderation-on {
+  background: #166534;
+}
+
+.banner.offline {
+  top: 2.4em;
+  background: #b91c1c;
+}
+
+.message {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid #888;
+}
+
+.message.error {
+  border-color: #b91c1c;
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+header h1 {
+  font-size: 1.3rem;
+  margin: 16px 0 8px;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+
+.summary dt {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.summary dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+body.stale .summary dd,
+body.stale section:not(.actions) {
+  opacity: 0.35;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.group {
+  display: inline-flex;
+  gap: 4px;
+}
+
+button {
+  font: inherit;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button.armed {
+  background: #b45309;
+  color: #fff;
+}
+
+button.current {
+  outline: 2px solid currentColor;
+}
+
+.estop {
+  font-size: 1.2rem;
+  font-weight: 700;
+  padding: 10px 28px;
+  background: #b91c1c;
+  color: #fff;
+  border: none;
+}
+
+h2 {
+  font-size: 1.05rem;
+  margin: 20px 0 8px;
+}
+
+h2 small {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.held {
+  list-style: none;
+  padding: 0;
+}
+
+.held li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #8884;
+}
+
+.held .subtitle {
+  flex: 1 1 320px;
+  font-size: 1.05rem;
+}
+
+.held .meta {
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid #8884;
+}
+
+td.state-active {
+  color: #166534;
+}
+
+td.state-waiting,
+td.state-failed {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.alerts {
+  padding-left: 0;
+  list-style: none;
+}
+
+.alerts li {
+  padding: 2px 0;
+}
+
+.alerts time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  margin-right: 8px;
+}
