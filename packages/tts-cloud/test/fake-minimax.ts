@@ -27,6 +27,8 @@ export interface FakeMinimaxOptions {
   backpressureOnce?: boolean;
   /** task_continue 以这个错误码拒绝（例如 2204）。 */
   rejectText?: number;
+  /** 前这么多次 task_continue（跨连接计）以 task_failed 1002（每分钟请求数超限）拒绝并断开。 */
+  rateLimitTexts?: number;
   /** 合成到第几段音频时以 task_failed 中断。 */
   failAtChunk?: { index: number; code: number };
   /** 空闲这么久后以 2201 断开。 */
@@ -63,6 +65,8 @@ export class FakeMinimax {
   readonly authorizations: string[] = [];
   connections = 0;
   pings = 0;
+  /** 已以 1002 拒绝的 task_continue 次数。 */
+  rateLimited = 0;
   readonly #server: WebSocketServer;
   readonly #options: Required<
     Omit<FakeMinimaxOptions, 'failStart' | 'rejectText' | 'failAtChunk' | 'idleCloseMs'>
@@ -79,6 +83,7 @@ export class FakeMinimax {
       splitSentences: false,
       oddChunks: false,
       backpressureOnce: false,
+      rateLimitTexts: 0,
       audioAfterCancel: 0,
       ignoreCancel: false,
       confirmCanceledFlush: true,
@@ -284,6 +289,15 @@ export class FakeMinimax {
           send({ event: 'task_started', base_resp: ok });
           return;
         case 'task_continue':
+          if (this.rateLimited < o.rateLimitTexts) {
+            this.rateLimited += 1;
+            send({
+              event: 'task_failed',
+              base_resp: { status_code: 1002, status_msg: 'rate limit exceeded(RPM)' },
+            });
+            socket.close();
+            return;
+          }
           if (o.backpressureOnce && !rejectedOnce) {
             rejectedOnce = true;
             send({ event: 'task_continued', base_resp: { status_code: 2205, status_msg: 'busy' } });

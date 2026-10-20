@@ -1,7 +1,9 @@
 import {
+  type Clock,
   ClockService,
   catalog,
   Kernel,
+  ManualClock,
   type PluginSecrets,
   type ResolvedEntry,
   SecretsService,
@@ -25,12 +27,24 @@ export const timeouts: EngineTimeouts = {
   idleCloseMs: 5000,
 };
 
-export function env(secret: string | undefined, wire: WireEvent[] = []): EngineEnv {
+export function env(
+  secret: string | undefined,
+  wire: WireEvent[] = [],
+  clock: Clock = systemClock(),
+): EngineEnv {
   return {
-    clock: systemClock(),
+    clock,
     secret: async () => secret,
     observe: (event) => wire.push(event),
   };
+}
+
+/** 等到条件成立（真实时间，至多 limitMs）；用于等本机网络往返，不用固定的 sleep。 */
+export async function until(condition: () => boolean, limitMs = 5000): Promise<void> {
+  for (let waited = 0; !condition(); waited += 5) {
+    if (waited > limitMs) throw new Error(`条件未在 ${limitMs}ms 内满足`);
+    await wait(5);
+  }
 }
 
 /** 读完一路合成，收集音频与最后一次时间戳。 */
@@ -67,14 +81,14 @@ export const CLOUD_GRANT = [
 ];
 
 /**
- * 真实时钟下的小世界：状态存储（内存）、安全核（仿真模式，M0）、插件内核，
- * 凭据服务按授予的权限放行（与宿主的实现一致），凭据存在内存里。
+ * 小世界：状态存储（内存）、安全核（仿真模式，M0）、插件内核，
+ * 凭据服务按授予的权限放行（与宿主的实现一致），凭据存在内存里。缺省用真实时钟。
  */
 export async function world(
   entries: readonly ResolvedEntry[],
   secrets: Record<string, string> = {},
+  clock: Clock = systemClock(),
 ) {
-  const clock = systemClock();
   const store = StateStore.open({ path: ':memory:' });
   store.recover();
   const logs: Array<{ event: string; fields: Record<string, unknown> }> = [];
@@ -150,7 +164,18 @@ export async function world(
     },
     events: (type: string) => store.events().filter((e) => e.type === type),
     async close() {
-      await host.shutdown();
+      let done = false;
+      const shutdown = host.shutdown().finally(() => {
+        done = true;
+      });
+      // 手动时钟：卸载期间继续推进，收尾的截止时间才会到期。
+      if (clock instanceof ManualClock) {
+        for (let waited = 0; !done && waited < 60_000; waited += 10) {
+          clock.advance(10);
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      }
+      await shutdown;
       store.close();
     },
   };

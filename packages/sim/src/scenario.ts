@@ -52,6 +52,8 @@ export interface Scenario {
   operator: Array<{ atMs: number; action: 'estop' | 'upgrade' | 'restart' }>;
   /** 呈现延迟（stage-sync 的初值；仿真里没有音量表，一直用它）。缺省 0。 */
   presentationMs?: number;
+  /** 模拟 TTS 的每分钟请求数上限：到了上限，下一句安静等到窗口里空出名额（云端 TTS 限流，R-10）。缺省 0 不限。 */
+  ttsRpm?: number;
   durationMs: number;
 }
 
@@ -98,6 +100,7 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
       { maxLength: 4 },
     ),
     presentationMs: fc.nat(30).map((n) => n * 10),
+    ttsRpm: fc.constantFrom(0, 0, 2, 4),
     durationMs: fc.constant(maxDurationMs),
   });
 }
@@ -142,6 +145,7 @@ export function scenarioEntries(scenario: Scenario, fromMs = 0, outputsUsed = 0)
         samplesPerChar: SAMPLES_PER_CHAR,
         slowness: scenario.ttsSlow ? 1.5 : 0,
         failOn: [BROKEN_AUDIO],
+        rpm: scenario.ttsRpm ?? 0,
       },
     }),
     entry('speech', 'speech-arbiter', { grant: ['speech.output'] }),

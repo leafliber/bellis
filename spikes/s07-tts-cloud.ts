@@ -22,7 +22,8 @@
  * 每轮冷启动的音频另存为 WAV，供人工听辨；PCM 的位深与字节序另按小端与大端解码的相邻采样相关性核对。
  *
  * 只发送下面的固定测试句，结果里写明请求数（发出文本的次数）与发送的总码点数。鉴权失败、限流、额度或余额类错误
- * 立即停止，不重试；其它失败连续两次也停止。
+ * 立即停止，不重试；其它失败连续两次也停止。MiniMax 适配器按插件的规则，在每分钟请求数到上限（`rpm`）或被 1002 拒绝时
+ * 安静等待而不报错（见 docs/modules/speech.md 的“限流”），等待记在线路观测里（`rate-wait`、`rate-limited`）。
  * 凭据按宿主装配插件的方式读取（`pluginSecrets`，只放行 `secret:<厂商>`），来自 SecretStore 服务名 bellis，
  * 只在本进程内用于建连请求头；不复制、不打印、不写进结果。
  * 未覆盖：到 Stage 游标起步的时间（需真实 Stage，见 drill-tts-cloud.ts）；网络抖动注入；
@@ -776,6 +777,7 @@ async function main(): Promise<void> {
     languageBoost: 'Chinese',
     subtitleType: 'word_streaming',
     pingIntervalMs: 30_000,
+    rpm: 20,
   };
   const volcengineOptions: VolcengineOptions = {
     endpoint,

@@ -112,6 +112,20 @@ const regressions: Array<[string, Scenario]> = [
     },
   ],
   [
+    'TTS 等限流时弹幕回复过期：等待取消，这一句不播，写回为空',
+    {
+      seed: 0,
+      moderation: { enabled: false, onError: 'skip', delayMs: 0 },
+      ttsSlow: false,
+      danmaku: [{ atMs: 0, viewer: 0, nickname: 0, text: 0 }],
+      outputs: [{ kind: 'reply', sentences: [5], target: 1 }],
+      announcements: [{ atMs: 0, sentences: [0], immediate: false }],
+      operator: [],
+      ttsRpm: 1,
+      durationMs: 20_000,
+    },
+  ],
+  [
     'TTS 在句中出错：这一句截断，意图结案，不卡住',
     {
       seed: 0,
@@ -132,6 +146,27 @@ for (const [name, scenario] of regressions) {
     assert.deepEqual(result.violations, []);
   });
 }
+
+test('TTS 等限流时发言过期：等待在过期那一刻取消，这一句没有在 Stage 上开始', async () => {
+  const found = regressions.find(([name]) => name.startsWith('TTS 等限流时弹幕回复过期'));
+  assert.ok(found);
+  const result = await simulate(found[1]);
+  assert.deepEqual(result.violations, []);
+  const { trace } = result.history;
+  const reply = trace.find((e) => e.kind === 'fact.utterance' && e.data.source === 'danmaku-reply');
+  assert.equal(reply?.data.end, 'expired');
+  assert.equal(reply?.data.heard, '');
+  const ended = trace.filter((e) => e.kind === 'tts.rate-wait-ended');
+  assert.deepEqual(
+    ended.map((e) => e.data.canceled),
+    [true],
+  );
+  assert.equal(ended[0]?.at, reply?.at, '过期那一刻取消等待并结束发言');
+  const id = String(reply?.data.id);
+  assert.ok(
+    !trace.some((e) => e.kind === 'page.begin' && String(e.data.sentenceId).startsWith(id)),
+  );
+});
 
 test('崩溃重启后，此前执行中的意图被结案而没有重做', async () => {
   const [, scenario] = regressions[2] as [string, Scenario];
