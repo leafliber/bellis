@@ -204,10 +204,22 @@ export interface HeldSentence {
 }
 
 /**
- * M1 的逐句放行环节（固定延迟加否决）：仲裁在 M1 下每句播出前交给它，
- * 等待期满放行（返回 undefined），被操作员否决或模式变化时返回拦下的原因。
+ * 放行方式：`delay` 固定延迟后放行，期间可否决或提前放行；`approve` 每句等操作员放行，超时撤回。
+ */
+export type ReviewMode = 'delay' | 'approve';
+
+export interface ReviewSettings {
+  mode: ReviewMode;
+  delayMs: number;
+  approveTimeoutMs: number;
+}
+
+/**
+ * M1 的逐句放行环节：仲裁在 M1 下每句播出前交给它，放行时返回 undefined，
+ * 被否决、超时或因停止与模式变化撤回时返回拦下的原因。
  */
 export interface Review {
+  readonly settings: ReviewSettings;
   hold(sentence: HeldSentence, signal: AbortSignal): Promise<string | undefined>;
 }
 

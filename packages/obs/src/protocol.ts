@@ -21,6 +21,16 @@ export const RequestStatus = {
   OutputNotRunning: 501,
 } as const;
 
+/**
+ * Identify 时订阅的事件类别（obs-websocket 5 的 EventSubscription 位）。`CurrentProgramSceneChanged` 属于
+ * Scenes，`InputMuteStateChanged` 属于 Inputs；InputVolumeMeters 是高频事件，单独一位。
+ */
+export const EventSubscription = {
+  Scenes: 1 << 2,
+  Inputs: 1 << 3,
+  InputVolumeMeters: 1 << 16,
+} as const;
+
 /** 批量请求的执行方式：0 为按顺序实时执行。 */
 export const SerialRealtime = 0;
 

@@ -15,7 +15,7 @@ import {
   StoreUnavailable,
 } from '@bellis/store';
 import { ControlChannel } from './control.ts';
-import type { EmergencyObs } from './emergency.ts';
+import type { EmergencyObs, ObsChange } from './emergency.ts';
 import { type Lease, Leases } from './leases.ts';
 import { type RateLimit, RateLimiter } from './rate.ts';
 import {
@@ -99,6 +99,15 @@ export interface SafetyOptions {
  */
 export const STAGE_URL = 'obs.stage-url';
 
+/** 真实输出模式：OBS 的外部变化只在这些模式下按急停处理（M0 只连模拟设备）。 */
+const REAL_OUTPUT: ReadonlySet<Mode> = new Set(['M1', 'M2', 'M3']);
+
+/** OBS 外部变化按急停处理时的原因。可能是热键，也可能是手动操作，不断言是热键。 */
+export const OBS_EXTERNAL_REASON = {
+  scene: 'OBS 外部切到安全场景',
+  mute: 'OBS 外部静音了 Stage 源',
+} as const;
+
 /** 含不可信输入的意图永远不能申请的能力（Rule of Two）。 */
 const UNTRUSTED_FORBIDDEN = new Set([
   'obs.scene',
@@ -155,6 +164,10 @@ export class SafetyCore {
     );
     this.leases = new Leases(options.store, options.clock, options.config.leaseTtlMs, this.#log);
     this.#record('safety.started', { simulation: options.config.simulation, mode: this.#mode });
+    options.obs.watch?.({
+      change: (change) => this.#onObsChange(change, false),
+      connected: () => this.#resyncObs(),
+    });
   }
 
   get mode(): Mode {
@@ -176,6 +189,12 @@ export class SafetyCore {
 
   presenceValid(): boolean {
     return this.#clock.now() < this.#presenceUntil;
+  }
+
+  /** 在场确认还剩多久有效（毫秒）；无效时为 0。 */
+  presenceRemainingMs(): number {
+    const remaining = this.#presenceUntil - this.#clock.now();
+    return Number.isFinite(remaining) ? Math.max(0, remaining) : 0;
   }
 
   /** 给外部看门狗的心跳内容。 */
@@ -349,6 +368,62 @@ export class SafetyCore {
   /** 操作员否决 M1 中等待放行的句子（key 为空时否决全部），经控制通道送到持有它们的插件。 */
   veto(key: string | undefined): void {
     this.control.broadcast({ kind: 'veto', key, reason: '操作员否决' });
+  }
+
+  /** 操作员放行 M1 中等待的句子（key 为空时放行全部），与否决一样经控制通道送达。 */
+  release(key: string | undefined): void {
+    this.control.broadcast({ kind: 'release', key, reason: '操作员放行' });
+  }
+
+  /**
+   * OBS 的外部变化（R-27）：真实输出模式下节目场景变为安全场景、或 Stage 源被静音，先记事实
+   * `safety.obs-external`，再走完整的急停路径（吊销许可、广播停止，并经应急连接把静音与切安全场景再做一遍：
+   * 两个动作都幂等，热键可能只绑了其中一项）。已在安全停止、M0 或维护态时只写日志：安全核自己急停、
+   * 看门狗动作引起的这两个事件都落在这里。
+   */
+  #onObsChange(change: ObsChange, resync: boolean): void {
+    const { safeScene, stageSource } = this.#config.emergency;
+    const fields =
+      change.kind === 'scene'
+        ? change.sceneName === safeScene
+          ? { change: 'scene', scene: change.sceneName }
+          : undefined
+        : change.inputName === stageSource && change.muted
+          ? { change: 'mute', input: change.inputName }
+          : undefined;
+    if (!fields) return;
+    if (!REAL_OUTPUT.has(this.#mode) || this.#maintenance) {
+      this.#log('safety.obs-external-ignored', {
+        ...fields,
+        resync,
+        mode: this.#mode,
+        maintenance: this.#maintenance,
+      });
+      return;
+    }
+    this.#record('safety.obs-external', { ...fields, resync, mode: this.#mode });
+    this.#log('safety.alarm', { reason: 'obs-external', ...fields, resync });
+    void this.emergencyStop(OBS_EXTERNAL_REASON[change.kind]);
+  }
+
+  /** 应急连接（重新）连上了 OBS：真实输出模式下读一次当前状态，断开期间可能错过了事件。 */
+  #resyncObs(): void {
+    const observe = this.#obs.observe?.bind(this.#obs);
+    if (!observe || !REAL_OUTPUT.has(this.#mode) || this.#maintenance) return;
+    const policy = this.#config.emergency;
+    observe(policy).then(
+      (observed) => {
+        this.#log('safety.obs-resynced', { ...observed });
+        if (observed.sceneName !== undefined)
+          this.#onObsChange({ kind: 'scene', sceneName: observed.sceneName }, true);
+        if (observed.stageMuted !== undefined)
+          this.#onObsChange(
+            { kind: 'mute', inputName: policy.stageSource, muted: observed.stageMuted },
+            true,
+          );
+      },
+      (error: unknown) => this.#log('safety.obs-resync-failed', { error: message(error) }),
+    );
   }
 
   // ---------------------------------------------------------------- 监督模式

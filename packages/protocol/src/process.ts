@@ -95,7 +95,7 @@ export type HostStatusResult = Static<typeof HostStatusResult>;
 export const Role = {
   Launcher: 'launcher',
   Watchdog: 'watchdog',
-  /** 操作员入口（P0 为命令行，操作台待 R-20）。 */
+  /** 操作员命令行（`pnpm operator`）。宿主内置的操作台不经本机通道，调用同一套操作员动作。 */
   Operator: 'operator',
 } as const;
 
@@ -107,18 +107,31 @@ export const OperatorMethod = {
   EmergencyStop: 'operator.emergency_stop',
   /** M1 中否决等待放行的句子。 */
   Veto: 'operator.veto',
+  /** M1 中放行等待中的句子（逐句放行，或提前结束固定延迟）。 */
+  Release: 'operator.release',
   /** 只跑开播预检，不切换模式。 */
   Preflight: 'operator.preflight',
+  /** 向宿主要一个操作台的一次性登录令牌（R-20）。 */
+  ConsoleLogin: 'operator.console_login',
 } as const;
 
 export const OperatorModeParams = Type.Object(
-  { target: Type.Union(['M0', 'M1', 'M2', 'M3', 'safe-stop'].map((m) => Type.Literal(m))) },
+  {
+    target: Type.Union([
+      Type.Literal('M0'),
+      Type.Literal('M1'),
+      Type.Literal('M2'),
+      Type.Literal('M3'),
+      Type.Literal('safe-stop'),
+    ]),
+  },
   closed,
 );
 export type OperatorModeParams = Static<typeof OperatorModeParams>;
 
+/** 急停的原因可省略（缺省为“操作员急停”）；参数不合法时照样急停，只是用缺省原因。 */
 export const OperatorEmergencyParams = Type.Object(
-  { reason: Type.String({ minLength: 1, maxLength: 200 }) },
+  { reason: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })) },
   closed,
 );
 export type OperatorEmergencyParams = Static<typeof OperatorEmergencyParams>;
@@ -130,8 +143,33 @@ export const OperatorVetoParams = Type.Object(
 );
 export type OperatorVetoParams = Static<typeof OperatorVetoParams>;
 
+/** 放行指定的句子（`发言编号#句序号`）；不给 key 时放行全部等待中的句子。 */
+export const OperatorReleaseParams = Type.Object(
+  { key: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) },
+  closed,
+);
+export type OperatorReleaseParams = Static<typeof OperatorReleaseParams>;
+
 export const OperatorPreflightParams = Type.Object(
-  { target: Type.Optional(Type.Union(['M1', 'M2', 'M3'].map((m) => Type.Literal(m)))) },
+  {
+    target: Type.Optional(Type.Union([Type.Literal('M1'), Type.Literal('M2'), Type.Literal('M3')])),
+  },
   closed,
 );
 export type OperatorPreflightParams = Static<typeof OperatorPreflightParams>;
+
+/**
+ * 操作台的一次性登录令牌：只存在宿主内存里，短时间内有效、只能用一次（R-20）。命令行用浏览器打开
+ * `url#token`，令牌放在 URL 片段里，不随请求发出、不进 Referer。
+ */
+export const OperatorConsoleLoginResult = Type.Object(
+  {
+    /** 操作台页面的地址：`http://127.0.0.1:端口/`。 */
+    url: Type.String({ pattern: '^http://127\\.0\\.0\\.1:[0-9]{1,5}/$' }),
+    /** base64url，至少 128 位随机。 */
+    token: Type.String({ pattern: '^[A-Za-z0-9_-]{22,128}$' }),
+    expiresInMs: Type.Integer({ minimum: 1 }),
+  },
+  closed,
+);
+export type OperatorConsoleLoginResult = Static<typeof OperatorConsoleLoginResult>;

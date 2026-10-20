@@ -144,9 +144,6 @@
     },
     "OperatorEmergencyParams": {
       "type": "object",
-      "required": [
-        "reason"
-      ],
       "properties": {
         "reason": {
           "type": "string",
@@ -157,6 +154,17 @@
       "additionalProperties": false
     },
     "OperatorVetoParams": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorReleaseParams": {
       "type": "object",
       "properties": {
         "key": {
@@ -185,6 +193,29 @@
               "const": "M3"
             }
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorConsoleLoginResult": {
+      "type": "object",
+      "required": [
+        "url",
+        "token",
+        "expiresInMs"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:[0-9]{1,5}/$"
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22,128}$"
+        },
+        "expiresInMs": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "additionalProperties": false

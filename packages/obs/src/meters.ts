@@ -1,7 +1,8 @@
 import { ObsClient, type ObsConnectOptions } from './client.ts';
+import { EventSubscription } from './protocol.ts';
 
 /** obs-websocket 的 InputVolumeMeters 事件订阅位（高频事件，约每 50ms 一次）。 */
-export const INPUT_VOLUME_METERS = 1 << 16;
+export const INPUT_VOLUME_METERS = EventSubscription.InputVolumeMeters;
 
 /** 一个输入此刻的音量表读数。 */
 export interface MeterLevel {

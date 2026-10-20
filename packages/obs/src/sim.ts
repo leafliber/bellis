@@ -5,6 +5,7 @@ import { type WebSocket, WebSocketServer } from 'ws';
 import {
   AuthenticationFailed,
   authenticationString,
+  EventSubscription,
   type Message,
   OpCode,
   RequestStatus,
@@ -33,7 +34,9 @@ interface Handled {
 
 /**
  * 模拟 OBS：在本机端口上说 obs-websocket 5（JSON 子协议）的一个子集，供 `sim` profile 与测试使用。
- * 场景、输入静音和推流状态都在内存里，可以直接查看。
+ * 场景、输入静音和推流状态都在内存里，可以直接查看。节目场景或输入静音真的变了时（经请求，或经
+ * setProgramScene / setInputMuted 模拟在 OBS 里按热键或手动操作），向订阅了 Scenes / Inputs 的连接发
+ * CurrentProgramSceneChanged / InputMuteStateChanged；emitEvent 可以直接注入任意事件。
  */
 export class SimObs {
   readonly scenes: readonly string[];
@@ -94,19 +97,47 @@ export class SimObs {
    * [magnitude, peak, inputPeak]（线性值）。
    */
   emitMeters(inputs: ReadonlyArray<{ inputName: string; levels: number[][] }>): void {
+    this.emitEvent('InputVolumeMeters', EventSubscription.InputVolumeMeters, {
+      inputs: inputs.map((i) => ({ inputName: i.inputName, inputLevelsMul: i.levels })),
+    });
+  }
+
+  /** 向订阅了 `intent` 位的已认证连接发一个事件。 */
+  emitEvent(eventType: string, intent: number, eventData: Record<string, unknown>): void {
     const message = JSON.stringify({
       op: OpCode.Event,
-      d: {
-        eventType: 'InputVolumeMeters',
-        eventIntent: 1 << 16,
-        eventData: {
-          inputs: inputs.map((i) => ({ inputName: i.inputName, inputLevelsMul: i.levels })),
-        },
-      },
+      d: { eventType, eventIntent: intent, eventData },
     });
     for (const [connection, bits] of this.#subscribed) {
-      if (bits & (1 << 16)) connection.send(message);
+      if (bits & intent) connection.send(message);
     }
+  }
+
+  /** 像在 OBS 里按热键或手动操作那样切换节目场景（不经 obs-websocket 请求）。 */
+  setProgramScene(sceneName: string): void {
+    if (!this.scenes.includes(sceneName)) throw new Error(`没有场景 ${sceneName}`);
+    this.#changeScene(sceneName);
+  }
+
+  /** 像在 OBS 里按热键或手动操作那样静音或取消静音一个输入（不经 obs-websocket 请求）。 */
+  setInputMuted(inputName: string, muted: boolean): void {
+    if (!this.muted.has(inputName)) throw new Error(`没有输入 ${inputName}`);
+    this.#changeMute(inputName, muted);
+  }
+
+  #changeScene(sceneName: string): void {
+    if (this.currentScene === sceneName) return;
+    this.currentScene = sceneName;
+    this.emitEvent('CurrentProgramSceneChanged', EventSubscription.Scenes, { sceneName });
+  }
+
+  #changeMute(inputName: string, muted: boolean): void {
+    if (this.muted.get(inputName) === muted) return;
+    this.muted.set(inputName, muted);
+    this.emitEvent('InputMuteStateChanged', EventSubscription.Inputs, {
+      inputName,
+      inputMuted: muted,
+    });
   }
 
   /** 断开所有客户端，模拟 OBS 重启或网络中断。 */
@@ -222,7 +253,7 @@ export class SimObs {
         const scene = String(data.sceneName);
         if (!this.scenes.includes(scene))
           return { code: RequestStatus.ResourceNotFound, comment: `没有场景 ${scene}` };
-        this.currentScene = scene;
+        this.#changeScene(scene);
         return { code: RequestStatus.Success };
       }
       case 'GetInputMute': {
@@ -235,7 +266,7 @@ export class SimObs {
         const input = String(data.inputName);
         if (!this.muted.has(input))
           return { code: RequestStatus.ResourceNotFound, comment: `没有输入 ${input}` };
-        this.muted.set(input, data.inputMuted === true);
+        this.#changeMute(input, data.inputMuted === true);
         return { code: RequestStatus.Success };
       }
       case 'GetInputSettings': {

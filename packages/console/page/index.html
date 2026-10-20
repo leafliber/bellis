@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bellis 操作台</title>
+    <!-- crossorigin 让样式表请求带上 Origin：子资源都要求同源的 Origin。 -->
+    <link rel="stylesheet" href="/console.css" crossorigin="anonymous" />
+  </head>
+  <body>
+    <!-- 页面本身不含任何数据：一切来自宿主的内容由 console.js 用 textContent 填入。 -->
+    <div id="moderation" class="banner">审核状态未知</div>
+    <div id="connection" class="banner offline" hidden>连不上宿主</div>
+    <div id="message" class="message" hidden></div>
+
+    <header>
+      <h1>Bellis 操作台</h1>
+      <dl class="summary">
+        <div><dt>模式</dt><dd id="mode">—</dd></div>
+        <div><dt>在场确认</dt><dd id="presence">—</dd></div>
+        <div><dt>维护态</dt><dd id="maintenance">—</dd></div>
+        <div><dt>呈现延迟</dt><dd id="presentation">—</dd></div>
+        <div><dt>更新于</dt><dd id="updated">—</dd></div>
+      </dl>
+    </header>
+
+    <section class="actions">
+      <button id="estop" class="estop" type="button">急停</button>
+      <button id="presence-confirm" type="button">确认在场</button>
+      <span class="group">
+        <button type="button" data-mode="M0">M0</button>
+        <button type="button" data-mode="M1">M1</button>
+        <button type="button" data-mode="M2">M2</button>
+        <button type="button" data-mode="M3">M3</button>
+        <button type="button" data-mode="safe-stop">安全停止</button>
+      </span>
+      <span class="group">
+        <select id="preflight-target" aria-label="预检目标">
+          <option value="M1">M1</option>
+          <option value="M2" selected>M2</option>
+          <option value="M3">M3</option>
+        </select>
+        <button id="preflight-run" type="button">只跑开播预检</button>
+      </span>
+      <button id="logout" type="button">注销</button>
+    </section>
+
+    <section>
+      <h2>等待放行 <small id="review-mode"></small></h2>
+      <button id="veto-all" type="button">全部否决</button>
+      <p id="held-empty">没有等待放行的句子</p>
+      <ul id="held" class="held"></ul>
+    </section>
+
+    <section>
+      <h2>开播预检</h2>
+      <p id="preflight-summary">—</p>
+      <ul id="preflight-failures"></ul>
+    </section>
+
+    <section>
+      <h2>插件</h2>
+      <table>
+        <thead>
+          <tr><th>条目</th><th>插件</th><th>状态</th><th>原因</th></tr>
+        </thead>
+        <tbody id="plugins"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>近期告警</h2>
+      <ol id="alerts" class="alerts"></ol>
+    </section>
+
+    <script type="module" src="/console.js"></script>
+  </body>
+</html>

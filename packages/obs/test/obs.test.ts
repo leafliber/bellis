@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  EventSubscription,
   INPUT_VOLUME_METERS,
   inspectObsTargets,
   type MeterLevel,
@@ -172,6 +173,53 @@ test('只读音量表连接：只订阅 InputVolumeMeters，读推子前的峰�
     );
   } finally {
     meters.close();
+    await obs.close();
+  }
+});
+
+test('模拟 OBS：节目场景与静音真的变了时，只向订阅了 Scenes / Inputs 的连接发事件', async () => {
+  const obs = await SimObs.start();
+  const scenes = await ObsClient.connect(obs.url, undefined, {
+    eventSubscriptions: EventSubscription.Scenes,
+  });
+  const inputs = await ObsClient.connect(obs.url, undefined, {
+    eventSubscriptions: EventSubscription.Inputs,
+  });
+  const none = await ObsClient.connect(obs.url, undefined);
+  const seen = { scenes: [] as unknown[], inputs: [] as unknown[], none: [] as unknown[] };
+  scenes.onEvent((type, data) => seen.scenes.push([type, data]));
+  inputs.onEvent((type, data) => seen.inputs.push([type, data]));
+  none.onEvent((type, data) => seen.none.push([type, data]));
+  try {
+    // 经请求（任一连接）、经模拟热键与直接注入。
+    await none.request('SetCurrentProgramScene', { sceneName: 'Safe' });
+    await none.request('SetCurrentProgramScene', { sceneName: 'Safe' });
+    await none.request('SetInputMute', { inputName: 'Stage', inputMuted: true });
+    obs.setInputMuted('Stage', true);
+    obs.setProgramScene('Live');
+    obs.setInputMuted('Stage', false);
+    obs.emitEvent('InputMuteStateChanged', EventSubscription.Inputs, {
+      inputName: 'Mic',
+      inputMuted: true,
+    });
+    while (seen.inputs.length < 3 || seen.scenes.length < 2) {
+      await new Promise((done) => setTimeout(done, 5));
+    }
+    assert.deepEqual(seen.scenes, [
+      ['CurrentProgramSceneChanged', { sceneName: 'Safe' }],
+      ['CurrentProgramSceneChanged', { sceneName: 'Live' }],
+    ]);
+    assert.deepEqual(seen.inputs, [
+      ['InputMuteStateChanged', { inputName: 'Stage', inputMuted: true }],
+      ['InputMuteStateChanged', { inputName: 'Stage', inputMuted: false }],
+      ['InputMuteStateChanged', { inputName: 'Mic', inputMuted: true }],
+    ]);
+    assert.deepEqual(seen.none, []);
+    assert.throws(() => obs.setProgramScene('Nope'));
+  } finally {
+    scenes.close();
+    inputs.close();
+    none.close();
     await obs.close();
   }
 });
