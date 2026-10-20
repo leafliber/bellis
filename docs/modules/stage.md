@@ -67,6 +67,7 @@ Stage 是运行在 OBS 浏览器源里的页面，负责播放音频、显示字
 - Win11 曾因忽略被遮挡且无声进程的定时器精度请求，导致浏览器源音频失真（[obs-studio #7588](https://github.com/obsproject/obs-studio/issues/7588)、[obs-browser #406](https://github.com/obsproject/obs-browser/issues/406)）。OBS 31.1 已修复（[obs-browser #484](https://github.com/obsproject/obs-browser/pull/484)），32.2.x 包含此修复；长时间运行的表现仍由 S-01 实测。
 - 基线版本 OBS 32.2.x（D-24）；OBS 与浏览器内核版本写进 Stage 握手，便于对照兼容矩阵。迁移到 OBS 33 前须复测页面导航或刷新后声音仍只经 OBS：33 的测试版曾有此后绕过 OBS 的缺陷（[obs-browser 修复](https://github.com/obsproject/obs-browser/commit/de7e68f33f76f76312ea4c2237ca3c8f809de363)），否则急停的静音会失效。
 - 安全场景与静音目标在配置中固定，开播预检确认它们存在、浏览器源的上述设置无误，并确认安全场景里不含 Stage 源。
+- 已知现象：浏览器源的“自定义 CSS”以内联样式注入，被 Stage 页面的 CSP（`style-src 'self'`）拦下，OBS 日志里出现 “Refused to apply inline style”。所附哈希 `Yd1GhiWi47kUsi/SDfKQTY7E39TboDOQOjTJBsT0GQg=` 就是 OBS 缺省自定义 CSS `body { background-color: rgba(0, 0, 0, 0); margin: 0px auto; overflow: hidden; }` 的 SHA-256。这条无害：页面自己的样式表已经设了透明背景、无边距、不滚动，不为它放宽 CSP。
 
 ## 形象
 
