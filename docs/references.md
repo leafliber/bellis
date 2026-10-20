@@ -31,6 +31,7 @@
 ## 直播平台
 
 - B 站直播开放平台：[快速开始](https://open-live.bilibili.com/document/849b924b-b421-8586-3e5e-765a72ec3840)、[应用 API](https://open-live.bilibili.com/document/eba8e2e1-847d-e908-2e5c-7a1ec7d9266f)、[签名鉴权](https://open-live.bilibili.com/document/74eec767-e594-7ddd-6aba-257e8317c05d)、[长连接数据协议](https://open-live.bilibili.com/document/657d8e34-f926-a133-16c0-300c1afc6e6b)、[消息命令](https://open-live.bilibili.com/document/f9ce25be-312e-1f4a-85fd-fef21f1637f8)、[常见问题](https://open-live.bilibili.com/document/5dffc297-6fd2-41ff-bd45-6e8b89e2a68e)。
+- 开放平台的社区实现（官方文档没写明之处交叉核对用，MIT）：[blivedm](https://github.com/xfgryujk/blivedm)（`blivedm/clients/open_live.py`、`ws_base.py`）、[bianka](https://github.com/vtb-link/bianka)。
 
 ## 模型与记忆
 
