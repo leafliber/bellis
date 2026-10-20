@@ -1,4 +1,10 @@
-import { ClockService, definePlugin, defineService, type TimerHandle } from '@bellis/kernel';
+import {
+  ClockService,
+  defineExtension,
+  definePlugin,
+  defineService,
+  type TimerHandle,
+} from '@bellis/kernel';
 import { SafetyService } from '@bellis/safety';
 import { SpeechService, type UtteranceOutcome } from '@bellis/speech';
 import type { Projection } from '@bellis/store';
@@ -90,6 +96,26 @@ export interface Votes {
 }
 
 export const VoteService = defineService<Votes>('vote', 1);
+
+/** 投票正常结束的通知：题目与选项来自模型（受不可信输入影响），只当数据用。 */
+export interface VoteEndedNotice {
+  voteId: string;
+  question: string;
+  options: string[];
+  /** 按选项顺序的票数。 */
+  counts: number[];
+  valid: number;
+  outcome: VoteOutcome;
+  /** 胜出（或并列最多）的选项编号，从 1 起。 */
+  winners: number[];
+  decisionPoint: string | null;
+}
+
+/**
+ * 扩展点 `vote.ended`（观察）：投票正常结束时分发，在记下 `vote.ended` 之后、请求播报结果之前；
+ * 中止的投票不分发。决策插件据此把“投票结束”作为决策时机。监听者按扩展点注册，投票插件重新加载后照样收到。
+ */
+export const VoteEnded = defineExtension<'observe', VoteEndedNotice>('vote.ended', 'observe');
 
 /** 投票账本：进行中的投票（有 `vote.started`，还没有 `vote.ended` 或 `vote.aborted`）。 */
 export interface VoteLedger {
@@ -258,6 +284,16 @@ export const vote = definePlugin({
         gaps,
       });
       ctx.log('vote.ended', { voteId: rules.voteId, valid, outcome, gaps: gaps.count });
+      ctx.extensions.observe(VoteEnded, {
+        voteId: rules.voteId,
+        question: rules.question,
+        options: [...rules.options],
+        counts: [...counts],
+        valid,
+        outcome,
+        winners: winners.map((index) => index + 1),
+        decisionPoint: rules.decisionPoint,
+      });
       // 先记结果再播报：重启后账本上没有进行中的投票，不会再播一次。
       void speech
         .request({

@@ -134,8 +134,8 @@ test('一条弹幕从接入到播出在同一个 trace 里：接入 → 分诊 �
 });
 
 /**
- * 流式、报用量的模型客户端：第一次调用 50ms 后报第一块、200ms 后回应 c-d1，并报 token 数；
- * 之后的调用不再应答（超时），超时之后才报来的用量与首块不该记。
+ * 流式、报用量的模型客户端：第一次调用 50ms 后报第一块、120ms 后报第一个正文块、200ms 后回应 c-d1，
+ * 并报 token 数；之后的调用不再应答（超时），超时之后才报来的用量、首块与正文块不该记。
  */
 const usageLlm = definePlugin({
   manifest: {
@@ -158,11 +158,13 @@ const usageLlm = definePlugin({
         if (calls > 1) {
           clock.setTimeout(() => {
             options?.onFirstChunk?.();
+            options?.onFirstOutput?.();
             options?.onUsage?.({ inputTokens: 1, outputTokens: 1 });
           }, 8_500);
           return new Promise(() => {});
         }
         clock.setTimeout(() => options?.onFirstChunk?.(), 50);
+        clock.setTimeout(() => options?.onFirstOutput?.(), 120);
         return new Promise((resolve) =>
           clock.setTimeout(() => {
             options?.onUsage?.({
@@ -226,6 +228,7 @@ test('模型调用的 GenAI span 与推理指标：型号、用量、耗时与�
       'gen_ai.provider.name': 'test',
       'gen_ai.request.model': 'test-model',
       'bellis.director.candidates': 1,
+      'bellis.director.trigger': 'candidates',
       'gen_ai.usage.input_tokens': 120,
       'gen_ai.usage.output_tokens': 30,
       'gen_ai.usage.reasoning.output_tokens': 10,
@@ -238,6 +241,7 @@ test('模型调用的 GenAI span 与推理指标：型号、用量、耗时与�
       'gen_ai.provider.name': 'test',
       'gen_ai.request.model': 'test-model',
       'bellis.director.candidates': 1,
+      'bellis.director.trigger': 'candidates',
       'error.type': 'timeout',
     });
     assert.equal(timedOut?.error, true);
@@ -258,6 +262,10 @@ test('模型调用的 GenAI span 与推理指标：型号、用量、耗时与�
     // 流式首块只记第一次调用的那一个；响应型号那时还不知道。
     assert.deepEqual(points(raw, 'gen_ai.client.inference.time_to_first_chunk'), [
       { unit: 's', attributes: { 'gen_ai.provider.name': 'test' }, values: [0.05] },
+    ]);
+    // 第一个正文块（不含思考）同样只记第一次调用的。
+    assert.deepEqual(points(raw, 'bellis.llm.time_to_first_output'), [
+      { unit: 's', attributes: { 'gen_ai.provider.name': 'test' }, values: [0.12] },
     ]);
     for (const absent of [
       'gen_ai.client.operation.duration',

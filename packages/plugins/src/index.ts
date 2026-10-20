@@ -3,6 +3,7 @@ import { vtsAvatar } from '@bellis/avatar';
 import { danmakuBilibili } from '@bellis/bilibili';
 import { director, replayLlm } from '@bellis/director';
 import { catalog } from '@bellis/kernel';
+import { llmOpenAi } from '@bellis/llm';
 import { moderation, simModerationModel } from '@bellis/moderation';
 import {
   localTts,
@@ -40,6 +41,7 @@ export const builtinPlugins = catalog(
   vote,
   director,
   replayLlm,
+  llmOpenAi,
   vtsAvatar,
 );
 

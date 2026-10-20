@@ -153,15 +153,17 @@ test('急停：Stage 立即截断，此后没有新的输出，切到安全场�
   }
 });
 
-test('上下文里只有净化后的称呼与文本，没有原始昵称', async () => {
+test('上下文与提示词里只有净化后的称呼与文本，没有原始昵称与观众身份', async () => {
   const rawName = '小​明‮\u0007';
+  const viewer = 'open-id-7f3a9c2e5b';
   const world = await startChain({
-    messages: [{ atMs: 0, id: 'd1', viewer: 'v1', nickname: rawName, text: '你好\u0000‍呀' }],
+    messages: [{ atMs: 0, id: 'd1', viewer, nickname: rawName, text: '你好\u0000‍呀' }],
     outputs: [speak('你好。', 'c-d1')],
   });
   try {
     await world.until(() => played(world).length === 1);
-    const context = world.service(ReplayLlmService).requests[0]?.context;
+    const request = world.service(ReplayLlmService).requests[0];
+    const context = request?.context;
     assert.ok(!JSON.stringify(context).includes(rawName));
     assert.deepEqual(
       context?.candidates.map((c) => [c.name, c.text]),
@@ -169,6 +171,12 @@ test('上下文里只有净化后的称呼与文本，没有原始昵称', async
     );
     for (const c of context?.candidates ?? []) {
       assert.ok(!/[\p{Cc}\p{Cf}]/u.test(c.name + c.text), '不含控制字符与格式字符');
+    }
+    // 真正发给模型的是消息：同样没有原始昵称、观众身份与原文里的控制字符和格式字符。
+    const sent = request?.messages.map((m) => m.content).join('\n') ?? '';
+    assert.ok(sent.includes('小明') && sent.includes('你好呀'));
+    for (const absent of [rawName, viewer, '​', '‮', '‍', '\u0007', '\u0000']) {
+      assert.ok(!sent.includes(absent), JSON.stringify(absent));
     }
   } finally {
     await world.close();

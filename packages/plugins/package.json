@@ -12,6 +12,7 @@
     "@bellis/bilibili": "workspace:*",
     "@bellis/director": "workspace:*",
     "@bellis/kernel": "workspace:*",
+    "@bellis/llm": "workspace:*",
     "@bellis/moderation": "workspace:*",
     "@bellis/speech": "workspace:*",
     "@bellis/stage": "workspace:*",

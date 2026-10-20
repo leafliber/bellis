@@ -1,0 +1,20 @@
+{
+  "name": "@bellis/llm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/director": "workspace:*",
+    "@bellis/kernel": "workspace:*",
+    "typebox": "1.3.37"
+  },
+  "devDependencies": {
+    "@bellis/safety": "workspace:*",
+    "@bellis/secret-store": "workspace:*",
+    "@bellis/store": "workspace:*",
+    "fast-check": "4.10.2"
+  }
+}

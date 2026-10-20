@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { safetyFacade } from '../src/index.ts';
 import { setup } from './helpers.ts';
 
 test('启动时处于安全停止；sim 下只能进入 M0，非 sim 不能进入 M0', async () => {
@@ -106,6 +107,41 @@ test('自动降级：在场确认有效时 M2 降到 M1，M1 再降进入安全�
     assert.equal(s.safety.downgrade('测试'), 'M1');
     assert.equal(s.safety.downgrade('测试'), 'safe-stop');
     assert.equal(s.safety.mode, 'safe-stop');
+  } finally {
+    await s.close();
+  }
+});
+
+test('插件经门面请求降级：记下请求者与原因，按自动降级的规则只往下走', async () => {
+  const s = await setup();
+  try {
+    const facade = safetyFacade(s.safety, 'director#3');
+    s.safety.confirmPresence();
+    s.safety.requestMode('M2');
+    assert.equal(facade.requestDowngrade('决策模型连续失败 3 次'), 'M1');
+    assert.equal(facade.requestDowngrade('决策模型连续失败 6 次'), 'safe-stop');
+    // 已在安全停止：仍记下请求，不再动作。
+    assert.equal(facade.requestDowngrade('决策模型连续失败 9 次'), 'safe-stop');
+    assert.deepEqual(
+      s.events('safety.downgrade-requested').map((e) => e.data),
+      [
+        { holder: 'director#3', reason: '决策模型连续失败 3 次', mode: 'M2' },
+        { holder: 'director#3', reason: '决策模型连续失败 6 次', mode: 'M1' },
+        { holder: 'director#3', reason: '决策模型连续失败 9 次', mode: 'safe-stop' },
+      ],
+    );
+    const [changed] = s.events('supervision.changed').filter((e) => {
+      const data = e.data as { to: string };
+      return data.to === 'M1';
+    });
+    assert.deepEqual(changed?.data, {
+      from: 'M2',
+      to: 'M1',
+      reason: '决策模型连续失败 3 次（director#3 请求降级）',
+      by: 'safety',
+    });
+    // 门面没有升级或切换模式的方法。
+    assert.equal('requestMode' in facade, false);
   } finally {
     await s.close();
   }

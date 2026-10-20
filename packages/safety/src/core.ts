@@ -523,6 +523,15 @@ export class SafetyCore {
     return target;
   }
 
+  /**
+   * 插件请求自动降级（例如决策模型连续失败、输出连续重复或漂移）：先记事实 `safety.downgrade-requested`
+   * （请求者、原因、当时的模式），再按 {@link downgrade} 的规则处理。只能往下走：插件不能借此升级或恢复。
+   */
+  requestDowngrade(holder: string, reason: string): Mode {
+    this.#record('safety.downgrade-requested', { holder, reason, mode: this.#mode });
+    return this.downgrade(`${reason}（${holder} 请求降级）`);
+  }
+
   /** 审核插件的开关（D-18）：由宿主按 profile 的显式设置报告，变化写入事件；关闭时不允许 M3。 */
   setModeration(enabled: boolean): void {
     if (this.#moderation === enabled) return;

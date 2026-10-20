@@ -9,7 +9,7 @@ import type { Mode } from './supervision.ts';
  * 插件能接触到的安全核：申请授权、持有与续约执行许可、订阅控制信号、执行已授权的意图、记录事实，
  * 读取宿主注册的投影，以及为自己的结果未知的意图对账。
  * 每个插件实例拿到的门面都绑定了它自己的实例编号，不能冒用其他实例的身份。
- * 插件拿不到状态存储本身，也不能切换监督模式。
+ * 插件拿不到状态存储本身，也不能切换监督模式，只能请求降级。
  */
 export interface SafetyFacade {
   readonly mode: Mode;
@@ -37,6 +37,11 @@ export interface SafetyFacade {
   unresolved(type: string): Intent[];
   /** 对账：查询外部状态后为结果未知的意图补记结果；只能对账 {@link unresolved} 会列出的意图。 */
   reconcile(intent: Intent, outcome: Outcome): Intent;
+  /**
+   * 以本实例的身份请求自动降级（记事实 `safety.downgrade-requested`，再按自动降级的规则处理），返回之后的模式。
+   * 只有降级这一个方向：插件仍不能切换或恢复监督模式。
+   */
+  requestDowngrade(reason: string): Mode;
 }
 
 export const SafetyService = defineService<SafetyFacade>('safety', 1);
@@ -81,5 +86,6 @@ export function safetyFacade(
     view: (projection) => core.store.view(projection),
     unresolved: (type) => core.unresolved(type, granted()),
     reconcile: (intent, outcome) => core.reconcile(intent.id, outcome, granted()),
+    requestDowngrade: (reason) => core.requestDowngrade(holder, reason),
   };
 }

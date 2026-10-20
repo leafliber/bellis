@@ -156,6 +156,33 @@
           "grant": ["vote.start"]
         }
       ]
+    },
+    {
+      "name": "director",
+      "entries": [
+        {
+          "id": "llm",
+          "plugin": "llm-openai",
+          "disabled": true,
+          "grant": ["net.egress:ark.cn-beijing.volces.com", "secret:ark"],
+          "config": {
+            "endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+            "model": "glm-5-3-flash-260828",
+            "provider": "volcengine.ark",
+            "reasoningEffort": "low",
+            "outputMode": "prompt"
+          }
+        },
+        {
+          "id": "director",
+          "plugin": "director",
+          "disabled": true,
+          "config": {
+            "persona": "（示例人设，由操作员按实际角色改写）你是一名温和、好奇的中文虚拟主播。",
+            "fallback": { "lines": ["稍等，我想一想。"] }
+          }
+        }
+      ]
     }
   ]
 }
