@@ -54,7 +54,7 @@ async function sample() {
   play.fail('stage_unavailable');
   play.end();
   for (let i = 1; i <= 20; i += 1) tracer.record('bellis.tts.time_to_first_audio', i / 100, 's');
-  tracer.record('gen_ai.client.token.usage', 300, '{token}');
+  tracer.record('bellis.test.count', 300, '{item}');
   await new Promise((r) => setImmediate(r));
   return { lines: writer.lines, traceId: (receive.traceparent as string).slice(3, 35) };
 }
@@ -68,7 +68,8 @@ test('汇总：各直方图的样本数与 p50/p95/p99，最近的弹幕链路',
     text,
     /bellis\.tts\.time_to_first_audio {2}n=20 {2}p50 100\.0ms {2}p95 190\.0ms {2}p99 200\.0ms/,
   );
-  assert.match(text, /gen_ai\.client\.token\.usage {2}n=1 {2}p50 300\{token\}/);
+  // 不是秒的单位按原值与单位显示。
+  assert.match(text, /bellis\.test\.count {2}n=1 {2}p50 300\{item\}/);
   assert.ok(text.includes(traceId));
 });
 

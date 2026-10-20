@@ -160,7 +160,8 @@ test('直方图：同一批里同一指标、同一组属性合成一个增量�
   tracer.record('bellis.moderation.check.duration', 2, 's', {
     'bellis.moderation.outcome': 'error',
   });
-  tracer.record('gen_ai.client.token.usage', 300, '{token}', { 'gen_ai.token.type': 'input' });
+  // 不是秒的单位用 SDK 缺省的桶边界。
+  tracer.record('bellis.test.count', 30, '{item}', { 'bellis.test.kind': 'a' });
   // 不合格的样本丢弃并计数。
   tracer.record('bad name', 1, 's');
   tracer.record('bellis.x', Number.NaN, 's');
@@ -170,7 +171,7 @@ test('直方图：同一批里同一指标、同一组属性合成一个增量�
   await tick();
   assert.equal(writer.lines.length, 1, '1 秒后只写了直方图，span 在下一批');
   for (const line of writer.lines) assert.deepEqual(otlpLineProblems(line), []);
-  const [duration, tokens] = metricsOf(writer.lines);
+  const [duration, count] = metricsOf(writer.lines);
   assert.equal(duration?.name, 'bellis.moderation.check.duration');
   assert.equal(duration?.unit, 's');
   assert.equal(duration?.histogram.aggregationTemporality, 1);
@@ -191,8 +192,10 @@ test('直方图：同一批里同一指标、同一组属性合成一个增量�
   assert.equal(allow?.bucketCounts[2], '1');
   assert.equal(allow?.bucketCounts[7], '1');
   assert.equal(error?.count, '1');
-  assert.equal(tokens?.unit, '{token}');
-  assert.equal(tokens?.histogram.dataPoints[0]?.bucketCounts[5], '1');
+  assert.equal(count?.unit, '{item}');
+  // 30 落在 (25, 50]。
+  assert.equal(count?.histogram.dataPoints[0]?.bucketCounts[4], '1');
+  assert.equal(count?.histogram.dataPoints[0]?.explicitBounds[0], 0);
   assert.equal(telemetry.stats().rejectedSamples, 2);
 });
 

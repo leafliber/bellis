@@ -5,7 +5,9 @@ import { ClockService, definePlugin } from '@bellis/kernel';
 import { builtinPlugins } from '@bellis/plugins';
 import {
   formatTrace,
+  GenAi,
   Metric,
+  type OtlpMetrics,
   parseLines,
   type TelemetryMemory,
   TelemetryMemoryService,
@@ -106,7 +108,7 @@ test('一条弹幕从接入到播出在同一个 trace 里：接入 → 分诊 �
       Metric.TtsFirstAudio,
       Metric.ModerationDuration,
       Metric.LeaseRenewLag,
-      'gen_ai.client.operation.duration',
+      GenAi.InferenceDuration,
     ]) {
       assert.ok((view.metrics.get(`${name} s`)?.values.length ?? 0) > 0, `${name} 有样本`);
     }
@@ -131,7 +133,10 @@ test('一条弹幕从接入到播出在同一个 trace 里：接入 → 分诊 �
   }
 });
 
-/** 报用量的模型客户端：第一次调用回应 c-d1 并报 token 数，之后不再应答（超时）。 */
+/**
+ * 流式、报用量的模型客户端：第一次调用 50ms 后报第一块、200ms 后回应 c-d1，并报 token 数；
+ * 之后的调用不再应答（超时），超时之后才报来的用量与首块不该记。
+ */
 const usageLlm = definePlugin({
   manifest: {
     id: 'llm-usage',
@@ -150,10 +155,24 @@ const usageLlm = definePlugin({
       model: { provider: 'test', name: 'test-model' },
       complete(_request, _signal, options) {
         calls += 1;
-        if (calls > 1) return new Promise(() => {});
-        options?.onUsage?.({ inputTokens: 120, outputTokens: 30, responseModel: 'test-model-1' });
+        if (calls > 1) {
+          clock.setTimeout(() => {
+            options?.onFirstChunk?.();
+            options?.onUsage?.({ inputTokens: 1, outputTokens: 1 });
+          }, 8_500);
+          return new Promise(() => {});
+        }
+        clock.setTimeout(() => options?.onFirstChunk?.(), 50);
         return new Promise((resolve) =>
-          clock.setTimeout(() => resolve(speak('好的。', 'c-d1')), 200),
+          clock.setTimeout(() => {
+            options?.onUsage?.({
+              inputTokens: 120,
+              outputTokens: 30,
+              reasoningOutputTokens: 10,
+              responseModel: 'test-model-1',
+            });
+            resolve(speak('好的。', 'c-d1'));
+          }, 200),
         );
       },
     };
@@ -161,7 +180,26 @@ const usageLlm = definePlugin({
   },
 });
 
-test('模型调用的 GenAI span：型号、用量与耗时；超时记 error.type，不记上下文与输出', async () => {
+/** 某个直方图各数据点的属性与原值（按写出的顺序）。 */
+function points(raw: readonly string[], name: string) {
+  return raw
+    .map((line) => JSON.parse(line) as Partial<OtlpMetrics>)
+    .flatMap((request) => request.resourceMetrics ?? [])
+    .flatMap((resource) => resource.scopeMetrics)
+    .flatMap((scoped) => scoped.metrics)
+    .filter((metric) => metric.name === name)
+    .flatMap((metric) =>
+      metric.histogram.dataPoints.map((point) => ({
+        unit: metric.unit,
+        attributes: Object.fromEntries(
+          (point.attributes ?? []).map((a) => [a.key, Object.values(a.value)[0]]),
+        ),
+        values: point.exemplars.map((e) => e.asDouble),
+      })),
+    );
+}
+
+test('模型调用的 GenAI span 与推理指标：型号、用量、耗时与流式首块；超时记 error.type，不记上下文与输出', async () => {
   const entries = chain({
     telemetry: true,
     messages: [
@@ -190,14 +228,46 @@ test('模型调用的 GenAI span：型号、用量与耗时；超时记 error.ty
       'bellis.director.candidates': 1,
       'gen_ai.usage.input_tokens': 120,
       'gen_ai.usage.output_tokens': 30,
+      'gen_ai.usage.reasoning.output_tokens': 10,
       'gen_ai.response.model': 'test-model-1',
       'bellis.director.action': 'speak',
     });
+    // 超时之后才报来的用量不记。
+    assert.deepEqual(timedOut?.attributes, {
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.provider.name': 'test',
+      'gen_ai.request.model': 'test-model',
+      'bellis.director.candidates': 1,
+      'error.type': 'timeout',
+    });
     assert.equal(timedOut?.error, true);
-    assert.equal(timedOut?.attributes['error.type'], 'timeout');
-    assert.deepEqual(view.metrics.get('gen_ai.client.token.usage {token}')?.values, [120, 30]);
-    assert.deepEqual(view.metrics.get('gen_ai.client.operation.duration s')?.values, [0.2, 8]);
-    assert.ok(!lines(world).join('\n').includes('主播你好'));
+    // 推理调用记 inference.duration，不记 operation.duration；用量不写指标（该约定里是计数器）。
+    const raw = lines(world);
+    assert.deepEqual(points(raw, 'gen_ai.client.inference.duration'), [
+      {
+        unit: 's',
+        attributes: { 'gen_ai.provider.name': 'test', 'gen_ai.response.model': 'test-model-1' },
+        values: [0.2],
+      },
+      {
+        unit: 's',
+        attributes: { 'gen_ai.provider.name': 'test', 'error.type': 'timeout' },
+        values: [8],
+      },
+    ]);
+    // 流式首块只记第一次调用的那一个；响应型号那时还不知道。
+    assert.deepEqual(points(raw, 'gen_ai.client.inference.time_to_first_chunk'), [
+      { unit: 's', attributes: { 'gen_ai.provider.name': 'test' }, values: [0.05] },
+    ]);
+    for (const absent of [
+      'gen_ai.client.operation.duration',
+      'gen_ai.client.token.usage',
+      'gen_ai.client.inference.usage.input_tokens',
+    ]) {
+      assert.deepEqual(points(raw, absent), [], absent);
+    }
+    assert.ok(!raw.join('\n').includes('gen_ai.token.type'));
+    assert.ok(!raw.join('\n').includes('主播你好'));
   } finally {
     await world.close();
   }

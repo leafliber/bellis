@@ -5,7 +5,10 @@
  */
 export const GENAI_SEMCONV_COMMIT = '547934afa90a34298441caf80c43b27255c3a292';
 
-/** GenAI 语义约定（只用不含内容的部分）。 */
+/**
+ * GenAI 语义约定（只用不含内容的部分）。该提交里 token 用量的指标是计数器
+ * （`gen_ai.client.inference.usage.*`），本实现只写直方图，所以用量只记在 span 上，不写指标。
+ */
 export const GenAi = {
   OperationName: 'gen_ai.operation.name',
   ProviderName: 'gen_ai.provider.name',
@@ -13,11 +16,14 @@ export const GenAi = {
   ResponseModel: 'gen_ai.response.model',
   UsageInputTokens: 'gen_ai.usage.input_tokens',
   UsageOutputTokens: 'gen_ai.usage.output_tokens',
-  TokenType: 'gen_ai.token.type',
-  /** 直方图：一次模型调用的耗时（秒）。 */
-  OperationDuration: 'gen_ai.client.operation.duration',
-  /** 直方图：一次调用用掉的 token 数（`{token}`），按 `gen_ai.token.type` 分输入与输出。 */
-  TokenUsage: 'gen_ai.client.token.usage',
+  UsageReasoningOutputTokens: 'gen_ai.usage.reasoning.output_tokens',
+  /**
+   * 直方图（秒）：一次推理调用（chat）的耗时。属性：必填 `gen_ai.provider.name`，推荐
+   * `gen_ai.response.model`，出错时 `error.type`。推理调用不记 `gen_ai.client.operation.duration`。
+   */
+  InferenceDuration: 'gen_ai.client.inference.duration',
+  /** 直方图（秒）：流式推理调用从发出到收到第一块的耗时，只对流式调用记，属性同上。 */
+  InferenceTimeToFirstChunk: 'gen_ai.client.inference.time_to_first_chunk',
 } as const;
 
 export const ErrorType = 'error.type';

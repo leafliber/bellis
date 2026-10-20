@@ -49,12 +49,17 @@ export interface LlmModel {
 export interface LlmUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** 输出里用于推理（思考）的 token 数。 */
+  reasoningOutputTokens?: number;
   responseModel?: string;
 }
 
+/** 模型客户端在调用过程中报给决策插件的信息，只用于遥测；都可以不调用。 */
 export interface LlmCallOptions {
-  /** 模型客户端拿到用量时调用（遥测用），可以不调用。 */
+  /** 拿到用量（以及实际应答的型号）时调用。 */
   onUsage?(usage: LlmUsage): void;
+  /** 流式调用收到第一块时调用；不流式的客户端不调用。 */
+  onFirstChunk?(): void;
 }
 
 export interface Llm {
@@ -73,8 +78,9 @@ const UNKNOWN_MODEL: LlmModel = { provider: 'unknown', name: 'unknown' };
  * 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
  *
  * 遥测（见运维“观测”）：一次模型调用一个 GenAI span（`chat <型号>`，父为排第一的候选，其余候选以 links
- * 关联），记 `gen_ai.client.operation.duration`，模型客户端报来用量时记 token 数。回应弹幕的发言以被回应的
- * 候选为父、以 link 关联这次调用，带上链路起点；闲聊与开票说明以这次调用为父。不记上下文与模型输出。
+ * 关联），记 `gen_ai.client.inference.duration`；模型客户端报来用量时 token 数记在 span 上，流式客户端报来
+ * 第一块时记 `gen_ai.client.inference.time_to_first_chunk`。回应弹幕的发言以被回应的候选为父、以 link
+ * 关联这次调用，带上链路起点；闲聊与开票说明以这次调用为父。不记上下文与模型输出。
  */
 export const director = definePlugin({
   manifest: {
@@ -184,16 +190,16 @@ export const director = definePlugin({
           if (ctx.signal.aborted) return;
           const taken = candidates.take(config.maxCandidates);
           const model = llm.model ?? UNKNOWN_MODEL;
-          const genAi = {
-            [GenAi.OperationName]: 'chat',
-            [GenAi.ProviderName]: model.provider,
-            [GenAi.RequestModel]: model.name,
-          };
           const call = tracer.startSpan(`chat ${model.name}`, {
             kind: 'client',
             parent: taken[0]?.trace,
             links: taken.slice(1).map((c) => c.trace),
-            attributes: { ...genAi, 'bellis.director.candidates': taken.length },
+            attributes: {
+              [GenAi.OperationName]: 'chat',
+              [GenAi.ProviderName]: model.provider,
+              [GenAi.RequestModel]: model.name,
+              'bellis.director.candidates': taken.length,
+            },
           });
           /** 结束这次调用的 span；出错时带上类别（不带模型输出）。 */
           const endCall = (errorType?: string) => {
@@ -201,6 +207,15 @@ export const director = definePlugin({
             call.end();
           };
           const startedAt = clock.now();
+          /** 调用已有结果（含超时）：之后客户端再报的用量与首块不记。 */
+          let settled = false;
+          let responseModel: string | undefined;
+          /** 推理指标的属性：必填厂商，能拿到时加实际应答的型号，出错时加错误类别。 */
+          const metricAttributes = (errorType?: string) => ({
+            [GenAi.ProviderName]: model.provider,
+            [GenAi.ResponseModel]: responseModel,
+            [ErrorType]: errorType,
+          });
           const request: LlmRequest = {
             context: context(taken),
             ...(call.traceparent ? { traceparent: call.traceparent } : {}),
@@ -212,48 +227,51 @@ export const director = definePlugin({
               clock,
               llm.complete(request, controller.signal, {
                 onUsage: (usage) => {
+                  if (settled) return;
+                  responseModel = usage.responseModel ?? responseModel;
                   call.setAttributes({
                     [GenAi.UsageInputTokens]: usage.inputTokens,
                     [GenAi.UsageOutputTokens]: usage.outputTokens,
+                    [GenAi.UsageReasoningOutputTokens]: usage.reasoningOutputTokens,
                     [GenAi.ResponseModel]: usage.responseModel,
                   });
-                  for (const [type, tokens] of [
-                    ['input', usage.inputTokens],
-                    ['output', usage.outputTokens],
-                  ] as const) {
-                    if (tokens === undefined) continue;
-                    tracer.record(
-                      GenAi.TokenUsage,
-                      tokens,
-                      '{token}',
-                      { ...genAi, [GenAi.TokenType]: type },
-                      call,
-                    );
-                  }
+                },
+                // 流式客户端（第 3 步的真实模型客户端）收到第一块时调用；回放模型不流式，不调用。
+                onFirstChunk: () => {
+                  if (settled) return;
+                  tracer.record(
+                    GenAi.InferenceTimeToFirstChunk,
+                    (clock.now() - startedAt) / 1000,
+                    's',
+                    metricAttributes(),
+                    call,
+                  );
                 },
               }),
               config.callTimeoutMs,
               '决策模型调用',
             );
           } catch (error) {
+            settled = true;
             controller.abort();
             const errorType = error instanceof DeadlineError ? 'timeout' : 'call_failed';
             tracer.record(
-              GenAi.OperationDuration,
+              GenAi.InferenceDuration,
               (clock.now() - startedAt) / 1000,
               's',
-              { ...genAi, [ErrorType]: errorType },
+              metricAttributes(errorType),
               call,
             );
             endCall(errorType);
             failed((error as Error).message);
             continue;
           }
+          settled = true;
           tracer.record(
-            GenAi.OperationDuration,
+            GenAi.InferenceDuration,
             (clock.now() - startedAt) / 1000,
             's',
-            genAi,
+            metricAttributes(),
             call,
           );
           const parsed = parseAction(output);
