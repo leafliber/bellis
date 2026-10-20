@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { VoteService, type Votes } from '@bellis/audience';
 import { ReplayLlmService } from '@bellis/director';
 import { checkHistory, type History } from './invariants.ts';
 import { type Scenario, scenarioEntries } from './scenario.ts';
@@ -100,14 +101,18 @@ export async function simulate(
       if (violations.length > 0) break;
     }
 
-    // 冷场闲聊可能在排空期间开始新的发言：等进行中的意图结束，超过上限才判为卡住。
+    // 冷场闲聊可能在排空期间开始新的发言，投票可能还在倒计时：等进行中的意图与投票结束，超过上限才判为卡住。
     const inflight = () => [
       ...world.store.intentsIn('pending'),
       ...world.store.intentsIn('executing'),
     ];
+    const voting = () => {
+      const found = world.kernel.services.resolve(VoteService.name, VoteService.major);
+      return 'missing' in found ? undefined : (found.impl as Votes).current();
+    };
     for (
       let waited = 0;
-      inflight().length > 0 && waited < (options.settleMs ?? 60_000);
+      (inflight().length > 0 || voting() !== undefined) && waited < (options.settleMs ?? 60_000);
       waited += stepMs
     ) {
       world.clock.advance(stepMs);
@@ -116,6 +121,8 @@ export async function simulate(
     const stuck = inflight();
     if (stuck.length > 0)
       violations.push(`排空后仍有未完成的意图：${stuck.map((i) => i.key).join(', ')}`);
+    const open = voting();
+    if (open) violations.push(`排空后仍有进行中的投票：${open.voteId}`);
     const busy = world.kernel
       .snapshot()
       .filter((e) => ['loading', 'quiescing', 'unloading'].includes(e.state));

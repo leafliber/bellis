@@ -3,6 +3,7 @@
  * 参数用同一份 TypeBox Schema 校验，行为与记录完全一致。操作台与命令行一样由宿主装配，不经插件加载器，
  * 插件出问题时照样可用。
  */
+import type { VoteStatus } from '@bellis/audience';
 import type { RpcPeer } from '@bellis/channel';
 import { type ConsoleRoute, InvalidParams } from '@bellis/console';
 import type { EntrySnapshot } from '@bellis/kernel';
@@ -59,6 +60,8 @@ export interface OperatorStatus {
   /** M1 的放行环节的设置；不在场时为 null。 */
   review: ReviewSettings | null;
   held: HeldEntry[];
+  /** 进行中的投票（题目、选项、票数、剩余时间）；没有投票或投票插件不在场时为 null。 */
+  vote: VoteStatus | null;
   preflight: PreflightRecord | null;
   plugins: PluginStatus[];
 }
@@ -80,6 +83,8 @@ export interface OperatorDeps {
   plugins(): readonly EntrySnapshot[];
   presentation(): Presentation | null;
   review(): ReviewSettings | null;
+  /** 进行中的投票；不给时状态里总是 null。 */
+  vote?(): VoteStatus | null;
   /** 开播预检；withSafety 时先列出安全核的前置条件（见 preflight.ts）。 */
   preflight(target: Target, withSafety: boolean): Promise<string[]>;
   /** 操作台的一次性登录令牌；操作台没有启动时为 undefined。 */
@@ -128,6 +133,7 @@ const ALERTS: Record<string, (data: Record<string, unknown>) => string | undefin
   'danmaku.gap-started': (d) => `弹幕缺口开始：${d.platform}（${d.reason}）`,
   'danmaku.gap-ended': (d) =>
     `弹幕缺口结束：${d.platform}，${d.recovered === true ? '已恢复' : '未恢复'}，持续 ${d.durationMs}ms`,
+  'vote.aborted': (d) => `投票中止：${d.voteId}（${d.reason}）`,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -196,6 +202,7 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
           heldAt: new Date(since).toISOString(),
           waitedMs: Math.max(0, at - since),
         })),
+        vote: deps.vote?.() ?? null,
         preflight: lastPreflight,
         plugins: deps.plugins().map((e) => ({
           id: e.id,

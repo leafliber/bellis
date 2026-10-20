@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@bellis/audience": "workspace:*",
     "@bellis/director": "workspace:*",
     "@bellis/kernel": "workspace:*",
     "@bellis/obs": "workspace:*",
@@ -16,8 +17,5 @@
     "@bellis/stage": "workspace:*",
     "@bellis/store": "workspace:*",
     "fast-check": "4.10.2"
-  },
-  "devDependencies": {
-    "@bellis/audience": "workspace:*"
   }
 }

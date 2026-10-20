@@ -1,4 +1,4 @@
-import { danmakuReplay, triage } from '@bellis/audience';
+import { danmakuReplay, triage, vote, voteLedger } from '@bellis/audience';
 import { vtsAvatar } from '@bellis/avatar';
 import { danmakuBilibili } from '@bellis/bilibili';
 import { director, replayLlm } from '@bellis/director';
@@ -34,7 +34,14 @@ export const builtinPlugins = catalog(
   triage,
   danmakuReplay,
   danmakuBilibili,
+  vote,
   director,
   replayLlm,
   vtsAvatar,
 );
+
+/**
+ * 内置插件用到的投影：宿主（与仿真）打开状态存储时注册，重启时从事件重建（见状态存储“表”）。
+ * 插件经安全核门面的 `view` 读取。
+ */
+export const builtinProjections = [voteLedger] as const;

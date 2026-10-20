@@ -11,8 +11,17 @@ export interface Danmaku {
   text: string;
 }
 
+/** 接收缺口（见观众接入“缺口”）：从失去接收到重新接收之间，这段时间的弹幕收不到。 */
+export interface DanmakuGap {
+  reason: string;
+}
+
 export interface DanmakuSource {
   subscribe(listener: (danmaku: Danmaku) => void): () => void;
+  /** 此刻在缺口中时返回缺口，正常接收时为 undefined。没有缺口概念的来源可以不提供。 */
+  gap?(): DanmakuGap | undefined;
+  /** 缺口开始（收到缺口）与结束（收到 undefined）时同步通知。 */
+  onGap?(listener: (gap: DanmakuGap | undefined) => void): () => void;
 }
 
 export const DanmakuService = defineService<DanmakuSource>('danmaku', 1);

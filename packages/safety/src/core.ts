@@ -9,6 +9,7 @@ import type { EmergencyPolicy } from '@bellis/obs';
 import {
   type Intent,
   type IntentSource,
+  type Outcome,
   payloadHash,
   ResourceIsolated,
   type StateStore,
@@ -281,6 +282,42 @@ export class SafetyCore {
       return '安全停止中，不产生新输出';
     if (this.#maintenance) return '维护态中';
     return undefined;
+  }
+
+  // ---------------------------------------------------------------- 对账
+
+  /** 插件实例被授予的权限（来自插件内核）；激活期间的实例还查不到。 */
+  permissionsOf(holder: string): ReadonlySet<string> | undefined {
+    return this.#permissionsOf(holder);
+  }
+
+  /**
+   * 结果未知、可以由所有者对账的意图（状态存储“重启”第 4 步）：按类型，没有时效，且所需能力 `granted` 全都有。
+   * 持有一个意图全部所需能力的实例，才算它的所有者。
+   */
+  unresolved(type: string, granted: ReadonlySet<string>): Intent[] {
+    return this.#store
+      .intentsIn('unknown')
+      .filter(
+        (intent) =>
+          intent.type === type &&
+          !intent.timeSensitive &&
+          intent.capabilities.every((capability) => granted.has(capability)),
+      );
+  }
+
+  /**
+   * 对账：所有者查询外部状态后，为结果未知的意图补记结果。不是所有者、不是结果未知的意图都抛错；
+   * 有时效的意图只能由操作员结案（由状态存储拒绝）。
+   */
+  reconcile(id: number, outcome: Outcome, granted: ReadonlySet<string>): Intent {
+    const intent = this.#store.intent(id);
+    if (intent?.state !== 'unknown') throw new Error(`意图 ${id} 不是结果未知的意图`);
+    const missing = intent.capabilities.filter((capability) => !granted.has(capability));
+    if (missing.length > 0) {
+      throw new Error(`不能对账意图 ${intent.key}：没有能力 ${missing.join(', ')}`);
+    }
+    return this.#store.resolve(id, outcome, 'reconcile');
   }
 
   #deny(request: IntentRequest, reason: string): Decision {

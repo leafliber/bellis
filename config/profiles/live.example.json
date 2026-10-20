@@ -136,6 +136,12 @@
           "id": "triage",
           "plugin": "audience-triage",
           "disabled": true
+        },
+        {
+          "id": "vote",
+          "plugin": "audience-vote",
+          "disabled": true,
+          "grant": ["vote.start"]
         }
       ]
     }

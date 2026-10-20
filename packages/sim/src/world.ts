@@ -9,7 +9,7 @@ import {
   seededRandom,
   TraceService,
 } from '@bellis/kernel';
-import { builtinPlugins } from '@bellis/plugins';
+import { builtinPlugins, builtinProjections } from '@bellis/plugins';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { ObsMetersService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
@@ -81,13 +81,16 @@ export class World {
     this.storePath = options.storePath ?? ':memory:';
     this.store = StateStore.open({
       path: this.storePath,
+      projections: builtinProjections,
       now: () => epoch + Math.floor(this.clock.now()),
     });
     this.store.recover();
-    // 发言结果同时写进追踪，与 Stage 的回报排在同一条时间线上。
+    // 发言结果与投票的事实同时写进追踪，与 Stage 的回报、送出的弹幕排在同一条时间线上。
     this.store.subscribe((event) => {
       if (event.type === 'utterance.played')
         this.record('fact.utterance', { ...(event.data as object) });
+      else if (event.type.startsWith('vote.'))
+        this.record(`fact.${event.type}`, { ...(event.data as object) });
     });
     let kernel: Kernel | undefined;
     this.safety = new SafetyCore({
@@ -115,8 +118,8 @@ export class World {
     this.kernel.provideCore(ClockService, this.clock);
     this.kernel.provideCore(RandomService, random);
     this.kernel.provideCore(TraceService, { record: (kind, data) => this.record(kind, data) });
-    this.kernel.provideScoped(SafetyService, ({ instanceId }) =>
-      safetyFacade(this.safety, instanceId),
+    this.kernel.provideScoped(SafetyService, ({ instanceId, permissions }) =>
+      safetyFacade(this.safety, instanceId, permissions),
     );
     // 仿真里没有 OBS 音量表：stage-sync 一直用配置的初值作呈现延迟。
     this.kernel.provideCore(ObsMetersService, {

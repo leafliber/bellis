@@ -1,3 +1,4 @@
+import { ballotKeys, decide, matchBallot } from '@bellis/audience';
 import { speakable } from '@bellis/speech';
 import type { StoredEvent } from '@bellis/store';
 import { BLOCKED, SAMPLE_RATE, SAMPLES_PER_CHAR } from './scenario.ts';
@@ -20,7 +21,8 @@ export interface History {
  * 4. 同一句话从未在 Stage 上开始两次（含跨重启），同一意图从未执行两次；
  * 5. 字幕不早于游标：页面显示的是这一句字幕的前缀，其中有朗读的码点都已开始播出（按模拟 TTS 每码点的
  *    采样数，与页面当时已播出的采样数比较）；版面固定：已显示与占位的两段拼起来总是整句；
- * 6. 页面回报一句截断时，这一句的字幕（两段）已经清除；回报播完时，至迟在呈现延迟之后清除。
+ * 6. 页面回报一句截断时，这一句的字幕（两段）已经清除；回报播完时，至迟在呈现延迟之后清除；
+ * 7. 投票的不变量（见 {@link checkVotes}）。
  */
 export function checkHistory(history: History): string[] {
   const violations: string[] = [];
@@ -169,7 +171,222 @@ export function checkHistory(history: History): string[] {
   for (const [intentId, times] of started) {
     if (times > 1) violations.push(`意图 ${intentId} 执行了 ${times} 次`);
   }
+  violations.push(...checkVotes(history));
   return violations;
+}
+
+interface VoteTrack {
+  voteId: string;
+  /** 开票时所在的世界（第几次启动）。 */
+  world: number;
+  keys: ReadonlyMap<string, number>;
+  durationMs: number;
+  startedAt: number;
+  deadline: number | undefined;
+  counts: number[];
+  voters: Set<string>;
+  ignored: { unmatched: number; repeat: number; late: number };
+  openingHeard: boolean;
+  terminal: 'ended' | 'aborted' | undefined;
+}
+
+const VOTE_SPEECH = /^vote:(.+):(opening|result)$/u;
+
+/**
+ * 投票的不变量（含跨重启）：
+ * 1. 同时最多一个进行中的投票，安全停止期间不开票；同一投票只开一次，恰好以一条 `vote.ended` 或 `vote.aborted` 结束，
+ *    排空后没有进行中的投票；
+ * 2. 开票说明完整播出之后才开始倒计时，截止时刻之前不出结果；
+ * 3. 结果等于按冻结的规则对开票之后、截止之前送达的弹幕独立重算的结果（截止后的弹幕不计票，每人只计第一票），
+ *    与投票时段重叠的缺口次数与时长也一致；
+ * 4. 开票说明与结果播报各至多播一次（含跨重启：只在一个进程里开始播出，至多写回一次），只有正常结束的投票播报结果。
+ */
+export function checkVotes(history: History): string[] {
+  const violations: string[] = [];
+  const votes = new Map<string, VoteTrack>();
+  let world = -1;
+  let open: VoteTrack | undefined;
+  let mode = 'safe-stop';
+  let gaps: Array<{ start: number; end: number | undefined }> = [];
+  /** 开票说明与结果播报：在哪些世界里开始播出、写回过几次。 */
+  const begunIn = new Map<string, Set<number>>();
+  const written = new Map<string, number>();
+
+  for (const entry of history.trace) {
+    const voteId = String(entry.data.voteId);
+    switch (entry.kind) {
+      case 'world.start':
+        world += 1;
+        mode = 'safe-stop';
+        gaps = [];
+        // 上一个进程里没结束的投票由新进程激活时记为中止（那条事实可能排在这条之前或之后）。
+        open = undefined;
+        break;
+      case 'control.mode':
+        mode = String(entry.data.mode);
+        break;
+      case 'danmaku.gap-started':
+        gaps.push({ start: entry.at, end: undefined });
+        break;
+      case 'danmaku.gap-ended': {
+        const last = gaps.at(-1);
+        if (last && last.end === undefined) last.end = entry.at;
+        break;
+      }
+      case 'fact.vote.started': {
+        if (votes.has(voteId)) violations.push(`投票 ${voteId} 开了两次`);
+        if (open) violations.push(`投票 ${open.voteId} 还没结束就开了 ${voteId}`);
+        if (mode === 'safe-stop') violations.push(`安全停止期间开了投票 ${voteId}`);
+        const options = entry.data.options as string[];
+        const keys = ballotKeys(options);
+        if (typeof keys === 'string') {
+          violations.push(`投票 ${voteId} 的规则不能冻结却开了票：${keys}`);
+          break;
+        }
+        open = {
+          voteId,
+          world,
+          keys,
+          durationMs: Number(entry.data.durationMs),
+          startedAt: entry.at,
+          deadline: undefined,
+          counts: options.map(() => 0),
+          voters: new Set(),
+          ignored: { unmatched: 0, repeat: 0, late: 0 },
+          openingHeard: false,
+          terminal: undefined,
+        };
+        votes.set(voteId, open);
+        break;
+      }
+      case 'danmaku.delivered': {
+        const vote = open;
+        if (!vote || vote.world !== world) break;
+        if (vote.deadline !== undefined && entry.at >= vote.deadline) {
+          vote.ignored.late += 1;
+          break;
+        }
+        const viewer = String(entry.data.viewer);
+        const option = matchBallot(String(entry.data.text), vote.keys);
+        if (option === undefined) vote.ignored.unmatched += 1;
+        else if (vote.voters.has(viewer)) vote.ignored.repeat += 1;
+        else {
+          vote.voters.add(viewer);
+          vote.counts[option] = (vote.counts[option] ?? 0) + 1;
+        }
+        break;
+      }
+      case 'page.begin': {
+        const id = String(entry.data.sentenceId).replace(/#\d+$/u, '');
+        if (!VOTE_SPEECH.test(id)) break;
+        const worlds = begunIn.get(id) ?? new Set<number>();
+        worlds.add(world);
+        begunIn.set(id, worlds);
+        break;
+      }
+      case 'fact.utterance': {
+        const id = String(entry.data.id);
+        const match = VOTE_SPEECH.exec(id);
+        if (!match) break;
+        written.set(id, (written.get(id) ?? 0) + 1);
+        const vote = votes.get(match[1] as string);
+        if (match[2] === 'opening' && vote && vote === open) {
+          vote.openingHeard =
+            entry.data.end === 'complete' && (entry.data.skipped as unknown[]).length === 0;
+        }
+        break;
+      }
+      case 'fact.vote.announced': {
+        const vote = votes.get(voteId);
+        if (!vote || vote !== open) {
+          violations.push(`不在进行中的投票 ${voteId} 开始了倒计时`);
+          break;
+        }
+        if (!vote.openingHeard)
+          violations.push(`投票 ${voteId} 的开票说明没有完整播出就开始倒计时`);
+        vote.deadline = entry.at + vote.durationMs;
+        break;
+      }
+      case 'fact.vote.ended':
+      case 'fact.vote.aborted': {
+        const vote = votes.get(voteId);
+        if (!vote) {
+          violations.push(`没有开过的投票 ${voteId} 结束了`);
+          break;
+        }
+        if (vote.terminal) violations.push(`投票 ${voteId} 结束了两次`);
+        vote.terminal = entry.kind === 'fact.vote.ended' ? 'ended' : 'aborted';
+        if (open === vote) open = undefined;
+        if (entry.kind === 'fact.vote.ended') violations.push(...checkResult(vote, entry, gaps));
+        break;
+      }
+    }
+  }
+
+  for (const vote of votes.values()) {
+    if (!vote.terminal) violations.push(`投票 ${vote.voteId} 到最后也没有结束或中止`);
+  }
+  for (const [id, worlds] of begunIn) {
+    if (worlds.size > 1) violations.push(`${id} 在 ${worlds.size} 个进程里都开始播出`);
+  }
+  for (const [id, times] of written) {
+    if (times > 1) violations.push(`${id} 写回了 ${times} 次`);
+  }
+  for (const id of new Set([...begunIn.keys(), ...written.keys()])) {
+    const match = VOTE_SPEECH.exec(id);
+    if (match?.[2] === 'result' && votes.get(match[1] as string)?.terminal !== 'ended') {
+      violations.push(`没有正常结束的投票 ${match[1]} 播报了结果`);
+    }
+  }
+  return violations;
+}
+
+/** 按冻结的规则独立重算的结果与 `vote.ended` 比较。 */
+function checkResult(
+  vote: VoteTrack,
+  entry: TraceEntry,
+  gaps: ReadonlyArray<{ start: number; end: number | undefined }>,
+): string[] {
+  const id = vote.voteId;
+  if (vote.deadline === undefined) return [`投票 ${id} 没有开始倒计时就出了结果`];
+  if (entry.at < vote.deadline) return [`投票 ${id} 在截止前就出了结果`];
+  const problems: string[] = [];
+  const { outcome, winners } = decide(vote.counts);
+  const expected = {
+    counts: vote.counts,
+    valid: vote.counts.reduce((sum, n) => sum + n, 0),
+    ignored: vote.ignored,
+    outcome,
+    winners: winners.map((index) => index + 1),
+  };
+  const actual = {
+    counts: entry.data.counts,
+    valid: entry.data.valid,
+    ignored: entry.data.ignored,
+    outcome: entry.data.outcome,
+    winners: entry.data.winners,
+  };
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    problems.push(
+      `投票 ${id} 的结果 ${JSON.stringify(actual)} 与按冻结规则重算的 ${JSON.stringify(expected)} 不一致`,
+    );
+  }
+  let count = 0;
+  let durationMs = 0;
+  for (const gap of gaps) {
+    const from = Math.max(gap.start, vote.startedAt);
+    const to = Math.min(gap.end ?? vote.deadline, vote.deadline);
+    if (to <= from) continue;
+    count += 1;
+    durationMs += to - from;
+  }
+  const recorded = entry.data.gaps as { count: number; durationMs: number };
+  if (recorded.count !== count || recorded.durationMs !== Math.round(durationMs)) {
+    problems.push(
+      `投票 ${id} 记下的缺口 ${JSON.stringify(recorded)} 与追踪上的 ${count} 次、${durationMs}ms 不一致`,
+    );
+  }
+  return problems;
 }
 
 /**

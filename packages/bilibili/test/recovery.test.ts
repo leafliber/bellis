@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { DanmakuService } from '@bellis/audience';
 import { Operation } from '../src/index.ts';
 import { entry, fakePlatform, fastConfig, GRANT, linkReady, waitFor, world } from './helpers.ts';
 import { assertCleanLogs, dm } from './messages.ts';
@@ -45,8 +46,18 @@ test('地址轮换：一个连不上（拒绝升级、迟迟不回认证）就�
 
     fake.push(dm(1));
     await waitFor(() => w.received.length === 1, '断开前的弹幕');
+    // 缺口也经 danmaku@1 交给订阅者（投票据此记下与投票时段重叠的缺口）。
+    const source = w.service(DanmakuService);
+    assert.equal(source.gap?.(), undefined);
+    const notified: Array<string | undefined> = [];
+    const unsubscribe = source.onGap?.((gap) => notified.push(gap?.reason));
     fake.drop();
     await linkReady(w, 2);
+    unsubscribe?.();
+    assert.equal(notified.length, 2);
+    assert.match(notified[0] ?? '', /长连接断开/);
+    assert.equal(notified[1], undefined);
+    assert.equal(source.gap?.(), undefined);
     assert.equal(fake.upgrades.length, 6, '断开后从下一个地址起再轮一遍');
     g = gaps(w);
     assert.equal(g.started.length, 2);
