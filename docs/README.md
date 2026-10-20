@@ -23,7 +23,7 @@
 | [观众接入与投票](modules/audience.md) | 普通插件 | P0 回放，P2 真实 |
 | [记忆](modules/memory.md) | 普通插件 | P2 |
 | [游戏桥](modules/game-bridge.md) | 普通插件 | P3 |
-| [运维：操作台、观测与评测](modules/operations.md) | 普通插件 | P0 仿真，P2 操作台 |
+| [运维：操作台、观测与评测](modules/operations.md) | 宿主（操作台）/ 普通插件（遥测） | P0 仿真，P2 操作台 |
 
 ## 平台与计划
 
