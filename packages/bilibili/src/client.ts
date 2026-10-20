@@ -100,7 +100,8 @@ function errorText(error: unknown): string {
  *
  * - **场次**：开启失败按错误码等待（7001 约 10 秒、7002 一分钟以上、鉴权与配置类较久），其余按指数退避；
  *   项目心跳返回 7003 或连续失败、收到 `INTERACTION_END`、场次开得太久、长连接认证被拒或地址都连不上时，
- *   关闭旧场次（能关就关）后重新开启。
+ *   关闭旧场次（能关就关）后重新开启。无场次编号（`game_id` 为空串）的场次不发项目心跳、不关闭，只靠长连接维持，
+ *   `INTERACTION_END` 不按编号过滤。
  * - **长连接**：返回的地址依次使用，一个连不上就换下一个；断开后按退避重连。只连 profile 授予了外发的主机。
  * - **缺口**：从失去接收（断开、认证失败、心跳失败、场次失效、开启失败）到长连接重新认证成功之间是缺口，
  *   开始与结束都交给 sink；停用时仍开着的缺口以“未恢复”结束。
@@ -200,6 +201,9 @@ export class BilibiliClient {
         gameId: session.gameId,
         roomId: session.roomId,
         links: session.links.length,
+        ...(session.gameId === ''
+          ? { noGameId: true, note: '无场次编号：不发项目心跳、不关闭场次，只靠长连接维持' }
+          : {}),
       });
       const outcome = await this.#session(session);
       if (signal.aborted) break;
@@ -264,7 +268,10 @@ export class BilibiliClient {
       if (!scope.signal.aborted)
         heartbeat = clock.setTimeout(() => void beat(), o.projectHeartbeatMs);
     };
-    heartbeat = clock.setTimeout(() => void beat(), o.projectHeartbeatMs);
+    // 无场次编号（game_id 为空串）的场次不发项目心跳（与 blivedm 一致；PENDING，以真机为准）。
+    if (session.gameId !== '') {
+      heartbeat = clock.setTimeout(() => void beat(), o.projectHeartbeatMs);
+    }
     const age = clock.setTimeout(() => {
       invalidate({ reason: `场次已开 ${Math.round(o.maxSessionAgeMs / 60_000)} 分钟，例行重开` });
     }, o.maxSessionAgeMs);
@@ -381,7 +388,8 @@ export class BilibiliClient {
       const data = command.data as { game_id?: unknown } | null | undefined;
       const raw = data?.game_id;
       const gameId = typeof raw === 'string' || typeof raw === 'number' ? String(raw) : undefined;
-      if (gameId !== undefined && gameId !== session.gameId) {
+      // 无场次编号的场次分不出是不是自己的，一律当作自己的：重开只多一小段缺口，漏判则一直收不到消息。
+      if (session.gameId !== '' && gameId !== undefined && gameId !== session.gameId) {
         this.#log('bilibili.interaction-end-ignored', { gameId: session.gameId, other: gameId });
         return;
       }
@@ -436,6 +444,11 @@ export class BilibiliClient {
     this.#game = undefined;
     if (!game) return;
     const o = this.#options;
+    if (game.gameId === '') {
+      // 无场次编号：没有可关闭的场次（与 blivedm 一致；PENDING，以真机为准）。
+      this.#log('bilibili.end-skipped', { gameId: '', noGameId: true, reason });
+      return;
+    }
     try {
       // 不随停用中止：停用时正是要把场次关掉。
       await o.api.end(o.appId, game.gameId, new AbortController().signal, o.endTimeoutMs);

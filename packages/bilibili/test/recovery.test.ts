@@ -219,3 +219,55 @@ test('场次开得太久时例行重开', async () => {
     await fake.close();
   }
 });
+
+test('无场次编号（game_id 为空串）：不发项目心跳、停用时不关闭场次；断线照常重连并记缺口，INTERACTION_END 不按编号过滤', async () => {
+  const fake = await fakePlatform({ emptyGameId: true });
+  // 项目心跳间隔很短、一次失败就判失效：若发了项目心跳，下面这段时间里早已发出并引起重开。
+  const config = fastConfig(fake, {
+    heartbeatIntervalMs: 20,
+    projectHeartbeatMs: 20,
+    projectHeartbeatFailures: 1,
+  });
+  const w = await world([entry('danmaku', 'danmaku-bilibili', { config, grant: GRANT })]);
+  try {
+    w.listen();
+    await linkReady(w);
+    const opened = w.logged('bilibili.session-opened')[0];
+    assert.equal(opened?.fields.gameId, '');
+    assert.equal(opened?.fields.noGameId, true, '日志里看得出是无场次编号的场次');
+    const beats = () => fake.packets.filter((p) => p.operation === Operation.Heartbeat).length;
+    await waitFor(() => beats() >= 5, '长连接心跳照常');
+    assert.equal(fake.calls('heartbeat').length, 0, '不发项目心跳');
+
+    fake.drop();
+    await linkReady(w, 2);
+    let g = gaps(w);
+    assert.equal(g.started.length, 1);
+    assert.match(g.started[0]?.reason ?? '', /长连接断开/);
+    assert.equal(g.ended.length, 1);
+    assert.equal(g.ended[0]?.recovered, true);
+    fake.push(dm(1));
+    await waitFor(() => w.received.length === 1, '重连后的弹幕');
+    assert.equal(fake.games.length, 1, '断线只重连，不重开场次');
+
+    // 分不出是不是自己的场次：带着别的编号也重开；旧场次不调用关闭。
+    fake.interactionEnd('game-x');
+    await linkReady(w, 3);
+    assert.equal(fake.games.length, 2);
+    g = gaps(w);
+    assert.match(g.started[1]?.reason ?? '', /INTERACTION_END/);
+    const before = beats();
+    await waitFor(() => beats() >= before + 5, '新场次的长连接心跳照常');
+    assert.equal(fake.calls('heartbeat').length, 0, '新场次也不发项目心跳');
+
+    await w.kernel.disable('danmaku');
+    assert.equal(fake.calls('end').length, 0, '不调用 /v2/app/end');
+    const skipped = w.logged('bilibili.end-skipped');
+    assert.equal(skipped.length, 2, '重开与停用各跳过一次');
+    assert.ok(skipped.every((l) => l.fields.noGameId === true));
+    assertCleanLogs(w.logs);
+  } finally {
+    await w.close();
+    await fake.close();
+  }
+});

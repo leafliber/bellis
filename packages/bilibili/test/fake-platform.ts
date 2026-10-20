@@ -31,6 +31,11 @@ export interface FakePlatformOptions {
   authReplyDelayMs?: number;
   /** 开启场次的接口晚这么久再返回。 */
   startDelayMs?: number;
+  /**
+   * 开启场次时 `game_id` 返回空串（社区实现所见的不分场次的项目）：不判“已有场次”，内部仍按认证正文区分
+   * 先后开启的连接。
+   */
+  emptyGameId?: boolean;
 }
 
 export type ApiName = 'start' | 'heartbeat' | 'end';
@@ -152,7 +157,7 @@ export class FakePlatform {
   }
 
   /** 场次失效：平台关闭当前场次并推送 INTERACTION_END。 */
-  interactionEnd(gameId = this.activeGame): void {
+  interactionEnd(gameId = this.#options.emptyGameId ? '' : this.activeGame): void {
     this.activeGame = undefined;
     this.push({
       cmd: 'LIVE_OPEN_PLATFORM_INTERACTION_END',
@@ -272,7 +277,7 @@ export class FakePlatform {
         if (body.code !== this.#options.code || body.app_id !== this.#options.appId) {
           return reply(4000);
         }
-        if (this.activeGame !== undefined) return reply(7002);
+        if (this.activeGame !== undefined && !this.#options.emptyGameId) return reply(7002);
         if (this.#options.startDelayMs) {
           await new Promise((resolve) => setTimeout(resolve, this.#options.startDelayMs));
         }
@@ -283,7 +288,7 @@ export class FakePlatform {
         this.#authBodies.set(gameId, authBody);
         const links = this.#options.links?.(this) ?? [this.wsUrl()];
         return reply(0, {
-          game_info: { game_id: gameId },
+          game_info: { game_id: this.#options.emptyGameId ? '' : gameId },
           websocket_info: { auth_body: authBody, wss_link: links },
           anchor_info: {
             room_id: 1001,
