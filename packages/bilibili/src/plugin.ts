@@ -1,4 +1,4 @@
-import { type Danmaku, DanmakuService } from '@bellis/audience';
+import { type Danmaku, type DanmakuGap, DanmakuService } from '@bellis/audience';
 import {
   ClockService,
   definePlugin,
@@ -198,6 +198,21 @@ export const danmakuBilibili = definePlugin({
 
     const intake = new Intake(config.dedupCapacity);
     const listeners = new Set<(danmaku: Danmaku) => void>();
+    const gapListeners = new Set<(gap: DanmakuGap | undefined) => void>();
+    let gap: DanmakuGap | undefined;
+    const notifyGap = (next: DanmakuGap | undefined) => {
+      gap = next;
+      for (const listener of [...gapListeners]) {
+        try {
+          listener(next);
+        } catch (error) {
+          ctx.log('bilibili.listener-failed', {
+            gap: next !== undefined,
+            error: error instanceof Error ? error.name : '未知',
+          });
+        }
+      }
+    };
     const counts = new Map<IntakeKind, number>();
     const unknown = new Set<string>();
     const deliver = (danmaku: Danmaku) => {
@@ -225,11 +240,13 @@ export const danmakuBilibili = definePlugin({
         if (result.fact) safety.record(result.fact.type, result.fact.data);
         if (result.danmaku) deliver(result.danmaku);
       },
-      gapStarted(gap) {
-        safety.record(FactType.GapStarted, { platform: PLATFORM, ...gap });
+      gapStarted(started) {
+        safety.record(FactType.GapStarted, { platform: PLATFORM, ...started });
+        notifyGap({ reason: started.reason });
       },
-      gapEnded(gap) {
-        safety.record(FactType.GapEnded, { platform: PLATFORM, ...gap });
+      gapEnded(ended) {
+        safety.record(FactType.GapEnded, { platform: PLATFORM, ...ended });
+        notifyGap(undefined);
       },
     };
     const api = new OpenApi({
@@ -264,6 +281,11 @@ export const danmakuBilibili = definePlugin({
       subscribe(listener) {
         listeners.add(listener);
         return () => listeners.delete(listener);
+      },
+      gap: () => gap,
+      onGap(listener) {
+        gapListeners.add(listener);
+        return () => gapListeners.delete(listener);
       },
     });
     client.start();

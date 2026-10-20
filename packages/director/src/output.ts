@@ -1,3 +1,4 @@
+import { VOTE_LIMITS } from '@bellis/audience';
 import Type, { type Static } from 'typebox';
 import { Compile } from 'typebox/compile';
 
@@ -17,16 +18,24 @@ export const SpeakAction = Type.Object(
   closed,
 );
 
+/** 发起投票：范围与投票插件冻结规则时核对的一致（VOTE_LIMITS）。 */
 export const VoteAction = Type.Object(
   {
     action: Type.Literal('vote'),
-    question: Type.String({ minLength: 1, maxLength: 60 }),
-    options: Type.Array(Type.String({ minLength: 1, maxLength: 20 }), { minItems: 2, maxItems: 4 }),
-    durationSec: Type.Integer({ minimum: 10, maximum: 300 }),
+    question: Type.String({ minLength: 1, maxLength: VOTE_LIMITS.maxQuestionLength }),
+    options: Type.Array(Type.String({ minLength: 1, maxLength: VOTE_LIMITS.maxOptionLength }), {
+      minItems: VOTE_LIMITS.minOptions,
+      maxItems: VOTE_LIMITS.maxOptions,
+    }),
+    durationSec: Type.Integer({
+      minimum: VOTE_LIMITS.minDurationSec,
+      maximum: VOTE_LIMITS.maxDurationSec,
+    }),
     decisionPoint: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   },
   closed,
 );
+export type VoteAction = Static<typeof VoteAction>;
 
 export const SilenceAction = Type.Object(
   { action: Type.Literal('silence'), reason: Type.String({ maxLength: 100 }) },

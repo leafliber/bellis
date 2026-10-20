@@ -1,4 +1,4 @@
-import { type Candidate, CandidatesService } from '@bellis/audience';
+import { type Candidate, CandidatesService, VoteService } from '@bellis/audience';
 import {
   ClockService,
   definePlugin,
@@ -8,7 +8,7 @@ import {
 } from '@bellis/kernel';
 import { SpeechService } from '@bellis/speech';
 import Type from 'typebox';
-import { parseAction } from './output.ts';
+import { parseAction, type VoteAction } from './output.ts';
 
 /**
  * 交给决策模型的上下文。只含人设、观众实际听到的近期发言、分诊后净化过的候选。
@@ -33,7 +33,7 @@ export const LlmService = defineService<Llm>('llm', 1);
 /**
  * 决策模型（普通插件）：在决策时机到来时组装上下文、调用模型、把输出解析成枚举的意图。
  * 时机：新一批候选到达、冷场计时到期。同时只有一个在途调用，每次调用都有截止时间。
- * 投票与游戏目标在后续阶段接入，P0 只记录。
+ * 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
  */
 export const director = definePlugin({
   manifest: {
@@ -41,7 +41,13 @@ export const director = definePlugin({
     version: '0.1.0',
     tier: 'ordinary',
     provides: [],
-    inject: [LlmService.ref, SpeechService.ref, CandidatesService.ref, ClockService.ref],
+    inject: [
+      LlmService.ref,
+      SpeechService.ref,
+      CandidatesService.ref,
+      ClockService.ref,
+      `${VoteService.ref}?`,
+    ],
     permissions: [],
     process: 'in-process',
     config: Type.Object({
@@ -72,6 +78,33 @@ export const director = definePlugin({
       heard: speech.heard().map((utterance) => utterance.heard),
       candidates: taken.map((c) => ({ id: c.id, name: c.name, text: c.text, count: c.count })),
     });
+
+    /**
+     * 发起投票：交给投票插件（`vote@1`），规则、计票与口播都在那里；优先级与发声来源也由那里的确定性代码决定，
+     * 模型不能指定（D-33）。成功、被拒都记日志，不写题目与选项（模型输出可能复述弹幕）。
+     */
+    const startVote = (action: VoteAction, taken: Candidate[], id: string) => {
+      const votes = ctx.optional(VoteService);
+      if (!votes) {
+        ctx.log('director.vote-unavailable', { id, reason: '投票插件不在场' });
+        return;
+      }
+      void votes
+        .start({
+          id,
+          question: action.question,
+          options: action.options,
+          durationSec: action.durationSec,
+          ...(action.decisionPoint === undefined ? {} : { decisionPoint: action.decisionPoint }),
+          inputs: taken.flatMap((c) => c.sources),
+          untrusted: taken.length > 0,
+        })
+        .then((result) =>
+          result.ok
+            ? ctx.log('director.vote-started', { id, voteId: result.voteId })
+            : ctx.log('director.vote-refused', { id, reason: result.reason }),
+        );
+    };
 
     const failed = (reason: string) => {
       failures += 1;
@@ -131,11 +164,13 @@ export const director = definePlugin({
               // 上下文里有弹幕，输出就受不可信输入影响。
               untrusted: taken.length > 0,
             });
+          } else if (action.action === 'vote') {
+            failures = 0;
+            calls += 1;
+            startVote(action, taken, `director:${ctx.instanceId}:${calls}`);
           } else {
             failures = 0;
-            ctx.log(action.action === 'vote' ? 'director.vote-unsupported' : 'director.silence', {
-              ...action,
-            });
+            ctx.log('director.silence', { ...action });
           }
         } while (again);
       } finally {

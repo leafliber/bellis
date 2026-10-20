@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { DanmakuService } from '@bellis/audience';
 import { Operation } from '../src/index.ts';
 import { AUTH_MARKER } from './fake-platform.ts';
 import {
@@ -323,6 +324,8 @@ test('长连接地址全都未授予时不连接：关闭场次、记缺口，�
     assert.equal(gap.length, 1);
     const reason = (gap[0]?.data as { reason?: string } | undefined)?.reason;
     assert.match(reason ?? '', /没有可连接的长连接地址/);
+    // 此刻仍在缺口中：danmaku@1 的订阅者看得到。
+    assert.equal(w.service(DanmakuService).gap?.()?.reason, reason);
     await w.kernel.disable('danmaku');
     const ended = w.events('danmaku.gap-ended').map((e) => e.data as Record<string, unknown>);
     assert.equal(ended.length, 1);

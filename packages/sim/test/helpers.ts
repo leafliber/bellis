@@ -26,6 +26,12 @@ export interface ChainOptions {
   tts?: Record<string, unknown>;
   safety?: Partial<SafetyConfig>;
   withoutModerationModel?: boolean;
+  /** 加上投票插件（给出它的配置）。 */
+  vote?: Record<string, unknown>;
+  /** 状态存储文件（重启用）与本次启动的标识。 */
+  storePath?: string;
+  bootId?: string;
+  startAt?: number;
 }
 
 /** 全模拟发声链路：录制弹幕 → 分诊 → 回放模型输出 → 分句 → 审核 → 仲裁 → 模拟 TTS → 模拟 Stage。 */
@@ -55,6 +61,9 @@ export function chain(options: ChainOptions = {}): ResolvedEntry[] {
     }),
     entry('danmaku', 'danmaku-replay', { config: { messages: options.messages ?? [] } }),
     entry('triage', 'audience-triage'),
+    ...(options.vote
+      ? [entry('vote', 'audience-vote', { grant: ['vote.start'], config: options.vote })]
+      : []),
     entry('llm', 'llm-replay', { config: { outputs: options.outputs ?? [] } }),
     entry('director', 'director'),
     entry('schedule', 'speech-schedule', {
@@ -71,6 +80,9 @@ export async function startChain(options: ChainOptions = {}) {
     entries: chain(options),
     moderationEnabled: options.moderation?.enabled ?? true,
     ...(options.safety ? { safety: options.safety } : {}),
+    ...(options.storePath ? { storePath: options.storePath } : {}),
+    ...(options.bootId ? { bootId: options.bootId } : {}),
+    ...(options.startAt === undefined ? {} : { startAt: options.startAt }),
   });
   await world.kernel.settled();
   const mode = world.safety.requestMode('M0');

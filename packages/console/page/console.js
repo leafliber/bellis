@@ -25,6 +25,19 @@
 /** @typedef {{ seq: number, at: string, type: string, text: string }} Alert */
 /** @typedef {{ target: string, failures: string[], at: string, by: 'preflight' | 'mode' }} Preflight */
 /**
+ * @typedef {object} Vote
+ * @property {string} voteId
+ * @property {string} question
+ * @property {string[]} options
+ * @property {number[]} counts
+ * @property {number} valid
+ * @property {'announcing' | 'open'} phase
+ * @property {number} durationMs
+ * @property {number | null} remainingMs
+ * @property {string | null} decisionPoint
+ * @property {boolean} gap
+ */
+/**
  * @typedef {object} Status
  * @property {Mode} mode
  * @property {boolean} maintenance
@@ -34,6 +47,7 @@
  * @property {{ delayMs: number, samples: number, source: string } | null} presentation
  * @property {{ mode: 'delay' | 'approve', delayMs: number, approveTimeoutMs: number } | null} review
  * @property {Held[]} held
+ * @property {Vote | null} vote
  * @property {Preflight | null} preflight
  * @property {PluginRow[]} plugins
  * @property {Alert[]} alerts
@@ -70,6 +84,8 @@ const updatedText = byId('updated');
 const reviewModeText = byId('review-mode');
 const heldList = byId('held');
 const heldEmpty = byId('held-empty');
+const voteSummary = byId('vote-summary');
+const voteOptions = byId('vote-options');
 const preflightSummary = byId('preflight-summary');
 const preflightFailures = byId('preflight-failures');
 const pluginRows = byId('plugins');
@@ -250,6 +266,7 @@ function render(status) {
         : `（固定延迟 ${status.review.delayMs}ms 后放行，期间可否决或提前放行）`,
   );
   renderHeld(status.held);
+  renderVote(status.vote);
   renderPreflight(status.preflight);
   renderPlugins(status.plugins);
   renderAlerts(status.alerts);
@@ -290,6 +307,28 @@ function renderHeld(held) {
     setText(entry.waited, `已等 ${duration(item.waitedMs)} · ${limit}`);
   }
   heldEmpty.hidden = held.length > 0;
+}
+
+/**
+ * 进行中的投票：题目、阶段与剩余时间、各项票数。题目与选项来自模型，只用 textContent 渲染。
+ * @param {Vote | null} vote
+ */
+function renderVote(vote) {
+  if (vote === null) {
+    setText(voteSummary, '没有进行中的投票');
+    voteOptions.replaceChildren();
+    return;
+  }
+  const phase =
+    vote.phase === 'announcing' || vote.remainingMs === null
+      ? `开票说明播报中，播完后计时 ${duration(vote.durationMs)}`
+      : `剩余 ${duration(vote.remainingMs)}`;
+  setText(
+    voteSummary,
+    `${vote.question}（${phase}，有效票 ${vote.valid}${vote.gap ? '，弹幕接收中断中' : ''}）`,
+  );
+  const rows = vote.options.map((option, i) => make('li', `${option}：${vote.counts[i] ?? 0} 票`));
+  voteOptions.replaceChildren(...rows);
 }
 
 /** @param {Preflight | null} preflight */

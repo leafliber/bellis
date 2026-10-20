@@ -4,6 +4,7 @@
  * → 按 profile 加载插件；看门狗的心跳在加载插件之前开始。
  * 启动后总处于安全停止，由操作员显式切换模式。操作员动作由命令行与操作台共用（operator.ts）。
  */
+import { VoteService, type Votes } from '@bellis/audience';
 import { type Avatar, AvatarService } from '@bellis/avatar';
 import { listen, RpcPeer } from '@bellis/channel';
 import {
@@ -25,7 +26,7 @@ import {
   systemClock,
 } from '@bellis/kernel';
 import { ObsClient, ObsMeters } from '@bellis/obs';
-import { builtinPlugins } from '@bellis/plugins';
+import { builtinPlugins, builtinProjections } from '@bellis/plugins';
 import {
   channelCredentialsFromEnv,
   handleShutdown,
@@ -79,6 +80,10 @@ const LOGGED_FACTS = new Set([
   'tts.switched',
   'tts.started',
   'tts.degraded',
+  'vote.announced',
+  'vote.ended',
+  'vote.aborted',
+  'vote.rejected',
 ]);
 const isWatchdogActed = Compile(WatchdogActedParams);
 
@@ -101,6 +106,7 @@ const clock = systemClock();
 let safety: SafetyCore | undefined;
 const store = StateStore.open({
   path: config.storePath,
+  projections: builtinProjections,
   onFault: (error) => {
     logEvent('host.store-fault', { error: error.message });
     safety?.downgrade('状态存储不可用');
@@ -150,7 +156,9 @@ kernel = host;
 const hub = new ChannelHub();
 host.provideCore(SidecarHostService, { credentials, hub });
 host.provideCore(ClockService, clock);
-host.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(core, instanceId));
+host.provideScoped(SafetyService, ({ instanceId, permissions }) =>
+  safetyFacade(core, instanceId, permissions),
+);
 // 插件凭据：只放行 profile 授予的条目；会话连接信息与 OBS 凭据由宿主管理，插件拿不到。
 const reservedSecrets = new Set([SESSION_SECRET, OBS_SECRET, SIM_OBS_SECRET]);
 host.provideScoped(SecretsService, ({ permissions }) =>
@@ -182,6 +190,10 @@ const operator = createOperator({
   review: () => {
     const review = host.services.resolve(ReviewService.name, ReviewService.major);
     return 'missing' in review ? null : (review.impl as Review).settings;
+  },
+  vote: () => {
+    const votes = host.services.resolve(VoteService.name, VoteService.major);
+    return 'missing' in votes ? null : ((votes.impl as Votes).current() ?? null);
   },
   preflight: runPreflight,
   consoleLogin: () => consoleServer?.issueLogin(),

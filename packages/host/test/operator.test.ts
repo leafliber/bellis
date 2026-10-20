@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { request } from 'node:http';
 import { test } from 'node:test';
+import type { VoteStatus } from '@bellis/audience';
 import {
   type Connection,
   connect,
@@ -54,7 +55,11 @@ async function setup(options: { alertLimit?: number } = {}) {
     watchdogConnected: () => true,
   });
   core.setModeration(false);
-  const world = { failures: [] as string[], preflights: [] as Array<[string, boolean]> };
+  const world = {
+    failures: [] as string[],
+    preflights: [] as Array<[string, boolean]>,
+    vote: null as VoteStatus | null,
+  };
   let server: ConsoleServer | undefined;
   const api = createOperator({
     core,
@@ -74,6 +79,7 @@ async function setup(options: { alertLimit?: number } = {}) {
     ],
     presentation: () => ({ delayMs: 82, samples: 0, source: 'initial' }),
     review: () => ({ mode: 'approve', delayMs: 3000, approveTimeoutMs: 30_000 }),
+    vote: () => world.vote,
     preflight: async (target, withSafety) => {
       world.preflights.push([target, withSafety]);
       return [...world.failures];
@@ -346,6 +352,41 @@ test('近期告警环形保存最近的重要事实，普通事实不进告警',
       ],
     );
     assert.ok(status.alerts.every((a) => !Number.isNaN(Date.parse(a.at))));
+  } finally {
+    await s.close();
+  }
+});
+
+test('进行中的投票：命令行与操作台的状态里看得到题目、票数与剩余时间；中止进近期告警', async () => {
+  const s = await setup();
+  try {
+    assert.equal(((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).vote, null);
+    s.world.vote = {
+      voteId: 'director:1',
+      question: '下一把玩什么?',
+      options: ['魔女审判', '逆转裁判'],
+      counts: [2, 1],
+      valid: 3,
+      phase: 'open',
+      durationMs: 30_000,
+      remainingMs: 12_000,
+      decisionPoint: null,
+      gap: false,
+    };
+    const fromCli = (await s.cli.request(OperatorMethod.Status)) as OperatorStatus;
+    assert.deepEqual(fromCli.vote, s.world.vote);
+    const fromConsole = (await s.http('GET', '/api/status')).body as OperatorStatus;
+    assert.deepEqual(fromConsole.vote, s.world.vote);
+    s.core.record('vote.aborted', {
+      voteId: 'director:1',
+      decisionPoint: null,
+      cause: 'stopped',
+      reason: '安全停止：操作员急停',
+    });
+    assert.deepEqual(
+      s.api.alerts().map((a) => a.text),
+      ['投票中止：director:1（安全停止：操作员急停）'],
+    );
   } finally {
     await s.close();
   }
