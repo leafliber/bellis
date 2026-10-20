@@ -250,6 +250,34 @@ importers:
         specifier: 8.18.2
         version: 8.18.2
 
+  packages/bilibili:
+    dependencies:
+      '@bellis/audience':
+        specifier: workspace:*
+        version: link:../audience
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@bellis/secret-store':
+        specifier: workspace:*
+        version: link:../secret-store
+      '@bellis/store':
+        specifier: workspace:*
+        version: link:../store
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
+
   packages/channel:
     dependencies:
       '@bellis/protocol':
@@ -412,6 +440,9 @@ importers:
       '@bellis/avatar':
         specifier: workspace:*
         version: link:../avatar
+      '@bellis/bilibili':
+        specifier: workspace:*
+        version: link:../bilibili
       '@bellis/director':
         specifier: workspace:*
         version: link:../director
@@ -620,6 +651,9 @@ importers:
       '@bellis/avatar':
         specifier: workspace:*
         version: link:../packages/avatar
+      '@bellis/bilibili':
+        specifier: workspace:*
+        version: link:../packages/bilibili
       '@bellis/channel':
         specifier: workspace:*
         version: link:../packages/channel

@@ -9,6 +9,7 @@
   "dependencies": {
     "@bellis/audience": "workspace:*",
     "@bellis/avatar": "workspace:*",
+    "@bellis/bilibili": "workspace:*",
     "@bellis/director": "workspace:*",
     "@bellis/kernel": "workspace:*",
     "@bellis/moderation": "workspace:*",

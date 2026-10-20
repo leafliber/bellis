@@ -1,5 +1,6 @@
 import { danmakuReplay, triage } from '@bellis/audience';
 import { vtsAvatar } from '@bellis/avatar';
+import { danmakuBilibili } from '@bellis/bilibili';
 import { director, replayLlm } from '@bellis/director';
 import { catalog } from '@bellis/kernel';
 import { moderation, simModerationModel } from '@bellis/moderation';
@@ -32,6 +33,7 @@ export const builtinPlugins = catalog(
   simModerationModel,
   triage,
   danmakuReplay,
+  danmakuBilibili,
   director,
   replayLlm,
   vtsAvatar,
