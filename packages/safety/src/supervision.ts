@@ -10,6 +10,11 @@ export function producesOutput(mode: Mode): boolean {
   return mode !== 'safe-stop';
 }
 
+/** 真实输出模式（M1–M3）：M0 只连模拟设备，不算。 */
+export function isRealOutput(mode: Mode): boolean {
+  return mode === 'M1' || mode === 'M2' || mode === 'M3';
+}
+
 export interface UpgradeContext {
   simulation: boolean;
   maintenance: boolean;

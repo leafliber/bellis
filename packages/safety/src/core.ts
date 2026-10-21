@@ -21,6 +21,7 @@ import { type Lease, Leases } from './leases.ts';
 import { type RateLimit, RateLimiter } from './rate.ts';
 import {
   downgradeTarget,
+  isRealOutput,
   type Mode,
   preconditionBlocker,
   producesOutput,
@@ -99,9 +100,6 @@ export interface SafetyOptions {
  * 这一资源的许可，在安全停止下照常判定与授予；维护态与存储不可用时仍拒绝（见安全核“监督模式”）。
  */
 export const STAGE_URL = 'obs.stage-url';
-
-/** 真实输出模式：OBS 的外部变化只在这些模式下按急停处理（M0 只连模拟设备）。 */
-const REAL_OUTPUT: ReadonlySet<Mode> = new Set(['M1', 'M2', 'M3']);
 
 /** OBS 外部变化按急停处理时的原因。可能是热键，也可能是手动操作，不断言是热键。 */
 export const OBS_EXTERNAL_REASON = {
@@ -429,7 +427,7 @@ export class SafetyCore {
           ? { change: 'mute', input: change.inputName }
           : undefined;
     if (!fields) return;
-    if (!REAL_OUTPUT.has(this.#mode) || this.#maintenance) {
+    if (!isRealOutput(this.#mode) || this.#maintenance) {
       this.#log('safety.obs-external-ignored', {
         ...fields,
         resync,
@@ -446,7 +444,7 @@ export class SafetyCore {
   /** 应急连接（重新）连上了 OBS：真实输出模式下读一次当前状态，断开期间可能错过了事件。 */
   #resyncObs(): void {
     const observe = this.#obs.observe?.bind(this.#obs);
-    if (!observe || !REAL_OUTPUT.has(this.#mode) || this.#maintenance) return;
+    if (!observe || !isRealOutput(this.#mode) || this.#maintenance) return;
     const policy = this.#config.emergency;
     observe(policy).then(
       (observed) => {
