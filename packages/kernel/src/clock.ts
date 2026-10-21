@@ -4,6 +4,11 @@
  */
 export interface Clock {
   now(): number;
+  /**
+   * 单调时钟零点对应的 Unix 毫秒。只用来给可以丢失的派生数据（遥测）打墙钟时间戳：Unix 时刻为
+   * `epochMs + now()`；计时与截止时间仍只用 `now()`。不提供时按 0。
+   */
+  readonly epochMs?: number;
   setTimeout(callback: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
 }
@@ -18,6 +23,7 @@ export function systemClock(): Clock {
   let next = 1;
   return {
     now: () => performance.now(),
+    epochMs: performance.timeOrigin,
     setTimeout(callback, ms) {
       const id = next++;
       timers.set(
@@ -98,6 +104,7 @@ export class DeadlineError extends Error {
  * 包括推进过程中新设的定时器。
  */
 export class ManualClock implements Clock {
+  readonly epochMs: number;
   #now: number;
   #next = 1;
   readonly #timers = new Map<number, { at: number; callback: () => void }>();
@@ -106,8 +113,10 @@ export class ManualClock implements Clock {
   /**
    * @param start 起始时刻。
    * @param shuffle 同时到期的多个定时器的选择方式（返回下标）；缺省按设定顺序。确定性仿真用它探索交错。
+   * @param epochMs 零点对应的 Unix 毫秒（见 {@link Clock.epochMs}）。
    */
-  constructor(start = 0, shuffle?: (count: number) => number) {
+  constructor(start = 0, shuffle?: (count: number) => number, epochMs = 0) {
+    this.epochMs = epochMs;
     this.#now = start;
     this.#shuffle = shuffle;
   }

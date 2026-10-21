@@ -4,15 +4,18 @@ import {
   catalog,
   Kernel,
   type PluginSecrets,
+  RandomService,
   type ResolvedEntry,
   SecretsService,
   type ServiceToken,
   secretPermission,
   systemClock,
+  systemRandom,
 } from '@bellis/kernel';
 import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { MemorySecretStore } from '@bellis/secret-store';
 import { StateStore } from '@bellis/store';
+import { memoryTelemetry } from '@bellis/telemetry';
 import { danmakuBilibili } from '../src/index.ts';
 import { FakePlatform, type FakePlatformOptions } from './fake-platform.ts';
 
@@ -148,6 +151,7 @@ export async function world(
   const memory = new MemorySecretStore();
   for (const [name, value] of Object.entries(secrets)) await memory.set(name, value);
   host.provideCore(ClockService, clock);
+  host.provideCore(RandomService, systemRandom());
   host.provideScoped(SafetyService, ({ instanceId }) => safetyFacade(safety, instanceId));
   host.provideScoped(SecretsService, ({ permissions }): PluginSecrets => {
     const check = (name: string) => {
@@ -170,7 +174,7 @@ export async function world(
     };
   });
   safety.setModeration(false);
-  host.add(entries, catalog(danmakuBilibili, triage));
+  host.add(entries, catalog(danmakuBilibili, triage, memoryTelemetry));
   await host.settled();
   const received: Danmaku[] = [];
   return {

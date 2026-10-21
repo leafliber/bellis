@@ -2,6 +2,7 @@ import { ClockService, definePlugin, defineService, type TimerHandle } from '@be
 import { SafetyService } from '@bellis/safety';
 import { SpeechService, type UtteranceOutcome } from '@bellis/speech';
 import type { Projection } from '@bellis/store';
+import type { TraceRef } from '@bellis/telemetry';
 import Type from 'typebox';
 import {
   ballotKeys,
@@ -58,6 +59,8 @@ export interface VoteRequest {
   inputs: readonly string[];
   /** 发起方的上下文里是否有不可信输入：题目与选项来自模型，开票说明据此标记。 */
   untrusted: boolean;
+  /** 发起它的链路（例如模型调用的 span），开票说明的发言以它为父；没有遥测时不出现。 */
+  trace?: TraceRef;
 }
 
 export type VoteStartResult = { ok: true; voteId: string } | { ok: false; reason: string };
@@ -315,6 +318,7 @@ export const vote = definePlugin({
           preempt: 'sentence',
           inputs: [...request.inputs],
           untrusted: request.untrusted,
+          ...(request.trace ? { trace: request.trace } : {}),
         })
         .then((outcome) => announced(current, outcome));
       return current;

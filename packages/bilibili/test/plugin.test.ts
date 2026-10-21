@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DanmakuService } from '@bellis/audience';
+import { parseLines, TelemetryMemoryService } from '@bellis/telemetry';
 import { Operation } from '../src/index.ts';
 import { AUTH_MARKER } from './fake-platform.ts';
 import {
@@ -406,6 +407,51 @@ test('清单申请的权限未授予时停在 WAITING', async () => {
     assert.equal(state?.state, 'waiting');
     assert.match(state?.reason ?? '', /未授予权限 net\.egress:\*\.chat\.bilibili\.com/);
     assert.equal(fake.requests.length, 0);
+  } finally {
+    await w.close();
+    await fake.close();
+  }
+});
+
+test('遥测在场时每条交给分诊的弹幕开一个根 span，只记平台与消息编号；候选以它为父', async () => {
+  const fake = await fakePlatform();
+  const config = fastConfig(fake);
+  const w = await world([
+    entry('telemetry', 'telemetry-memory'),
+    entry('danmaku', 'danmaku-bilibili', { config, grant: GRANT }),
+    entry('triage', 'audience-triage'),
+  ]);
+  try {
+    w.listen();
+    await waitFor(() => fake.authed.length === 1, '长连接认证');
+    fake.push([dm(1), dm(2)]);
+    // 点赞只写事实，不开链路。
+    fake.push(command('LIKE', { open_id: 'viewer-12', like_count: 5, msg_id: 'like-1' }));
+    await waitFor(() => w.received.length === 2, '两条弹幕交给分诊');
+    await new Promise((resolve) => setImmediate(resolve));
+    const lines = w.service(TelemetryMemoryService).lines;
+    const roots = parseLines(lines).spans.filter((s) => s.name === 'danmaku.receive');
+    assert.deepEqual(
+      roots.map((s) => s.attributes),
+      [1, 2].map((n) => ({
+        'bellis.danmaku.platform': 'bilibili',
+        'bellis.danmaku.id': `msg-${n}`,
+      })),
+    );
+    for (const [index, danmaku] of w.received.entries()) {
+      const root = roots[index];
+      assert.equal(danmaku.trace?.traceparent, `00-${root?.traceId}-${root?.spanId}-01`);
+      assert.equal(typeof danmaku.trace?.originAt, 'number');
+    }
+    // 候选在第一条弹幕的 trace 里。
+    for (const candidate of w.candidates().take(2)) {
+      const root = roots.find((s) => s.attributes['bellis.danmaku.id'] === candidate.sources[0]);
+      assert.equal(candidate.trace?.traceparent.slice(3, 35), root?.traceId);
+    }
+    const text = lines.join('\n');
+    for (const marker of [NICK, TEXT, 'FACEMARK', 'viewer-1', 'viewer-2']) {
+      assert.ok(!text.includes(marker), `遥测里出现了 ${marker}`);
+    }
   } finally {
     await w.close();
     await fake.close();

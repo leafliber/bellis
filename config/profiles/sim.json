@@ -2,6 +2,12 @@
   "name": "sim",
   "packs": [
     {
+      "name": "telemetry",
+      "entries": [
+        { "id": "telemetry", "plugin": "telemetry", "config": { "dir": "telemetry/sim" } }
+      ]
+    },
+    {
       "name": "stage",
       "entries": [
         { "id": "stage-page", "plugin": "stage-page-sim" },

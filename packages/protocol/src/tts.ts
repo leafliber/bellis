@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+import { Traceparent } from './telemetry.ts';
 
 /**
  * 本地 TTS sidecar 的控制面消息（R-10、R-11、D-21）。
@@ -58,6 +59,8 @@ export const TtsSynthesizeParams = Type.Object(
     stream: Type.Integer({ minimum: 1, maximum: 0xffff_ffff }),
     /** 一句的朗读文本（已规范化）。按句合成，长度有上限，宿主为每个流缓冲的音频也就有上限。 */
     text: Type.String({ minLength: 1, maxLength: 500 }),
+    /** 这一句合成所在的链路（W3C traceparent）：sidecar 以它为父写自己的 span（R-21）。 */
+    traceparent: Type.Optional(Traceparent),
   },
   closed,
 );

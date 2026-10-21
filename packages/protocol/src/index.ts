@@ -31,6 +31,7 @@ import {
   SessionInfo,
   WatchdogActedParams,
 } from './process.ts';
+import { SidecarTelemetry, Traceparent } from './telemetry.ts';
 import {
   TtsInfoResult,
   TtsStatus,
@@ -44,6 +45,7 @@ export * from './config.ts';
 export * from './jsonrpc.ts';
 export * from './plugin.ts';
 export * from './process.ts';
+export * from './telemetry.ts';
 export * from './tts.ts';
 
 /**
@@ -78,5 +80,6 @@ export const schemaModules = {
     OperatorConsoleLoginResult,
     WatchdogActedParams,
   },
+  telemetry: { Traceparent, SidecarTelemetry },
   tts: { TtsInfoResult, TtsStatus, TtsSynthesizeParams, TtsSynthesizeResult, TtsWordsParams },
 } as const;

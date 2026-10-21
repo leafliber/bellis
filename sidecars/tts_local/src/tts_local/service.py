@@ -7,6 +7,9 @@
   宿主保留插值（R-11）。
 - `tts.synthesize` 在全部音频帧与时间戳之后才应答，应答即流结束。宿主发 `rpc.cancel` 时
   处理任务被取消，后端的生成器随之关闭、停止送出。本地模型一次只合成一句，请求按到达顺序排队。
+- 遥测（R-21）：参数里的 `traceparent` 是宿主那一句合成的 span，以它为父记
+  `tts_local.synthesize`（排队结束、第一块音频为事件）与其下的 `tts_local.align`；
+  只记后端名、流编号、字数与采样数，不记文本。
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from pydantic import ValidationError
 from bellis_sidecar.protocol import SidecarHealthResult
 from bellis_sidecar.rpc import INVALID_PARAMS, Params, RpcError, RpcPeer
 from bellis_sidecar.runtime import run_blocking
+from bellis_sidecar.telemetry import NOOP_TELEMETRY, Span, Telemetry
 
 from .backend import Backend
 from .protocol import (
@@ -48,9 +52,12 @@ log = logging.getLogger('tts_local')
 
 
 class TtsService:
-    def __init__(self, peer: RpcPeer, backend: Backend) -> None:
+    def __init__(
+        self, peer: RpcPeer, backend: Backend, telemetry: Telemetry = NOOP_TELEMETRY
+    ) -> None:
         self._peer = peer
         self._backend = backend
+        self._telemetry = telemetry
         self._lock = asyncio.Lock()
         self.status = TtsStatus(state=State.loading, detail='模型加载中')
         self.loaded = asyncio.get_running_loop().create_task(self._load())
@@ -86,26 +93,59 @@ class TtsService:
             request = TtsSynthesizeParams.model_validate(params, strict=True)
         except ValidationError as error:
             raise RpcError(INVALID_PARAMS, 'Invalid params') from error
-        if self.status.state != State.ready:
-            raise RpcError(TTS_NOT_READY, self.status.detail or '模型尚未就绪')
-        header = STREAM_HEADER.pack(request.stream)
-        samples = 0
-        pcm = bytearray()
-        async with self._lock:
-            async with contextlib.aclosing(self._backend.synthesize(request.text)) as chunks:
-                async for chunk in chunks:
-                    await self._peer.send_binary(header + chunk)
-                    samples += len(chunk) // 2
-                    pcm += chunk
-            await self._send_words(request.stream, request.text, bytes(pcm))
-        return TtsSynthesizeResult(samples=samples).model_dump(mode='json')
+        span = self._telemetry.start_span(
+            'tts_local.synthesize',
+            parent=request.traceparent,
+            kind='server',
+            attributes={
+                'bellis.tts.backend': self._backend.name,
+                'bellis.tts.stream': request.stream,
+                'bellis.tts.chars': len(request.text),
+            },
+        )
+        try:
+            if self.status.state != State.ready:
+                span.fail('not_ready')
+                raise RpcError(TTS_NOT_READY, self.status.detail or '模型尚未就绪')
+            header = STREAM_HEADER.pack(request.stream)
+            samples = 0
+            pcm = bytearray()
+            async with self._lock:
+                span.add_event('bellis.tts.dequeued')
+                first = True
+                async with contextlib.aclosing(self._backend.synthesize(request.text)) as chunks:
+                    async for chunk in chunks:
+                        if first:
+                            first = False
+                            span.add_event('bellis.tts.first_chunk')
+                        await self._peer.send_binary(header + chunk)
+                        samples += len(chunk) // 2
+                        pcm += chunk
+                span.set_attributes({'bellis.tts.samples': samples})
+                await self._send_words(request.stream, request.text, bytes(pcm), span)
+            return TtsSynthesizeResult(samples=samples).model_dump(mode='json')
+        except asyncio.CancelledError:
+            span.set_attributes({'bellis.tts.cancelled': True})
+            raise
+        except RpcError:
+            raise
+        except Exception as error:
+            span.fail(type(error).__name__)
+            raise
+        finally:
+            span.end()
 
-    async def _send_words(self, stream: int, text: str, pcm: bytes) -> None:
+    async def _send_words(self, stream: int, text: str, pcm: bytes, parent: Span) -> None:
+        span = self._telemetry.start_span('tts_local.align', parent=parent.traceparent)
         try:
             stamps = await self._backend.align(text, pcm)
-        except Exception:
+        except Exception as error:
+            span.fail(type(error).__name__)
+            span.end()
             log.exception('强制对齐失败，保留插值')
             return
+        span.set_attributes({'bellis.tts.words': len(stamps or [])})
+        span.end()
         if not stamps:
             return
         words = [

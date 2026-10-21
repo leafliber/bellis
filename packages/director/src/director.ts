@@ -1,12 +1,22 @@
 import { type Candidate, CandidatesService, VoteService } from '@bellis/audience';
 import {
   ClockService,
+  DeadlineError,
   definePlugin,
   defineService,
   type TimerHandle,
   withDeadline,
 } from '@bellis/kernel';
 import { SpeechService } from '@bellis/speech';
+import {
+  ErrorType,
+  GenAi,
+  type Span,
+  TelemetryService,
+  type TraceRef,
+  traceRef,
+  useTracer,
+} from '@bellis/telemetry';
 import Type from 'typebox';
 import { parseAction, type VoteAction } from './output.ts';
 
@@ -22,18 +32,55 @@ export interface DirectorContext {
 
 export interface LlmRequest {
   context: DirectorContext;
+  /**
+   * 这次模型调用的 span（W3C traceparent），模型客户端可以在它下面记自己的 span。只用于本机遥测，
+   * 不发给模型服务；不放进 `context`（那是交给模型的内容）。没有遥测时不出现。
+   */
+  traceparent?: string;
+}
+
+/** 模型的标识，写进 GenAI 语义约定的属性（`gen_ai.provider.name`、`gen_ai.request.model`）。 */
+export interface LlmModel {
+  provider: string;
+  name: string;
+}
+
+/** 一次调用用掉的 token 数与实际应答的型号（能拿到多少填多少）。 */
+export interface LlmUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  /** 输出里用于推理（思考）的 token 数。 */
+  reasoningOutputTokens?: number;
+  responseModel?: string;
+}
+
+/** 模型客户端在调用过程中报给决策插件的信息，只用于遥测；都可以不调用。 */
+export interface LlmCallOptions {
+  /** 拿到用量（以及实际应答的型号）时调用。 */
+  onUsage?(usage: LlmUsage): void;
+  /** 流式调用收到第一块时调用；不流式的客户端不调用。 */
+  onFirstChunk?(): void;
 }
 
 export interface Llm {
-  complete(request: LlmRequest, signal: AbortSignal): Promise<string>;
+  /** 模型标识（遥测用）；不提供时按 `unknown` 记。 */
+  readonly model?: LlmModel;
+  complete(request: LlmRequest, signal: AbortSignal, options?: LlmCallOptions): Promise<string>;
 }
 
 export const LlmService = defineService<Llm>('llm', 1);
+
+const UNKNOWN_MODEL: LlmModel = { provider: 'unknown', name: 'unknown' };
 
 /**
  * 决策模型（普通插件）：在决策时机到来时组装上下文、调用模型、把输出解析成枚举的意图。
  * 时机：新一批候选到达、冷场计时到期。同时只有一个在途调用，每次调用都有截止时间。
  * 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
+ *
+ * 遥测（见运维“观测”）：一次模型调用一个 GenAI span（`chat <型号>`，父为排第一的候选，其余候选以 links
+ * 关联），记 `gen_ai.client.inference.duration`；模型客户端报来用量时 token 数记在 span 上，流式客户端报来
+ * 第一块时记 `gen_ai.client.inference.time_to_first_chunk`。回应弹幕的发言以被回应的候选为父、以 link
+ * 关联这次调用，带上链路起点；闲聊与开票说明以这次调用为父。不记上下文与模型输出。
  */
 export const director = definePlugin({
   manifest: {
@@ -47,6 +94,7 @@ export const director = definePlugin({
       CandidatesService.ref,
       ClockService.ref,
       `${VoteService.ref}?`,
+      `${TelemetryService.ref}?`,
     ],
     permissions: [],
     process: 'in-process',
@@ -66,12 +114,24 @@ export const director = definePlugin({
     const speech = ctx.service(SpeechService);
     const candidates = ctx.service(CandidatesService);
     const clock = ctx.service(ClockService);
+    const tracer = useTracer(ctx, 'director');
     const config = ctx.config;
     let inflight = false;
     let again = false;
     let failures = 0;
     let calls = 0;
     let idleTimer: TimerHandle | undefined;
+
+    /** 回应弹幕的发言以被回应的候选为父（链路起点不变），以 link 关联这次模型调用；其余以模型调用为父。 */
+    const speechTrace = (call: Span, target: Candidate | undefined): TraceRef | undefined => {
+      if (!target?.trace) return traceRef(call);
+      const { traceparent, originAt } = target.trace;
+      return {
+        traceparent,
+        ...(originAt === undefined ? {} : { originAt }),
+        ...(call.traceparent ? { links: [call.traceparent] } : {}),
+      };
+    };
 
     const context = (taken: Candidate[]): DirectorContext => ({
       persona: config.persona,
@@ -83,7 +143,12 @@ export const director = definePlugin({
      * 发起投票：交给投票插件（`vote@1`），规则、计票与口播都在那里；优先级与发声来源也由那里的确定性代码决定，
      * 模型不能指定（D-33）。成功、被拒都记日志，不写题目与选项（模型输出可能复述弹幕）。
      */
-    const startVote = (action: VoteAction, taken: Candidate[], id: string) => {
+    const startVote = (
+      action: VoteAction,
+      taken: Candidate[],
+      id: string,
+      trace: TraceRef | undefined,
+    ) => {
       const votes = ctx.optional(VoteService);
       if (!votes) {
         ctx.log('director.vote-unavailable', { id, reason: '投票插件不在场' });
@@ -98,6 +163,7 @@ export const director = definePlugin({
           ...(action.decisionPoint === undefined ? {} : { decisionPoint: action.decisionPoint }),
           inputs: taken.flatMap((c) => c.sources),
           untrusted: taken.length > 0,
+          ...(trace ? { trace } : {}),
         })
         .then((result) =>
           result.ok
@@ -123,36 +189,111 @@ export const director = definePlugin({
           again = false;
           if (ctx.signal.aborted) return;
           const taken = candidates.take(config.maxCandidates);
-          const request = { context: context(taken) };
+          const model = llm.model ?? UNKNOWN_MODEL;
+          const call = tracer.startSpan(`chat ${model.name}`, {
+            kind: 'client',
+            parent: taken[0]?.trace,
+            links: taken.slice(1).map((c) => c.trace),
+            attributes: {
+              [GenAi.OperationName]: 'chat',
+              [GenAi.ProviderName]: model.provider,
+              [GenAi.RequestModel]: model.name,
+              'bellis.director.candidates': taken.length,
+            },
+          });
+          /** 结束这次调用的 span；出错时带上类别（不带模型输出）。 */
+          const endCall = (errorType?: string) => {
+            if (errorType) call.fail(errorType);
+            call.end();
+          };
+          const startedAt = clock.now();
+          /** 调用已有结果（含超时）：之后客户端再报的用量与首块不记。 */
+          let settled = false;
+          let responseModel: string | undefined;
+          /** 推理指标的属性：必填厂商，能拿到时加实际应答的型号，出错时加错误类别。 */
+          const metricAttributes = (errorType?: string) => ({
+            [GenAi.ProviderName]: model.provider,
+            [GenAi.ResponseModel]: responseModel,
+            [ErrorType]: errorType,
+          });
+          const request: LlmRequest = {
+            context: context(taken),
+            ...(call.traceparent ? { traceparent: call.traceparent } : {}),
+          };
           const controller = new AbortController();
           let output: string;
           try {
             output = await withDeadline(
               clock,
-              llm.complete(request, controller.signal),
+              llm.complete(request, controller.signal, {
+                onUsage: (usage) => {
+                  if (settled) return;
+                  responseModel = usage.responseModel ?? responseModel;
+                  call.setAttributes({
+                    [GenAi.UsageInputTokens]: usage.inputTokens,
+                    [GenAi.UsageOutputTokens]: usage.outputTokens,
+                    [GenAi.UsageReasoningOutputTokens]: usage.reasoningOutputTokens,
+                    [GenAi.ResponseModel]: usage.responseModel,
+                  });
+                },
+                // 流式客户端（第 3 步的真实模型客户端）收到第一块时调用；回放模型不流式，不调用。
+                onFirstChunk: () => {
+                  if (settled) return;
+                  tracer.record(
+                    GenAi.InferenceTimeToFirstChunk,
+                    (clock.now() - startedAt) / 1000,
+                    's',
+                    metricAttributes(),
+                    call,
+                  );
+                },
+              }),
               config.callTimeoutMs,
               '决策模型调用',
             );
           } catch (error) {
+            settled = true;
             controller.abort();
+            const errorType = error instanceof DeadlineError ? 'timeout' : 'call_failed';
+            tracer.record(
+              GenAi.InferenceDuration,
+              (clock.now() - startedAt) / 1000,
+              's',
+              metricAttributes(errorType),
+              call,
+            );
+            endCall(errorType);
             failed((error as Error).message);
             continue;
           }
+          settled = true;
+          tracer.record(
+            GenAi.InferenceDuration,
+            (clock.now() - startedAt) / 1000,
+            's',
+            metricAttributes(),
+            call,
+          );
           const parsed = parseAction(output);
           if (!parsed.ok) {
+            endCall('invalid_output');
             failed(parsed.reason);
             continue;
           }
           const action = parsed.action;
+          call.setAttributes({ 'bellis.director.action': action.action });
           if (action.action === 'speak') {
             const target =
               action.replyTo === undefined ? undefined : taken.find((c) => c.id === action.replyTo);
             if (action.replyTo !== undefined && !target) {
+              endCall('unknown_target');
               failed(`回应对象 ${action.replyTo} 不在本次上下文中`);
               continue;
             }
+            endCall();
             failures = 0;
             calls += 1;
+            const trace = speechTrace(call, target);
             void speech.request({
               id: `director:${ctx.instanceId}:${calls}`,
               source: target ? 'danmaku-reply' : 'chatter',
@@ -163,12 +304,15 @@ export const director = definePlugin({
               inputs: target ? target.sources : [],
               // 上下文里有弹幕，输出就受不可信输入影响。
               untrusted: taken.length > 0,
+              ...(trace ? { trace } : {}),
             });
           } else if (action.action === 'vote') {
+            endCall();
             failures = 0;
             calls += 1;
-            startVote(action, taken, `director:${ctx.instanceId}:${calls}`);
+            startVote(action, taken, `director:${ctx.instanceId}:${calls}`, traceRef(call));
           } else {
+            endCall();
             failures = 0;
             ctx.log('director.silence', { ...action });
           }
@@ -222,6 +366,8 @@ export const replayLlm = definePlugin({
     const requests: LlmRequest[] = [];
     let next = 0;
     const replay: ReplayLlm = {
+      // 遥测里填回放的标识，不冒充真实的厂商与型号。
+      model: { provider: 'bellis.replay', name: 'replay' },
       requests,
       complete(request) {
         requests.push(structuredClone(request));

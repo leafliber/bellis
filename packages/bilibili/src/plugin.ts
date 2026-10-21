@@ -1,4 +1,4 @@
-import { type Danmaku, type DanmakuGap, DanmakuService } from '@bellis/audience';
+import { type Danmaku, type DanmakuGap, DanmakuService, receiveSpan } from '@bellis/audience';
 import {
   ClockService,
   definePlugin,
@@ -8,6 +8,7 @@ import {
   secretPermission,
 } from '@bellis/kernel';
 import { SafetyService } from '@bellis/safety';
+import { TelemetryService, traceRef, useTracer } from '@bellis/telemetry';
 import Type, { type Static } from 'typebox';
 import { OPEN_LIVE_ENDPOINT, OpenApi } from './api.ts';
 import { BilibiliClient, type ClientSink, type ClientTimings } from './client.ts';
@@ -158,6 +159,7 @@ const instances = new WeakMap<object, () => Promise<void>>();
  *   只写事实（见 {@link Intake}）。缺口写 `danmaku.gap-started` 与 `danmaku.gap-ended`。
  * - 停用（含 QUIESCING）时停心跳、关长连接、关闭场次，都带截止时间，失败只记日志。
  * - 日志不写弹幕正文、昵称、头像、auth_body、签名、身份码与密钥，只写编号、计数、状态与原因。
+ * - 遥测在场时，每条交给分诊的弹幕开一个根 span（链路起点，只记平台与消息编号），随弹幕交给下游。
  */
 export const danmakuBilibili = definePlugin({
   manifest: {
@@ -165,7 +167,7 @@ export const danmakuBilibili = definePlugin({
     version: '0.1.0',
     tier: 'ordinary',
     provides: [DanmakuService.ref],
-    inject: [ClockService.ref, SafetyService.ref, SecretsService.ref],
+    inject: [ClockService.ref, SafetyService.ref, SecretsService.ref, `${TelemetryService.ref}?`],
     permissions: [
       egressPermission(new URL(OPEN_LIVE_ENDPOINT).hostname),
       egressPermission(LINK_HOSTS),
@@ -196,6 +198,7 @@ export const danmakuBilibili = definePlugin({
       throw new Error(`B 站弹幕接入不可用：${reason}`);
     }
 
+    const tracer = useTracer(ctx, 'danmaku-bilibili');
     const intake = new Intake(config.dedupCapacity);
     const listeners = new Set<(danmaku: Danmaku) => void>();
     const gapListeners = new Set<(gap: DanmakuGap | undefined) => void>();
@@ -237,8 +240,14 @@ export const danmakuBilibili = definePlugin({
         } else if (result.kind === 'malformed') {
           ctx.log('bilibili.malformed', { cmd: command.cmd.slice(0, 64), reason: '缺少必需字段' });
         }
+        // 交给分诊的弹幕：开链路的根 span（只记平台与消息编号），写成事实、交出之后结束。
+        const span = result.danmaku ? receiveSpan(tracer, PLATFORM, result.danmaku.id) : undefined;
         if (result.fact) safety.record(result.fact.type, result.fact.data);
-        if (result.danmaku) deliver(result.danmaku);
+        if (result.danmaku && span) {
+          const trace = traceRef(span, clock.now());
+          deliver(trace ? { ...result.danmaku, trace } : result.danmaku);
+          span.end();
+        }
       },
       gapStarted(started) {
         safety.record(FactType.GapStarted, { platform: PLATFORM, ...started });

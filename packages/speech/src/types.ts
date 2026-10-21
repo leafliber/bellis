@@ -1,5 +1,6 @@
 import { defineExtension, defineService } from '@bellis/kernel';
 import type { SidecarQos } from '@bellis/protocol';
+import type { TraceRef } from '@bellis/telemetry';
 
 /** 发声请求的来源，由确定性代码按触发来源填写，决策模型不能指定（D-33）。 */
 export type SpeechSource =
@@ -42,6 +43,11 @@ export interface SpeechRequest {
   inputs: readonly string[];
   /** 是否混入了不可信输入。 */
   untrusted: boolean;
+  /**
+   * 产生它的链路（见运维“观测”）：发言的 span 以它为父；回应弹幕时带 `originAt`，
+   * 第一句在 Stage 开始播出时记“弹幕到首音”。没有遥测时不出现。
+   */
+  trace?: TraceRef;
 }
 
 export type UtteranceEnd =
@@ -90,6 +96,8 @@ export interface PreCheckInput {
   sentence: Sentence;
   /** 上一句的字幕文本，作为判定的上下文。 */
   previous: string | undefined;
+  /** 发声前检查的 span（W3C traceparent），检查方以它为父；没有遥测时不出现。 */
+  traceparent?: string;
 }
 
 /** 发声前检查只能放行（弃权）或拦下。 */
@@ -135,6 +143,11 @@ export interface SynthesisOptions {
    * 以 {@link TtsExpiredError} 结束这一句、不发请求；不需要等时不看它。
    */
   readonly expiresAt?: number;
+  /**
+   * 这一句合成的 span（W3C traceparent）。以 sidecar 运行的引擎把它放进 JSON-RPC 参数，
+   * sidecar 以它为父写自己的 span（R-21）；没有遥测时不出现。
+   */
+  readonly traceparent?: string;
 }
 
 export interface Tts {

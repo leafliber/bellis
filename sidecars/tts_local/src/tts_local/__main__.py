@@ -18,6 +18,7 @@ from bellis_sidecar.processes import contain_descendants
 from bellis_sidecar.protocol import SidecarHealthResult
 from bellis_sidecar.rpc import RpcPeer
 from bellis_sidecar.runtime import SidecarOptions, run_sidecar
+from bellis_sidecar.telemetry import telemetry_from_env
 
 from .backend import Backend
 from .fake import FakeBackend, FakeConfig
@@ -104,10 +105,12 @@ def main(argv: list[str] | None = None) -> int:
         # 假后端：连接宿主之前先等一会儿，模拟启动慢的 sidecar。
         time.sleep(args.startup_delay_ms / 1000)
     backend = build_backend(args)
+    # 宿主的遥测在场时，span 写进它给的同一目录（R-21）；不在时是空实现。
+    telemetry = telemetry_from_env(os.environ, scope='tts_local')
     services: list[TtsService] = []
 
     def setup(peer: RpcPeer) -> None:
-        services.append(TtsService(peer, backend))
+        services.append(TtsService(peer, backend, telemetry))
 
     async def health() -> SidecarHealthResult:
         return await services[0].health()
@@ -118,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     finally:
         backend.close()
+        telemetry.close()
 
 
 if __name__ == '__main__':

@@ -2,6 +2,18 @@
   "name": "live",
   "packs": [
     {
+      "name": "telemetry",
+      "entries": [
+        {
+          "id": "telemetry",
+          "plugin": "telemetry",
+          "config": {
+            "dir": "telemetry/live"
+          }
+        }
+      ]
+    },
+    {
       "name": "obs",
       "entries": [
         {

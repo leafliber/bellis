@@ -4,6 +4,7 @@
  * → 按 profile 加载插件；看门狗的心跳在加载插件之前开始。
  * 启动后总处于安全停止，由操作员显式切换模式。操作员动作由命令行与操作台共用（operator.ts）。
  */
+import { dirname } from 'node:path';
 import { VoteService, type Votes } from '@bellis/audience';
 import { type Avatar, AvatarService } from '@bellis/avatar';
 import { listen, RpcPeer } from '@bellis/channel';
@@ -18,12 +19,15 @@ import { ConsoleServer } from '@bellis/console';
 import {
   ChannelHub,
   ClockService,
+  DataDirService,
   Kernel,
+  RandomService,
   readJsonFile,
   resolveProfile,
   SecretsService,
   SidecarHostService,
   systemClock,
+  systemRandom,
 } from '@bellis/kernel';
 import { ObsClient, ObsMeters } from '@bellis/obs';
 import { builtinPlugins, builtinProjections } from '@bellis/plugins';
@@ -156,6 +160,9 @@ kernel = host;
 const hub = new ChannelHub();
 host.provideCore(SidecarHostService, { credentials, hub });
 host.provideCore(ClockService, clock);
+host.provideCore(RandomService, systemRandom());
+// 状态存储所在目录：遥测在它下面的子目录里写 JSONL（见运维“观测”）。
+host.provideCore(DataDirService, { path: dirname(config.storePath) });
 host.provideScoped(SafetyService, ({ instanceId, permissions }) =>
   safetyFacade(core, instanceId, permissions),
 );

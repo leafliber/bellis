@@ -1,9 +1,21 @@
 import asyncio
+import json
+import shutil
 import struct
+import tempfile
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 from bellis_sidecar.channel import KIND_BINARY, connect
+from bellis_sidecar.protocol import SidecarTelemetry
 from bellis_sidecar.rpc import INVALID_PARAMS, RpcPeer
+from bellis_sidecar.telemetry import (
+    ENV_ROLE,
+    ENV_TELEMETRY,
+    NOOP_TELEMETRY,
+    Telemetry,
+    telemetry_from_env,
+)
 from bellis_sidecar.testing import HostSide, fake_host
 from tts_local.__main__ import build_backend, parse_args
 from tts_local.fake import FakeBackend, FakeConfig
@@ -14,11 +26,11 @@ KEY = bytes([3]) * 32
 Body = Callable[[HostSide, TtsService], Awaitable[None]]
 
 
-def run(config: FakeConfig, body: Body) -> None:
+def run(config: FakeConfig, body: Body, telemetry: Telemetry = NOOP_TELEMETRY) -> None:
     async def main() -> None:
         async with fake_host(KEY) as (path, accepted):
             peer = RpcPeer(await connect(path, 'sidecar.tts-local', KEY))
-            service = TtsService(peer, FakeBackend(config))
+            service = TtsService(peer, FakeBackend(config), telemetry)
             host = await accepted.get()
             try:
                 await body(host, service)
@@ -139,3 +151,63 @@ def test_command_line_selects_the_backend():
     assert isinstance(qwen, QwenBackend)
     assert qwen.config.speaker == 'vivian'
     assert qwen.processes() == []
+
+
+def test_synthesize_writes_its_span_into_the_hosts_trace():
+    traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+    directory = Path(tempfile.mkdtemp(prefix='bellis-tts-telemetry-'))
+    try:
+        config = SidecarTelemetry(
+            v=1,
+            dir=str(directory),
+            maxFileBytes=1_000_000,
+            maxFileAgeMs=3_600_000,
+            maxFiles=5,
+            maxQueue=100,
+            flushIntervalMs=20,
+        )
+        telemetry = telemetry_from_env(
+            {ENV_TELEMETRY: config.model_dump_json(), ENV_ROLE: 'sidecar.tts-local'},
+            scope='tts_local',
+        )
+
+        async def body(host: HostSide, service: TtsService) -> None:
+            await service.loaded
+            await host.receive_json()  # tts.status：ready
+            params = {'stream': 1, 'text': '你好', 'traceparent': traceparent}
+            reply = await host.request(1, 'tts.synthesize', params)
+            assert reply['result'] == {'samples': 80}
+            # 不合格的 traceparent 按协议拒绝（宿主只发版本 00 的合格值）。
+            bad = await host.request(2, 'tts.synthesize', {**params, 'traceparent': 'x'})
+            assert bad['error']['code'] == INVALID_PARAMS
+
+        run(FakeConfig(sample_rate=16_000, samples_per_char=40, chunk_samples=30), body, telemetry)
+        telemetry.close()
+
+        text = ''.join(p.read_text(encoding='utf-8') for p in directory.glob('*.jsonl'))
+        assert '你好' not in text
+        spans = [
+            span
+            for line in text.splitlines()
+            for resource in json.loads(line)['resourceSpans']
+            for scoped in resource['scopeSpans']
+            for span in scoped['spans']
+        ]
+        synthesize = next(s for s in spans if s['name'] == 'tts_local.synthesize')
+        assert synthesize['traceId'] == '4bf92f3577b34da6a3ce929d0e0e4736'
+        assert synthesize['parentSpanId'] == '00f067aa0ba902b7'
+        attributes = {a['key']: a['value'] for a in synthesize['attributes']}
+        assert attributes == {
+            'bellis.tts.backend': {'stringValue': 'fake'},
+            'bellis.tts.stream': {'intValue': '1'},
+            'bellis.tts.chars': {'intValue': '2'},
+            'bellis.tts.samples': {'intValue': '80'},
+        }
+        assert [e['name'] for e in synthesize['events']] == [
+            'bellis.tts.dequeued',
+            'bellis.tts.first_chunk',
+        ]
+        align = next(s for s in spans if s['name'] == 'tts_local.align')
+        assert align['parentSpanId'] == synthesize['spanId']
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)

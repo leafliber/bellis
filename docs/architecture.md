@@ -149,6 +149,8 @@
 | 弹幕到首个音频 | p95 ≤4s（观众端拉流本身有数秒延迟） | PENDING（P2） |
 | 输入许可过期到全部按键释放 | ≤100ms | PENDING（P3） |
 
+宿主在运行中写出的相应直方图（弹幕到首音、停止到静音等）及其口径见[运维的观测](modules/operations.md#直方图)。
+
 ## 平台
 
 Windows 11 x64 是唯一的生产平台；P0 在 macOS 验收，P1 起只认 Windows（D-11）。工程约束见 [Windows 平台](platform/windows.md)。

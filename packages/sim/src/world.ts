@@ -75,7 +75,8 @@ export class World {
     const epoch = options.epochMs ?? Date.UTC(2026, 9, 14);
     const random = seededRandom(options.seed ?? 0);
     const shuffle = seededRandom((options.seed ?? 0) ^ 0x5bd1e995);
-    this.clock = new ManualClock(options.startAt ?? 0, (count) => shuffle.int(0, count - 1));
+    // 零点对应墙钟起点：遥测的时间戳与事件时间戳在同一条墙钟时间线上。
+    this.clock = new ManualClock(options.startAt ?? 0, (count) => shuffle.int(0, count - 1), epoch);
     const log = (event: string, fields: Record<string, unknown> = {}) =>
       this.logs.push({ event, fields });
     this.storePath = options.storePath ?? ':memory:';

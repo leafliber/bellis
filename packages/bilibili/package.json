@@ -10,6 +10,7 @@
     "@bellis/audience": "workspace:*",
     "@bellis/kernel": "workspace:*",
     "@bellis/safety": "workspace:*",
+    "@bellis/telemetry": "workspace:*",
     "typebox": "1.3.37",
     "ws": "8.22.0"
   },

@@ -13,6 +13,7 @@
     "secret": "node packages/launcher/src/secret.ts",
     "autostart": "node packages/launcher/src/autostart.ts",
     "sim": "node packages/sim/src/cli.ts",
+    "telemetry": "node packages/telemetry/src/cli.ts",
     "check": "pnpm run lint && pnpm run typecheck && pnpm run gen:check && pnpm run test",
     "lint": "biome ci . && uv run --locked ruff check && uv run --locked ruff format --check",
     "format": "biome check --write . && uv run --locked ruff check --fix && uv run --locked ruff format",

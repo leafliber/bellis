@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VoteService, type Votes } from '@bellis/audience';
 import { ReplayLlmService } from '@bellis/director';
+import { type TelemetryMemory, TelemetryMemoryService } from '@bellis/telemetry';
 import { checkHistory, type History } from './invariants.ts';
 import { type Scenario, scenarioEntries } from './scenario.ts';
 import { type TraceEntry, World } from './world.ts';
@@ -14,6 +15,8 @@ export interface SimulationOptions {
   drainMs?: number;
   /** 排空时间到了仍有进行中的意图时，最多再推进这么久等它结束；超过即判为卡住。 */
   settleMs?: number;
+  /** 启用写内存的遥测并检查它的不变量，缺省启用；关掉用于核对遥测不改变仿真的行为。 */
+  telemetry?: boolean;
 }
 
 export interface SimulationResult {
@@ -34,9 +37,12 @@ export async function simulate(
 ): Promise<SimulationResult> {
   const stepMs = options.stepMs ?? 10;
   const drainMs = options.drainMs ?? 15_000;
+  const withTelemetry = options.telemetry ?? true;
   const dir = mkdtempSync(join(tmpdir(), 'bellis-sim-'));
   const storePath = join(dir, 'state.db');
   const trace: TraceEntry[] = [];
+  /** 各次启动的遥测输出（JSONL 行）；崩溃时还没写出的部分随进程丢失。 */
+  const telemetry: string[] = [];
   const violations: string[] = [];
   const tokens = new Map<string, number>();
   let restarts = 0;
@@ -44,7 +50,7 @@ export async function simulate(
 
   const boot = async (fromMs: number, startAt: number): Promise<World> => {
     const world = new World({
-      entries: scenarioEntries(scenario, fromMs, outputsUsed),
+      entries: scenarioEntries(scenario, fromMs, outputsUsed, { telemetry: withTelemetry }),
       moderationEnabled: scenario.moderation.enabled,
       seed: scenario.seed + restarts,
       storePath,
@@ -62,6 +68,13 @@ export async function simulate(
   };
   const collect = (world: World) => {
     for (const entry of world.trace) trace.push({ ...entry, seq: trace.length });
+    if (!withTelemetry) return;
+    const found = world.kernel.services.resolve(
+      TelemetryMemoryService.name,
+      TelemetryMemoryService.major,
+    );
+    if ('missing' in found) violations.push(`遥测不在场：${found.missing}`);
+    else telemetry.push(...(found.impl as TelemetryMemory).lines);
   };
 
   let world = await boot(0, 0);
@@ -136,6 +149,7 @@ export async function simulate(
       trace,
       events: world.store.events(),
       moderationEnabled: scenario.moderation.enabled,
+      ...(withTelemetry ? { telemetry } : {}),
     };
     violations.push(...checkHistory(history));
     return { violations, history, restarts };

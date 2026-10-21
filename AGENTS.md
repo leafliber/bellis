@@ -17,6 +17,7 @@
 - `pnpm autostart <register [配置文件] | unregister | status>`：维护者注册、注销、读回核对“登录时运行”的计划任务，只在 Windows 上可用，register 缺省用 `config/live.json`；详见 [Windows 平台](docs/platform/windows.md#登录时运行)。它改动的是本机的持久系统配置，Agent 不代为运行。
 - `pnpm operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [目标] | console>`：操作员命令，例如 `pnpm operator mode M0`；`console` 用浏览器打开本机操作台（见[运维](docs/modules/operations.md#操作台)）。
 - `pnpm sim [--seed N] [--runs N]`：确定性仿真的大规模探索；失败时给出复现命令。
+- `pnpm telemetry <summary | trace 编号> [--config 配置文件] [--dir 目录]`：读遥测的 JSONL（缺省按 `config/sim.json` 找目录），输出各直方图的样本数与 p50/p95/p99，或按 trace 打印 span 树（不含内容）；只读文件，见[运维的观测](docs/modules/operations.md#查看)。
 
 ## 从哪里开始
 

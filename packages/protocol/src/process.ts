@@ -18,6 +18,8 @@ export const ChildEnv = {
   Role: 'BELLIS_ROLE',
   /** SecretStore 的服务名，缺省为 `bellis`；测试用独立的服务名互不干扰。 */
   SecretService: 'BELLIS_SECRET_SERVICE',
+  /** sidecar 的遥测输出（`SidecarTelemetry` 的 JSON），由代理插件按遥测服务给出；没有时 sidecar 不写遥测。 */
+  Telemetry: 'BELLIS_TELEMETRY',
 } as const;
 
 export const SessionId = Type.String({ pattern: '^[a-z0-9]{1,16}$' });

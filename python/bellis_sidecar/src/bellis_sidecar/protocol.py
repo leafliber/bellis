@@ -170,3 +170,16 @@ class SidecarHealthResult(BaseModel):
     ok: StrictBool
     detail: Annotated[StrictStr | None, Field(max_length=200)] = None
     qos: Qos | None = None
+
+
+class SidecarTelemetry(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    v: Literal[1]
+    dir: Annotated[StrictStr, Field(max_length=1024, min_length=1)]
+    maxFileBytes: Annotated[StrictInt, Field(ge=65536)]
+    maxFileAgeMs: Annotated[StrictInt, Field(ge=1000)]
+    maxFiles: Annotated[StrictInt, Field(ge=1, le=1000)]
+    maxQueue: Annotated[StrictInt, Field(ge=1)]
+    flushIntervalMs: Annotated[StrictInt, Field(ge=1)]
