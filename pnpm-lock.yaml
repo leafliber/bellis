@@ -858,6 +858,9 @@ importers:
       '@bellis/store':
         specifier: workspace:*
         version: link:../packages/store
+      '@bellis/telemetry':
+        specifier: workspace:*
+        version: link:../packages/telemetry
       '@bellis/tts-cloud':
         specifier: workspace:*
         version: link:../packages/tts-cloud
