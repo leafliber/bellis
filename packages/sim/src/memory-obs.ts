@@ -35,15 +35,18 @@ export class MemoryObs implements EmergencyObs {
     this.#apply(change);
   }
 
+  /** 这个变化会不会改变 OBS 的状态（没变时 OBS 不发事件，订阅者收不到）。 */
+  changes(change: ObsChange): boolean {
+    return change.kind === 'scene'
+      ? this.currentScene !== change.sceneName
+      : this.muted.has(change.inputName) !== change.muted;
+  }
+
   #apply(change: ObsChange): void {
-    if (change.kind === 'scene') {
-      if (this.currentScene === change.sceneName) return;
-      this.currentScene = change.sceneName;
-    } else {
-      if (this.muted.has(change.inputName) === change.muted) return;
-      if (change.muted) this.muted.add(change.inputName);
-      else this.muted.delete(change.inputName);
-    }
+    if (!this.changes(change)) return;
+    if (change.kind === 'scene') this.currentScene = change.sceneName;
+    else if (change.muted) this.muted.add(change.inputName);
+    else this.muted.delete(change.inputName);
     for (const watcher of [...this.#watchers]) watcher.change(change);
   }
 }
