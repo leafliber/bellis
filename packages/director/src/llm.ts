@@ -66,14 +66,37 @@ export interface LlmCallOptions {
   onFirstOutput?(): void;
 }
 
+/** 模型客户端跟踪的失败（就绪判定与操作员状态用）。 */
+export interface LlmFailures {
+  /** 连续失败的次数：成功清零；调用方取消不计，截止时间到点算超时。 */
+  consecutive: number;
+  /** 最近一次失败：类别、墙钟时刻（毫秒）、HTTP 状态与错误码；还没失败过时不出现。不含服务端的说明。 */
+  last?: { kind: LlmErrorKind; at: number; status?: number; code?: string };
+}
+
 export interface Llm {
   /** 模型标识（遥测用）；不提供时按 `unknown` 记。 */
   readonly model?: LlmModel;
   /**
    * 调用一次模型，返回正文（函数调用方式下是函数参数）的字符串，由决策插件解析。不做隐式重试；
-   * `signal` 中止即断开连接，以 {@link LlmError}（`aborted`）结束。
+   * `signal` 中止即断开连接，以 {@link LlmError}（`aborted`）结束。调用方因截止时间到点而中止时以
+   * `DeadlineError` 作中止原因（`signal.reason`），模型客户端据此把这次调用记为超时失败；其余中止不算失败。
    */
   complete(request: LlmRequest, signal: AbortSignal, options?: LlmCallOptions): Promise<string>;
+  /**
+   * 此刻是否就绪（见决策模型“就绪”），开播预检与操作员状态用；判定不发请求。不报告的客户端按未就绪核对，
+   * 回放模型恒为就绪。
+   */
+  readonly ready?: boolean;
+  /** 给操作员看的状态说明：只含失败的类别、HTTP 状态与错误码，不含服务端的说明。 */
+  readonly status?: string;
+  /** 连续失败与最近一次失败；不跟踪的客户端不提供。 */
+  readonly failures?: LlmFailures;
+  /**
+   * 开播预检的显式探测，只在模型客户端的配置打开时提供：发一个固定的极短请求（带截止时间），确认能拿到合法响应；
+   * 结果计入就绪判定。会外发、会计费。失败以 {@link LlmError} 结束。
+   */
+  probe?(): Promise<void>;
 }
 
 export const LlmService = defineService<Llm>('llm', 1);

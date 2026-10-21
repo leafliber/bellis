@@ -114,6 +114,8 @@ export class BilibiliClient {
   #stopping: Promise<void> | undefined;
   #state: ClientState = 'idle';
   #reason: string | undefined;
+  /** 正在等待重试时，下一次尝试的时刻（注入时钟的毫秒）；状态说明据此给出还要等多久。 */
+  #retryAt: number | undefined;
   #game: GameSession | undefined;
   #link: LiveLink | undefined;
   #gap: (Gap & { startedClock: number }) | undefined;
@@ -130,14 +132,35 @@ export class BilibiliClient {
     return this.#state;
   }
 
-  /** 当前状态的说明（等待的原因、所连的主机等）。 */
+  /**
+   * 给操作员看的状态说明（开播预检与操作员状态用）：在做什么、在等什么及原因、还要等多久。
+   * 不含缺口的时长（缺口的开始时刻经 sink 交出）。
+   */
   get status(): string {
-    return this.#reason ? `${this.#state}：${this.#reason}` : this.#state;
+    const reason = this.#reason ?? '';
+    const retry = this.#retryIn();
+    const texts: Record<ClientState, string> = {
+      idle: '尚未开始',
+      opening: '开启场次中',
+      waiting: `等待重试${retry ? `（${retry}）` : ''}：${reason}`,
+      connecting: retry ? `长连接等待重连（${retry}）：${reason}` : `连接长连接中（${reason}）`,
+      receiving: `接收中（${reason}）`,
+      reopening: `场次失效，等待重开${retry ? `（${retry}）` : ''}：${reason}`,
+      stopping: '停止中',
+      stopped: '已停止',
+    };
+    return texts[this.#state];
   }
 
-  /** 正在接收：长连接已认证。 */
+  /** 正在接收：场次已开启、长连接已认证。 */
   get receiving(): boolean {
     return this.#state === 'receiving';
+  }
+
+  #retryIn(): string | undefined {
+    if (this.#retryAt === undefined) return undefined;
+    const ms = Math.max(0, this.#retryAt - this.#options.clock.now());
+    return `约 ${Math.ceil(ms / 1000)} 秒后`;
   }
 
   /** 在后台开启场次与长连接；立即返回。 */
@@ -192,7 +215,7 @@ export class BilibiliClient {
           retryInMs: failure.delayMs,
         });
         this.#setState('waiting', failure.reason);
-        await this.#sleep(failure.delayMs, signal);
+        await this.#sleep(failure.delayMs, signal, true);
         continue;
       }
       this.#game = session;
@@ -211,7 +234,7 @@ export class BilibiliClient {
       this.#setState('reopening', outcome.reason);
       this.#log('bilibili.session-invalid', { gameId: session.gameId, reason: outcome.reason });
       await this.#endGame(outcome.reason);
-      await this.#sleep(outcome.delayMs ?? this.#backoff(), signal);
+      await this.#sleep(outcome.delayMs ?? this.#backoff(), signal, true);
     }
   }
 
@@ -343,7 +366,8 @@ export class BilibiliClient {
             invalidate({ reason: `长连接连续 ${failedInRow} 次连不上` });
             break;
           }
-          await this.#sleep(this.#backoff(), scope.signal);
+          this.#setState('connecting', `长连接 ${host} ${reason}`);
+          await this.#sleep(this.#backoff(), scope.signal, true);
           continue;
         }
         if (outcome || scope.signal.aborted) {
@@ -368,7 +392,8 @@ export class BilibiliClient {
         if (outcome || scope.signal.aborted) break;
         if (readyMs >= o.stableAfterMs) this.#failures = 0;
         this.#openGap(`长连接断开：${closed}`);
-        await this.#sleep(this.#backoff(), scope.signal);
+        this.#setState('connecting', `长连接 ${host} 断开：${closed}`);
+        await this.#sleep(this.#backoff(), scope.signal, true);
       }
     } finally {
       if (heartbeat) clock.clearTimeout(heartbeat);
@@ -498,8 +523,10 @@ export class BilibiliClient {
     return delay;
   }
 
-  #sleep(ms: number, signal: AbortSignal): Promise<void> {
+  /** 等 `ms` 毫秒（停用即醒）；`retry` 表示这是在等下一次尝试，状态说明据此给出还要等多久。 */
+  #sleep(ms: number, signal: AbortSignal, retry = false): Promise<void> {
     const { clock } = this.#options;
+    if (retry) this.#retryAt = clock.now() + ms;
     return new Promise((resolve) => {
       if (signal.aborted) {
         resolve();
@@ -516,9 +543,9 @@ export class BilibiliClient {
   }
 
   #setState(state: ClientState, reason: string | undefined): void {
-    if (this.#state === state && this.#reason === reason) return;
     this.#state = state;
     this.#reason = reason;
+    this.#retryAt = undefined;
   }
 
   #log(event: string, fields: Record<string, unknown>): void {

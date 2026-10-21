@@ -1,5 +1,6 @@
 import type { EntrySnapshot } from '@bellis/kernel';
 import type { SidecarQos } from '@bellis/protocol';
+import { type DanmakuReport, danmakuFailure, type LlmReport, probeFailure } from './readiness.ts';
 
 /** 开播预检的输入：宿主从插件内核、Stage 服务、安全核与 OBS 应急连接收集。 */
 export interface PreflightInputs {
@@ -30,6 +31,16 @@ export interface PreflightInputs {
   ttsPrimary:
     | { engine: string; ready: boolean; status: string; qos?: () => Promise<SidecarQos> }
     | undefined;
+  /**
+   * 弹幕接入：profile 中启用了提供 `danmaku@1` 的条目时给出它此刻的状态（不在场时 ready 为 false）；
+   * 没有启用弹幕接入时为 undefined，不核对。
+   */
+  danmaku: DanmakuReport | undefined;
+  /**
+   * 决策模型：profile 中启用了决策插件时给出 `llm@1` 此刻的状态（不在场时 ready 为 false）；模型客户端配置了
+   * 开播预检的探测时带 `probe`。没有启用决策插件时为 undefined，不核对。
+   */
+  llm: (LlmReport & { probe?: () => Promise<void> }) | undefined;
   /** OBS 应急目标的只读核对，返回未通过的项。 */
   inspectObs(): Promise<string[]>;
 }
@@ -59,8 +70,8 @@ async function localQos(read: () => Promise<SidecarQos>): Promise<string | undef
 }
 
 /**
- * 开播预检中与 P1 相关的项（见运维“开播预检”）。返回未通过的项，全部通过时为空；任一未通过都不允许进入
- * 真实输出模式。安全核的拒绝原因（监督模式本身的前置条件）列在最前。
+ * 开播预检（见运维“开播预检”）。返回未通过的项，全部通过时为空；任一未通过都不允许进入真实输出模式。
+ * 安全核的拒绝原因（监督模式本身的前置条件）列在最前。决策模型只在配置了探测时才发请求。
  */
 export async function preflight(inputs: PreflightInputs): Promise<string[]> {
   const failures: string[] = [];
@@ -81,6 +92,20 @@ export async function preflight(inputs: PreflightInputs): Promise<string[]> {
   if (inputs.ttsPrimary?.engine === 'local' && inputs.ttsPrimary.qos) {
     const failure = await localQos(inputs.ttsPrimary.qos);
     if (failure) failures.push(failure);
+  }
+  if (inputs.danmaku) {
+    const failure = danmakuFailure(inputs.danmaku);
+    if (failure) failures.push(failure);
+  }
+  if (inputs.llm?.probe) {
+    // 配置了探测：以这一次请求的结果为准（成功即清掉之前的连续失败与鉴权失败）。
+    try {
+      await inputs.llm.probe();
+    } catch (error) {
+      failures.push(probeFailure(error));
+    }
+  } else if (inputs.llm && !inputs.llm.ready) {
+    failures.push(`决策模型未就绪：${inputs.llm.status}`);
   }
   if (inputs.target === 'M1' && !inputs.reviewPresent)
     failures.push('M1 需要逐句放行环节（speech-review）');

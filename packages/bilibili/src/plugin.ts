@@ -158,6 +158,8 @@ const instances = new WeakMap<object, () => Promise<void>>();
  * - 普通弹幕写成 `danmaku.received` 后交给订阅者；表情包弹幕、礼物、SC、SC 删除、大航海、点赞、开播、下播
  *   只写事实（见 {@link Intake}）。缺口写 `danmaku.gap-started` 与 `danmaku.gap-ended`。
  * - 停用（含 QUIESCING）时停心跳、关长连接、关闭场次，都带截止时间，失败只记日志。
+ * - 就绪报告（开播预检与操作员状态用）：场次已开启、长连接已认证、正在接收时就绪；否则状态说明给出在做什么、
+ *   在等什么及原因、还要等多久，缺口的开始时刻随 `gap()` 给出。
  * - 日志不写弹幕正文、昵称、头像、auth_body、签名、身份码与密钥，只写编号、计数、状态与原因。
  * - 遥测在场时，每条交给分诊的弹幕开一个根 span（链路起点，只记平台与消息编号），随弹幕交给下游。
  */
@@ -251,7 +253,7 @@ export const danmakuBilibili = definePlugin({
       },
       gapStarted(started) {
         safety.record(FactType.GapStarted, { platform: PLATFORM, ...started });
-        notifyGap({ reason: started.reason });
+        notifyGap({ reason: started.reason, startedAt: started.startedAt });
       },
       gapEnded(ended) {
         safety.record(FactType.GapEnded, { platform: PLATFORM, ...ended });
@@ -295,6 +297,13 @@ export const danmakuBilibili = definePlugin({
       onGap(listener) {
         gapListeners.add(listener);
         return () => gapListeners.delete(listener);
+      },
+      // 就绪：场次已开启、长连接已认证、正在接收（停用中不算）。
+      get ready() {
+        return client.receiving && !ctx.signal.aborted;
+      },
+      get status() {
+        return client.status;
       },
     });
     client.start();

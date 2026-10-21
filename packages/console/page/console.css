@@ -69,6 +69,34 @@ header h1 {
   font-weight: 600;
 }
 
+.readiness {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.readiness div {
+  display: contents;
+}
+
+.readiness dt {
+  opacity: 0.7;
+}
+
+.readiness dd {
+  margin: 0;
+}
+
+.readiness dd.not-ready {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.readiness dd.ready {
+  color: #166534;
+}
+
 body.stale .summary dd,
 body.stale section:not(.actions) {
   opacity: 0.35;

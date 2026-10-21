@@ -139,6 +139,39 @@ test('7002 等一分钟以上（此处按配置）、7001 等约 10 秒（同上
   }
 });
 
+test('就绪报告：开启场次失败的等待期间未就绪，说明原因与还要等多久，缺口带开始时刻；连上后就绪，停用后不再就绪', async () => {
+  const fake = await fakePlatform({ startDelayMs: 100 });
+  fake.failNext.start.push(7002);
+  const config = fastConfig(fake, { occupiedRetryMs: 1500 });
+  const w = await world([entry('danmaku', 'danmaku-bilibili', { config, grant: GRANT })]);
+  try {
+    const source = w.service(DanmakuService);
+    assert.equal(source.ready, false);
+    assert.match(source.status ?? '', /^(尚未开始|开启场次中)$/);
+    await waitFor(() => w.logged('bilibili.session-failed').length === 1, '7002');
+    assert.equal(source.ready, false);
+    assert.match(
+      source.status ?? '',
+      /^等待重试（约 [12] 秒后）：开启场次失败，直播间已有场次或上一场没有正常结束：平台返回错误 7002/,
+    );
+    const gap = source.gap?.();
+    assert.match(gap?.reason ?? '', /7002/);
+    assert.equal(typeof gap?.startedAt, 'number');
+    assert.ok(Math.abs(Date.now() - (gap?.startedAt ?? 0)) < 5000, '缺口从开始接入时算起');
+
+    await linkReady(w);
+    assert.equal(source.ready, true);
+    assert.match(source.status ?? '', /^接收中（127\.0\.0\.1:\d+）$/);
+    assert.equal(source.gap?.(), undefined);
+
+    await w.kernel.disable('danmaku');
+    assert.equal(source.ready, false, '停用后不再就绪');
+  } finally {
+    await w.close();
+    await fake.close();
+  }
+});
+
 test('收到 INTERACTION_END：关闭旧场次后重新开启，用新的 auth_body 认证；别的场次的 INTERACTION_END 不理', async () => {
   const fake = await fakePlatform();
   const w = await world([
