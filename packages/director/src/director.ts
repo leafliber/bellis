@@ -759,8 +759,8 @@ const ReplayOutput = Type.Union([
 
 /**
  * 回放模型（仿真与测试用）。在仿真里把每次调用写进追踪（`llm.request`：调用序号与上下文里的候选编号；
- * 结局 `llm.output`、`llm.error`，以及先于结局到达的中止 `llm.aborted`，带是否因截止时间），不变量据此
- * 独立推出每次调用对决策插件意味着什么。
+ * 结局 `llm.output`、`llm.error`，以及先于结局到达的中止 `llm.aborted`，带是否因截止时间；失败给出之后、
+ * 决策插件处理之前到达的取消带 `afterResult`），不变量据此独立推出每次调用对决策插件意味着什么。
  */
 export const replayLlm = definePlugin({
   manifest: {
@@ -827,6 +827,21 @@ export const replayLlm = definePlugin({
             if ('error' in plan) {
               trace?.record('llm.error', { call, kind: plan.error });
               reject(new LlmError(plan.error, `回放的失败：${plan.error}`));
+              // 失败已经给出、决策插件还没处理（处理在微任务里）时，同一时刻别的定时器触发的取消先到：
+              // 决策插件把这次调用当作取消。仿真里只有这种中止发生在任何微任务运行之前，记下它；
+              // 决策插件处理失败时自己发的中止在微任务里，不记。
+              let drained = false;
+              queueMicrotask(() => {
+                drained = true;
+              });
+              signal.addEventListener(
+                'abort',
+                () => {
+                  if (!drained)
+                    trace?.record('llm.aborted', { call, deadline: false, afterResult: true });
+                },
+                { once: true },
+              );
             } else {
               trace?.record('llm.output', { call, output: plan.output });
               resolve(plan.output);
