@@ -10,6 +10,7 @@
     "@bellis/audience": "workspace:*",
     "@bellis/director": "workspace:*",
     "@bellis/kernel": "workspace:*",
+    "@bellis/memory": "workspace:*",
     "@bellis/obs": "workspace:*",
     "@bellis/plugins": "workspace:*",
     "@bellis/safety": "workspace:*",

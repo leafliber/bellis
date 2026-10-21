@@ -17,6 +17,7 @@ import {
   type ResolvedEntry,
   seededRandom,
 } from '@bellis/kernel';
+import { type Memory, MemoryService } from '@bellis/memory';
 import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import {
   type Speech,
@@ -52,6 +53,8 @@ export interface Setup {
   heard?: string[];
   /** 进行中的投票（`vote@1` 的 `current()`）；不给时投票插件不在场。 */
   vote?: VoteStatus | null;
+  /** 记忆（`memory@1`）；不给时记忆插件不在场。 */
+  memory?: Memory;
   telemetry?: boolean;
 }
 
@@ -139,6 +142,8 @@ export async function world(setup: Setup = {}) {
   host.provideCore(CandidatesService, candidates);
 
   const spoken: SpeechRequest[] = [];
+  /** 每段发言的结束：测试决定观众听到了什么。 */
+  const finish: Array<(outcome: UtteranceOutcome) => void> = [];
   const heard: UtteranceOutcome[] = (setup.heard ?? []).map((text, i) => ({
     id: `h${i}`,
     source: 'chatter',
@@ -150,7 +155,7 @@ export async function world(setup: Setup = {}) {
   const speech: Speech = {
     request(request) {
       spoken.push(request);
-      return new Promise(() => {});
+      return new Promise((resolve) => finish.push(resolve));
     },
     softStop() {},
     heard: () => heard,
@@ -170,6 +175,7 @@ export async function world(setup: Setup = {}) {
     host.provideCore(VoteService, votes);
   }
 
+  if (setup.memory) host.provideCore(MemoryService, setup.memory);
   host.provideCore(ClockService, clock);
   host.provideCore(RandomService, seededRandom(1));
   host.provideScoped(SafetyService, ({ instanceId, permissions }) =>
@@ -217,6 +223,7 @@ export async function world(setup: Setup = {}) {
     logs,
     calls,
     spoken,
+    finish,
     voteRequests,
     flush,
     /** 新一批候选到达。 */

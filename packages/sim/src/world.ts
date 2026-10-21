@@ -9,6 +9,7 @@ import {
   seededRandom,
   TraceService,
 } from '@bellis/kernel';
+import { type SimIrisBackend, SimIrisBackendService } from '@bellis/memory';
 import { builtinPlugins, builtinProjections } from '@bellis/plugins';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { ObsMetersService } from '@bellis/stage';
@@ -42,6 +43,8 @@ export interface WorldOptions {
   startAt?: number;
   /** 本次启动的标识，写进插件实例编号。 */
   bootId?: string;
+  /** 模拟 Iris 的数据：代表进程外的服务，由仿真在各次启动之间保留。 */
+  iris?: SimIrisBackend;
 }
 
 /** 追踪中的一条记录：各部分按发生顺序写入，时间为手动时钟的时刻。 */
@@ -92,6 +95,8 @@ export class World {
         this.record('fact.utterance', { ...(event.data as object) });
       else if (event.type.startsWith('vote.'))
         this.record(`fact.${event.type}`, { ...(event.data as object) });
+      else if (event.type.startsWith('memory.'))
+        this.record(`fact.${event.type}`, { factSeq: event.seq, ...(event.data as object) });
     });
     let kernel: Kernel | undefined;
     this.safety = new SafetyCore({
@@ -123,6 +128,7 @@ export class World {
       safetyFacade(this.safety, instanceId, permissions),
     );
     // 仿真里没有 OBS 音量表：stage-sync 一直用配置的初值作呈现延迟。
+    if (options.iris) this.kernel.provideCore(SimIrisBackendService, options.iris);
     this.kernel.provideCore(ObsMetersService, {
       connect: () => Promise.reject(new Error('仿真里没有 OBS 音量表')),
     });

@@ -69,6 +69,7 @@ const SAMPLES: DirectorContext[] = [
     ],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
     persona: PERSONA,
@@ -80,6 +81,7 @@ const SAMPLES: DirectorContext[] = [
     ],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
     persona: PERSONA,
@@ -91,6 +93,7 @@ const SAMPLES: DirectorContext[] = [
     ],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
     persona: PERSONA,
@@ -107,6 +110,7 @@ const SAMPLES: DirectorContext[] = [
       remainingSec: 18,
     },
     endedVote: null,
+    memories: [],
   },
   {
     persona: PERSONA,
@@ -115,6 +119,7 @@ const SAMPLES: DirectorContext[] = [
     candidates: [],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
     persona: PERSONA,
@@ -131,6 +136,7 @@ const SAMPLES: DirectorContext[] = [
       outcome: 'winner',
       winners: [1],
     },
+    memories: [],
   },
 ];
 

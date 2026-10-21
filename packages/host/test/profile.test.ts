@@ -129,9 +129,65 @@ test('live 样例加上 interaction patch：互动包整体启用，其余不变
   }
 });
 
+/** P2 的记忆包：Iris 客户端与记忆插件，整体启用或禁用。 */
+const MEMORY = ['iris', 'memory'];
+const memoryPatch = () => readJsonFile(path('patches/memory.json'));
+
+test('live 样例：记忆包缺省整体禁用，Iris 外发配置未确认、入口 ID 未配置', () => {
+  const entries = resolveProfile(profile(), []);
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  for (const id of MEMORY) {
+    assert.equal(byId.get(id)?.disabled, true, `${id} 随记忆包禁用`);
+    assert.equal(byId.get(id)?.explicitSwitch, true, `${id} 的开关显式写明`);
+  }
+  const packs = (profile() as { packs: Array<{ name: string; entries: Array<{ id: string }> }> })
+    .packs;
+  assert.deepEqual(
+    packs.find((p) => p.name === 'memory')?.entries.map((e) => e.id),
+    MEMORY,
+  );
+  // 维护者核对 Iris 的外发配置后才改成 true；入口 ID 由维护者填。
+  const config = (id: string) => byId.get(id)?.config as Record<string, unknown> | undefined;
+  assert.equal(config('iris')?.egressReviewed, false);
+  assert.equal(config('memory')?.entryId, '');
+});
+
+test('live 样例加上 memory patch（可与 interaction 一起）：记忆包整体启用；授权与依赖一致，只有 Iris 客户端持凭据', () => {
+  const base = resolveProfile(profile(), []);
+  assert.deepEqual(
+    (memoryPatch() as { ops: Array<{ op: string; id: string }> }).ops,
+    MEMORY.map((id) => ({ op: 'enable', id })),
+    'patch 只启用记忆包的条目',
+  );
+  for (const patches of [[memoryPatch()], [patch(), memoryPatch()]]) {
+    const entries = resolveProfile(profile(), patches);
+    assertConsistent(entries);
+    for (const entry of entries) {
+      const before = base.find((e) => e.id === entry.id);
+      const enabledByPatch =
+        MEMORY.includes(entry.id) || (patches.length === 2 && INTERACTION.includes(entry.id));
+      assert.equal(entry.disabled, enabledByPatch ? false : before?.disabled);
+    }
+    const byId = new Map(entries.map((e) => [e.id, manifest(e)]));
+    // 记忆插件依赖 Iris 客户端；弹幕接入是它的可选依赖，记忆是决策插件的可选依赖。
+    const [iris] = byId.get('iris')?.provides ?? [];
+    const [memory] = byId.get('memory')?.provides ?? [];
+    assert.ok(iris && memory);
+    assert.ok(byId.get('memory')?.inject.includes(iris));
+    assert.ok(byId.get('director')?.inject.includes(`${memory}?`));
+    // 收发与解读分开：Iris 客户端只持 secret:iris 与本机回环的外发许可，记忆插件不持凭据。
+    assert.deepEqual([...(byId.get('iris')?.permissions ?? [])].sort(), [
+      'net.egress:127.0.0.1',
+      'secret:iris',
+    ]);
+    assert.deepEqual(byId.get('memory')?.permissions, ['memory.write']);
+  }
+});
+
 test('live 配置样例不带 patch；interaction patch 相对配置文件所在目录引用', () => {
   const config = loadConfig(path('live.example.json'));
   assert.deepEqual(config.patches, []);
-  // 维护者在 live.json 的 patches 里写 "patches/interaction.json"，按配置文件所在目录解析。
+  // 维护者在 live.json 的 patches 里写 "patches/interaction.json"、"patches/memory.json"，按配置文件所在目录解析。
   assert.ok(readJsonFile(path('patches/interaction.json')));
+  assert.ok(readJsonFile(path('patches/memory.json')));
 });

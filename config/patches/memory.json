@@ -1,0 +1,4 @@
+{
+  "name": "memory",
+  "ops": [{ "op": "enable", "id": "iris" }, { "op": "enable", "id": "memory" }]
+}

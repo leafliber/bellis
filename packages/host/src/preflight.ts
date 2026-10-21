@@ -1,6 +1,12 @@
 import type { EntrySnapshot } from '@bellis/kernel';
 import type { SidecarQos } from '@bellis/protocol';
-import { type DanmakuReport, danmakuFailure, type LlmReport, probeFailure } from './readiness.ts';
+import {
+  type DanmakuReport,
+  danmakuFailure,
+  type LlmReport,
+  memoryCheckFailure,
+  probeFailure,
+} from './readiness.ts';
 
 /** 开播预检的输入：宿主从插件内核、Stage 服务、安全核与 OBS 应急连接收集。 */
 export interface PreflightInputs {
@@ -41,6 +47,11 @@ export interface PreflightInputs {
    * 开播预检的探测时带 `probe`。没有启用决策插件时为 undefined，不核对。
    */
   llm: (LlmReport & { probe?: () => Promise<void> }) | undefined;
+  /**
+   * 记忆：profile 中启用了提供 `memory@1` 的插件时给出；`check` 以宿主令牌访问 Iris（`GET /status`），
+   * `memory@1` 不在场时没有 `check`。没有启用记忆时为 undefined，不核对。
+   */
+  memory: { check?: () => Promise<void> } | undefined;
   /** OBS 应急目标的只读核对，返回未通过的项。 */
   inspectObs(): Promise<string[]>;
 }
@@ -71,7 +82,8 @@ async function localQos(read: () => Promise<SidecarQos>): Promise<string | undef
 
 /**
  * 开播预检（见运维“开播预检”）。返回未通过的项，全部通过时为空；任一未通过都不允许进入真实输出模式。
- * 安全核的拒绝原因（监督模式本身的前置条件）列在最前。决策模型只在配置了探测时才发请求。
+ * 安全核的拒绝原因（监督模式本身的前置条件）列在最前。决策模型只在配置了探测时才发请求；启用了记忆时，
+ * 每次预检以宿主令牌访问一次本机 Iris 的 GET /status。
  */
 export async function preflight(inputs: PreflightInputs): Promise<string[]> {
   const failures: string[] = [];
@@ -106,6 +118,18 @@ export async function preflight(inputs: PreflightInputs): Promise<string[]> {
     }
   } else if (inputs.llm && !inputs.llm.ready) {
     failures.push(`决策模型未就绪：${inputs.llm.status}`);
+  }
+  if (inputs.memory) {
+    // Iris 外发配置已核对（egressReviewed）由 Iris 客户端激活时核对：没确认就不激活，memory@1 不在场。
+    if (!inputs.memory.check) {
+      failures.push('记忆未就绪：memory@1 不在场（Iris 客户端或记忆插件没有激活，原因见插件状态）');
+    } else {
+      try {
+        await inputs.memory.check();
+      } catch (error) {
+        failures.push(memoryCheckFailure(error));
+      }
+    }
   }
   if (inputs.target === 'M1' && !inputs.reviewPresent)
     failures.push('M1 需要逐句放行环节（speech-review）');

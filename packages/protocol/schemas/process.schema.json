@@ -197,6 +197,19 @@
       },
       "additionalProperties": false
     },
+    "OperatorForgetParams": {
+      "type": "object",
+      "required": [
+        "account"
+      ],
+      "properties": {
+        "account": {
+          "type": "string",
+          "pattern": "^[\\x21-\\x7e]{1,128}$"
+        }
+      },
+      "additionalProperties": false
+    },
     "OperatorConsoleLoginResult": {
       "type": "object",
       "required": [
