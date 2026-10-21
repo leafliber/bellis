@@ -10,7 +10,7 @@
 
 | 命令 | 作用 |
 | --- | --- |
-| `status` | 当前模式、在场确认是否有效与剩余时间、维护态、审核开关、呈现延迟、M1 的放行方式与等待中的句子（等待方式、已等多久）、进行中的投票（题目、开票说明播报中或倒计时剩余、各项票数、是否在缺口中）、最近一次开播预检的结果、插件状态与 WAITING 原因 |
+| `status` | 当前模式、在场确认是否有效与剩余时间、维护态、审核开关、呈现延迟、M1 的放行方式与等待中的句子（等待方式、已等多久）、进行中的投票（题目、开票说明播报中或倒计时剩余、各项票数、是否在缺口中）、弹幕接入的状态（`danmaku`：就绪与否、状态说明、当前缺口的原因、开始时刻与已持续多久）、决策模型的状态（`llm`：就绪与否、状态说明、连续失败数、最近一次失败的类别与时间），两者判定见[开播预检](#开播预检)，profile 中没有启用时为 null；最近一次开播预检的结果、插件状态与 WAITING 原因 |
 | `mode 目标` | 切换监督模式。升级只能由操作员显式执行；降级也可由安全核自动触发 |
 | `presence` | 确认在场（M2 的前提） |
 | `estop [原因]` | 急停。参数不合法时照样急停，用缺省原因“操作员急停” |
@@ -39,14 +39,62 @@
 
 ## 开播预检
 
-开播前逐项确认，任一失败则不允许进入真实输出。操作员切到 M1–M3 时，先由安全核核对模式本身的前置条件（见[安全核](safety-core.md#监督模式)），满足后宿主再跑以下各项，未通过的项随拒绝一起返回并记入事件。`pnpm operator preflight` 与操作台的“只跑开播预检”只跑预检、不切换：先由安全核核对目标模式的前置条件（已处于该模式不算未满足），未满足就把原因列为第一项，再跑以下各项。最近一次预检（含切换前跑的）的结果显示在 `status` 与操作台上。
+开播前逐项确认，任一失败则不允许进入真实输出。操作员切到 M1–M3 时，先由安全核核对模式本身的前置条件（见[安全核](safety-core.md#监督模式)），满足后宿主再跑以下各项，未通过的项随拒绝一起返回并记入事件。`pnpm operator preflight` 与操作台的“只跑开播预检”只跑预检、不切换：先由安全核核对目标模式的前置条件（已处于该模式不算未满足），未满足就把原因列为第一项，再跑以下各项。最近一次预检（含切换前跑的）的结果显示在 `status` 与操作台上。预检可能含决策模型的探测，命令行与操作台等切换模式与只跑预检的应答至多 30 秒，其余请求照旧（命令行 5 秒，操作台 3 秒）。
 
 - 监督模式有效，M2 下在场确认未过期；
 - 安全场景、Stage 静音目标存在，看门狗连接正常；Stage 浏览器源的设置符合 [Stage](stage.md#obs-配置要求) 的要求，安全场景里不含 Stage 源；Stage 源没有被静音，节目场景不是安全场景（以上经 OBS 应急连接只读核对）。急停之后由操作员先取消静音、切回直播场景，再进入输出模式，Bellis 不自动切回；
 - Stage 已认证，AI 标识可见；
 - 审核插件的状态已确认（启用且审核模型可用，或已显式关闭）；
-- TTS、形象、弹幕接入、决策模型、Iris、Game Runtime 按 profile 就绪（profile 中启用的插件全部激活）；弹幕接入已开启场次、长连接已认证；Iris 能以宿主令牌访问且外发配置已核对；TTS 路由配置中第一个音频引擎（只出字幕不算）就绪，例如本地模型已加载完成；本地 TTS 作主引擎时，它的 sidecar 读回为 HighQoS（见 [Windows 平台](../platform/windows.md#定时与调度)）；形象还要求已连上 VTube Studio 并认证、嘴型参数没有被其他插件占用；M1 还要求逐句放行环节在场；
+- TTS、形象、弹幕接入、决策模型、Iris、Game Runtime 按 profile 就绪（profile 中启用的插件全部激活）；Iris 能以宿主令牌访问且外发配置已核对；TTS 路由配置中第一个音频引擎（只出字幕不算）就绪，例如本地模型已加载完成；本地 TTS 作主引擎时，它的 sidecar 读回为 HighQoS（见 [Windows 平台](../platform/windows.md#定时与调度)）；形象还要求已连上 VTube Studio 并认证、嘴型参数没有被其他插件占用；M1 还要求逐句放行环节在场；
+- 弹幕接入与决策模型按下文就绪；
 - 合规清单中试播门禁项已满足（见[合规](../compliance.md)）。
+
+**弹幕接入**：profile 中启用了提供 `danmaku@1` 的插件（B 站接入或回放）时核对，没有启用就不核对。接入插件报告此刻是否就绪与状态说明（`danmaku@1` 的 `ready`、`status`）：
+
+- B 站接入（`danmaku-bilibili`）在场次已开启、长连接已认证、正在接收时就绪；否则状态说明给出开启中、连接中，或在等什么、原因（例如 7002 的等待、IP 白名单等鉴权或配置问题、长连接断开）与约多久后重试。
+- 回放（`danmaku-replay`）恒为就绪。
+- 不在场（例如激活失败）、未就绪、或不报告就绪的来源都算未通过：`弹幕接入未就绪：<状态说明>`，在缺口中时加上 `；缺口已持续 <时长>`（缺口的开始时刻随 `gap()` 给出，见[观众接入](audience.md#b-站直播开放平台)）。
+
+**决策模型**：profile 中启用了决策插件时核对，`llm@1` 必须在场且就绪；没有启用决策插件就不核对。缺省不为它向厂商发请求（不外发、不计费），只看模型客户端报告的就绪（`llm@1` 的 `ready`、`status`、`failures`）：
+
+- 模型客户端（`llm-openai`）：配置齐全、凭据已读到（激活时已核对，否则插件加载失败、`llm@1` 不在场），且最近的调用没有处在连续失败中：还没调用过、或连续失败少于 `unreadyAfter` 次（缺省 3，与决策插件的 `alarmAfter` 缺省相同）就绪。鉴权失败（`auth`）一出现就未就绪，直到下一次成功。调用方取消不算失败，决策插件的截止时间（`callTimeoutMs`）到点算超时。
+- 回放模型（`llm-replay`）恒为就绪。
+- 不在场、未就绪或不报告就绪的都算未通过：`决策模型未就绪：<状态说明>`。说明只含最近一次失败的类别、HTTP 状态与错误码，不含服务端的说明。
+
+**显式探测**：模型客户端配置 `probeOnPreflight: true`（缺省 false）时，这一项改为每次预检发一个最小的请求：固定的极短提示词（只要求输出 `{"ok":true}`，不含人设、上下文与观众输入），按配置的型号、思考档位与输出方式，截止时间 `probeTimeoutMs`（缺省 10 秒，至多 20 秒）。应答正常结束、正文是一个 JSON 对象才通过；结果计入上面的就绪判定（成功清掉之前的失败）。未通过时为 `决策模型的探测请求失败（<类别>，HTTP <状态>，<错误码>）`。**探测会外发到模型服务、按调用计费**，切到 M1–M3 前与每次只跑预检各发一次；不打开就不发。
+
+## 真实配置的样例
+
+`config/live.example.json` 与 `config/profiles/live.example.json` 只含脱敏占位值；维护者复制成 `config/live.json` 与 `config/profiles/live.json`（不入库），填值、录凭据后用 `pnpm start config/live.json` 运行。profile 样例的插件包：
+
+| 包 | 条目 | 缺省 |
+| --- | --- | --- |
+| `telemetry` | `telemetry` | 启用（见[遥测服务](#遥测服务)） |
+| `obs`、`stage`、`avatar` | `obs`、`stage-page`、`stage`、`stage-sync`、`avatar` | 启用 |
+| `moderation` | `moderation` | 显式关闭（R-12 暂缓，见[审核插件](moderation.md)） |
+| `speech` | `speech`（发声仲裁）、`review`、`tts`、`tts-local`、`tts-cloud` | 启用；`tts-cloud` 禁用，两家都不外发 |
+| `interaction` | `danmaku`、`triage`、`vote`、`llm`、`director` | 整体禁用 |
+
+- **互动包缺省禁用**：复制样例后还没填项目 ID、录凭据时，弹幕接入与模型客户端会加载失败，开播预检一直不通过；它们还要外发到 B 站与方舟（方舟按调用计费），须维护者先同意。禁用时媒体部分照常可用，预检也不核对这两项。
+- **整体启用**：在 `config/live.json` 的 `patches` 里写 `"patches/interaction.json"`（仓库自带，按配置文件所在目录解析，只把互动包的五个条目设为启用）；去掉就整体关闭。`pnpm run profile config/profiles/live.json config/patches/interaction.json` 打印实际生效的条目。维护者自己写的 patch 也放在 `config/patches/` 下，不入库。
+
+**从 P1 时复制的 `live.json` 升级**：
+
+1. profile 的 `speech` 包加上发声仲裁：`{"id": "speech", "plugin": "speech-arbiter", "grant": ["speech.output"]}`。投票与决策都依赖它提供的 `speech@1`。
+2. 没有 `telemetry` 包的，从样例复制。
+3. 从样例整段复制 `interaction` 包（已有旧的弹幕、决策条目的，换成样例的写法），填：
+   - `danmaku` 的 `config.appId`：直播开放平台的项目 ID。样例的 0 表示未配置，插件以“未配置项目 ID（appId）”加载失败、不连任何端点；
+   - `director` 的 `config.persona`：人设，由操作员按实际角色改写；`fallback.lines` 按需改；
+   - `llm` 的 `config`：型号不是机密，换型号只改 `model`（见[决策模型](director.md#模型客户端插件)）；`probeOnPreflight` 见上文。
+4. 录凭据（`pnpm secret set 名字`，值不回显，见 [Windows 平台](../platform/windows.md#凭据)）：`bilibili`（JSON `{"accessKeyId": "…", "accessKeySecret": "…"}`）、`bilibili-code`（主播身份码）、`ark`（方舟的 API Key）。
+5. 在 `config/live.json` 的 `patches` 加上 `"patches/interaction.json"`，跑 `pnpm operator preflight` 看弹幕接入与决策模型两项。
+
+互动包里的先后关系由各插件的清单决定，依赖不全的条目停在 WAITING，开播预检随之不通过：
+
+- 分诊（`audience-triage`）依赖弹幕接入（`danmaku@1`）；
+- 投票（`audience-vote`）依赖弹幕接入与发声仲裁（`speech@1`），授予 `vote.start`；
+- 决策（`director`）依赖分诊（`candidates@1`）、模型客户端（`llm@1`）与发声仲裁；投票是它的可选依赖；
+- 弹幕接入（`danmaku-bilibili`）与模型客户端（`llm-openai`）只依赖宿主的核心服务，各自只持自己的凭据与外发许可；分诊、投票、决策不持凭据（见[插件内核](plugin-kernel.md#权限)）。
 
 ## 观测
 
