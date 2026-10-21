@@ -1,4 +1,10 @@
-import { type Candidate, CandidatesService, VoteService } from '@bellis/audience';
+import {
+  type Candidate,
+  CandidatesService,
+  VoteEnded,
+  type VoteEndedNotice,
+  VoteService,
+} from '@bellis/audience';
 import {
   ClockService,
   DeadlineError,
@@ -7,85 +13,111 @@ import {
   type TimerHandle,
   withDeadline,
 } from '@bellis/kernel';
+import { SafetyService } from '@bellis/safety';
 import { SpeechService } from '@bellis/speech';
 import {
   ErrorType,
   GenAi,
+  Metric,
   type Span,
   TelemetryService,
   type TraceRef,
   traceRef,
   useTracer,
 } from '@bellis/telemetry';
-import Type from 'typebox';
-import { parseAction, type VoteAction } from './output.ts';
-
-/**
- * 交给决策模型的上下文。只含人设、观众实际听到的近期发言、分诊后净化过的候选。
- * 不含凭据、OBS 与游戏的控制能力、私密记忆、未净化的原始昵称与原文（Rule of Two）。
- */
-export interface DirectorContext {
-  persona: string;
-  heard: string[];
-  candidates: Array<{ id: string; name: string; text: string; count: number }>;
-}
-
-export interface LlmRequest {
-  context: DirectorContext;
-  /**
-   * 这次模型调用的 span（W3C traceparent），模型客户端可以在它下面记自己的 span。只用于本机遥测，
-   * 不发给模型服务；不放进 `context`（那是交给模型的内容）。没有遥测时不出现。
-   */
-  traceparent?: string;
-}
-
-/** 模型的标识，写进 GenAI 语义约定的属性（`gen_ai.provider.name`、`gen_ai.request.model`）。 */
-export interface LlmModel {
-  provider: string;
-  name: string;
-}
-
-/** 一次调用用掉的 token 数与实际应答的型号（能拿到多少填多少）。 */
-export interface LlmUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  /** 输出里用于推理（思考）的 token 数。 */
-  reasoningOutputTokens?: number;
-  responseModel?: string;
-}
-
-/** 模型客户端在调用过程中报给决策插件的信息，只用于遥测；都可以不调用。 */
-export interface LlmCallOptions {
-  /** 拿到用量（以及实际应答的型号）时调用。 */
-  onUsage?(usage: LlmUsage): void;
-  /** 流式调用收到第一块时调用；不流式的客户端不调用。 */
-  onFirstChunk?(): void;
-}
-
-export interface Llm {
-  /** 模型标识（遥测用）；不提供时按 `unknown` 记。 */
-  readonly model?: LlmModel;
-  complete(request: LlmRequest, signal: AbortSignal, options?: LlmCallOptions): Promise<string>;
-}
-
-export const LlmService = defineService<Llm>('llm', 1);
+import Type, { type Static } from 'typebox';
+import { DEFAULT_DRIFT_PHRASES, type DriftSignal, driftSignals } from './drift.ts';
+import { type Llm, LlmError, type LlmModel, type LlmRequest, LlmService } from './llm.ts';
+import { parseIntent, type VoteAction } from './output.ts';
+import {
+  buildMessages,
+  type DecisionTrigger,
+  type DirectorContext,
+  type EndedVoteContext,
+  INTENT_OUTPUT,
+  type VoteContext,
+} from './prompt.ts';
 
 const UNKNOWN_MODEL: LlmModel = { provider: 'unknown', name: 'unknown' };
 
+/** 决策时机的先后（合并后按这个顺序写进上下文）。 */
+const TRIGGER_ORDER: readonly DecisionTrigger[] = ['vote-ended', 'candidates', 'idle'];
+
+export const DirectorConfig = Type.Object({
+  /** 人设与核心价值（操作员管理），放进提示词的系统部分。 */
+  persona: Type.String({ default: '' }),
+  maxCandidates: Type.Integer({ minimum: 1, default: 5 }),
+  /** 上下文里放观众实际听到的近期发言的条数（最近的若干条，跳过没有人听到的）。 */
+  heardLimit: Type.Integer({ minimum: 0, default: 8 }),
+  /** 一次调用的截止时间（含思考与全部输出），到点即取消。 */
+  callTimeoutMs: Type.Integer({ minimum: 1, default: 8_000 }),
+  replyTtlMs: Type.Integer({ minimum: 1, default: 20_000 }),
+  /** 冷场多久后自主发言；0 表示不闲聊。 */
+  idleMs: Type.Integer({ minimum: 0, default: 0 }),
+  /** 连续失败（超时、出错、非法输出）每满这么多次：告警并请求安全核降级。 */
+  alarmAfter: Type.Integer({ minimum: 1, default: 3 }),
+  /** 固定过渡语：模型超时或出错、而这次有观众在等回应时播一句（每串连续失败至多一句，轮流取用）。 */
+  fallback: Type.Object(
+    {
+      lines: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), { default: [] }),
+      ttlMs: Type.Integer({ minimum: 1, default: 5_000 }),
+    },
+    { default: {} },
+  ),
+  /** 人设漂移信号（见 drift.ts）。 */
+  drift: Type.Object(
+    {
+      phrases: Type.Array(Type.String({ minLength: 1 }), { default: [...DEFAULT_DRIFT_PHRASES] }),
+      similarity: Type.Number({ minimum: 0, maximum: 1, default: 0.8 }),
+      /** 与最近多少段发言比较（观众听到的与本插件最近交给发声的各取这么多）。 */
+      recent: Type.Integer({ minimum: 0, default: 8 }),
+      maxChars: Type.Integer({ minimum: 1, default: 120 }),
+      /** 有输出的决策连续命中信号每满这么多次：告警并请求安全核降级（内容重复或漂移）。 */
+      alarmAfter: Type.Integer({ minimum: 1, default: 3 }),
+    },
+    { default: {} },
+  ),
+});
+export type DirectorConfig = Static<typeof DirectorConfig>;
+
+/** 调用失败的类别（写进遥测的 `error.type`）：模型客户端给的类别，或本插件判定的。 */
+function failureKind(error: unknown): string {
+  if (error instanceof LlmError) return error.kind;
+  if (error instanceof DeadlineError) return 'timeout';
+  return 'call_failed';
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+const lastOf = <T>(list: readonly T[], n: number): T[] => (n <= 0 ? [] : list.slice(-n));
+
+/** 被取消的调用（更高优先级的时机到来，或插件停用）。 */
+class Cancelled extends Error {}
+
 /**
- * 决策模型（普通插件）：在决策时机到来时组装上下文、调用模型、把输出解析成枚举的意图。
- * 时机：新一批候选到达、冷场计时到期。同时只有一个在途调用，每次调用都有截止时间。
- * 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
+ * 决策模型（普通插件）：在决策时机到来时组装上下文、调用模型、把输出解析成枚举的意图（见决策模型）。
+ *
+ * - 时机：新一批候选到达、冷场计时到期、投票正常结束（扩展点 `vote.ended`）。同时只有一个在途调用：
+ *   在途的是不带候选与投票结果的闲聊调用时，新到的候选或投票结束取消它并立即重来；否则新时机排队，
+ *   排队的时机在在途调用结束后合并成一次调用；在途时冷场计时到期不另排。每次调用都有截止时间。
+ * - 提示词由确定性代码组装（prompt.ts）：观众内容只在不可信数据区里；输出各种方式共用 `parseIntent` 解析与校验，
+ *   非法输出丢弃，不修补。
+ * - 失败：超时或出错时放弃本次时机，有观众在等回应时可播一句固定过渡语；连续失败每满 `alarmAfter` 次告警
+ *   （事实 `director.alarmed`）并请求安全核降级。人设漂移信号连续命中同样处理。
+ * - 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
  *
  * 遥测（见运维“观测”）：一次模型调用一个 GenAI span（`chat <型号>`，父为排第一的候选，其余候选以 links
  * 关联），记 `gen_ai.client.inference.duration`；模型客户端报来用量时 token 数记在 span 上，流式客户端报来
- * 第一块时记 `gen_ai.client.inference.time_to_first_chunk`。回应弹幕的发言以被回应的候选为父、以 link
- * 关联这次调用，带上链路起点；闲聊与开票说明以这次调用为父。不记上下文与模型输出。
+ * 第一块时记 `gen_ai.client.inference.time_to_first_chunk`、第一个正文块时记 `bellis.llm.time_to_first_output`。
+ * 回应弹幕的发言以被回应的候选为父、以 link 关联这次调用，带上链路起点；闲聊与开票说明以这次调用为父。
+ * 不记上下文与模型输出。
  */
 export const director = definePlugin({
   manifest: {
     id: 'director',
-    version: '0.1.0',
+    version: '0.2.0',
     tier: 'ordinary',
     provides: [],
     inject: [
@@ -93,33 +125,37 @@ export const director = definePlugin({
       SpeechService.ref,
       CandidatesService.ref,
       ClockService.ref,
+      SafetyService.ref,
       `${VoteService.ref}?`,
       `${TelemetryService.ref}?`,
     ],
     permissions: [],
     process: 'in-process',
-    config: Type.Object({
-      persona: Type.String({ default: '' }),
-      maxCandidates: Type.Integer({ minimum: 1, default: 5 }),
-      callTimeoutMs: Type.Integer({ minimum: 1, default: 8_000 }),
-      replyTtlMs: Type.Integer({ minimum: 1, default: 20_000 }),
-      /** 冷场多久后自主发言；0 表示不闲聊。 */
-      idleMs: Type.Integer({ minimum: 0, default: 0 }),
-      /** 连续这么多次失败后告警。 */
-      alarmAfter: Type.Integer({ minimum: 1, default: 3 }),
-    }),
+    config: DirectorConfig,
   },
   activate(ctx) {
     const llm = ctx.service(LlmService);
     const speech = ctx.service(SpeechService);
     const candidates = ctx.service(CandidatesService);
     const clock = ctx.service(ClockService);
+    const safety = ctx.service(SafetyService);
     const tracer = useTracer(ctx, 'director');
     const config = ctx.config;
-    let inflight = false;
-    let again = false;
+
+    /** 排队的决策时机：在途调用结束后合并成一次调用。 */
+    const pending = new Set<DecisionTrigger>();
+    /** 刚结束、还没交给模型的投票。 */
+    let endedVote: EndedVoteContext | undefined;
+    let inflight: { cancellable: boolean; cancel(by: string): void } | undefined;
+    let running = false;
     let failures = 0;
+    /** 这一串连续失败里是否已播过过渡语。 */
+    let fallbackPlayed = false;
+    let fallbacks = 0;
+    let driftStreak = 0;
     let calls = 0;
+    /** 本插件最近交给发声的文本（漂移的重复检测用）。 */
+    const outputs: string[] = [];
     let idleTimer: TimerHandle | undefined;
 
     /** 回应弹幕的发言以被回应的候选为父（链路起点不变），以 link 关联这次模型调用；其余以模型调用为父。 */
@@ -133,11 +169,110 @@ export const director = definePlugin({
       };
     };
 
-    const context = (taken: Candidate[]): DirectorContext => ({
+    const voteContext = (): VoteContext | null => {
+      const status = ctx.optional(VoteService)?.current();
+      if (!status) return null;
+      return {
+        phase: status.phase,
+        question: status.question,
+        options: status.options.map((text, i) => ({
+          number: i + 1,
+          text,
+          votes: status.counts[i] ?? 0,
+        })),
+        remainingSec: status.remainingMs === null ? null : Math.ceil(status.remainingMs / 1000),
+      };
+    };
+
+    const context = (
+      triggers: DecisionTrigger[],
+      taken: Candidate[],
+      ended: EndedVoteContext | undefined,
+    ): DirectorContext => ({
       persona: config.persona,
-      heard: speech.heard().map((utterance) => utterance.heard),
+      triggers,
+      heard: lastOf(
+        speech
+          .heard()
+          .map((utterance) => utterance.heard)
+          .filter((text) => text !== ''),
+        config.heardLimit,
+      ),
       candidates: taken.map((c) => ({ id: c.id, name: c.name, text: c.text, count: c.count })),
+      vote: voteContext(),
+      endedVote: ended ?? null,
     });
+
+    /** 告警（事实 `director.alarmed`，进操作台的近期告警）并请求安全核降级。 */
+    const alarm = (cause: 'failures' | 'drift', count: number, detail: string) => {
+      safety.record('director.alarmed', { cause, count, detail });
+      const reason =
+        cause === 'failures'
+          ? `决策模型连续失败 ${count} 次（最近一次：${detail}）`
+          : `决策输出连续 ${count} 次重复或漂移（${detail}）`;
+      const mode = safety.requestDowngrade(reason);
+      ctx.log('director.alarm', { cause, count, detail, mode });
+    };
+
+    /** 固定过渡语：每串连续失败至多一句，轮流取用。文本来自 profile，不含不可信输入。 */
+    const playFallback = (call: Span) => {
+      const { lines, ttlMs } = config.fallback;
+      if (lines.length === 0 || fallbackPlayed) return;
+      fallbackPlayed = true;
+      const index = fallbacks % lines.length;
+      fallbacks += 1;
+      const trace = traceRef(call);
+      ctx.log('director.fallback', { index });
+      void speech.request({
+        id: `director:${ctx.instanceId}:fallback:${fallbacks}`,
+        source: 'chatter',
+        text: lines[index] as string,
+        expiresAt: clock.now() + ttlMs,
+        preempt: 'immediate',
+        inputs: [],
+        untrusted: false,
+        ...(trace ? { trace } : {}),
+      });
+    };
+
+    /** 一次失败：超时、出错、非法输出、回应对象不在上下文中。 */
+    const failed = (kind: string, reason: string, call: Span, waiting: boolean) => {
+      failures += 1;
+      ctx.log('director.output-dropped', { kind, reason, failures });
+      // 超时与出错才播过渡语：非法输出照常丢弃，不当作“还在想”。
+      const callFailed = kind !== 'invalid_output' && kind !== 'unknown_target';
+      if (callFailed && waiting) playFallback(call);
+      if (failures % config.alarmAfter === 0) alarm('failures', failures, kind);
+    };
+
+    const succeeded = () => {
+      failures = 0;
+      fallbackPlayed = false;
+    };
+
+    /** 漂移信号：命中时写日志、记在 span 上；有输出的决策连续命中每满阈值告警并请求降级。 */
+    const noteDrift = (signals: DriftSignal[], call: Span) => {
+      if (signals.length === 0) {
+        driftStreak = 0;
+        return;
+      }
+      driftStreak += 1;
+      const joined = signals.join(',');
+      call.setAttributes({ 'bellis.director.drift': joined });
+      ctx.log('director.drift', { signals, streak: driftStreak });
+      if (driftStreak % config.drift.alarmAfter === 0) alarm('drift', driftStreak, joined);
+    };
+
+    const recentTexts = () => [
+      ...lastOf(
+        speech
+          .heard()
+          .map((utterance) => utterance.heard)
+          .filter((text) => text !== ''),
+        config.drift.recent,
+      ),
+      ...lastOf(outputs, config.drift.recent),
+    ];
 
     /**
      * 发起投票：交给投票插件（`vote@1`），规则、计票与口播都在那里；优先级与发声来源也由那里的确定性代码决定，
@@ -172,174 +307,278 @@ export const director = definePlugin({
         );
     };
 
-    const failed = (reason: string) => {
-      failures += 1;
-      ctx.log('director.output-dropped', { reason, failures });
-      if (failures >= config.alarmAfter) ctx.log('director.alarm', { failures });
-    };
-
-    const decide = async () => {
-      if (inflight) {
-        again = true;
+    /** 一次决策：取候选、组装上下文、调用模型（可被取消）、解析并交出意图。 */
+    const decide = async (triggers: DecisionTrigger[]) => {
+      const taken = candidates.take(config.maxCandidates);
+      const ended = endedVote;
+      endedVote = undefined;
+      // 写进上下文的时机只留实际带来了数据的；都没有时按冷场。
+      const effective = triggers.filter(
+        (t) =>
+          (t !== 'candidates' || taken.length > 0) && (t !== 'vote-ended' || ended !== undefined),
+      );
+      const reasons: DecisionTrigger[] = effective.length > 0 ? effective : ['idle'];
+      // 不带候选与投票结果的调用（闲聊）可以被新到的候选或投票结束取消。
+      const cancellable = taken.length === 0 && ended === undefined;
+      const model = llm.model ?? UNKNOWN_MODEL;
+      const call = tracer.startSpan(`chat ${model.name}`, {
+        kind: 'client',
+        parent: taken[0]?.trace,
+        links: taken.slice(1).map((c) => c.trace),
+        attributes: {
+          [GenAi.OperationName]: 'chat',
+          [GenAi.ProviderName]: model.provider,
+          [GenAi.RequestModel]: model.name,
+          'bellis.director.candidates': taken.length,
+          'bellis.director.trigger': reasons.join(','),
+        },
+      });
+      /** 结束这次调用的 span；出错时带上类别（不带模型输出）。 */
+      const endCall = (errorType?: string) => {
+        if (errorType) call.fail(errorType);
+        call.end();
+      };
+      const startedAt = clock.now();
+      /** 调用已有结果（含超时与取消）：之后客户端再报的用量与首块不记。 */
+      let settled = false;
+      let responseModel: string | undefined;
+      /** 推理指标的属性：必填厂商，能拿到时加实际应答的型号，出错时加错误类别。 */
+      const metricAttributes = (errorType?: string) => ({
+        [GenAi.ProviderName]: model.provider,
+        [GenAi.ResponseModel]: responseModel,
+        [ErrorType]: errorType,
+      });
+      const recordDuration = (errorType?: string) =>
+        tracer.record(
+          GenAi.InferenceDuration,
+          (clock.now() - startedAt) / 1000,
+          's',
+          metricAttributes(errorType),
+          call,
+        );
+      const contextValue = context(reasons, taken, ended);
+      const request: LlmRequest = {
+        messages: buildMessages(contextValue),
+        output: INTENT_OUTPUT,
+        context: contextValue,
+        ...(call.traceparent ? { traceparent: call.traceparent } : {}),
+      };
+      const controller = new AbortController();
+      let cancelledBy: string | undefined;
+      // 取消时不等客户端收尾：客户端没有及时响应中止信号也照样结束这次调用。
+      const cancelled = new Promise<never>((_, reject) =>
+        controller.signal.addEventListener('abort', () => reject(new Cancelled()), { once: true }),
+      );
+      cancelled.catch(() => {});
+      inflight = {
+        cancellable,
+        cancel: (by) => {
+          cancelledBy ??= by;
+          controller.abort();
+        },
+      };
+      let output: string;
+      try {
+        output = await withDeadline(
+          clock,
+          Promise.race([
+            completeWith(llm, request, controller.signal, {
+              onUsage: (usage) => {
+                if (settled) return;
+                responseModel = usage.responseModel ?? responseModel;
+                call.setAttributes({
+                  [GenAi.UsageInputTokens]: usage.inputTokens,
+                  [GenAi.UsageOutputTokens]: usage.outputTokens,
+                  [GenAi.UsageReasoningOutputTokens]: usage.reasoningOutputTokens,
+                  [GenAi.ResponseModel]: usage.responseModel,
+                });
+              },
+              onFirstChunk: () => {
+                if (settled) return;
+                tracer.record(
+                  GenAi.InferenceTimeToFirstChunk,
+                  (clock.now() - startedAt) / 1000,
+                  's',
+                  metricAttributes(),
+                  call,
+                );
+              },
+              onFirstOutput: () => {
+                if (settled) return;
+                tracer.record(
+                  Metric.LlmFirstOutput,
+                  (clock.now() - startedAt) / 1000,
+                  's',
+                  metricAttributes(),
+                  call,
+                );
+              },
+            }),
+            cancelled,
+          ]),
+          config.callTimeoutMs,
+          '决策模型调用',
+        );
+      } catch (error) {
+        settled = true;
+        inflight = undefined;
+        controller.abort();
+        if (cancelledBy !== undefined) {
+          recordDuration('cancelled');
+          endCall('cancelled');
+          ctx.log('director.cancelled', { by: cancelledBy });
+          return;
+        }
+        const kind = failureKind(error);
+        recordDuration(kind);
+        endCall(kind);
+        failed(kind, message(error), call, taken.length > 0);
         return;
       }
-      inflight = true;
-      try {
-        do {
-          again = false;
-          if (ctx.signal.aborted) return;
-          const taken = candidates.take(config.maxCandidates);
-          const model = llm.model ?? UNKNOWN_MODEL;
-          const call = tracer.startSpan(`chat ${model.name}`, {
-            kind: 'client',
-            parent: taken[0]?.trace,
-            links: taken.slice(1).map((c) => c.trace),
-            attributes: {
-              [GenAi.OperationName]: 'chat',
-              [GenAi.ProviderName]: model.provider,
-              [GenAi.RequestModel]: model.name,
-              'bellis.director.candidates': taken.length,
-            },
-          });
-          /** 结束这次调用的 span；出错时带上类别（不带模型输出）。 */
-          const endCall = (errorType?: string) => {
-            if (errorType) call.fail(errorType);
-            call.end();
-          };
-          const startedAt = clock.now();
-          /** 调用已有结果（含超时）：之后客户端再报的用量与首块不记。 */
-          let settled = false;
-          let responseModel: string | undefined;
-          /** 推理指标的属性：必填厂商，能拿到时加实际应答的型号，出错时加错误类别。 */
-          const metricAttributes = (errorType?: string) => ({
-            [GenAi.ProviderName]: model.provider,
-            [GenAi.ResponseModel]: responseModel,
-            [ErrorType]: errorType,
-          });
-          const request: LlmRequest = {
-            context: context(taken),
-            ...(call.traceparent ? { traceparent: call.traceparent } : {}),
-          };
-          const controller = new AbortController();
-          let output: string;
-          try {
-            output = await withDeadline(
-              clock,
-              llm.complete(request, controller.signal, {
-                onUsage: (usage) => {
-                  if (settled) return;
-                  responseModel = usage.responseModel ?? responseModel;
-                  call.setAttributes({
-                    [GenAi.UsageInputTokens]: usage.inputTokens,
-                    [GenAi.UsageOutputTokens]: usage.outputTokens,
-                    [GenAi.UsageReasoningOutputTokens]: usage.reasoningOutputTokens,
-                    [GenAi.ResponseModel]: usage.responseModel,
-                  });
-                },
-                // 流式客户端（第 3 步的真实模型客户端）收到第一块时调用；回放模型不流式，不调用。
-                onFirstChunk: () => {
-                  if (settled) return;
-                  tracer.record(
-                    GenAi.InferenceTimeToFirstChunk,
-                    (clock.now() - startedAt) / 1000,
-                    's',
-                    metricAttributes(),
-                    call,
-                  );
-                },
-              }),
-              config.callTimeoutMs,
-              '决策模型调用',
-            );
-          } catch (error) {
-            settled = true;
-            controller.abort();
-            const errorType = error instanceof DeadlineError ? 'timeout' : 'call_failed';
-            tracer.record(
-              GenAi.InferenceDuration,
-              (clock.now() - startedAt) / 1000,
-              's',
-              metricAttributes(errorType),
-              call,
-            );
-            endCall(errorType);
-            failed((error as Error).message);
-            continue;
-          }
-          settled = true;
-          tracer.record(
-            GenAi.InferenceDuration,
-            (clock.now() - startedAt) / 1000,
-            's',
-            metricAttributes(),
+      settled = true;
+      inflight = undefined;
+      recordDuration();
+      const parsed = parseIntent(output);
+      if (!parsed.ok) {
+        endCall('invalid_output');
+        failed('invalid_output', parsed.reason, call, taken.length > 0);
+        return;
+      }
+      const action = parsed.action;
+      call.setAttributes({ 'bellis.director.action': action.action });
+      if (action.action === 'speak') {
+        const target =
+          action.replyTo === undefined ? undefined : taken.find((c) => c.id === action.replyTo);
+        if (action.replyTo !== undefined && !target) {
+          endCall('unknown_target');
+          failed(
+            'unknown_target',
+            `回应对象 ${action.replyTo} 不在本次上下文中`,
             call,
+            taken.length > 0,
           );
-          const parsed = parseAction(output);
-          if (!parsed.ok) {
-            endCall('invalid_output');
-            failed(parsed.reason);
-            continue;
+          return;
+        }
+        noteDrift(driftSignals(action.text, recentTexts(), config.drift), call);
+        endCall();
+        succeeded();
+        calls += 1;
+        outputs.push(action.text);
+        if (outputs.length > config.drift.recent) outputs.shift();
+        const trace = speechTrace(call, target);
+        void speech.request({
+          id: `director:${ctx.instanceId}:${calls}`,
+          source: target ? 'danmaku-reply' : 'chatter',
+          text: action.text,
+          expiresAt: clock.now() + config.replyTtlMs,
+          // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
+          preempt: target ? 'sentence' : 'immediate',
+          inputs: target ? target.sources : [],
+          // 上下文里有弹幕，输出就受不可信输入影响。
+          untrusted: taken.length > 0,
+          ...(trace ? { trace } : {}),
+        });
+      } else if (action.action === 'vote') {
+        // 题目与选项也要说出口：查出戏用语与格式（各段分别查，不查重复）。
+        const signals = new Set<DriftSignal>();
+        for (const piece of [action.question, ...action.options]) {
+          for (const signal of driftSignals(piece, [], config.drift)) signals.add(signal);
+        }
+        noteDrift([...signals], call);
+        endCall();
+        succeeded();
+        calls += 1;
+        startVote(action, taken, `director:${ctx.instanceId}:${calls}`, traceRef(call));
+      } else {
+        endCall();
+        succeeded();
+        ctx.log('director.silence', { ...action });
+      }
+    };
+
+    /** 依次处理排队的时机，每轮把排队的全部合并成一次调用。 */
+    const run = async () => {
+      running = true;
+      try {
+        while (pending.size > 0 && !ctx.signal.aborted) {
+          const triggers = TRIGGER_ORDER.filter((t) => pending.has(t));
+          pending.clear();
+          try {
+            await decide(triggers);
+          } catch (error) {
+            // 本插件自己的错误（不是模型调用的失败）：记下后继续处理后面的时机。
+            inflight = undefined;
+            ctx.log('director.decide-failed', { error: message(error) });
           }
-          const action = parsed.action;
-          call.setAttributes({ 'bellis.director.action': action.action });
-          if (action.action === 'speak') {
-            const target =
-              action.replyTo === undefined ? undefined : taken.find((c) => c.id === action.replyTo);
-            if (action.replyTo !== undefined && !target) {
-              endCall('unknown_target');
-              failed(`回应对象 ${action.replyTo} 不在本次上下文中`);
-              continue;
-            }
-            endCall();
-            failures = 0;
-            calls += 1;
-            const trace = speechTrace(call, target);
-            void speech.request({
-              id: `director:${ctx.instanceId}:${calls}`,
-              source: target ? 'danmaku-reply' : 'chatter',
-              text: action.text,
-              expiresAt: clock.now() + config.replyTtlMs,
-              // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
-              preempt: target ? 'sentence' : 'immediate',
-              inputs: target ? target.sources : [],
-              // 上下文里有弹幕，输出就受不可信输入影响。
-              untrusted: taken.length > 0,
-              ...(trace ? { trace } : {}),
-            });
-          } else if (action.action === 'vote') {
-            endCall();
-            failures = 0;
-            calls += 1;
-            startVote(action, taken, `director:${ctx.instanceId}:${calls}`, traceRef(call));
-          } else {
-            endCall();
-            failures = 0;
-            ctx.log('director.silence', { ...action });
-          }
-        } while (again);
+        }
       } finally {
-        inflight = false;
+        running = false;
         armIdle();
       }
+    };
+
+    /**
+     * 新的决策时机：没有在途调用就立即开始；在途时冷场到期不另排，其余排队，在途的是可取消的闲聊调用就取消它。
+     */
+    const trigger = (t: DecisionTrigger) => {
+      if (ctx.signal.aborted) return;
+      if (inflight) {
+        if (t === 'idle') return;
+        pending.add(t);
+        if (inflight.cancellable) inflight.cancel(t);
+        return;
+      }
+      pending.add(t);
+      if (!running) void run();
     };
 
     const armIdle = () => {
       if (idleTimer) clock.clearTimeout(idleTimer);
       idleTimer = undefined;
       if (config.idleMs > 0 && !ctx.signal.aborted) {
-        idleTimer = clock.setTimeout(() => void decide(), config.idleMs);
+        idleTimer = clock.setTimeout(() => trigger('idle'), config.idleMs);
       }
     };
 
-    ctx.register(candidates.onAvailable(() => void decide()));
+    const onVoteEnded = (notice: VoteEndedNotice) => {
+      endedVote = {
+        question: notice.question,
+        options: notice.options.map((text, i) => ({
+          number: i + 1,
+          text,
+          votes: notice.counts[i] ?? 0,
+        })),
+        outcome: notice.outcome,
+        winners: [...notice.winners],
+      };
+      trigger('vote-ended');
+    };
+
+    ctx.register(candidates.onAvailable(() => trigger('candidates')));
+    ctx.on(VoteEnded, onVoteEnded);
     ctx.register(() => {
       if (idleTimer) clock.clearTimeout(idleTimer);
+      inflight?.cancel('unload');
     });
     armIdle();
   },
 });
 
-/** 回放的模型输出（P0 用）：按顺序返回录好的输出，并记下收到的上下文以便检查。 */
+/** 调用模型；客户端同步抛错也当作这次调用失败。 */
+function completeWith(
+  llm: Llm,
+  request: LlmRequest,
+  signal: AbortSignal,
+  options: Parameters<Llm['complete']>[2],
+): Promise<string> {
+  try {
+    return llm.complete(request, signal, options);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+/** 回放的模型输出（P0 用）：按顺序返回录好的输出，并记下收到的请求以便检查。 */
 export interface ReplayLlm extends Llm {
   readonly requests: readonly LlmRequest[];
 }
@@ -349,7 +588,7 @@ export const ReplayLlmService = defineService<ReplayLlm>('llm-replay', 1);
 export const replayLlm = definePlugin({
   manifest: {
     id: 'llm-replay',
-    version: '0.1.0',
+    version: '0.2.0',
     tier: 'ordinary',
     provides: [LlmService.ref, ReplayLlmService.ref],
     inject: [ClockService.ref],
@@ -369,13 +608,22 @@ export const replayLlm = definePlugin({
       // 遥测里填回放的标识，不冒充真实的厂商与型号。
       model: { provider: 'bellis.replay', name: 'replay' },
       requests,
-      complete(request) {
+      complete(request, signal) {
         requests.push(structuredClone(request));
         const output = ctx.config.outputs[next] ?? '{"action":"silence","reason":"回放结束"}';
         next += 1;
-        return new Promise((resolve) =>
-          clock.setTimeout(() => resolve(output), ctx.config.latencyMs),
-        );
+        return new Promise((resolve, reject) => {
+          const onAbort = () => {
+            clock.clearTimeout(timer);
+            reject(new LlmError('aborted', '已取消'));
+          };
+          const timer = clock.setTimeout(() => {
+            signal.removeEventListener('abort', onAbort);
+            resolve(output);
+          }, ctx.config.latencyMs);
+          if (signal.aborted) onAbort();
+          else signal.addEventListener('abort', onAbort, { once: true });
+        });
       },
     };
     ctx.provide(LlmService, replay);

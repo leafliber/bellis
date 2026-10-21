@@ -44,4 +44,6 @@ export const Metric = {
   LeaseRenewLag: 'bellis.lease.renew.lag',
   /** 宿主事件循环延迟：每个采样周期里的最大值。 */
   EventLoopDelay: 'bellis.host.event_loop.delay',
+  /** 流式推理调用从发出到第一个正文块（不含思考内容；函数调用方式下为第一段函数参数）。 */
+  LlmFirstOutput: 'bellis.llm.time_to_first_output',
 } as const;

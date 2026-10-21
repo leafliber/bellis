@@ -36,6 +36,7 @@
 ## 模型与记忆
 
 - 火山方舟：[模型列表](https://docs.volcengine.com/docs/ark/model-list)、[深度思考](https://docs.volcengine.com/docs/ark/deep-thinking)、[Chat API](https://ark.volcengine.com/region:cn-beijing/docs/chat-api.md)、[Base URL 与鉴权](https://ark.volcengine.com/region:cn-beijing/docs/base-url-and-authentication.md)、[GLM-5.3-flash 模型卡](https://ark.volcengine.com/models/glm-5-3-flash.md)。
+- OpenAI 兼容的 Chat Completions（模型客户端按它收发）：[流式返回的块](https://platform.openai.com/docs/api-reference/chat-streaming)、[结构化输出](https://platform.openai.com/docs/guides/structured-outputs)、[函数调用](https://platform.openai.com/docs/guides/function-calling)；SSE 按 [WHATWG 的事件流格式](https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation)解析。
 - [iris-core 宿主接口契约](https://github.com/AirObject/iris-core/blob/main/docs/host-api.md)。
 - [W3C Trace Context](https://www.w3.org/TR/trace-context/)、[OTLP 文件格式](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/file-exporter.md)、[OpenTelemetry GenAI 语义约定](https://github.com/open-telemetry/semantic-conventions-genai)。
 

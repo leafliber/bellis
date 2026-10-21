@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { voteIntentKey, voteLedger, voteSpeechId } from '../src/index.ts';
+import {
+  VoteEnded,
+  type VoteEndedNotice,
+  voteIntentKey,
+  voteLedger,
+  voteSpeechId,
+} from '../src/index.ts';
 import { ballotRequest, type VoteWorld, voteWorld } from './vote-helpers.ts';
 
 /** 开票说明（缺省 1 秒播完）之后倒计时 30 秒：截止在 31 秒。 */
@@ -223,12 +229,47 @@ test('开票说明与结果各只播一次：结果以“投票结果”来源�
     assert.equal(result?.text, '投票结束！「魔女审判」以一票胜出，一共一票。');
   }));
 
-test('急停：进行中的投票中止，不出结果', () =>
+test('正常结束时分发 vote.ended 扩展点（记下结果之后、播报之前），带题目、选项、票数与胜出编号', () =>
   withWorld(async (w) => {
+    const notices: VoteEndedNotice[] = [];
+    let speechAtNotice = -1;
+    const off = w.kernel.extensions.add(VoteEnded, (notice) => {
+      notices.push(notice);
+      speechAtNotice = w.speechCalls.length;
+      assert.equal(w.events('vote.ended').length, 1, '先记下结果');
+    });
+    const request = ballotRequest({ options: ['甲', '乙'] });
+    await w.start(request);
+    await w.advance(ANNOUNCED_AT);
+    w.send('a', '2');
+    w.send('b', '乙');
+    w.send('c', '1');
+    await w.advance(30_000);
+    off();
+    assert.deepEqual(notices, [
+      {
+        voteId: request.id,
+        question: '下一把玩什么？',
+        options: ['甲', '乙'],
+        counts: [1, 2],
+        valid: 3,
+        outcome: 'winner',
+        winners: [2],
+        decisionPoint: null,
+      },
+    ]);
+    assert.equal(speechAtNotice, 1, '分发时还没请求播报结果');
+  }));
+
+test('急停：进行中的投票中止，不出结果，也不分发 vote.ended', () =>
+  withWorld(async (w) => {
+    const notices: VoteEndedNotice[] = [];
+    w.kernel.extensions.add(VoteEnded, (notice) => notices.push(notice));
     await w.start();
     await w.advance(ANNOUNCED_AT + 5000);
     await w.safety.emergencyStop('操作员急停');
     await w.advance(40_000);
+    assert.deepEqual(notices, []);
     assert.deepEqual(
       w.events('vote.aborted').map((e) => e.cause),
       ['stopped'],

@@ -31,7 +31,7 @@
   - 任何一项不符一律拒绝，响应体为空，原因只写宿主日志（`console.refused`）。
 - **响应头**：CSP 为 `default-src 'none'`，脚本、样式、连接只许 `'self'`，`frame-ancestors 'none'`、`base-uri 'none'`、`form-action 'none'`；另有 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`。
 - **接口**：`GET /api/status` 与 `pnpm operator status` 的内容相同，另加近期告警；`POST /api/mode`、`/api/presence`、`/api/emergency-stop`、`/api/veto`、`/api/release`、`/api/preflight` 与命令行的同名命令调同一个动作；`POST /api/login`、`GET /api/session`、`POST /api/logout` 管理会话。
-- **近期告警**：宿主订阅状态存储，环形保存最近 50 条重要事实：模式变化与拒绝、急停请求与完成、OBS 外部变化、看门狗动作、否决与等待放行超时、审核开关变化、TTS 换引擎与降级、弹幕缺口、投票中止。宿主重启后从空开始。
+- **近期告警**：宿主订阅状态存储，环形保存最近 50 条重要事实：模式变化与拒绝、急停请求与完成、OBS 外部变化、看门狗动作、否决与等待放行超时、审核开关变化、TTS 换引擎与降级、弹幕缺口、投票中止、决策模型的告警（连续失败或连续漂移，已请求降级）。宿主重启后从空开始。
 - **页面**：每秒轮询状态；连不上宿主或会话失效时醒目提示，并把状态清成未知，不把过期的数据当作当前状态。顶部常显审核状态：审核插件关闭时为“审核已关闭”，未显式设置时为“审核状态未设置”。来自宿主的文本（句子可能受弹幕影响）只用 `textContent` 渲染。
 - **操作**：急停（一键，不二次确认）；确认在场（页面在线不算在场，必须操作员主动点）；切换监督模式（升级到 M1–M3 要再点一次确认）；只跑开播预检；M1 中逐句放行、否决与全部否决；注销。
 
@@ -65,7 +65,7 @@
   - `sidecarEnv()`：拉起 sidecar 时加进它环境的变量（见下文[跨进程](#跨进程)）。
 - trace ID 与 span ID 取自 `random@1`，时间取自 `clock@1`：时间戳是 Unix 纳秒，即时钟零点对应的 Unix 毫秒加单调时钟。确定性仿真里同一种子两次运行的遥测完全相同。
 - `traceparent` 按 W3C Trace Context Level 1 解析：接受更高的版本（只读前四段），拒绝版本 ff、全零的 ID 与不合格的写法；生成的总是版本 00、flags 01。
-- 随数据传递的链路上下文 `TraceRef`（上游 span 的 `traceparent`、链路起点的时刻 `originAt`、要关联的上游 span）是可选字段，放在 `Danmaku`、分诊候选、投票请求与发声请求上；模型调用的 `traceparent` 放在 `LlmRequest` 上，不放进交给模型的上下文；发声前检查的输入、合成选项与 Stage 的句子信息带 `traceparent`。没有遥测时这些字段都不出现。
+- 随数据传递的链路上下文 `TraceRef`（上游 span 的 `traceparent`、链路起点的时刻 `originAt`、要关联的上游 span）是可选字段，放在 `Danmaku`、分诊候选、投票请求与发声请求上；模型调用的 `traceparent` 放在 `LlmRequest` 上，不放进交给模型的消息，也不发给模型服务；发声前检查的输入、合成选项与 Stage 的句子信息带 `traceparent`。没有遥测时这些字段都不出现。
 
 ### 文件与格式
 
@@ -104,7 +104,7 @@
 | 接入 | `danmaku.receive`（根，consumer） | — | 平台与平台的消息编号；写成事实、交给分诊后结束，开始时刻即链路起点 |
 | 分诊 | `triage.candidate` | 第一条弹幕；合并进来的其余弹幕以 links 关联 | 候选编号；取走、过期、挤出或停用时结束，记去向、合并数、是否命中注入检测 |
 | | `triage.drop` | 被丢弃的弹幕 | 丢弃的原因（净化后为空、注入） |
-| 决策 | `chat <型号>`（GenAI，client） | 排第一的候选；其余候选以 links 关联 | GenAI 属性（回放模型填 `bellis.replay` 与 `replay`）、候选数、意图类型；模型客户端报来时另记 token 用量（输入、输出，能拿到时含推理）与应答的型号；超时、调用失败、非法输出、回应对象不在上下文时出错 |
+| 决策 | `chat <型号>`（GenAI，client） | 排第一的候选；其余候选以 links 关联 | GenAI 属性（回放模型填 `bellis.replay` 与 `replay`，方舟缺省填 `volcengine.ark` 与型号）、决策时机（`bellis.director.trigger`）、候选数、意图类型、命中的漂移信号（`bellis.director.drift`）；模型客户端报来时另记 token 用量（输入、输出，能拿到时含推理）与应答的型号；超时、调用失败、非法输出、回应对象不在上下文、被取消时出错，`error.type` 分别为 `timeout`、模型客户端的失败类别（见[决策模型](director.md#失败)）、`invalid_output`、`unknown_target`、`cancelled` |
 | 发声 | `speech.utterance` | 回应弹幕：被回应的候选，以 link 关联这次模型调用；闲聊与开票说明：模型调用；其余来源：根 | 发言编号、来源、可抢占点、是否含不可信输入；出队为事件；结束方式、听到的字数、跳过的句数 |
 | 每句 | `speech.sentence` | 发言 | 句键、句序号、去向（播出、截断、跳过、拒绝、过期等） |
 | | `speech.pre_check`，其下 `moderation.check` | 这一句 | 是否拦下；审核的结论（allow、block、error）与 `error.type`（例如 timeout） |
@@ -132,8 +132,9 @@
 | `bellis.stage.stop_to_silence.duration` | 停止到静音：Stage 服务要求页面截断一句（或转告许可令牌变化）到页面回报这一句已截断，按 `bellis.stage.stop_by`（truncate、token）分。页面停止输出后才回报；不含浏览器的输出缓冲、OBS 的缓冲与呈现延迟，不同于[时延目标](../architecture.md#时延目标)里按录音测的停止到静音 |
 | `bellis.lease.renew.lag` | 许可续约滞后：发声仲裁续约 Stage 音频输出许可的实际时刻相对计划时刻（上次续约后许可时长的三分之一）的滞后 |
 | `bellis.host.event_loop.delay` | 宿主事件循环延迟：`perf_hooks.monitorEventLoopDelay`（分辨率 20ms）在每个采样周期（缺省 10 秒）里的最大值减去分辨率；Windows 的定时器粒度也算在里面 |
-| `gen_ai.client.inference.duration` | 一次推理调用（决策的 chat）的耗时：决策插件发出调用到拿到完整输出，含超时与出错。属性只有 `gen_ai.provider.name`、知道时的 `gen_ai.response.model` 与出错时的 `error.type` |
-| `gen_ai.client.inference.time_to_first_chunk` | 流式推理调用从发出到收到第一块：模型客户端收到第一块时经调用选项 `onFirstChunk` 报给决策插件，属性同上。只对流式调用记；回放模型不流式，没有样本，第 3 步的真实模型客户端接入后才有 |
+| `gen_ai.client.inference.duration` | 一次推理调用（决策的 chat）的耗时：决策插件发出调用到拿到完整输出，含超时、出错与取消。属性只有 `gen_ai.provider.name`、知道时的 `gen_ai.response.model` 与出错时的 `error.type` |
+| `gen_ai.client.inference.time_to_first_chunk` | 流式推理调用从发出到收到第一块：模型客户端收到第一块时经调用选项 `onFirstChunk` 报给决策插件，属性同上。只对流式调用记；回放模型不流式，没有样本 |
+| `bellis.llm.time_to_first_output` | 流式推理调用从发出到第一个正文块：模型客户端收到第一段非空的正文（函数调用方式下为第一段函数参数）时经调用选项 `onFirstOutput` 报给决策插件；思考内容不算，所以与首块之差约等于思考的耗时。属性同上 |
 
 游戏首动作时间在 P3 加入。
 

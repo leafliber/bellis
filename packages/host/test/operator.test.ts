@@ -392,6 +392,23 @@ test('进行中的投票：命令行与操作台的状态里看得到题目、�
   }
 });
 
+test('决策模型连续失败或漂移的告警进近期告警', async () => {
+  const s = await setup();
+  try {
+    s.core.record('director.alarmed', { cause: 'failures', count: 3, detail: 'timeout' });
+    s.core.record('director.alarmed', { cause: 'drift', count: 3, detail: 'repeat,phrase' });
+    assert.deepEqual(
+      s.api.alerts().map((a) => a.text),
+      [
+        '决策模型连续失败 3 次（最近一次：timeout），已请求降级',
+        '决策输出连续 3 次重复或漂移（repeat,phrase），已请求降级',
+      ],
+    );
+  } finally {
+    await s.close();
+  }
+});
+
 test('操作台没有启动时，命令行要登录令牌得到明确的拒绝', async () => {
   const store = StateStore.open({ path: ':memory:' });
   const core = new SafetyCore({

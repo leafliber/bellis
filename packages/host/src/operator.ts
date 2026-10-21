@@ -134,6 +134,10 @@ const ALERTS: Record<string, (data: Record<string, unknown>) => string | undefin
   'danmaku.gap-ended': (d) =>
     `弹幕缺口结束：${d.platform}，${d.recovered === true ? '已恢复' : '未恢复'}，持续 ${d.durationMs}ms`,
   'vote.aborted': (d) => `投票中止：${d.voteId}（${d.reason}）`,
+  'director.alarmed': (d) =>
+    d.cause === 'drift'
+      ? `决策输出连续 ${d.count} 次重复或漂移（${d.detail}），已请求降级`
+      : `决策模型连续失败 ${d.count} 次（最近一次：${d.detail}），已请求降级`,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
