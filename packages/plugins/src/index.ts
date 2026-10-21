@@ -2,8 +2,10 @@ import { danmakuReplay, triage, vote, voteLedger } from '@bellis/audience';
 import { vtsAvatar } from '@bellis/avatar';
 import { danmakuBilibili } from '@bellis/bilibili';
 import { director, replayLlm } from '@bellis/director';
+import { irisClient } from '@bellis/iris';
 import { catalog } from '@bellis/kernel';
 import { llmOpenAi } from '@bellis/llm';
+import { memory, memoryLedger, simIris } from '@bellis/memory';
 import { moderation, simModerationModel } from '@bellis/moderation';
 import {
   localTts,
@@ -43,10 +45,13 @@ export const builtinPlugins = catalog(
   replayLlm,
   llmOpenAi,
   vtsAvatar,
+  memory,
+  irisClient,
+  simIris,
 );
 
 /**
  * 内置插件用到的投影：宿主（与仿真）打开状态存储时注册，重启时从事件重建（见状态存储“表”）。
  * 插件经安全核门面的 `view` 读取。
  */
-export const builtinProjections = [voteLedger] as const;
+export const builtinProjections = [voteLedger, memoryLedger] as const;

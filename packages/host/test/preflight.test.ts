@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { LlmError } from '@bellis/director';
 import { type EntrySnapshot, ManualClock } from '@bellis/kernel';
+import { IrisError } from '@bellis/memory';
 import type { SidecarQos } from '@bellis/protocol';
 import { SafetyCore } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
@@ -31,6 +32,7 @@ const ready: PreflightInputs = {
   ttsPrimary: { engine: 'local', ready: true, status: '就绪' },
   danmaku: undefined,
   llm: undefined,
+  memory: undefined,
   inspectObs: async () => [],
 };
 
@@ -271,4 +273,41 @@ test('开播预检：模型客户端配置了探测时以探测的结果为准�
     '决策模型未就绪：连续失败 3 次（最近一次：timeout）',
   ]);
   assert.equal(probes, 2);
+});
+
+test('开播预检：启用了记忆时 memory@1 须在场，且能以宿主令牌访问 Iris；失败只列类别、HTTP 状态与错误码', async () => {
+  let checks = 0;
+  const reachable = {
+    check: async () => {
+      checks += 1;
+    },
+  };
+  assert.deepEqual(await preflight({ ...ready, memory: reachable }), []);
+  assert.equal(checks, 1, '每次预检访问一次 Iris 的 GET /status');
+  // Iris 客户端没有激活（例如外发配置未确认、令牌没录入）：memory@1 不在场。
+  assert.deepEqual(await preflight({ ...ready, memory: {} }), [
+    '记忆未就绪：memory@1 不在场（Iris 客户端或记忆插件没有激活，原因见插件状态）',
+  ]);
+  const denied = {
+    check: async () => {
+      throw new IrisError('auth', '鉴权失败：HTTP 401（invalid_token）', {
+        status: 401,
+        code: 'invalid_token',
+      });
+    },
+  };
+  assert.deepEqual(await preflight({ ...ready, memory: denied }), [
+    'Iris 不能以宿主令牌访问（auth，HTTP 401，invalid_token）',
+  ]);
+  const starting = {
+    check: async () => {
+      throw new Error('Iris 的服务状态为 starting');
+    },
+  };
+  assert.deepEqual(await preflight({ ...ready, memory: starting }), [
+    'Iris 不能以宿主令牌访问：Iris 的服务状态为 starting',
+  ]);
+  // 没有启用记忆：不核对、不访问 Iris。
+  assert.deepEqual(await preflight({ ...ready, memory: undefined }), []);
+  assert.equal(checks, 1);
 });

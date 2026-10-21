@@ -20,6 +20,7 @@ import {
   TtsExpiredError,
   TtsService,
   type UtteranceOutcome,
+  UtterancePlayed,
 } from './types.ts';
 
 interface Item {
@@ -685,6 +686,7 @@ export const speechArbiter = definePlugin({
         }
         endUtterance(item.span, result);
         safety.record('utterance.played', { ...result });
+        ctx.extensions.observe(UtterancePlayed, { ...result, skipped: [...result.skipped] });
         item.resolve(result);
       }
       releaseLease();

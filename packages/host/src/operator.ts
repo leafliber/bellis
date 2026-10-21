@@ -7,9 +7,11 @@ import type { VoteStatus } from '@bellis/audience';
 import type { RpcPeer } from '@bellis/channel';
 import { type ConsoleRoute, InvalidParams } from '@bellis/console';
 import type { EntrySnapshot } from '@bellis/kernel';
+import { tombstoneFact } from '@bellis/memory';
 import {
   type OperatorConsoleLoginResult,
   OperatorEmergencyParams,
+  OperatorForgetParams,
   OperatorMethod,
   OperatorModeParams,
   OperatorPreflightParams,
@@ -22,7 +24,7 @@ import type { Presentation } from '@bellis/stage';
 import type { StoredEvent } from '@bellis/store';
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
-import type { DanmakuReport, LlmReport } from './readiness.ts';
+import type { DanmakuReport, LlmReport, MemoryStatusReport } from './readiness.ts';
 
 export type Target = 'M1' | 'M2' | 'M3';
 
@@ -70,6 +72,11 @@ export interface OperatorStatus {
    * 也没有模型客户端时为 null。
    */
   llm: LlmReport | null;
+  /**
+   * 记忆（memory@1 与 Iris）：就绪与否、状态说明、待发队列、累计写入与丢弃、墓碑数；profile 中没有启用记忆、
+   * 也没有记忆插件时为 null。
+   */
+  memory: MemoryStatusReport | null;
   preflight: PreflightRecord | null;
   plugins: PluginStatus[];
 }
@@ -97,6 +104,8 @@ export interface OperatorDeps {
   danmaku?(): DanmakuReport | null;
   /** 决策模型的状态；不给时状态里总是 null。 */
   llm?(): LlmReport | null;
+  /** 记忆的状态；不给时状态里总是 null。 */
+  memory?(): MemoryStatusReport | null;
   /** 开播预检；withSafety 时先列出安全核的前置条件（见 preflight.ts）。 */
   preflight(target: Target, withSafety: boolean): Promise<string[]>;
   /** 操作台的一次性登录令牌；操作台没有启动时为 undefined。 */
@@ -119,6 +128,8 @@ export interface OperatorApi {
   release(params: OperatorReleaseParams): { ok: true; released: string[] };
   preflight(params: OperatorPreflightParams): Promise<{ target: Target; failures: string[] }>;
   consoleLogin(): OperatorConsoleLoginResult | { ok: false; reason: string };
+  /** 登记观众删除请求的本地墓碑（事实 memory.tombstoned）。 */
+  forget(params: OperatorForgetParams): { ok: true } | { ok: false; reason: string };
   /** 取消对状态存储的订阅。 */
   dispose(): void;
 }
@@ -146,6 +157,8 @@ const ALERTS: Record<string, (data: Record<string, unknown>) => string | undefin
   'danmaku.gap-ended': (d) =>
     `弹幕缺口结束：${d.platform}，${d.recovered === true ? '已恢复' : '未恢复'}，持续 ${d.durationMs}ms`,
   'vote.aborted': (d) => `投票中止：${d.voteId}（${d.reason}）`,
+  // 只说登记了，不写观众的平台身份。
+  'memory.tombstoned': () => '已登记一名观众的本地墓碑（记忆）',
   'director.alarmed': (d) =>
     d.cause === 'drift'
       ? `决策输出连续 ${d.count} 次重复或漂移（${d.detail}），已请求降级`
@@ -221,6 +234,7 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
         vote: deps.vote?.() ?? null,
         danmaku: deps.danmaku?.() ?? null,
         llm: deps.llm?.() ?? null,
+        memory: deps.memory?.() ?? null,
         preflight: lastPreflight,
         plugins: deps.plugins().map((e) => ({
           id: e.id,
@@ -267,6 +281,17 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
     consoleLogin() {
       return deps.consoleLogin() ?? { ok: false, reason: '操作台没有启动' };
     },
+    forget({ account }) {
+      // 墓碑记在本地状态存储里，记忆插件在不在场都生效（投影重建）；平台身份不写日志。
+      const fact = tombstoneFact(account);
+      if (!fact) return { ok: false, reason: '参数不合法' };
+      try {
+        core.store.append(fact.type, fact.data, { source: 'operator' });
+      } catch {
+        return { ok: false, reason: '状态存储不可用，墓碑没有记下' };
+      }
+      return { ok: true };
+    },
     dispose: unsubscribe,
   };
 }
@@ -285,6 +310,7 @@ const modeParams = checked<OperatorModeParams>(OperatorModeParams);
 const vetoParams = checked<OperatorVetoParams>(OperatorVetoParams);
 const releaseParams = checked<OperatorReleaseParams>(OperatorReleaseParams);
 const preflightParams = checked<OperatorPreflightParams>(OperatorPreflightParams);
+const forgetParams = checked<OperatorForgetParams>(OperatorForgetParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
 
 /**
@@ -302,6 +328,7 @@ export function operatorActions(api: OperatorApi): Record<Method, (params: unkno
     [OperatorMethod.Release]: (params) => api.release(releaseParams(params)),
     [OperatorMethod.Preflight]: (params) => api.preflight(preflightParams(params)),
     [OperatorMethod.ConsoleLogin]: () => api.consoleLogin(),
+    [OperatorMethod.Forget]: (params) => api.forget(forgetParams(params)),
   };
 }
 

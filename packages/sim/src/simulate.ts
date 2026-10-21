@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VoteService, type Votes } from '@bellis/audience';
 import { ReplayLlmService } from '@bellis/director';
+import { SimIrisBackend, tombstoneFact } from '@bellis/memory';
 import { type TelemetryMemory, TelemetryMemoryService } from '@bellis/telemetry';
 import { checkHistory, type History } from './invariants.ts';
 import { type Scenario, scenarioEntries } from './scenario.ts';
@@ -47,6 +48,8 @@ export async function simulate(
   const tokens = new Map<string, number>();
   let restarts = 0;
   let outputsUsed = 0;
+  /** 模拟 Iris 是进程外的服务：宿主崩溃重启，它的数据还在。 */
+  const iris = new SimIrisBackend();
 
   const boot = async (fromMs: number, startAt: number): Promise<World> => {
     const world = new World({
@@ -56,6 +59,7 @@ export async function simulate(
       storePath,
       startAt,
       bootId: `b${restarts}`,
+      iris,
     });
     world.record('world.start', { restarts });
     await world.kernel.settled();
@@ -80,6 +84,8 @@ export async function simulate(
   let world = await boot(0, 0);
   const operations = [...scenario.operator].sort((a, b) => a.atMs - b.atMs);
   let next = 0;
+  const forgets = [...(scenario.memory?.forget ?? [])].sort((a, b) => a.atMs - b.atMs);
+  let nextForget = 0;
   try {
     for (let elapsed = 0; elapsed < scenario.durationMs + drainMs; elapsed += stepMs) {
       while (
@@ -98,6 +104,15 @@ export async function simulate(
           restarts += 1;
           world = await boot(elapsed, now);
         }
+      }
+      // 操作员登记墓碑（与 pnpm operator forget 记同一条事实）。
+      while (
+        elapsed < scenario.durationMs &&
+        (forgets[nextForget]?.atMs ?? Number.POSITIVE_INFINITY) <= elapsed
+      ) {
+        const forget = forgets[nextForget++];
+        const fact = forget ? tombstoneFact(`v${forget.viewer}`) : undefined;
+        if (fact) world.safety.record(fact.type, fact.data);
       }
       world.clock.advance(stepMs);
       await world.flush();

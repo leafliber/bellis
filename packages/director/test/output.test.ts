@@ -93,6 +93,7 @@ test('严格 schema：根是对象，字段全部必填、可选字段可为 nul
     'action',
     'replyTo',
     'text',
+    'memories',
     'question',
     'options',
     'durationSec',
@@ -132,6 +133,9 @@ test('严格 schema：根是对象，字段全部必填、可选字段可为 nul
     new RegExp(`整数 ${VOTE_LIMITS.minDurationSec}–${VOTE_LIMITS.maxDurationSec}`),
   );
   assert.deepEqual(properties.options?.items, { type: 'string', description: '1–20 字' });
+  // 用到的记忆编号：说话与发起投票共用，个数上限写进说明。
+  assert.match(String(properties.memories?.description), /至多 8 项；每项 1–16 字/);
+  assert.match(String(properties.memories?.description), /仅用于 action 为 speak、vote 时/);
 });
 
 const chars = fc.constantFrom('a', 'Z', '好', '的', '？', ' ', '1');
@@ -142,10 +146,14 @@ const id = fc.string({
   minLength: 1,
   maxLength: 64,
 });
+const memories = fc.array(
+  fc.string({ unit: fc.constantFrom('m', '1', '2', '8'), minLength: 1, maxLength: 16 }),
+  { maxLength: 8 },
+);
 
 const actionArbitrary: fc.Arbitrary<DirectorAction> = fc.oneof(
   fc.record(
-    { action: fc.constant('speak' as const), replyTo: id, text: text(1, 200) },
+    { action: fc.constant('speak' as const), replyTo: id, text: text(1, 200), memories },
     { requiredKeys: ['action', 'text'] },
   ),
   fc.record(
@@ -161,6 +169,7 @@ const actionArbitrary: fc.Arbitrary<DirectorAction> = fc.oneof(
         max: VOTE_LIMITS.maxDurationSec,
       }),
       decisionPoint: id,
+      memories,
     },
     { requiredKeys: ['action', 'question', 'options', 'durationSec'] },
   ),
@@ -191,6 +200,7 @@ test('严格 schema 比原 schema 宽：它接受、parseIntent 却拒绝的输�
   const nulls = {
     replyTo: null,
     text: null,
+    memories: null,
     question: null,
     options: null,
     durationSec: null,
@@ -201,6 +211,13 @@ test('严格 schema 比原 schema 宽：它接受、parseIntent 却拒绝的输�
     { ...nulls, action: 'speak' },
     { ...nulls, action: 'speak', text: 'x'.repeat(201) },
     { ...nulls, action: 'speak', text: '好', reason: '多填了' },
+    {
+      ...nulls,
+      action: 'speak',
+      text: '好',
+      memories: Array.from({ length: 9 }, (_, i) => `m${i}`),
+    },
+    { ...nulls, action: 'silence', reason: '', memories: ['m1'] },
     { ...nulls, action: 'vote', question: 'q', options: ['a'], durationSec: 30 },
     { ...nulls, action: 'vote', question: 'q', options: ['a', 'b'], durationSec: 5 },
     { ...nulls, action: 'silence' },

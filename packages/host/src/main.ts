@@ -30,6 +30,7 @@ import {
   systemClock,
   systemRandom,
 } from '@bellis/kernel';
+import { type Memory, MemoryService, memoryLedger } from '@bellis/memory';
 import { ObsClient, ObsMeters } from '@bellis/obs';
 import { builtinPlugins, builtinProjections } from '@bellis/plugins';
 import {
@@ -63,7 +64,13 @@ import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
 import { consoleRoutes, createOperator, serveOperator, type Target } from './operator.ts';
 import { preflight } from './preflight.ts';
-import { type DanmakuReport, danmakuReport, type LlmReport, llmReport } from './readiness.ts';
+import {
+  type DanmakuReport,
+  danmakuReport,
+  type LlmReport,
+  llmReport,
+  memoryReport,
+} from './readiness.ts';
 import { pluginSecrets } from './secrets.ts';
 
 const RPC_TIMEOUT_MS = 2000;
@@ -90,6 +97,9 @@ const LOGGED_FACTS = new Set([
   'vote.ended',
   'vote.aborted',
   'vote.rejected',
+  // 记忆：只有来源编号、类别与条数，不含内容；墓碑带平台身份，不写日志。
+  'memory.dropped',
+  'memory.filtered',
 ]);
 const isWatchdogActed = Compile(WatchdogActedParams);
 
@@ -207,6 +217,10 @@ const operator = createOperator({
   // 状态里的弹幕接入与决策模型：profile 中启用了（或服务在场）才给出。
   danmaku: () => (danmakuEnabled() || danmakuSource() ? currentDanmaku() : null),
   llm: () => (directorEnabled() || llmService() ? llmReport(llmService()) : null),
+  memory: () =>
+    memoryEnabled() || memoryService()
+      ? memoryReport(memoryService(), store.view(memoryLedger))
+      : null,
   preflight: runPreflight,
   consoleLogin: () => consoleServer?.issueLogin(),
 });
@@ -304,6 +318,7 @@ function runPreflight(target: Target, withSafety: boolean): Promise<string[]> {
     ttsPrimary: 'missing' in routing ? undefined : (routing.impl as TtsRouting).primary(),
     danmaku: danmakuEnabled() ? currentDanmaku() : undefined,
     llm: directorEnabled() ? currentLlm() : undefined,
+    memory: memoryEnabled() ? currentMemory() : undefined,
     inspectObs: () => emergency.inspect(config.safety.emergency),
   });
 }
@@ -320,6 +335,21 @@ function enabledProvider(ref: string): boolean {
 // 以下都是函数声明：模块在 await 处挂起时操作员就可能来查状态，不能落在 const 的暂时性死区里。
 function danmakuEnabled(): boolean {
   return enabledProvider(DanmakuService.ref);
+}
+
+function memoryEnabled(): boolean {
+  return enabledProvider(MemoryService.ref);
+}
+
+function memoryService(): Memory | undefined {
+  const found = host.services.resolve(MemoryService.name, MemoryService.major);
+  return 'missing' in found ? undefined : (found.impl as Memory);
+}
+
+/** 开播预检的 Iris 一项：memory@1 在场时以宿主令牌访问 Iris（GET /status）。 */
+function currentMemory(): { check?: () => Promise<void> } {
+  const memory = memoryService();
+  return memory ? { check: () => memory.check() } : {};
 }
 
 function directorEnabled(): boolean {

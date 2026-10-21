@@ -52,6 +52,15 @@ test('参数：release 与 veto 可带一个句键；console 不带参数；用�
     params: { key: 'u1#0' },
   });
   assert.deepEqual(parseOperatorArgs(['console']), { kind: 'console' });
+  // forget 恰好带一个平台 ID（格式由宿主校验）。
+  assert.deepEqual(parseOperatorArgs(['forget', 'open-id-1']), {
+    kind: 'call',
+    method: OperatorMethod.Forget,
+    params: { account: 'open-id-1' },
+  });
+  assert.equal(parseOperatorArgs(['forget']), undefined);
+  assert.equal(parseOperatorArgs(['forget', 'a', 'b']), undefined);
+  assert.ok(OPERATOR_USAGE.includes('forget'));
   assert.deepEqual(parseOperatorArgs(['preflight', 'M2']), {
     kind: 'call',
     method: OperatorMethod.Preflight,

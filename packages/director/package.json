@@ -9,6 +9,7 @@
   "dependencies": {
     "@bellis/audience": "workspace:*",
     "@bellis/kernel": "workspace:*",
+    "@bellis/memory": "workspace:*",
     "@bellis/safety": "workspace:*",
     "@bellis/speech": "workspace:*",
     "@bellis/telemetry": "workspace:*",

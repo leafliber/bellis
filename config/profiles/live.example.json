@@ -184,6 +184,33 @@
           }
         }
       ]
+    },
+    {
+      "name": "memory",
+      "entries": [
+        {
+          "id": "iris",
+          "plugin": "iris-client",
+          "disabled": true,
+          "grant": ["net.egress:127.0.0.1", "secret:iris"],
+          "config": {
+            "baseUrl": "http://127.0.0.1:8080",
+            "egressReviewed": false
+          }
+        },
+        {
+          "id": "memory",
+          "plugin": "memory",
+          "disabled": true,
+          "grant": ["memory.write"],
+          "config": {
+            "entryId": "",
+            "entryName": "直播间",
+            "selfName": "（示例：角色名，由操作员改写）",
+            "recall": { "judge": false, "memoryLimit": 5 }
+          }
+        }
+      ]
     }
   ]
 }

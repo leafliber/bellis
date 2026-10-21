@@ -9,6 +9,20 @@ import { Compile } from 'typebox/compile';
  */
 const closed = { additionalProperties: false } as const;
 
+/** 一次召回至多给出的记忆条数（与 Iris 召回准备的 `memory_limit` 上限一致）。 */
+export const MAX_MEMORIES = 8;
+
+/**
+ * 这次输出实际用到的记忆编号（使用反馈，见记忆“召回”）。只接受本次数据里出现的编号，其余忽略；
+ * 说话与发起投票共用同一个定义（严格 schema 合并同名字段时要求完全相同）。
+ */
+const UsedMemories = Type.Optional(
+  Type.Array(Type.String({ minLength: 1, maxLength: 16 }), {
+    maxItems: MAX_MEMORIES,
+    description: '用到的记忆编号；没有用到记忆时为 null',
+  }),
+);
+
 export const SpeakAction = Type.Object(
   {
     action: Type.Literal('speak'),
@@ -21,6 +35,7 @@ export const SpeakAction = Type.Object(
       }),
     ),
     text: Type.String({ minLength: 1, maxLength: 200, description: '要说的话' }),
+    memories: UsedMemories,
   },
   { ...closed, description: '说话' },
 );
@@ -51,6 +66,7 @@ export const VoteAction = Type.Object(
         description: '游戏决策点编号；没有游戏决策点时为 null',
       }),
     ),
+    memories: UsedMemories,
   },
   { ...closed, description: '发起投票' },
 );

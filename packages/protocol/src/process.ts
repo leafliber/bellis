@@ -115,6 +115,8 @@ export const OperatorMethod = {
   Preflight: 'operator.preflight',
   /** 向宿主要一个操作台的一次性登录令牌（R-20）。 */
   ConsoleLogin: 'operator.console_login',
+  /** 登记观众删除请求的本地墓碑（见记忆“删除”）。 */
+  Forget: 'operator.forget',
 } as const;
 
 export const OperatorModeParams = Type.Object(
@@ -159,6 +161,16 @@ export const OperatorPreflightParams = Type.Object(
   closed,
 );
 export type OperatorPreflightParams = Static<typeof OperatorPreflightParams>;
+
+/**
+ * 登记本地墓碑：观众的平台稳定 ID（B 站为 open_id），1–128 个可打印 ASCII、不含空白。
+ * 墓碑立即阻止这名观众的待发写入与相关的召回；彻底清除要经 Iris 管理端（见记忆“删除”）。
+ */
+export const OperatorForgetParams = Type.Object(
+  { account: Type.String({ pattern: '^[\\x21-\\x7e]{1,128}$' }) },
+  closed,
+);
+export type OperatorForgetParams = Static<typeof OperatorForgetParams>;
 
 /**
  * 操作台的一次性登录令牌：只存在宿主内存里，短时间内有效、只能用一次（R-20）。命令行用浏览器打开

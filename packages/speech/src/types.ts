@@ -82,6 +82,16 @@ export interface Speech {
 
 export const SpeechService = defineService<Speech>('speech', 1);
 
+/**
+ * 扩展点 `speech.played`（观察）：一段发言结束、记下事实 `utterance.played` 之后分发，参数与那条事实相同。
+ * `heard` 只含观众实际听到的部分（见发声“播放游标与写回”）。记忆插件据此写入角色的发言；监听者按扩展点注册，
+ * 仲裁重新加载后照样收到。
+ */
+export const UtterancePlayed = defineExtension<'observe', UtteranceOutcome>(
+  'speech.played',
+  'observe',
+);
+
 /** 一句话的两份文本。`align[i]` 是朗读文本第 i 个码点对应的字幕文本码点下标。 */
 export interface Sentence {
   index: number;

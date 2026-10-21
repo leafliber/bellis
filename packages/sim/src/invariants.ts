@@ -1,6 +1,7 @@
 import { ballotKeys, decide, matchBallot } from '@bellis/audience';
 import { speakable } from '@bellis/speech';
 import type { StoredEvent } from '@bellis/store';
+import { checkMemory } from './memory-check.ts';
 import { BLOCKED, SAMPLE_RATE, SAMPLES_PER_CHAR } from './scenario.ts';
 import { checkTelemetry } from './telemetry-check.ts';
 import type { TraceEntry } from './world.ts';
@@ -26,7 +27,8 @@ export interface History {
  *    采样数，与页面当时已播出的采样数比较）；版面固定：已显示与占位的两段拼起来总是整句；
  * 6. 页面回报一句截断时，这一句的字幕（两段）已经清除；回报播完时，至迟在呈现延迟之后清除；
  * 7. 投票的不变量（见 {@link checkVotes}）；
- * 8. 遥测的不变量（见 {@link checkTelemetry}）。
+ * 8. 遥测的不变量（见 {@link checkTelemetry}）；
+ * 9. 记忆的不变量（见 {@link checkMemory}）。
  */
 export function checkHistory(history: History): string[] {
   const violations: string[] = [];
@@ -177,6 +179,7 @@ export function checkHistory(history: History): string[] {
   }
   violations.push(...checkVotes(history));
   violations.push(...checkTelemetry(history));
+  violations.push(...checkMemory(history));
   return violations;
 }
 
