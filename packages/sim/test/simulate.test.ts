@@ -127,6 +127,37 @@ const regressions: Array<[string, Scenario]> = [
     },
   ],
   [
+    '闲聊调用出错的同一时刻新弹幕到达：决策插件把这次调用当作取消，不计入连续失败',
+    {
+      seed: 0,
+      moderation: { enabled: false, onError: 'skip', delayMs: 0 },
+      ttsSlow: false,
+      danmaku: [
+        { atMs: 2530, viewer: 0, nickname: 0, text: 0 },
+        { atMs: 7030, viewer: 0, nickname: 0, text: 0 },
+      ],
+      gaps: [],
+      outputs: [
+        { kind: 'chatter', sentences: [0] },
+        { kind: 'error', error: 'auth' },
+        { kind: 'timeout', ignoreAbort: false },
+        { kind: 'timeout', ignoreAbort: false },
+      ],
+      announcements: [],
+      operator: [],
+      mode: 'M0',
+      presentationMs: 0,
+      ttsRpm: 0,
+      memory: {
+        recallDelayMs: 50,
+        writeDelayMs: 300,
+        writeFaults: [],
+        forget: [{ atMs: 0, viewer: 0 }],
+      },
+      durationMs: 20_000,
+    },
+  ],
+  [
     'TTS 在句中出错：这一句截断，意图结案，不卡住',
     {
       seed: 0,
@@ -168,6 +199,22 @@ test('TTS 要等限流、额度恢复时弹幕回复已过期：不等，这一�
   const id = String(reply?.data.id);
   assert.ok(
     !trace.some((e) => e.kind === 'page.begin' && String(e.data.sentenceId).startsWith(id)),
+  );
+});
+
+test('出错与取消在同一时刻：取消先于决策插件处理到达，这次调用不算失败，三次超时与出错之后也不告警', async () => {
+  const found = regressions.find(([name]) => name.startsWith('闲聊调用出错的同一时刻'));
+  assert.ok(found);
+  const result = await simulate(found[1]);
+  assert.deepEqual(result.violations, []);
+  const { trace } = result.history;
+  const error = trace.find((e) => e.kind === 'llm.error');
+  const cancel = trace.find((e) => e.kind === 'llm.aborted' && e.data.afterResult === true);
+  assert.equal(cancel?.data.call, error?.data.call);
+  assert.equal(cancel?.at, error?.at);
+  assert.deepEqual(
+    trace.filter((e) => e.kind === 'fact.director.alarmed'),
+    [],
   );
 });
 

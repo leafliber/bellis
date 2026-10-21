@@ -32,7 +32,8 @@ function classify(output: string, candidates: readonly string[]): Outcome {
 
 /**
  * 决策模型失败的不变量（见决策模型“失败与降级”）。每次调用的结局由回放模型的记录独立推出：先到的中止
- * （截止时间到点算超时，否则是取消）、出错，或给出的输出（非法、回应对象不在上下文中算失败）。
+ * （截止时间到点算超时，否则是取消）、出错，或给出的输出（非法、回应对象不在上下文中算失败）。出错给出之后、
+ * 决策插件处理之前到达的取消（同一时刻别的定时器触发）让这次调用算作取消；给出输出之后再到的取消不改变结局。
  * 1. 失败与取消的调用不产生任何发言；超时的调用晚到的输出（{@link LATE_TEXT}）从不交给发声；成功的说话意图
  *    恰好交给发声一次，文本不变；
  * 2. 过渡语只在超时或出错、且这次取到了候选时播，每一串连续失败至多一句（成功才清零，取消不算）；
@@ -51,6 +52,8 @@ export function checkDirector(history: History): string[] {
   /** 告警之后等降级请求；降级请求之后等模式下降（请求时的模式）。 */
   let awaitingDowngrade = false;
   let downgradeFrom: string | undefined;
+  /** 已经出错、还要看决策插件处理之前有没有取消先到的调用。 */
+  let failedCall: { call: number; kind: string } | undefined;
 
   /** 上一次有结局的调用应当带来的都已出现（下一次调用、重启与结束时核对）。 */
   const settle = () => {
@@ -69,6 +72,13 @@ export function checkDirector(history: History): string[] {
     if (downgradeFrom !== undefined)
       violations.push(`降级请求之后模式没有从 ${downgradeFrom} 下降`);
     downgradeFrom = undefined;
+  };
+
+  /** 出错的调用：之后没有取消先到，就是一次失败。 */
+  const commitError = () => {
+    const pending = failedCall;
+    failedCall = undefined;
+    if (pending) decide(pending.call, { kind: 'failure', failure: pending.kind, callFailed: true });
   };
 
   const decide = (call: number, outcome: Outcome) => {
@@ -95,6 +105,14 @@ export function checkDirector(history: History): string[] {
 
   for (const entry of history.trace) {
     const call = Number(entry.data.call);
+    // 决策插件处理出错的结果（发言、告警）或开始下一次调用之前，先定下那次出错的结局。
+    if (
+      entry.kind === 'world.start' ||
+      entry.kind === 'llm.request' ||
+      (entry.kind === 'speech.requested' && String(entry.data.id).startsWith('director:')) ||
+      entry.kind === 'fact.director.alarmed'
+    )
+      commitError();
     switch (entry.kind) {
       case 'world.start':
         settle();
@@ -119,6 +137,13 @@ export function checkDirector(history: History): string[] {
         candidates.set(call, (entry.data.candidates as string[] | undefined) ?? []);
         break;
       case 'llm.aborted':
+        if (entry.data.afterResult === true) {
+          if (failedCall?.call === call) {
+            failedCall = undefined;
+            decide(call, { kind: 'cancelled' });
+          }
+          break;
+        }
         decide(
           call,
           entry.data.deadline === true
@@ -127,7 +152,8 @@ export function checkDirector(history: History): string[] {
         );
         break;
       case 'llm.error':
-        decide(call, { kind: 'failure', failure: String(entry.data.kind), callFailed: true });
+        commitError();
+        failedCall = { call, kind: String(entry.data.kind) };
         break;
       case 'llm.output':
         decide(call, classify(String(entry.data.output), candidates.get(call) ?? []));
@@ -172,6 +198,7 @@ export function checkDirector(history: History): string[] {
       }
     }
   }
+  commitError();
   settle();
   return violations;
 }
