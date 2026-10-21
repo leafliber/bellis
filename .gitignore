@@ -16,6 +16,9 @@
 /config/profiles/*.json
 !/config/profiles/sim.json
 !/config/profiles/*.example.json
+# 仓库只带整体启用互动包的 patch（不含任何值）；维护者自己的 patch 可能带真实值，不入库
+/config/patches/*.json
+!/config/patches/interaction.json
 
 # Node / Python 工具
 node_modules/
