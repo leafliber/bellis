@@ -25,7 +25,7 @@
 | 载荷摘要 | 载荷的哈希，防止授权后被替换 |
 | 幂等键 | 同一意图重复提交只执行一次 |
 | 来源 | 由谁、基于哪些输入产生，用于判断是否混入了不可信输入 |
-| 所需能力 | 例如 `speech.output`、`obs.scene`、`vote.start`、`game.goal`、`game.input` |
+| 所需能力 | 例如 `speech.output`、`obs.scene`、`vote.start`、`memory.write`、`game.goal`、`game.input` |
 
 `authorize(意图)` 返回允许或拒绝及原因：
 
