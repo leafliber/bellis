@@ -1,4 +1,6 @@
+import { TEST_PERSONA } from '@bellis/director';
 import type { ResolvedEntry } from '@bellis/kernel';
+import type { SimIrisBackend } from '@bellis/memory';
 import type { SafetyConfig } from '@bellis/safety';
 import { World } from '../src/index.ts';
 
@@ -30,6 +32,14 @@ export interface ChainOptions {
   vote?: Record<string, unknown>;
   /** 加上写内存的遥测（`telemetry-memory`）。 */
   telemetry?: boolean;
+  /** 决策插件的配置。 */
+  director?: Record<string, unknown>;
+  /** 加上模拟 Iris 与记忆插件：模拟 Iris 的配置、记忆插件的配置与跨重启保留的数据。 */
+  memory?: {
+    iris?: Record<string, unknown>;
+    config?: Record<string, unknown>;
+    backend?: SimIrisBackend;
+  };
   /** 状态存储文件（重启用）与本次启动的标识。 */
   storePath?: string;
   bootId?: string;
@@ -67,13 +77,22 @@ export function chain(options: ChainOptions = {}): ResolvedEntry[] {
       ? [entry('vote', 'audience-vote', { grant: ['vote.start'], config: options.vote })]
       : []),
     entry('llm', 'llm-replay', { config: { outputs: options.outputs ?? [] } }),
-    entry('director', 'director'),
+    entry('director', 'director', { config: { persona: TEST_PERSONA, ...options.director } }),
     entry('schedule', 'speech-schedule', {
       config: {
         announcements: options.announcements ?? [],
         preempt: options.preempt ?? 'sentence',
       },
     }),
+    ...(options.memory
+      ? [
+          entry('iris', 'iris-sim', { config: options.memory.iris ?? {} }),
+          entry('memory', 'memory', {
+            grant: ['memory.write'],
+            config: { entryId: 'sim:room', ...options.memory.config },
+          }),
+        ]
+      : []),
     ...(options.telemetry ? [entry('telemetry', 'telemetry-memory')] : []),
   ];
 }
@@ -86,6 +105,7 @@ export async function startChain(options: ChainOptions = {}) {
     ...(options.storePath ? { storePath: options.storePath } : {}),
     ...(options.bootId ? { bootId: options.bootId } : {}),
     ...(options.startAt === undefined ? {} : { startAt: options.startAt }),
+    ...(options.memory?.backend ? { iris: options.memory.backend } : {}),
   });
   await world.kernel.settled();
   const mode = world.safety.requestMode('M0');

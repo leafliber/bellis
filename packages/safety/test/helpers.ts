@@ -39,6 +39,7 @@ export async function setup(
     ['speaker#1', new Set(['speech.output'])],
     ['other#2', new Set(['speech.output'])],
     ['director#3', new Set(['speech.output', 'obs.scene'])],
+    ['memory#4', new Set(['memory.write'])],
   ]);
   const world = { watchdog: true };
   const safety = new SafetyCore({

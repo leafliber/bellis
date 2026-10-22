@@ -51,6 +51,20 @@
  * @property {{ kind: string, at: string } | null} lastFailure
  */
 /**
+ * @typedef {object} Memory
+ * @property {boolean} ready
+ * @property {string} status
+ * @property {number} pending
+ * @property {number} written
+ * @property {number} dropped
+ * @property {number} tombstones
+ */
+/**
+ * @typedef {object} Persona
+ * @property {'iris' | 'profile'} source
+ * @property {number | null} version
+ */
+/**
  * @typedef {object} Status
  * @property {Mode} mode
  * @property {boolean} maintenance
@@ -63,6 +77,8 @@
  * @property {Vote | null} vote
  * @property {Danmaku | null} danmaku
  * @property {Llm | null} llm
+ * @property {Memory | null} memory
+ * @property {Persona | null} persona
  * @property {Preflight | null} preflight
  * @property {PluginRow[]} plugins
  * @property {Alert[]} alerts
@@ -107,6 +123,9 @@ const danmakuText = byId('danmaku');
 const danmakuGapText = byId('danmaku-gap');
 const llmText = byId('llm');
 const llmFailuresText = byId('llm-failures');
+const memoryText = byId('memory');
+const memoryCountsText = byId('memory-counts');
+const personaText = byId('persona');
 const preflightSummary = byId('preflight-summary');
 const preflightFailures = byId('preflight-failures');
 const pluginRows = byId('plugins');
@@ -228,7 +247,15 @@ function clearStatus() {
   moderationBanner.className = 'banner';
   setText(moderationBanner, '审核状态未知（没有宿主的当前状态）');
   for (const button of modeButtons) button.classList.remove('current');
-  for (const node of [danmakuText, danmakuGapText, llmText, llmFailuresText]) {
+  for (const node of [
+    danmakuText,
+    danmakuGapText,
+    llmText,
+    llmFailuresText,
+    memoryText,
+    memoryCountsText,
+    personaText,
+  ]) {
     node.className = '';
     setText(node, '未知');
   }
@@ -293,7 +320,8 @@ function render(status) {
   );
   renderHeld(status.held);
   renderVote(status.vote);
-  renderReadiness(status.danmaku, status.llm);
+  renderReadiness(status.danmaku, status.llm, status.memory);
+  renderPersona(status.persona);
   renderPreflight(status.preflight);
   renderPlugins(status.plugins);
   renderAlerts(status.alerts);
@@ -359,11 +387,12 @@ function renderVote(vote) {
 }
 
 /**
- * 弹幕接入与决策模型：就绪与否与状态说明、当前缺口、最近一次失败与连续失败数。
+ * 弹幕接入、决策模型与记忆：就绪与否与状态说明、当前缺口、最近一次失败与连续失败数、记忆的待发队列与墓碑数。
  * @param {Danmaku | null} danmaku
  * @param {Llm | null} llm
+ * @param {Memory | null} memory
  */
-function renderReadiness(danmaku, llm) {
+function renderReadiness(danmaku, llm, memory) {
   /**
    * @param {HTMLElement} node
    * @param {{ ready: boolean, status: string } | null} report
@@ -396,6 +425,28 @@ function renderReadiness(danmaku, llm) {
             ? '，还没有失败过'
             : `，最近一次 ${last.kind}（${new Date(last.at).toLocaleTimeString()}）`
         }`,
+  );
+  show(memoryText, memory);
+  setText(
+    memoryCountsText,
+    memory === null
+      ? '—'
+      : `待发 ${memory.pending} 条，已写入 ${memory.written} 条，丢弃 ${memory.dropped} 条，墓碑 ${memory.tombstones} 名`,
+  );
+}
+
+/**
+ * 决策插件用的人设：来源与版本（不含正文）。
+ * @param {Persona | null} persona
+ */
+function renderPersona(persona) {
+  setText(
+    personaText,
+    persona === null
+      ? '没有启用决策插件'
+      : persona.source === 'iris'
+        ? `Iris 的当前人设（${persona.version === null ? '未编号' : `第 ${persona.version} 版`}）`
+        : 'profile 里的人设',
   );
 }
 

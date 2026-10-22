@@ -8,7 +8,7 @@ import { OperatorConsoleLoginResult, OperatorMethod } from '@bellis/protocol';
 import { Compile } from 'typebox/compile';
 
 export const OPERATOR_USAGE =
-  '用法：operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [M1|M2|M3] | console>';
+  '用法：operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [M1|M2|M3] | forget 平台ID | console>';
 
 export interface OperatorCommandIo {
   /** 经本机通道调宿主的操作员方法。 */
@@ -66,6 +66,9 @@ export function parseOperatorArgs(args: readonly string[]): OperatorCommand | un
         OperatorMethod.Preflight,
         optional((target) => ({ target })),
       );
+    case 'forget':
+      // 观众的平台稳定 ID（B 站为 open_id）；格式由宿主按同一份 Schema 校验。
+      return rest.length === 1 ? call(OperatorMethod.Forget, { account: rest[0] }) : undefined;
     case 'console':
       return rest.length === 0 ? { kind: 'console' } : undefined;
     default:

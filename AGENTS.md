@@ -15,7 +15,7 @@
 - `pnpm start [配置文件]`：在本机运行启动器（拉起宿主与看门狗，缺省用 `config/sim.json`），Ctrl+C 停止。接真实 OBS 用 `pnpm start config/live.json`；真实配置与 profile 从对应的 `*.example.json` 复制，不入库。
 - `pnpm secret <list | set 名字 | delete 名字 | audit [路径…]>`：维护者录入凭据，例如 `pnpm secret set obs`；值不回显、不打印，列出时只显示名字。Agent 不代为录入。`audit` 核对文件里有没有出现凭据的值（核对方式见 [Windows 平台](docs/platform/windows.md#凭据)），有命中或读取失败时退出码为 1；它的输出只有文件、条目名、编码与次数，不含值，Agent 可以运行。
 - `pnpm autostart <register [配置文件] | unregister | status>`：维护者注册、注销、读回核对“登录时运行”的计划任务，只在 Windows 上可用，register 缺省用 `config/live.json`；详见 [Windows 平台](docs/platform/windows.md#登录时运行)。它改动的是本机的持久系统配置，Agent 不代为运行。
-- `pnpm operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [目标] | console>`：操作员命令，例如 `pnpm operator mode M0`；`console` 用浏览器打开本机操作台（见[运维](docs/modules/operations.md#操作台)）。
+- `pnpm operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [目标] | forget 平台ID | console>`：操作员命令，例如 `pnpm operator mode M0`；`forget` 登记观众删除请求的本地墓碑（见[记忆](docs/modules/memory.md#删除)）；`console` 用浏览器打开本机操作台（见[运维](docs/modules/operations.md#操作台)）。
 - `pnpm sim [--seed N] [--runs N]`：确定性仿真的大规模探索；失败时给出复现命令。
 - `pnpm telemetry <summary | trace 编号> [--config 配置文件] [--dir 目录]`：读遥测的 JSONL（缺省按 `config/sim.json` 找目录），输出各直方图的样本数与 p50/p95/p99，或按 trace 打印 span 树（不含内容）；只读文件，见[运维的观测](docs/modules/operations.md#查看)。
 

@@ -13,6 +13,7 @@ import {
   type TimerHandle,
   withDeadline,
 } from '@bellis/kernel';
+import { type Memory, type MemoryRecall, MemoryService, type RecallResult } from '@bellis/memory';
 import { SafetyService } from '@bellis/safety';
 import { SpeechService } from '@bellis/speech';
 import {
@@ -29,6 +30,7 @@ import Type, { type Static } from 'typebox';
 import { DEFAULT_DRIFT_PHRASES, type DriftSignal, driftSignals } from './drift.ts';
 import { type Llm, LlmError, type LlmModel, type LlmRequest, LlmService } from './llm.ts';
 import { parseIntent, type VoteAction } from './output.ts';
+import { choosePersona } from './persona.ts';
 import {
   buildMessages,
   type DecisionTrigger,
@@ -51,6 +53,12 @@ export const DirectorConfig = Type.Object({
   heardLimit: Type.Integer({ minimum: 0, default: 8 }),
   /** 一次调用的截止时间（含思考与全部输出），到点即取消。 */
   callTimeoutMs: Type.Integer({ minimum: 1, default: 8_000 }),
+  /**
+   * 召回记忆的截止时间（记忆插件在场时，在调用模型之前召回）：到点就不带记忆继续决策，不计入 `callTimeoutMs`。
+   */
+  recallTimeoutMs: Type.Integer({ minimum: 1, default: 2_000 }),
+  /** 召回的查询提示至多这么多字（候选弹幕的净化文本、投票题目）。 */
+  recallQueryChars: Type.Integer({ minimum: 1, maximum: 8_000, default: 500 }),
   replyTtlMs: Type.Integer({ minimum: 1, default: 20_000 }),
   /** 冷场多久后自主发言；0 表示不闲聊。 */
   idleMs: Type.Integer({ minimum: 0, default: 0 }),
@@ -107,6 +115,8 @@ class Cancelled extends Error {}
  * - 失败：超时或出错时放弃本次时机，有观众在等回应时可播一句固定过渡语；连续失败每满 `alarmAfter` 次告警
  *   （事实 `director.alarmed`）并请求安全核降级。人设漂移信号连续命中同样处理。
  * - 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
+ * - 记忆插件（`memory@1`，可选依赖）在场时，调用模型之前召回，截止时间 `recallTimeoutMs`，到点、出错都不带记忆
+ *   继续；记忆只放进不可信数据区。决策后回报使用反馈：意图里写的、这次召回给出的编号，没有用到就是空集。
  *
  * 遥测（见运维“观测”）：一次模型调用一个 GenAI span（`chat <型号>`，父为排第一的候选，其余候选以 links
  * 关联），记 `gen_ai.client.inference.duration`；模型客户端报来用量时 token 数记在 span 上，流式客户端报来
@@ -127,6 +137,7 @@ export const director = definePlugin({
       ClockService.ref,
       SafetyService.ref,
       `${VoteService.ref}?`,
+      `${MemoryService.ref}?`,
       `${TelemetryService.ref}?`,
     ],
     permissions: [],
@@ -184,24 +195,125 @@ export const director = definePlugin({
       };
     };
 
+    /** 上一次用的人设的来源与版本：变了才记日志（不记正文）。 */
+    let lastPersona: string | undefined;
+
+    /**
+     * 这次决策用的人设（见决策模型“人设”）：记忆插件拿到过 Iris 的人设就用最近一次的，否则用 profile 的。
+     * 在召回之后选，这次召回带回的新版本立即生效。
+     */
+    const persona = () => {
+      const chosen = choosePersona(ctx.optional(MemoryService), config.persona);
+      const key = `${chosen.source}:${chosen.version}`;
+      if (key !== lastPersona) {
+        lastPersona = key;
+        ctx.log('director.persona', { source: chosen.source, version: chosen.version });
+      }
+      return chosen;
+    };
+
     const context = (
       triggers: DecisionTrigger[],
       taken: Candidate[],
       ended: EndedVoteContext | undefined,
-    ): DirectorContext => ({
-      persona: config.persona,
-      triggers,
-      heard: lastOf(
-        speech
-          .heard()
-          .map((utterance) => utterance.heard)
-          .filter((text) => text !== ''),
-        config.heardLimit,
-      ),
-      candidates: taken.map((c) => ({ id: c.id, name: c.name, text: c.text, count: c.count })),
-      vote: voteContext(),
-      endedVote: ended ?? null,
-    });
+      recall: MemoryRecall | undefined,
+    ): DirectorContext => {
+      const chosen = persona();
+      return {
+        persona: chosen.text,
+        ...(chosen.source === 'iris'
+          ? { personaSource: { from: 'iris' as const, version: chosen.version } }
+          : {}),
+        triggers,
+        heard: lastOf(
+          speech
+            .heard()
+            .map((utterance) => utterance.heard)
+            .filter((text) => text !== ''),
+          config.heardLimit,
+        ),
+        candidates: taken.map((c) => ({ id: c.id, name: c.name, text: c.text, count: c.count })),
+        vote: voteContext(),
+        endedVote: ended ?? null,
+        memories: (recall?.memories ?? []).map((m) => ({ ...m })),
+      };
+    };
+
+    /** 召回的查询提示：候选弹幕的净化文本与刚结束的投票题目；都没有（冷场）时省略，由 Iris 自己构造。 */
+    const recallQuery = (taken: Candidate[], ended: EndedVoteContext | undefined) => {
+      const parts = [...taken.map((c) => c.text), ...(ended ? [ended.question] : [])];
+      const text = [...parts.join('\n')].slice(0, config.recallQueryChars).join('');
+      return text === '' ? undefined : text;
+    };
+
+    /**
+     * 召回记忆：带截止时间（`recallTimeoutMs`），到点、出错或记忆插件不在场都不带记忆继续。
+     * 被取消（`cancelled` 拒绝）时抛出 {@link Cancelled}。
+     */
+    const recallMemories = async (
+      query: string | undefined,
+      call: Span,
+      signal: AbortSignal,
+      cancelled: Promise<never>,
+    ): Promise<{ recall: MemoryRecall; memory: Memory } | undefined> => {
+      const memory = ctx.optional(MemoryService);
+      if (!memory) return undefined;
+      const deadline = new AbortController();
+      const reason = new DeadlineError(`召回未在 ${config.recallTimeoutMs}ms 内完成`);
+      const timer = clock.setTimeout(() => deadline.abort(reason), config.recallTimeoutMs);
+      // 记忆插件没有及时响应中止信号也照样到点就走。
+      const expired = new Promise<RecallResult>((resolve) =>
+        deadline.signal.addEventListener(
+          'abort',
+          () => resolve({ ok: false, kind: 'timeout', detail: reason.message }),
+          { once: true },
+        ),
+      );
+      try {
+        const result = await Promise.race([
+          memory
+            .recall(
+              {
+                ...(query === undefined ? {} : { text: query }),
+                ...(call.traceparent ? { traceparent: call.traceparent } : {}),
+              },
+              AbortSignal.any([deadline.signal, signal]),
+            )
+            .catch(
+              (error: unknown): RecallResult => ({
+                ok: false,
+                kind: 'error',
+                detail: message(error),
+              }),
+            ),
+          expired,
+          cancelled,
+        ]);
+        if (result.ok) {
+          call.setAttributes({ 'bellis.director.memories': result.recall.memories.length });
+          return { recall: result.recall, memory };
+        }
+        call.setAttributes({ 'bellis.director.recall': result.kind });
+        ctx.log('director.recall-skipped', { kind: result.kind });
+        return undefined;
+      } finally {
+        clock.clearTimeout(timer);
+      }
+    };
+
+    /** 使用反馈：只回报本次召回给出的编号，其余忽略（记日志）。 */
+    const usedMemories = (
+      recall: MemoryRecall | undefined,
+      used: readonly string[] | undefined,
+    ) => {
+      if (!recall || !used) return [];
+      const given = new Set(recall.memories.map((m) => m.id));
+      const known = [...new Set(used)].filter((id) => given.has(id));
+      if (known.length < new Set(used).size) {
+        ctx.log('director.memory-unknown', { count: new Set(used).size - known.length });
+      }
+      return known;
+    };
 
     /** 告警（事实 `director.alarmed`，进操作台的近期告警）并请求安全核降级。 */
     const alarm = (cause: 'failures' | 'drift', count: number, detail: string) => {
@@ -283,10 +395,13 @@ export const director = definePlugin({
       taken: Candidate[],
       id: string,
       trace: TraceRef | undefined,
+      untrusted: boolean,
+      started: (ok: boolean) => void,
     ) => {
       const votes = ctx.optional(VoteService);
       if (!votes) {
         ctx.log('director.vote-unavailable', { id, reason: '投票插件不在场' });
+        started(false);
         return;
       }
       void votes
@@ -297,14 +412,14 @@ export const director = definePlugin({
           durationSec: action.durationSec,
           ...(action.decisionPoint === undefined ? {} : { decisionPoint: action.decisionPoint }),
           inputs: taken.flatMap((c) => c.sources),
-          untrusted: taken.length > 0,
+          untrusted,
           ...(trace ? { trace } : {}),
         })
-        .then((result) =>
-          result.ok
-            ? ctx.log('director.vote-started', { id, voteId: result.voteId })
-            : ctx.log('director.vote-refused', { id, reason: result.reason }),
-        );
+        .then((result) => {
+          if (result.ok) ctx.log('director.vote-started', { id, voteId: result.voteId });
+          else ctx.log('director.vote-refused', { id, reason: result.reason });
+          started(result.ok);
+        });
     };
 
     /** 一次决策：取候选、组装上下文、调用模型（可被取消）、解析并交出意图。 */
@@ -338,6 +453,52 @@ export const director = definePlugin({
         if (errorType) call.fail(errorType);
         call.end();
       };
+      const controller = new AbortController();
+      let cancelledBy: string | undefined;
+      // 取消时不等客户端收尾：客户端没有及时响应中止信号也照样结束这次调用。
+      const cancelled = new Promise<never>((_, reject) =>
+        controller.signal.addEventListener('abort', () => reject(new Cancelled()), { once: true }),
+      );
+      cancelled.catch(() => {});
+      inflight = {
+        cancellable,
+        cancel: (by) => {
+          cancelledBy ??= by;
+          controller.abort();
+        },
+      };
+      // 召回记忆（记忆插件在场时）：有截止时间，到点就不带记忆继续；被取消时这次时机结束。
+      let recalled: { recall: MemoryRecall; memory: Memory } | undefined;
+      try {
+        recalled = await recallMemories(
+          recallQuery(taken, ended),
+          call,
+          controller.signal,
+          cancelled,
+        );
+      } catch (error) {
+        if (!(error instanceof Cancelled)) throw error;
+        inflight = undefined;
+        endCall('cancelled');
+        ctx.log('director.cancelled', { by: cancelledBy });
+        return;
+      }
+      const recall = recalled?.recall;
+      /**
+       * 使用反馈：每次召回恰好回报一次。说话等发言结果（观众一个字也没听到就回报空集），发起投票等开票结果；
+       * 失败、取消、沉默与非法输出回报空集。
+       */
+      let reported = false;
+      const report = (used: readonly string[]) => {
+        if (!recall || reported) return;
+        reported = true;
+        try {
+          // 用召回时的那个记忆服务：之后它被替换或停用，回报就落空（由它自己核对）。
+          recalled?.memory.feedback(recall.recallId, used);
+        } catch (error) {
+          ctx.log('director.feedback-failed', { error: message(error) });
+        }
+      };
       const startedAt = clock.now();
       /** 调用已有结果（含超时与取消）：之后客户端再报的用量与首块不记。 */
       let settled = false;
@@ -356,26 +517,12 @@ export const director = definePlugin({
           metricAttributes(errorType),
           call,
         );
-      const contextValue = context(reasons, taken, ended);
+      const contextValue = context(reasons, taken, ended, recall);
       const request: LlmRequest = {
         messages: buildMessages(contextValue),
         output: INTENT_OUTPUT,
         context: contextValue,
         ...(call.traceparent ? { traceparent: call.traceparent } : {}),
-      };
-      const controller = new AbortController();
-      let cancelledBy: string | undefined;
-      // 取消时不等客户端收尾：客户端没有及时响应中止信号也照样结束这次调用。
-      const cancelled = new Promise<never>((_, reject) =>
-        controller.signal.addEventListener('abort', () => reject(new Cancelled()), { once: true }),
-      );
-      cancelled.catch(() => {});
-      inflight = {
-        cancellable,
-        cancel: (by) => {
-          cancelledBy ??= by;
-          controller.abort();
-        },
       };
       let output: string;
       try {
@@ -424,6 +571,7 @@ export const director = definePlugin({
         inflight = undefined;
         // 截止时间到点：以 DeadlineError 作中止原因，模型客户端据此把这次调用记为超时（就绪判定用）。
         controller.abort(error instanceof DeadlineError ? error : undefined);
+        report([]);
         if (cancelledBy !== undefined) {
           recordDuration('cancelled');
           endCall('cancelled');
@@ -441,6 +589,7 @@ export const director = definePlugin({
       recordDuration();
       const parsed = parseIntent(output);
       if (!parsed.ok) {
+        report([]);
         endCall('invalid_output');
         failed('invalid_output', parsed.reason, call, taken.length > 0);
         return;
@@ -451,6 +600,7 @@ export const director = definePlugin({
         const target =
           action.replyTo === undefined ? undefined : taken.find((c) => c.id === action.replyTo);
         if (action.replyTo !== undefined && !target) {
+          report([]);
           endCall('unknown_target');
           failed(
             'unknown_target',
@@ -460,6 +610,7 @@ export const director = definePlugin({
           );
           return;
         }
+        const used = usedMemories(recall, action.memories);
         noteDrift(driftSignals(action.text, recentTexts(), config.drift), call);
         endCall();
         succeeded();
@@ -467,30 +618,43 @@ export const director = definePlugin({
         outputs.push(action.text);
         if (outputs.length > config.drift.recent) outputs.shift();
         const trace = speechTrace(call, target);
-        void speech.request({
-          id: `director:${ctx.instanceId}:${calls}`,
-          source: target ? 'danmaku-reply' : 'chatter',
-          text: action.text,
-          expiresAt: clock.now() + config.replyTtlMs,
-          // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
-          preempt: target ? 'sentence' : 'immediate',
-          inputs: target ? target.sources : [],
-          // 上下文里有弹幕，输出就受不可信输入影响。
-          untrusted: taken.length > 0,
-          ...(trace ? { trace } : {}),
-        });
+        void speech
+          .request({
+            id: `director:${ctx.instanceId}:${calls}`,
+            source: target ? 'danmaku-reply' : 'chatter',
+            text: action.text,
+            expiresAt: clock.now() + config.replyTtlMs,
+            // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
+            preempt: target ? 'sentence' : 'immediate',
+            inputs: target ? target.sources : [],
+            // 上下文里有弹幕或记忆，输出就受不可信输入影响。
+            untrusted: taken.length > 0 || (recall?.memories.length ?? 0) > 0,
+            ...(trace ? { trace } : {}),
+          })
+          // 观众一个字也没听到：记忆没有用上。
+          .then((outcome) => report(outcome.heard === '' ? [] : used));
       } else if (action.action === 'vote') {
         // 题目与选项也要说出口：查出戏用语与格式（各段分别查，不查重复）。
         const signals = new Set<DriftSignal>();
         for (const piece of [action.question, ...action.options]) {
           for (const signal of driftSignals(piece, [], config.drift)) signals.add(signal);
         }
+        const used = usedMemories(recall, action.memories);
         noteDrift([...signals], call);
         endCall();
         succeeded();
         calls += 1;
-        startVote(action, taken, `director:${ctx.instanceId}:${calls}`, traceRef(call));
+        startVote(
+          action,
+          taken,
+          `director:${ctx.instanceId}:${calls}`,
+          traceRef(call),
+          // 上下文里有弹幕或记忆，题目与选项就受不可信输入影响。
+          taken.length > 0 || (recall?.memories.length ?? 0) > 0,
+          (ok) => report(ok ? used : []),
+        );
       } else {
+        report([]);
         endCall();
         succeeded();
         ctx.log('director.silence', { ...action });

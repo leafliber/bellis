@@ -1,4 +1,6 @@
+import { TEST_PERSONA } from '@bellis/director';
 import type { ResolvedEntry } from '@bellis/kernel';
+import type { SimWriteFault } from '@bellis/memory';
 import fc from 'fast-check';
 
 /** 模拟 TTS 每个朗读码点的采样数；不变量据此从播出的采样数推出观众听到了什么。 */
@@ -25,8 +27,8 @@ export const SENTENCES = [
 ] as const;
 
 /**
- * 弹幕文本：普通、提示注入、控制字符与零宽字符；后面是投票用的：编号（含全角、键帽）、选项文本、
- * 规范化后不匹配的写法。
+ * 弹幕文本：普通、提示注入、控制字符与零宽字符；中间是投票用的：编号（含全角、键帽）、选项文本、
+ * 规范化后不匹配的写法；最后一条含个人敏感信息（所在地），记忆的隐私网关应当拦下。
  */
 export const DANMAKU_TEXTS = [
   '主播你好',
@@ -42,9 +44,16 @@ export const DANMAKU_TEXTS = [
   ' 魔女审判！',
   '逆转裁判',
   '1号',
+  '我住在北京市海淀区',
 ] as const;
-/** 投票用的写法从这里开始。 */
+/** 投票用的写法从这里开始，到这里结束。 */
 const FIRST_BALLOT = 6;
+const LAST_BALLOT = DANMAKU_TEXTS.length - 2;
+/** 含个人敏感信息的那一条。 */
+const PRIVATE_TEXT = DANMAKU_TEXTS.length - 1;
+
+/** 仿真里记忆的入口 ID。 */
+export const SIM_ENTRY = 'sim:room';
 
 /** 投票的题目与选项组：含禁词的选项让审核启用时开票说明有一句被跳过。 */
 export const VOTE_QUESTIONS = ['下一把玩什么？', '要不要开新档'] as const;
@@ -78,6 +87,16 @@ export interface Scenario {
   presentationMs?: number;
   /** 模拟 TTS 的每分钟请求数上限：到了上限，下一句安静等到窗口里空出名额（云端 TTS 限流，R-10）。缺省 0 不限。 */
   ttsRpm?: number;
+  /**
+   * 记忆（模拟 Iris 与记忆插件）：召回的耗时（超过决策插件的截止时间即超时）、写入的应答耗时与依次注入的故障、
+   * 操作员登记墓碑的时刻与观众。缺省不启用记忆。
+   */
+  memory?: {
+    recallDelayMs: number;
+    writeDelayMs: number;
+    writeFaults: SimWriteFault[];
+    forget: Array<{ atMs: number; viewer: number }>;
+  };
   durationMs: number;
 }
 
@@ -99,10 +118,11 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
         atMs: time(maxDurationMs),
         viewer: fc.nat(3),
         nickname: fc.nat(NICKNAMES.length - 1),
-        // 一半是投票用的写法，投票时段里才有足够的票。
+        // 一半是投票用的写法，投票时段里才有足够的票；少数含个人敏感信息。
         text: fc.oneof(
-          fc.nat(FIRST_BALLOT - 1),
-          fc.integer({ min: FIRST_BALLOT, max: DANMAKU_TEXTS.length - 1 }),
+          { arbitrary: fc.nat(FIRST_BALLOT - 1), weight: 4 },
+          { arbitrary: fc.integer({ min: FIRST_BALLOT, max: LAST_BALLOT }), weight: 4 },
+          { arbitrary: fc.constant(PRIVATE_TEXT), weight: 1 },
         ),
       }),
       { maxLength: 16 },
@@ -145,6 +165,16 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
     ),
     presentationMs: fc.nat(30).map((n) => n * 10),
     ttsRpm: fc.constantFrom(0, 0, 2, 4),
+    memory: fc.record({
+      recallDelayMs: fc.constantFrom(0, 50, 3_000),
+      writeDelayMs: fc.constantFrom(0, 300),
+      writeFaults: fc.array(fc.constantFrom<SimWriteFault>('ok', 'reject', 'lost'), {
+        maxLength: 4,
+      }),
+      forget: fc.array(fc.record({ atMs: time(maxDurationMs), viewer: fc.nat(3) }), {
+        maxLength: 2,
+      }),
+    }),
     durationMs: fc.constant(maxDurationMs),
   });
 }
@@ -240,7 +270,9 @@ export function scenarioEntries(
     entry('llm', 'llm-replay', {
       config: { outputs: scenario.outputs.slice(outputsUsed).map(output), latencyMs: 200 },
     }),
-    entry('director', 'director', { config: { idleMs: 4000 } }),
+    entry('director', 'director', {
+      config: { persona: TEST_PERSONA, idleMs: 4000, recallTimeoutMs: 1000 },
+    }),
     entry('schedule', 'speech-schedule', {
       config: {
         announcements: scenario.announcements
@@ -250,6 +282,24 @@ export function scenarioEntries(
         preempt: 'sentence',
       },
     }),
+    ...(scenario.memory
+      ? [
+          entry('iris', 'iris-sim', {
+            config: {
+              recallDelayMs: scenario.memory.recallDelayMs,
+              writeDelayMs: scenario.memory.writeDelayMs,
+              writeFaults: scenario.memory.writeFaults,
+            },
+          }),
+          entry('memory', 'memory', {
+            grant: ['memory.write'],
+            config: {
+              entryId: SIM_ENTRY,
+              write: { flushDelayMs: 500, retryMinMs: 500, retryMaxMs: 4000, capacity: 20 },
+            },
+          }),
+        ]
+      : []),
     ...(options.telemetry === false ? [] : [entry('telemetry', 'telemetry-memory')]),
   ];
 }

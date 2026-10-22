@@ -36,6 +36,7 @@ import {
   LlmError,
   type LlmUsage,
   parseIntent,
+  TEST_PERSONA,
 } from '@bellis/director';
 import { type PluginSecrets, secretPermission, systemClock } from '@bellis/kernel';
 import {
@@ -55,12 +56,10 @@ import { pluginSecrets } from '../packages/host/src/secrets.ts';
 import { FakeChat } from '../packages/llm/test/fake-chat.ts';
 import { arkReasoningStream, openAiToolStream } from '../packages/llm/test/fixtures.ts';
 
-const PERSONA = '贝莉：温和、好奇的中文虚拟主播，喜欢推理游戏，说话简短、口语化。';
-
 /** 合成的弹幕上下文样本（不是观众数据）：轮流使用。 */
 const SAMPLES: DirectorContext[] = [
   {
-    persona: PERSONA,
+    persona: TEST_PERSONA,
     triggers: ['candidates'],
     heard: [],
     candidates: [
@@ -69,9 +68,10 @@ const SAMPLES: DirectorContext[] = [
     ],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
-    persona: PERSONA,
+    persona: TEST_PERSONA,
     triggers: ['candidates'],
     heard: ['欢迎大家来到直播间，今天我们继续玩魔女审判。'],
     candidates: [
@@ -80,9 +80,10 @@ const SAMPLES: DirectorContext[] = [
     ],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
-    persona: PERSONA,
+    persona: TEST_PERSONA,
     triggers: ['candidates'],
     heard: ['这一章的线索好多，我们慢慢来。'],
     candidates: [
@@ -91,9 +92,10 @@ const SAMPLES: DirectorContext[] = [
     ],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
-    persona: PERSONA,
+    persona: TEST_PERSONA,
     triggers: ['candidates'],
     heard: ['投票开始啦，大家打编号就行。'],
     candidates: [{ id: 'c-d7', name: '阿杰', text: '我投 1 号', count: 4 }],
@@ -107,17 +109,19 @@ const SAMPLES: DirectorContext[] = [
       remainingSec: 18,
     },
     endedVote: null,
+    memories: [],
   },
   {
-    persona: PERSONA,
+    persona: TEST_PERSONA,
     triggers: ['idle'],
     heard: ['好，存个档。', '刚才那段剧情真让人难过。'],
     candidates: [],
     vote: null,
     endedVote: null,
+    memories: [],
   },
   {
-    persona: PERSONA,
+    persona: TEST_PERSONA,
     triggers: ['vote-ended'],
     heard: ['投票结束！「魔女审判」以五票胜出，一共七票。'],
     candidates: [],
@@ -131,6 +135,7 @@ const SAMPLES: DirectorContext[] = [
       outcome: 'winner',
       winners: [1],
     },
+    memories: [],
   },
 ];
 

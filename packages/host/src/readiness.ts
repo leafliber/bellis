@@ -1,9 +1,10 @@
 /**
- * 弹幕接入与决策模型的状态：开播预检与操作员状态（命令行与操作台）共用同一份。判定不发请求，只读接入插件与
- * 模型客户端报告的就绪状态（见观众接入“就绪”、决策模型“就绪”）。
+ * 弹幕接入、决策模型与记忆的状态：开播预检与操作员状态（命令行与操作台）共用同一份。判定不发请求，只读接入插件、
+ * 模型客户端与记忆插件报告的就绪状态（见观众接入“就绪”、决策模型“就绪”、运维“开播预检”）。
  */
 import type { DanmakuSource } from '@bellis/audience';
-import { type Llm, LlmError } from '@bellis/director';
+import { choosePersona, type Llm, LlmError } from '@bellis/director';
+import { IrisError, irisFailureText, type Memory, type MemoryLedger } from '@bellis/memory';
 
 /** 弹幕接入（`danmaku@1`）的状态。 */
 export interface DanmakuReport {
@@ -84,4 +85,53 @@ export function probeFailure(error: unknown): string {
     error.code,
   ].filter((part) => part !== undefined);
   return `决策模型的探测请求失败（${parts.join('，')}）`;
+}
+
+/** 记忆（`memory@1` 与 Iris）的状态。 */
+export interface MemoryStatusReport {
+  /** Iris 就绪（最近的请求没有处在连续失败中、也没有鉴权失败），且记忆插件在运行。 */
+  ready: boolean;
+  /** 状态说明：只含失败的类别、HTTP 状态与错误码；写入在等重试时说明约多久后重试。不在场时为“memory@1 不在场”。 */
+  status: string;
+  /** 待发队列、累计写入与丢弃的条数、登记了墓碑的观众数：来自状态存储的记忆账本，记忆插件不在场时照样有。 */
+  pending: number;
+  written: number;
+  dropped: number;
+  tombstones: number;
+}
+
+export function memoryReport(memory: Memory | undefined, ledger: MemoryLedger): MemoryStatusReport {
+  const counts = {
+    pending: ledger.outbox.length,
+    written: ledger.written,
+    dropped: ledger.dropped,
+    tombstones: ledger.tombstones.length,
+  };
+  if (!memory) return { ready: false, status: 'memory@1 不在场', ...counts };
+  const report = memory.report;
+  return { ready: report.ready === true, status: report.status, ...counts };
+}
+
+/** 决策插件此刻用的人设的来源与版本（见决策模型“人设”）；不含正文。 */
+export interface PersonaReport {
+  source: 'iris' | 'profile';
+  /** Iris 人设的版本号；profile 的人设、或 Iris 没给版本时为 null。 */
+  version: number | null;
+}
+
+export function personaReport(memory: Memory | undefined): PersonaReport {
+  const { source, version } = choosePersona(memory, '');
+  return { source, version };
+}
+
+/** 开播预检中 Iris 一项的说明：取当前人设失败（请求出错）时，只含类别、HTTP 状态与错误码。 */
+export function personaFailure(error: unknown): string {
+  if (error instanceof IrisError) return `Iris 没有当前人设（${irisFailureText(error)}）`;
+  return `Iris 没有当前人设（${error instanceof Error ? error.message : String(error)}）`;
+}
+
+/** 开播预检中 Iris 一项的说明：以宿主令牌访问 Iris（`GET /status`）失败时，只含类别、HTTP 状态与错误码。 */
+export function memoryCheckFailure(error: unknown): string {
+  if (error instanceof IrisError) return `Iris 不能以宿主令牌访问（${irisFailureText(error)}）`;
+  return `Iris 不能以宿主令牌访问：${error instanceof Error ? error.message : String(error)}`;
 }

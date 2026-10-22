@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { danmakuReport, llmReport, spoken } from '../src/readiness.ts';
+import type { Memory } from '@bellis/memory';
+import { danmakuReport, llmReport, personaReport, spoken } from '../src/readiness.ts';
 
 test('时长的读法', () => {
   assert.equal(spoken(0), '0 秒');
@@ -39,4 +40,21 @@ test('决策模型的状态：还没失败过时最近一次失败为 null', () 
     }),
     { ready: true, status: '就绪（还没有调用过）', consecutiveFailures: 0, lastFailure: null },
   );
+});
+
+test('人设的来源与版本：记忆插件拿到过 Iris 的人设时为 iris 与版本，否则为 profile', () => {
+  const memory = (persona: Memory['persona']): Memory => ({
+    recall: async () => ({ ok: false, kind: 'unavailable', detail: '' }),
+    feedback() {},
+    check: async () => {},
+    persona,
+    currentPersona: async () => persona,
+    report: { ready: true, status: '就绪', pending: 0, written: 0, dropped: 0, tombstones: 0 },
+  });
+  assert.deepEqual(personaReport(memory({ text: '你是贝莉。', version: 3 })), {
+    source: 'iris',
+    version: 3,
+  });
+  assert.deepEqual(personaReport(memory(undefined)), { source: 'profile', version: null });
+  assert.deepEqual(personaReport(undefined), { source: 'profile', version: null });
 });

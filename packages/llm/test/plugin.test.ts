@@ -121,7 +121,15 @@ async function world(
 const request = {
   messages: [{ role: 'user' as const, content: '你好' }],
   output: INTENT_OUTPUT,
-  context: { persona: '', triggers: [], heard: [], candidates: [], vote: null, endedVote: null },
+  context: {
+    persona: '',
+    triggers: [],
+    heard: [],
+    candidates: [],
+    vote: null,
+    endedVote: null,
+    memories: [],
+  },
   traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
 };
 

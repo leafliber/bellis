@@ -24,7 +24,12 @@ import {
   type OperatorStatus,
   serveOperator,
 } from '../src/operator.ts';
-import type { DanmakuReport, LlmReport } from '../src/readiness.ts';
+import type {
+  DanmakuReport,
+  LlmReport,
+  MemoryStatusReport,
+  PersonaReport,
+} from '../src/readiness.ts';
 
 const isLogin = Compile(OperatorConsoleLoginResult);
 
@@ -62,6 +67,8 @@ async function setup(options: { alertLimit?: number } = {}) {
     vote: null as VoteStatus | null,
     danmaku: null as DanmakuReport | null,
     llm: null as LlmReport | null,
+    memory: null as MemoryStatusReport | null,
+    persona: null as PersonaReport | null,
   };
   let server: ConsoleServer | undefined;
   const api = createOperator({
@@ -85,6 +92,8 @@ async function setup(options: { alertLimit?: number } = {}) {
     vote: () => world.vote,
     danmaku: () => world.danmaku,
     llm: () => world.llm,
+    memory: () => world.memory,
+    persona: () => world.persona,
     preflight: async (target, withSafety) => {
       world.preflights.push([target, withSafety]);
       return [...world.failures];
@@ -424,6 +433,59 @@ test('弹幕接入与决策模型的状态：命令行与操作台相同；没�
     const fromConsole = (await s.http('GET', '/api/status')).body as OperatorStatus;
     assert.deepEqual(fromConsole.danmaku, s.world.danmaku);
     assert.deepEqual(fromConsole.llm, s.world.llm);
+  } finally {
+    await s.close();
+  }
+});
+
+test('记忆：状态在命令行与操作台相同；forget 登记本地墓碑，参数不合法时拒绝，告警不写平台身份', async () => {
+  const s = await setup();
+  try {
+    assert.equal(((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).memory, null);
+    assert.equal(((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).persona, null);
+    // 人设的来源与版本（不含正文）：命令行与操作台相同。
+    s.world.persona = { source: 'iris', version: 3 };
+    assert.deepEqual(((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).persona, {
+      source: 'iris',
+      version: 3,
+    });
+    assert.deepEqual(((await s.http('GET', '/api/status')).body as OperatorStatus).persona, {
+      source: 'iris',
+      version: 3,
+    });
+    s.world.memory = {
+      ready: true,
+      status: '就绪；写入失败，约 4 秒后重试',
+      pending: 3,
+      written: 10,
+      dropped: 1,
+      tombstones: 0,
+    };
+    assert.deepEqual(
+      ((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).memory,
+      s.world.memory,
+    );
+    assert.deepEqual(
+      ((await s.http('GET', '/api/status')).body as OperatorStatus).memory,
+      s.world.memory,
+    );
+
+    const account = 'open-id-0f3c9a';
+    assert.deepEqual(await s.cli.request(OperatorMethod.Forget, { account }), { ok: true });
+    assert.deepEqual(
+      s.events('memory.tombstoned').map((e) => e.data),
+      [{ account, by: 'operator' }],
+    );
+    for (const params of [{}, { account: '' }, { account: '含 空白' }, { account, extra: 1 }]) {
+      assert.deepEqual(await s.cli.request(OperatorMethod.Forget, params), {
+        ok: false,
+        reason: '参数不合法',
+      });
+    }
+    assert.equal(s.events('memory.tombstoned').length, 1);
+    const alert = s.api.alerts().find((a) => a.type === 'memory.tombstoned');
+    assert.equal(alert?.text, '已登记一名观众的本地墓碑（记忆）');
+    assert.ok(!JSON.stringify(s.api.alerts()).includes(account), '告警不写平台身份');
   } finally {
     await s.close();
   }

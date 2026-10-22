@@ -42,6 +42,10 @@ const context: DirectorContext = {
     outcome: 'winner',
     winners: [1],
   },
+  memories: [
+    { id: 'm1', text: '直播间的观众喜欢魔女审判', kind: '偏好', stance: '转述' },
+    { id: 'm2', text: forged, kind: null, stance: null },
+  ],
 };
 
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
@@ -90,6 +94,7 @@ test('系统部分是人设、规则与意图格式，不含任何观众内容�
     '魔女审判',
     '逆转裁判',
     '要不要唱歌',
+    '直播间的观众喜欢',
   ];
   const outside = usr.replace(data, '');
   for (const text of viewerContent) {
@@ -121,6 +126,12 @@ test('系统部分是人设、规则与意图格式，不含任何观众内容�
     结果: '有胜出选项',
     胜出选项编号: [1],
   });
+  // 记忆只在数据区里单列；类别与立场 Iris 没给时不写。
+  assert.deepEqual(parsed.记忆, [
+    { 编号: 'm1', 内容: '直播间的观众喜欢魔女审判', 类别: '偏好', 立场: '转述' },
+    { 编号: 'm2', 内容: forged },
+  ]);
+  assert.ok(sys.includes('memories 填它们的编号'), '规则说明怎样回报用到的记忆');
 });
 
 test('同样的上下文得到同样的消息；没有候选与投票时数据区照样完整', () => {
@@ -132,6 +143,7 @@ test('同样的上下文得到同样的消息；没有候选与投票时数据�
     candidates: [],
     vote: null,
     endedVote: null,
+    memories: [],
   };
   const [system, user] = buildMessages(empty);
   assert.ok(system?.content.includes('（未设定）'));
@@ -141,6 +153,7 @@ test('同样的上下文得到同样的消息；没有候选与投票时数据�
     候选弹幕: [],
     进行中的投票: null,
     刚结束的投票: null,
+    记忆: [],
   });
 });
 

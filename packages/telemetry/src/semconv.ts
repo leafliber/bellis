@@ -46,4 +46,6 @@ export const Metric = {
   EventLoopDelay: 'bellis.host.event_loop.delay',
   /** 流式推理调用从发出到第一个正文块（不含思考内容；函数调用方式下为第一段函数参数）。 */
   LlmFirstOutput: 'bellis.llm.time_to_first_output',
+  /** 记忆召回：记忆插件发出召回准备到拿到结果（含超时、出错与取消），按 `bellis.memory.outcome` 分。 */
+  MemoryRecallDuration: 'bellis.memory.recall.duration',
 } as const;

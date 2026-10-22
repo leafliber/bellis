@@ -95,10 +95,19 @@ export interface SafetyOptions {
 }
 
 /**
- * 安全停止下唯一允许的动作：把会话令牌写进 Stage 浏览器源的 URL。只申请这一能力的意图、
+ * 安全停止下允许的动作之一：把会话令牌写进 Stage 浏览器源的 URL。只申请这一能力的意图、
  * 这一资源的许可，在安全停止下照常判定与授予；维护态与存储不可用时仍拒绝（见安全核“监督模式”）。
  */
 export const STAGE_URL = 'obs.stage-url';
+
+/**
+ * 安全停止下允许的动作之二：写 Iris（记忆的写入，见记忆“写入”）。只申请这一能力的意图在安全停止下照常判定；
+ * 维护态与存储不可用时仍拒绝，Rule of Two 等其它检查照旧。它没有执行许可。
+ */
+export const MEMORY_WRITE = 'memory.write';
+
+/** 安全停止下照常判定的能力：都不是观众能看到或听到的输出（见安全核“监督模式”）。 */
+const SAFE_STOP_EXEMPT: ReadonlySet<string> = new Set([STAGE_URL, MEMORY_WRITE]);
 
 /** 真实输出模式：OBS 的外部变化只在这些模式下按急停处理（M0 只连模拟设备）。 */
 const REAL_OUTPUT: ReadonlySet<Mode> = new Set(['M1', 'M2', 'M3']);
@@ -237,9 +246,10 @@ export class SafetyCore {
   }
 
   async #denial(request: IntentRequest): Promise<string | undefined> {
-    const stageUrlOnly =
-      request.capabilities.length > 0 && request.capabilities.every((c) => c === STAGE_URL);
-    const immediate = this.#outputBlocker(stageUrlOnly);
+    // 只申请安全停止下的例外能力（写 Stage URL、写 Iris）的意图，安全停止下照常判定。
+    const exempt =
+      request.capabilities.length > 0 && request.capabilities.every((c) => SAFE_STOP_EXEMPT.has(c));
+    const immediate = this.#outputBlocker(exempt);
     if (immediate) return immediate;
     const granted = this.#permissionsOf(request.holder);
     if (!granted) return `未知的意图来源 ${request.holder}`;
@@ -272,13 +282,13 @@ export class SafetyCore {
       if (verdict && typeof verdict.deny === 'string') return verdict.deny;
     }
     // 守卫可能是异步的：判定期间若进入了安全停止，同样拒绝。
-    return this.#outputBlocker(stageUrlOnly);
+    return this.#outputBlocker(exempt);
   }
 
-  /** `stageUrl` 为 true 时是写 Stage URL：安全停止下放行，维护态仍拒绝。 */
-  #outputBlocker(stageUrl = false): string | undefined {
+  /** `exempt` 为 true 时是安全停止下的例外（写 Stage URL、写 Iris）：安全停止下放行，维护态仍拒绝。 */
+  #outputBlocker(exempt = false): string | undefined {
     if (!this.#store.healthy) return '状态存储不可用';
-    if (!producesOutput(this.#mode) && !(stageUrl && !this.#maintenance))
+    if (!producesOutput(this.#mode) && !(exempt && !this.#maintenance))
       return '安全停止中，不产生新输出';
     if (this.#maintenance) return '维护态中';
     return undefined;
