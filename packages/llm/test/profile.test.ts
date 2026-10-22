@@ -24,6 +24,8 @@ test('示例 profile：模型客户端与决策插件默认禁用；客户端只
   assert.equal(typed.endpoint, ARK_CHAT_ENDPOINT);
   assert.equal(typed.model, 'glm-5-3-flash-260828');
   assert.equal(typed.reasoningEffort, 'low');
+  // 开播预检的探测会外发、会计费：样例显式写明不发。
+  assert.equal((client.config as { probeOnPreflight?: boolean }).probeOnPreflight, false);
   // 型号不是机密；配置齐全，只差凭据。
   assert.equal(configBlocker(typed, new Set(client.grant)), undefined);
 

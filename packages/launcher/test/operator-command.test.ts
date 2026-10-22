@@ -6,6 +6,7 @@ import {
   OPERATOR_USAGE,
   openBrowser,
   parseOperatorArgs,
+  requestTimeoutMs,
   runOperatorCommand,
 } from '../src/operator-command.ts';
 
@@ -152,4 +153,14 @@ test('各平台自带的打开方式，都不经 shell', () => {
   ]);
   assert.deepEqual(browserCommand(url, 'darwin'), ['open', [url]]);
   assert.deepEqual(browserCommand(url, 'linux'), ['xdg-open', [url]]);
+});
+
+test('切换模式与只跑预检等开播预检跑完（含决策模型的探测），时限放宽；其余命令 5 秒', () => {
+  assert.equal(requestTimeoutMs(OperatorMethod.Mode), 30_000);
+  assert.equal(requestTimeoutMs(OperatorMethod.Preflight), 30_000);
+  for (const method of [OperatorMethod.Status, OperatorMethod.EmergencyStop, OperatorMethod.Veto]) {
+    assert.equal(requestTimeoutMs(method), 5000);
+  }
+  // 探测的截止时间上限（llm-openai 的 probeTimeoutMs 至多 20 秒）留在命令行的时限之内。
+  assert.ok(requestTimeoutMs(OperatorMethod.Preflight) > 20_000);
 });

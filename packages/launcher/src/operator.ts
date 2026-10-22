@@ -17,6 +17,7 @@ import {
   OPERATOR_USAGE,
   openBrowser,
   parseOperatorArgs,
+  requestTimeoutMs,
   runOperatorCommand,
 } from './operator-command.ts';
 
@@ -39,7 +40,8 @@ const connection = await connect(info.channelPath, Role.Operator, {
 const rpc = new RpcPeer(connection, { timeoutMs: 5000 });
 try {
   process.exitCode = await runOperatorCommand(args, {
-    request: (method, params) => rpc.request(method, params),
+    request: (method, params) =>
+      rpc.request(method, params, { timeoutMs: requestTimeoutMs(method) }),
     open: (url) => openBrowser(url),
     print: (line) => console.log(line),
   });

@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { LlmError } from '@bellis/director';
 import { type EntrySnapshot, ManualClock } from '@bellis/kernel';
 import type { SidecarQos } from '@bellis/protocol';
 import { SafetyCore } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
 import { type PreflightInputs, preflight } from '../src/preflight.ts';
+import { danmakuReport, llmReport } from '../src/readiness.ts';
 
 const plugin = (id: string, state: EntrySnapshot['state'], enabled = true): EntrySnapshot => ({
   id,
@@ -27,6 +29,8 @@ const ready: PreflightInputs = {
   moderationEnabled: false,
   reviewPresent: true,
   ttsPrimary: { engine: 'local', ready: true, status: '就绪' },
+  danmaku: undefined,
+  llm: undefined,
   inspectObs: async () => [],
 };
 
@@ -169,4 +173,102 @@ test('开播预检：先列出安全核的拒绝原因——看门狗未连接�
   } finally {
     close();
   }
+});
+
+const NOW = Date.parse('2026-10-21T08:00:00Z');
+
+test('开播预检：弹幕接入不就绪时列出状态说明与缺口已持续多久，就绪时不列；没有启用弹幕接入时不核对', async () => {
+  const waiting = danmakuReport(
+    {
+      subscribe: () => () => {},
+      ready: false,
+      status:
+        '等待重试（约 50 秒后）：开启场次失败，直播间已有场次或上一场没有正常结束：平台返回错误 7002',
+      gap: () => ({ reason: '开启场次失败（7002）', startedAt: NOW - 75_000 }),
+    },
+    NOW,
+  );
+  assert.deepEqual(waiting.gap, {
+    reason: '开启场次失败（7002）',
+    startedAt: new Date(NOW - 75_000).toISOString(),
+    durationMs: 75_000,
+  });
+  assert.deepEqual(await preflight({ ...ready, danmaku: waiting }), [
+    '弹幕接入未就绪：等待重试（约 50 秒后）：开启场次失败，直播间已有场次或上一场没有正常结束：平台返回错误 7002；缺口已持续 1 分 15 秒',
+  ]);
+  const receiving = danmakuReport(
+    { subscribe: () => () => {}, ready: true, status: '接收中（a.chat.bilibili.com）' },
+    NOW,
+  );
+  assert.deepEqual(await preflight({ ...ready, danmaku: receiving }), []);
+  // 启用了却不在场（例如激活失败）：同样未通过。
+  assert.deepEqual(await preflight({ ...ready, danmaku: danmakuReport(undefined, NOW) }), [
+    '弹幕接入未就绪：不在场',
+  ]);
+  // 不报告就绪状态的来源按未就绪核对。
+  assert.deepEqual(
+    await preflight({ ...ready, danmaku: danmakuReport({ subscribe: () => () => {} }, NOW) }),
+    ['弹幕接入未就绪：没有就绪报告'],
+  );
+  assert.deepEqual(await preflight({ ...ready, danmaku: undefined }), []);
+});
+
+test('开播预检：决策插件启用而 llm@1 缺失或未就绪时列出（带最近一次失败的类别，不带服务端的说明）', async () => {
+  assert.deepEqual(await preflight({ ...ready, llm: llmReport(undefined) }), [
+    '决策模型未就绪：llm@1 不在场',
+  ]);
+  const unready = llmReport({
+    complete: async () => '',
+    ready: false,
+    status: '鉴权失败（auth，HTTP 401），下一次成功之前不就绪',
+    failures: { consecutive: 1, last: { kind: 'auth', at: NOW, status: 401 } },
+  });
+  assert.deepEqual(unready.lastFailure, { kind: 'auth', at: new Date(NOW).toISOString() });
+  assert.equal(unready.consecutiveFailures, 1);
+  assert.deepEqual(await preflight({ ...ready, llm: unready }), [
+    '决策模型未就绪：鉴权失败（auth，HTTP 401），下一次成功之前不就绪',
+  ]);
+  const fine = llmReport({ complete: async () => '', ready: true, status: '就绪' });
+  assert.deepEqual(await preflight({ ...ready, llm: fine }), []);
+  // 不报告就绪状态的客户端按未就绪核对。
+  assert.deepEqual(await preflight({ ...ready, llm: llmReport({ complete: async () => '' }) }), [
+    '决策模型未就绪：没有就绪报告',
+  ]);
+});
+
+test('开播预检：模型客户端配置了探测时以探测的结果为准，失败只列类别、HTTP 状态与错误码；没有探测时不发请求', async () => {
+  let probes = 0;
+  const notReady = llmReport({
+    complete: async () => '',
+    ready: false,
+    status: '连续失败 3 次（最近一次：timeout）',
+  });
+  // 探测成功：之前的连续失败不再算（客户端在探测成功时清零）。
+  const passing = {
+    ...notReady,
+    probe: async () => {
+      probes += 1;
+    },
+  };
+  assert.deepEqual(await preflight({ ...ready, llm: passing }), []);
+  assert.equal(probes, 1);
+  const failing = {
+    ...llmReport({ complete: async () => '', ready: true, status: '就绪' }),
+    probe: async () => {
+      probes += 1;
+      throw new LlmError('auth', '鉴权失败：HTTP 401（AuthenticationError）：服务端的说明', {
+        status: 401,
+        code: 'AuthenticationError',
+      });
+    },
+  };
+  assert.deepEqual(await preflight({ ...ready, llm: failing }), [
+    '决策模型的探测请求失败（auth，HTTP 401，AuthenticationError）',
+  ]);
+  assert.equal(probes, 2);
+  // 没有配置探测：只按就绪报告判定，不发请求。
+  assert.deepEqual(await preflight({ ...ready, llm: notReady }), [
+    '决策模型未就绪：连续失败 3 次（最近一次：timeout）',
+  ]);
+  assert.equal(probes, 2);
 });

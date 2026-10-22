@@ -422,7 +422,8 @@ export const director = definePlugin({
       } catch (error) {
         settled = true;
         inflight = undefined;
-        controller.abort();
+        // 截止时间到点：以 DeadlineError 作中止原因，模型客户端据此把这次调用记为超时（就绪判定用）。
+        controller.abort(error instanceof DeadlineError ? error : undefined);
         if (cancelledBy !== undefined) {
           recordDuration('cancelled');
           endCall('cancelled');
@@ -607,6 +608,9 @@ export const replayLlm = definePlugin({
     const replay: ReplayLlm = {
       // 遥测里填回放的标识，不冒充真实的厂商与型号。
       model: { provider: 'bellis.replay', name: 'replay' },
+      // 回放没有要连接的端点：恒为就绪。
+      ready: true,
+      status: '回放',
       requests,
       complete(request, signal) {
         requests.push(structuredClone(request));

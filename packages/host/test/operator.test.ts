@@ -24,6 +24,7 @@ import {
   type OperatorStatus,
   serveOperator,
 } from '../src/operator.ts';
+import type { DanmakuReport, LlmReport } from '../src/readiness.ts';
 
 const isLogin = Compile(OperatorConsoleLoginResult);
 
@@ -59,6 +60,8 @@ async function setup(options: { alertLimit?: number } = {}) {
     failures: [] as string[],
     preflights: [] as Array<[string, boolean]>,
     vote: null as VoteStatus | null,
+    danmaku: null as DanmakuReport | null,
+    llm: null as LlmReport | null,
   };
   let server: ConsoleServer | undefined;
   const api = createOperator({
@@ -80,6 +83,8 @@ async function setup(options: { alertLimit?: number } = {}) {
     presentation: () => ({ delayMs: 82, samples: 0, source: 'initial' }),
     review: () => ({ mode: 'approve', delayMs: 3000, approveTimeoutMs: 30_000 }),
     vote: () => world.vote,
+    danmaku: () => world.danmaku,
+    llm: () => world.llm,
     preflight: async (target, withSafety) => {
       world.preflights.push([target, withSafety]);
       return [...world.failures];
@@ -387,6 +392,38 @@ test('进行中的投票：命令行与操作台的状态里看得到题目、�
       s.api.alerts().map((a) => a.text),
       ['投票中止：director:1（安全停止：操作员急停）'],
     );
+  } finally {
+    await s.close();
+  }
+});
+
+test('弹幕接入与决策模型的状态：命令行与操作台相同；没有启用时为 null', async () => {
+  const s = await setup();
+  try {
+    const before = (await s.cli.request(OperatorMethod.Status)) as OperatorStatus;
+    assert.equal(before.danmaku, null);
+    assert.equal(before.llm, null);
+    s.world.danmaku = {
+      ready: false,
+      status: '长连接等待重连（约 2 秒后）：长连接 a.chat.bilibili.com 断开：心跳超时',
+      gap: {
+        reason: '长连接断开：心跳超时',
+        startedAt: '2026-10-21T08:00:00.000Z',
+        durationMs: 12_000,
+      },
+    };
+    s.world.llm = {
+      ready: false,
+      status: '连续失败 3 次（最近一次：timeout）',
+      consecutiveFailures: 3,
+      lastFailure: { kind: 'timeout', at: '2026-10-21T08:00:05.000Z' },
+    };
+    const fromCli = (await s.cli.request(OperatorMethod.Status)) as OperatorStatus;
+    assert.deepEqual(fromCli.danmaku, s.world.danmaku);
+    assert.deepEqual(fromCli.llm, s.world.llm);
+    const fromConsole = (await s.http('GET', '/api/status')).body as OperatorStatus;
+    assert.deepEqual(fromConsole.danmaku, s.world.danmaku);
+    assert.deepEqual(fromConsole.llm, s.world.llm);
   } finally {
     await s.close();
   }

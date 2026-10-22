@@ -35,6 +35,8 @@ export function receiveSpan(tracer: Tracer, platform: string, id: string): Span 
 /** 接收缺口（见观众接入“缺口”）：从失去接收到重新接收之间，这段时间的弹幕收不到。 */
 export interface DanmakuGap {
   reason: string;
+  /** 缺口开始的墙钟时刻（毫秒），操作员据此看缺口持续了多久；不记墙钟的来源（回放）不提供。 */
+  startedAt?: number;
 }
 
 export interface DanmakuSource {
@@ -43,6 +45,13 @@ export interface DanmakuSource {
   gap?(): DanmakuGap | undefined;
   /** 缺口开始（收到缺口）与结束（收到 undefined）时同步通知。 */
   onGap?(listener: (gap: DanmakuGap | undefined) => void): () => void;
+  /**
+   * 此刻是否就绪（见观众接入“就绪”），开播预检与操作员状态用：B 站接入要场次已开启、长连接已认证、正在接收。
+   * 不报告的来源按未就绪核对。
+   */
+  readonly ready?: boolean;
+  /** 给操作员看的状态说明，例如“等待重开场次（约 50 秒后）：…”；不含缺口的时长（由 `gap()` 给出开始时刻）。 */
+  readonly status?: string;
 }
 
 export const DanmakuService = defineService<DanmakuSource>('danmaku', 1);

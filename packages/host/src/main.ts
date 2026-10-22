@@ -5,7 +5,7 @@
  * 启动后总处于安全停止，由操作员显式切换模式。操作员动作由命令行与操作台共用（operator.ts）。
  */
 import { dirname } from 'node:path';
-import { VoteService, type Votes } from '@bellis/audience';
+import { DanmakuService, type DanmakuSource, VoteService, type Votes } from '@bellis/audience';
 import { type Avatar, AvatarService } from '@bellis/avatar';
 import { listen, RpcPeer } from '@bellis/channel';
 import {
@@ -16,6 +16,7 @@ import {
   SIM_OBS_SECRET,
 } from '@bellis/config';
 import { ConsoleServer } from '@bellis/console';
+import { director, type Llm, LlmService } from '@bellis/director';
 import {
   ChannelHub,
   ClockService,
@@ -62,6 +63,7 @@ import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
 import { consoleRoutes, createOperator, serveOperator, type Target } from './operator.ts';
 import { preflight } from './preflight.ts';
+import { type DanmakuReport, danmakuReport, type LlmReport, llmReport } from './readiness.ts';
 import { pluginSecrets } from './secrets.ts';
 
 const RPC_TIMEOUT_MS = 2000;
@@ -202,6 +204,9 @@ const operator = createOperator({
     const votes = host.services.resolve(VoteService.name, VoteService.major);
     return 'missing' in votes ? null : ((votes.impl as Votes).current() ?? null);
   },
+  // 状态里的弹幕接入与决策模型：profile 中启用了（或服务在场）才给出。
+  danmaku: () => (danmakuEnabled() || danmakuSource() ? currentDanmaku() : null),
+  llm: () => (directorEnabled() || llmService() ? llmReport(llmService()) : null),
   preflight: runPreflight,
   consoleLogin: () => consoleServer?.issueLogin(),
 });
@@ -297,8 +302,49 @@ function runPreflight(target: Target, withSafety: boolean): Promise<string[]> {
     moderationEnabled: core.moderationEnabled,
     reviewPresent: !('missing' in review),
     ttsPrimary: 'missing' in routing ? undefined : (routing.impl as TtsRouting).primary(),
+    danmaku: danmakuEnabled() ? currentDanmaku() : undefined,
+    llm: directorEnabled() ? currentLlm() : undefined,
     inspectObs: () => emergency.inspect(config.safety.emergency),
   });
+}
+
+/** profile 中启用的条目里，有没有插件提供这个服务（不论此刻是否激活）。 */
+function enabledProvider(ref: string): boolean {
+  return host
+    .snapshot()
+    .some(
+      (entry) => entry.enabled && builtinPlugins.get(entry.plugin)?.manifest.provides.includes(ref),
+    );
+}
+
+// 以下都是函数声明：模块在 await 处挂起时操作员就可能来查状态，不能落在 const 的暂时性死区里。
+function danmakuEnabled(): boolean {
+  return enabledProvider(DanmakuService.ref);
+}
+
+function directorEnabled(): boolean {
+  return host.snapshot().some((entry) => entry.enabled && entry.plugin === director.manifest.id);
+}
+
+function danmakuSource(): DanmakuSource | undefined {
+  const found = host.services.resolve(DanmakuService.name, DanmakuService.major);
+  return 'missing' in found ? undefined : (found.impl as DanmakuSource);
+}
+
+function llmService(): Llm | undefined {
+  const found = host.services.resolve(LlmService.name, LlmService.major);
+  return 'missing' in found ? undefined : (found.impl as Llm);
+}
+
+function currentDanmaku(): DanmakuReport {
+  return danmakuReport(danmakuSource(), Date.now());
+}
+
+/** 决策模型的状态；模型客户端配置了开播预检的探测时带上它。 */
+function currentLlm(): LlmReport & { probe?: () => Promise<void> } {
+  const llm = llmService();
+  const probe = llm?.probe?.bind(llm);
+  return { ...llmReport(llm), ...(probe ? { probe } : {}) };
 }
 
 /** 当前的呈现延迟与样本数（Stage 文档“对齐”）；没有 Stage 服务时为 null。 */

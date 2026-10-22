@@ -90,10 +90,12 @@
 
 契约在 `packages/director/src/llm.ts`：
 
-- `complete(请求, 中止信号, 回调)` 返回正文（函数调用方式下是函数参数）的字符串，由决策插件解析；不做隐式重试，中止信号一到即断开。
+- `complete(请求, 中止信号, 回调)` 返回正文（函数调用方式下是函数参数）的字符串，由决策插件解析；不做隐式重试，中止信号一到即断开。决策插件的截止时间到点时以 `DeadlineError` 作中止原因（`signal.reason`），模型客户端据此把这次调用记为超时失败；其余中止不算失败。
 - 回调只用于遥测，取消之后不再调用：`onFirstChunk`（流式读取收到第一块，含只有思考内容的块）、`onFirstOutput`（第一个正文块：第一段非空的正文，函数调用方式下为第一段函数参数；思考内容不算）、`onUsage`（token 用量与实际应答的型号）。
 - 失败以 `LlmError` 结束，类别：`auth`、`rate_limit`、`server`、`request`、`timeout`、`network`、`protocol`、`incomplete`、`aborted`（含义见下文[失败](#失败)），也写进遥测的 `error.type`。
 - `model` 给出厂商与型号（遥测用）；请求里的 `traceparent` 只用于本机遥测，不发给模型服务。
+- 就绪报告，供开播预检与操作员状态用，判定见[运维的开播预检](operations.md#开播预检)：`ready`、给操作员看的 `status`（只含失败的类别、HTTP 状态与错误码）、`failures`（连续失败数，最近一次失败的类别、墙钟时刻、HTTP 状态与错误码）。判定不发请求；回放模型恒为就绪。
+- `probe()`：开播预检的显式探测，只在模型客户端配置了 `probeOnPreflight` 时提供；失败以 `LlmError` 结束。
 
 ### 模型客户端插件
 
@@ -116,6 +118,9 @@
 | `stallTimeoutMs` | 相邻两个数据块之间（保活注释不算），缺省 5 秒 |
 | `maxEventChars` | 单行与单个 SSE 事件的字符数上限，缺省 65536 |
 | `maxOutputChars` | 正文（或函数参数）的总字符数上限，缺省 8192 |
+| `unreadyAfter` | 连续失败达到这么多次就报告未就绪，直到下一次成功；缺省 3 |
+| `probeOnPreflight` | 开播预检时发一个最小的探测请求，缺省 false；会外发、会计费（见[运维的开播预检](operations.md#开播预检)） |
+| `probeTimeoutMs` | 探测的截止时间，缺省 10 秒，至多 20 秒 |
 
 整体截止时间由决策插件给（`callTimeoutMs`）。思考开关、思考档位与输出方式先按配置走，缺省值待 S-11 之后再定（PENDING）。样例 profile 用 GLM-5.3-flash：思考不能关闭，所以不发 `thinking`，只发 `reasoning_effort: low`；输出方式用 `prompt`，不发未核实的参数。
 
@@ -141,7 +146,7 @@
 
 - 不做隐式重试；中止信号一到即中止 fetch。
 - 类别：HTTP 401、403 为 `auth`；429 为 `rate_limit`；5xx 为 `server`；其余 4xx（例如参数或输出方式不受支持）为 `request`；连接、首块或块间停顿超时为 `timeout`；连接失败或读取中断为 `network`；不是 SSE、数据块不是 JSON、超过上限、流在给出结束原因之前就结束、没有调用指定的函数为 `protocol`；结束原因是 `length`、`content_filter` 等为 `incomplete`；调用方取消为 `aborted`。流中途的错误对象有 HTTP 状态时按状态归类，否则按错误码与类型归类（鉴权、限流与额度、参数，其余为服务端）。
-- 说明里只有类别、HTTP 状态、错误码与截短（至多 200 字）的服务端说明，API Key 抹掉；不含模型输出与思考内容。模型客户端的日志 `llm.failed` 只记类别、HTTP 状态与错误码，取消不记。
+- 说明里只有类别、HTTP 状态、错误码与截短（至多 200 字）的服务端说明，API Key 抹掉；不含模型输出与思考内容。模型客户端的日志 `llm.failed` 只记类别、HTTP 状态与错误码，取消不记，决策插件的截止时间到点记为 `timeout`（带 `deadline: true`）；探测的结果记 `llm.probe`，同样只有是否通过、类别、HTTP 状态与错误码。
 
 ### 遥测
 

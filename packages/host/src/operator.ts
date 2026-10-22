@@ -22,6 +22,7 @@ import type { Presentation } from '@bellis/stage';
 import type { StoredEvent } from '@bellis/store';
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
+import type { DanmakuReport, LlmReport } from './readiness.ts';
 
 export type Target = 'M1' | 'M2' | 'M3';
 
@@ -62,6 +63,13 @@ export interface OperatorStatus {
   held: HeldEntry[];
   /** 进行中的投票（题目、选项、票数、剩余时间）；没有投票或投票插件不在场时为 null。 */
   vote: VoteStatus | null;
+  /** 弹幕接入：就绪与否、状态说明、当前缺口；profile 中没有启用弹幕接入时为 null。 */
+  danmaku: DanmakuReport | null;
+  /**
+   * 决策模型（llm@1）：就绪与否、状态说明、最近一次失败的类别与时间、连续失败数；profile 中没有启用决策插件、
+   * 也没有模型客户端时为 null。
+   */
+  llm: LlmReport | null;
   preflight: PreflightRecord | null;
   plugins: PluginStatus[];
 }
@@ -85,6 +93,10 @@ export interface OperatorDeps {
   review(): ReviewSettings | null;
   /** 进行中的投票；不给时状态里总是 null。 */
   vote?(): VoteStatus | null;
+  /** 弹幕接入的状态；不给时状态里总是 null。 */
+  danmaku?(): DanmakuReport | null;
+  /** 决策模型的状态；不给时状态里总是 null。 */
+  llm?(): LlmReport | null;
   /** 开播预检；withSafety 时先列出安全核的前置条件（见 preflight.ts）。 */
   preflight(target: Target, withSafety: boolean): Promise<string[]>;
   /** 操作台的一次性登录令牌；操作台没有启动时为 undefined。 */
@@ -207,6 +219,8 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
           waitedMs: Math.max(0, at - since),
         })),
         vote: deps.vote?.() ?? null,
+        danmaku: deps.danmaku?.() ?? null,
+        llm: deps.llm?.() ?? null,
         preflight: lastPreflight,
         plugins: deps.plugins().map((e) => ({
           id: e.id,

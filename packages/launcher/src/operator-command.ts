@@ -24,6 +24,14 @@ export type OperatorCommand =
 
 const isLogin = Compile(OperatorConsoleLoginResult);
 
+/**
+ * 等宿主应答的时限：切换模式与只跑预检要等开播预检跑完（含配置了的决策模型探测，其截止时间至多 20 秒），
+ * 放宽到 30 秒；其余 5 秒。
+ */
+export function requestTimeoutMs(method: string): number {
+  return method === OperatorMethod.Mode || method === OperatorMethod.Preflight ? 30_000 : 5000;
+}
+
 /** 解析命令行参数；用法不对时为 undefined。 */
 export function parseOperatorArgs(args: readonly string[]): OperatorCommand | undefined {
   const [command, ...rest] = args;

@@ -1,0 +1,10 @@
+{
+  "name": "interaction",
+  "ops": [
+    { "op": "enable", "id": "danmaku" },
+    { "op": "enable", "id": "triage" },
+    { "op": "enable", "id": "vote" },
+    { "op": "enable", "id": "llm" },
+    { "op": "enable", "id": "director" }
+  ]
+}

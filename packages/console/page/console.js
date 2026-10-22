@@ -38,6 +38,19 @@
  * @property {boolean} gap
  */
 /**
+ * @typedef {object} Danmaku
+ * @property {boolean} ready
+ * @property {string} status
+ * @property {{ reason: string, startedAt: string | null, durationMs: number | null } | null} gap
+ */
+/**
+ * @typedef {object} Llm
+ * @property {boolean} ready
+ * @property {string} status
+ * @property {number} consecutiveFailures
+ * @property {{ kind: string, at: string } | null} lastFailure
+ */
+/**
  * @typedef {object} Status
  * @property {Mode} mode
  * @property {boolean} maintenance
@@ -48,6 +61,8 @@
  * @property {{ mode: 'delay' | 'approve', delayMs: number, approveTimeoutMs: number } | null} review
  * @property {Held[]} held
  * @property {Vote | null} vote
+ * @property {Danmaku | null} danmaku
+ * @property {Llm | null} llm
  * @property {Preflight | null} preflight
  * @property {PluginRow[]} plugins
  * @property {Alert[]} alerts
@@ -58,6 +73,8 @@ const POLL_MS = 1000;
 /** 这么久没有成功的轮询，就不再把显示的状态当作当前状态。 */
 const STALE_MS = 2500;
 const REQUEST_TIMEOUT_MS = 3000;
+/** 切换模式与只跑预检要等开播预检跑完（含配置了的决策模型探测），时限放宽。 */
+const PREFLIGHT_TIMEOUT_MS = 30_000;
 /** 升级的二次确认在这段时间内有效。 */
 const CONFIRM_MS = 5000;
 /** @type {Record<Mode, number>} */
@@ -86,6 +103,10 @@ const heldList = byId('held');
 const heldEmpty = byId('held-empty');
 const voteSummary = byId('vote-summary');
 const voteOptions = byId('vote-options');
+const danmakuText = byId('danmaku');
+const danmakuGapText = byId('danmaku-gap');
+const llmText = byId('llm');
+const llmFailuresText = byId('llm-failures');
 const preflightSummary = byId('preflight-summary');
 const preflightFailures = byId('preflight-failures');
 const pluginRows = byId('plugins');
@@ -158,11 +179,12 @@ function duration(ms) {
  * @param {'GET' | 'POST'} method
  * @param {string} path
  * @param {unknown} [body]
+ * @param {number} [timeoutMs]
  * @returns {Promise<Reply>}
  */
-async function call(method, path, body) {
+async function call(method, path, body, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     /** @type {Record<string, string>} */
     const headers = {};
@@ -206,6 +228,10 @@ function clearStatus() {
   moderationBanner.className = 'banner';
   setText(moderationBanner, '审核状态未知（没有宿主的当前状态）');
   for (const button of modeButtons) button.classList.remove('current');
+  for (const node of [danmakuText, danmakuGapText, llmText, llmFailuresText]) {
+    node.className = '';
+    setText(node, '未知');
+  }
   // 等待放行的句子可以操作，过期了就不再列出；其余部分变灰保留，便于排查。
   renderHeld([]);
   heldEmpty.hidden = true;
@@ -267,6 +293,7 @@ function render(status) {
   );
   renderHeld(status.held);
   renderVote(status.vote);
+  renderReadiness(status.danmaku, status.llm);
   renderPreflight(status.preflight);
   renderPlugins(status.plugins);
   renderAlerts(status.alerts);
@@ -329,6 +356,47 @@ function renderVote(vote) {
   );
   const rows = vote.options.map((option, i) => make('li', `${option}：${vote.counts[i] ?? 0} 票`));
   voteOptions.replaceChildren(...rows);
+}
+
+/**
+ * 弹幕接入与决策模型：就绪与否与状态说明、当前缺口、最近一次失败与连续失败数。
+ * @param {Danmaku | null} danmaku
+ * @param {Llm | null} llm
+ */
+function renderReadiness(danmaku, llm) {
+  /**
+   * @param {HTMLElement} node
+   * @param {{ ready: boolean, status: string } | null} report
+   */
+  const show = (node, report) => {
+    node.className = report === null ? '' : report.ready ? 'ready' : 'not-ready';
+    setText(
+      node,
+      report === null ? '没有启用' : `${report.ready ? '就绪' : '未就绪'}：${report.status}`,
+    );
+  };
+  show(danmakuText, danmaku);
+  const gap = danmaku?.gap ?? null;
+  setText(
+    danmakuGapText,
+    danmaku === null
+      ? '—'
+      : gap === null
+        ? '没有'
+        : `${gap.reason}${gap.durationMs === null ? '' : `，已持续 ${duration(gap.durationMs)}`}`,
+  );
+  show(llmText, llm);
+  const last = llm?.lastFailure ?? null;
+  setText(
+    llmFailuresText,
+    llm === null
+      ? '—'
+      : `连续 ${llm.consecutiveFailures} 次${
+          last === null
+            ? '，还没有失败过'
+            : `，最近一次 ${last.kind}（${new Date(last.at).toLocaleTimeString()}）`
+        }`,
+  );
 }
 
 /** @param {Preflight | null} preflight */
@@ -411,15 +479,16 @@ async function loop() {
  * @param {string} path
  * @param {Record<string, unknown>} body
  * @param {string} label
+ * @param {number} [timeoutMs]
  * @returns {Promise<Record<string, unknown> | null>}
  */
-async function act(path, body, label) {
+async function act(path, body, label, timeoutMs = REQUEST_TIMEOUT_MS) {
   if (csrf === null) {
     say(`${label}没有送出：尚未登录`, true);
     return null;
   }
   try {
-    const reply = await call('POST', path, body);
+    const reply = await call('POST', path, body, timeoutMs);
     const data = record(reply.data);
     if (reply.status !== 200) {
       say(`${label}被拒绝（${reply.status}${data.reason ? `：${data.reason}` : ''}）`, true);
@@ -462,7 +531,7 @@ async function switchMode(button, target) {
     return;
   }
   disarm();
-  const data = await act('/api/mode', { target }, `切换到 ${target}`);
+  const data = await act('/api/mode', { target }, `切换到 ${target}`, PREFLIGHT_TIMEOUT_MS);
   if (!data) return;
   if (data.ok === true) say(`已切换到 ${target}`);
   else {
@@ -500,7 +569,12 @@ for (const button of modeButtons) {
 }
 
 byId('preflight-run').addEventListener('click', async () => {
-  const data = await act('/api/preflight', { target: preflightTarget.value }, '开播预检');
+  const data = await act(
+    '/api/preflight',
+    { target: preflightTarget.value },
+    '开播预检',
+    PREFLIGHT_TIMEOUT_MS,
+  );
   if (!data) return;
   const failures = Array.isArray(data.failures) ? data.failures : [];
   say(failures.length === 0 ? '开播预检全部通过' : `开播预检有 ${failures.length} 项未通过`);

@@ -4,6 +4,7 @@ import { INTENT_OUTPUT, type Llm, LlmError, LlmService } from '@bellis/director'
 import {
   ClockService,
   catalog,
+  DeadlineError,
   Kernel,
   type PluginSecrets,
   type ResolvedEntry,
@@ -14,7 +15,7 @@ import {
 import { SafetyCore } from '@bellis/safety';
 import { MemorySecretStore } from '@bellis/secret-store';
 import { StateStore } from '@bellis/store';
-import { ARK_PROVIDER, llmOpenAi } from '../src/index.ts';
+import { ARK_PROVIDER, llmOpenAi, PROBE_REQUEST } from '../src/index.ts';
 import { FakeChat, respond, status } from './fake-chat.ts';
 import { ARK_MODEL, arkReasoningStream, INTENT } from './fixtures.ts';
 
@@ -261,6 +262,136 @@ test('失败只记类别、HTTP 状态与错误码；取消不记失败；停用
     await w.kernel.disable('llm');
     await rejected;
     await fake.waitDisconnect(before + 1);
+  } finally {
+    await w.close();
+  }
+  assert.ok(!JSON.stringify(w.logs).includes(KEY), '日志不含 API Key');
+});
+
+const failsWith = (kind: string) => (error: unknown) =>
+  error instanceof LlmError && error.kind === kind;
+
+test('就绪不发请求：鉴权失败后未就绪、成功后恢复；连续失败到阈值未就绪；取消不算，截止时间到点算超时', async () => {
+  const w = await world({ ...base, endpoint: fake.url, unreadyAfter: 2 });
+  try {
+    const requests = fake.requests.length;
+    const llm = w.llm();
+    assert.equal(llm.ready, true);
+    assert.equal(llm.status, '就绪（还没有调用过）');
+    assert.deepEqual(llm.failures, { consecutive: 0 });
+    assert.equal(fake.requests.length, requests, '读就绪状态不发请求');
+
+    const said = `invalid key ${KEY}`;
+    fake.script = status(
+      401,
+      JSON.stringify({ error: { code: 'AuthenticationError', message: said } }),
+    );
+    await assert.rejects(llm.complete(request, new AbortController().signal), failsWith('auth'));
+    assert.equal(llm.ready, false);
+    assert.equal(
+      llm.status,
+      '鉴权失败（auth，HTTP 401，AuthenticationError），下一次成功之前不就绪',
+    );
+    assert.equal(llm.failures?.consecutive, 1);
+    assert.equal(llm.failures?.last?.kind, 'auth');
+    assert.equal(typeof llm.failures?.last?.at, 'number');
+    assert.ok(!JSON.stringify(llm.failures).includes('invalid key'), '不含服务端的说明');
+
+    fake.script = respond(arkReasoningStream());
+    assert.equal(await llm.complete(request, new AbortController().signal), INTENT);
+    assert.equal(llm.ready, true, '成功后恢复');
+    assert.equal(llm.status, '就绪');
+    assert.equal(llm.failures?.consecutive, 0);
+
+    fake.script = status(503, JSON.stringify({ error: { code: 'ServiceUnavailable' } }));
+    await assert.rejects(llm.complete(request, new AbortController().signal), failsWith('server'));
+    assert.equal(llm.ready, true, '连续失败少于阈值仍就绪');
+    // 调用方取消：不算失败。
+    fake.script = respond(arkReasoningStream(), 200);
+    const cancel = new AbortController();
+    const cancelled = llm.complete(request, cancel.signal);
+    setTimeout(() => cancel.abort(), 50);
+    await assert.rejects(cancelled, failsWith('aborted'));
+    assert.equal(llm.failures?.consecutive, 1);
+    assert.equal(llm.ready, true);
+    // 调用方的截止时间到点（中止原因是 DeadlineError）：算超时，达到阈值后未就绪。
+    const deadline = new AbortController();
+    const late = llm.complete(request, deadline.signal);
+    setTimeout(() => deadline.abort(new DeadlineError('决策模型调用 未在 50ms 内完成')), 50);
+    await assert.rejects(late, failsWith('aborted'));
+    assert.equal(llm.failures?.consecutive, 2);
+    assert.equal(llm.failures?.last?.kind, 'timeout');
+    assert.equal(llm.ready, false);
+    assert.equal(llm.status, '连续失败 2 次（最近一次：timeout）');
+    assert.ok(
+      w.logs.some((l) => l.event === 'llm.failed' && l.fields.kind === 'timeout'),
+      '截止时间到点记一条超时',
+    );
+  } finally {
+    await w.close();
+  }
+  assert.ok(!JSON.stringify(w.logs).includes(KEY), '日志不含 API Key');
+});
+
+test('probeOnPreflight 关闭（缺省）时不提供探测，也不发请求', async () => {
+  const w = await world({ ...base, endpoint: fake.url });
+  try {
+    const requests = fake.requests.length;
+    assert.equal(w.llm().probe, undefined);
+    assert.equal(w.llm().ready, true);
+    assert.equal(fake.requests.length, requests);
+  } finally {
+    await w.close();
+  }
+});
+
+test('probeOnPreflight 打开时向本机伪端点发固定的极短探测：合法响应算成功，失败与超时计入就绪', async () => {
+  const w = await world({
+    ...base,
+    endpoint: fake.url,
+    probeOnPreflight: true,
+    probeTimeoutMs: 300,
+  });
+  try {
+    const llm = w.llm();
+    const probe = llm.probe;
+    assert.ok(probe, '打开时提供探测');
+    fake.script = respond(arkReasoningStream('{"ok":true}'));
+    const requests = fake.requests.length;
+    await probe();
+    assert.equal(fake.requests.length, requests + 1, '发了一个请求');
+    const sent = fake.requests.at(-1)?.body;
+    assert.deepEqual(sent?.messages, PROBE_REQUEST.messages, '固定的极短提示词，不含任何上下文');
+    assert.equal(sent?.model, ARK_MODEL);
+    assert.equal(sent?.reasoning_effort, 'low');
+    assert.equal(llm.ready, true);
+    assert.deepEqual(
+      w.logs.filter((l) => l.event === 'llm.probe').map((l) => l.fields.ok),
+      [true],
+    );
+
+    // 鉴权失败：未就绪。
+    fake.script = status(401, JSON.stringify({ error: { code: 'AuthenticationError' } }));
+    await assert.rejects(probe(), failsWith('auth'));
+    assert.equal(llm.ready, false);
+    // 应答不是 JSON 对象：不算合法响应。
+    fake.script = respond(arkReasoningStream('好的，我在。'));
+    await assert.rejects(probe(), failsWith('protocol'));
+    // 迟迟没有应答：探测的截止时间到点算超时，并断开连接。
+    const before = fake.disconnects;
+    fake.script = (exchange) => {
+      exchange.res.writeHead(200, { 'content-type': 'text/event-stream' });
+    };
+    await assert.rejects(probe(), failsWith('timeout'));
+    await fake.waitDisconnect(before + 1);
+    assert.equal(llm.failures?.consecutive, 3);
+    assert.equal(llm.failures?.last?.kind, 'timeout');
+
+    // 探测成功：清掉之前的失败。
+    fake.script = respond(arkReasoningStream('{"ok":true}'));
+    await probe();
+    assert.equal(llm.ready, true);
+    assert.equal(llm.failures?.consecutive, 0);
   } finally {
     await w.close();
   }

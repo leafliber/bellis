@@ -70,6 +70,11 @@
       "name": "speech",
       "entries": [
         {
+          "id": "speech",
+          "plugin": "speech-arbiter",
+          "grant": ["speech.output"]
+        },
+        {
           "id": "review",
           "plugin": "speech-review",
           "config": {
@@ -128,7 +133,7 @@
       ]
     },
     {
-      "name": "audience",
+      "name": "interaction",
       "entries": [
         {
           "id": "danmaku",
@@ -154,12 +159,7 @@
           "plugin": "audience-vote",
           "disabled": true,
           "grant": ["vote.start"]
-        }
-      ]
-    },
-    {
-      "name": "director",
-      "entries": [
+        },
         {
           "id": "llm",
           "plugin": "llm-openai",
@@ -170,7 +170,8 @@
             "model": "glm-5-3-flash-260828",
             "provider": "volcengine.ark",
             "reasoningEffort": "low",
-            "outputMode": "prompt"
+            "outputMode": "prompt",
+            "probeOnPreflight": false
           }
         },
         {

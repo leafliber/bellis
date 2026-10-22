@@ -96,6 +96,9 @@ export const danmakuReplay = definePlugin({
         gapListeners.add(listener);
         return () => gapListeners.delete(listener);
       },
+      // 回放没有要连接的平台：恒为就绪（缺口照常经 gap() 报告）。
+      ready: true,
+      status: '回放',
     });
   },
 });

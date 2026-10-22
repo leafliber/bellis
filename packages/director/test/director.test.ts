@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { DeadlineError } from '@bellis/kernel';
 import { INTENT_OUTPUT, LlmError, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from '../src/index.ts';
 import { candidate, silence, speak, world } from './helpers.ts';
 
@@ -53,6 +54,8 @@ test('在途的闲聊调用被新到的候选取消并立即重来；取消不�
 
     await w.arrive(candidate({ id: 'c-a' }));
     assert.equal(idle.signal.aborted, true, '闲聊调用被取消');
+    // 取消不是超时：模型客户端据中止原因区分，不把取消算作失败。
+    assert.ok(!(idle.signal.reason instanceof DeadlineError));
     assert.equal(w.calls.length, 2, '取消后立即重来');
     assert.deepEqual(w.call(1).request.context.triggers, ['candidates']);
     assert.deepEqual(w.logged('director.cancelled'), [{ by: 'candidates' }]);
@@ -223,6 +226,8 @@ test('超时与出错：放弃本次时机，有观众在等时播一句过渡�
     await w.arrive(candidate({ id: 'c-a' }));
     await w.advance(1000);
     assert.equal(w.call(0).signal.aborted, true, '超时即取消调用');
+    // 中止原因是截止时间：模型客户端据此把这次调用记为超时（就绪判定用）。
+    assert.ok(w.call(0).signal.reason instanceof DeadlineError);
     assert.deepEqual(
       w.logged('director.output-dropped').map((f) => f.kind),
       ['timeout'],
