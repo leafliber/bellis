@@ -29,6 +29,37 @@ export const PREEMPTING: ReadonlySet<SpeechSource> = new Set([
   'game-reaction',
 ]);
 
+/** 发声仲裁每句一个的意图：播出到 Stage，只申请 `speech.output`，有时效。 */
+export const SPEECH_INTENT = {
+  type: 'speech.play',
+  target: 'stage',
+  capability: 'speech.output',
+} as const;
+
+/** 重启时自动结案的发言意图的结局说明。 */
+export const INTERRUPTED_SPEECH = '重启中断：播出多少不可知，不重做';
+
+/**
+ * 重启时停在执行中的意图是不是 Stage 的发言（状态存储恢复时的 `interrupt`，见状态存储“重启”）：类型
+ * `speech.play`、目标 `stage`、所需能力恰好是 `speech.output`、有时效。是就返回结案说明，当场结案为失败、
+ * 解除 Stage 目标的隔离：Stage 每次启动都重新认证，旧令牌的音频作废，发言意图本来就永不重做，重启后这个
+ * 目标的状态是确定的。其余意图返回 undefined，留给所有者对账或操作员结案。
+ */
+export function interruptedSpeech(intent: {
+  type: string;
+  target: string;
+  capabilities: readonly string[];
+  timeSensitive: boolean;
+}): string | undefined {
+  const speech =
+    intent.type === SPEECH_INTENT.type &&
+    intent.target === SPEECH_INTENT.target &&
+    intent.timeSensitive &&
+    intent.capabilities.length === 1 &&
+    intent.capabilities[0] === SPEECH_INTENT.capability;
+  return speech ? INTERRUPTED_SPEECH : undefined;
+}
+
 export interface SpeechRequest {
   /** 去重键：同一件事不重复说。 */
   id: string;

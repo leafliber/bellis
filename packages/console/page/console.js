@@ -60,6 +60,17 @@
  * @property {number} tombstones
  */
 /**
+ * 结果未知的意图：只读显示，结案用命令行 pnpm operator resolve。
+ * @typedef {object} Unresolved
+ * @property {number} id
+ * @property {string} key
+ * @property {string} type
+ * @property {string} target
+ * @property {string[]} capabilities
+ * @property {boolean} timeSensitive
+ * @property {string} since
+ */
+/**
  * @typedef {object} Status
  * @property {Mode} mode
  * @property {boolean} maintenance
@@ -73,6 +84,7 @@
  * @property {Danmaku | null} danmaku
  * @property {Llm | null} llm
  * @property {Memory | null} memory
+ * @property {Unresolved[] | null} unresolved
  * @property {Preflight | null} preflight
  * @property {PluginRow[]} plugins
  * @property {Alert[]} alerts
@@ -119,6 +131,8 @@ const llmText = byId('llm');
 const llmFailuresText = byId('llm-failures');
 const memoryText = byId('memory');
 const memoryCountsText = byId('memory-counts');
+const unresolvedSummary = byId('unresolved-summary');
+const unresolvedList = byId('unresolved');
 const preflightSummary = byId('preflight-summary');
 const preflightFailures = byId('preflight-failures');
 const pluginRows = byId('plugins');
@@ -145,6 +159,7 @@ let armed = null;
 let alertsShown = -1;
 let pluginsShown = '';
 let preflightShown = '';
+let unresolvedShown = '';
 /** @type {Map<string, { row: HTMLLIElement, waited: HTMLElement }>} */
 const heldRows = new Map();
 
@@ -251,6 +266,9 @@ function clearStatus() {
     node.className = '';
     setText(node, '未知');
   }
+  unresolvedShown = '';
+  unresolvedList.replaceChildren();
+  setText(unresolvedSummary, '未知');
   // 等待放行的句子可以操作，过期了就不再列出；其余部分变灰保留，便于排查。
   renderHeld([]);
   heldEmpty.hidden = true;
@@ -313,6 +331,7 @@ function render(status) {
   renderHeld(status.held);
   renderVote(status.vote);
   renderReadiness(status.danmaku, status.llm, status.memory);
+  renderUnresolved(status.unresolved);
   renderPreflight(status.preflight);
   renderPlugins(status.plugins);
   renderAlerts(status.alerts);
@@ -424,6 +443,34 @@ function renderReadiness(danmaku, llm, memory) {
       ? '—'
       : `待发 ${memory.pending} 条，已写入 ${memory.written} 条，丢弃 ${memory.dropped} 条，墓碑 ${memory.tombstones} 名`,
   );
+}
+
+/** @param {Unresolved[] | null} unresolved */
+function renderUnresolved(unresolved) {
+  const key = JSON.stringify(unresolved);
+  if (key === unresolvedShown) return;
+  unresolvedShown = key;
+  unresolvedList.replaceChildren();
+  if (unresolved === null) {
+    setText(unresolvedSummary, '读不出状态存储');
+    return;
+  }
+  setText(
+    unresolvedSummary,
+    unresolved.length === 0
+      ? '没有'
+      : `${unresolved.length} 个，目标已隔离：核对后用 pnpm operator resolve <编号> <succeeded|failed> 结案`,
+  );
+  for (const intent of unresolved) {
+    const since = new Date(intent.since).toLocaleTimeString();
+    const kind = intent.timeSensitive ? '有时效' : '可对账';
+    unresolvedList.append(
+      make(
+        'li',
+        `#${intent.id} ${intent.type} → ${intent.target}（${kind}，${intent.key}，${since} 起）`,
+      ),
+    );
+  }
 }
 
 /** @param {Preflight | null} preflight */

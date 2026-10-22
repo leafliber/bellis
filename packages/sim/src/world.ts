@@ -12,6 +12,7 @@ import {
 import { type SimIrisBackend, SimIrisBackendService } from '@bellis/memory';
 import { builtinPlugins, builtinProjections } from '@bellis/plugins';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
+import { interruptedSpeech } from '@bellis/speech';
 import { ObsMetersService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { MemoryObs } from './memory-obs.ts';
@@ -100,7 +101,8 @@ export class World {
       projections: builtinProjections,
       now: () => epoch + Math.floor(this.clock.now()),
     });
-    this.store.recover();
+    // 与宿主相同：停在执行中的 Stage 发言当场结案，其余结果未知的意图等所有者对账或操作员结案。
+    this.store.recover({ interrupt: interruptedSpeech });
     // 发言结果与投票的事实同时写进追踪，与 Stage 的回报、送出的弹幕排在同一条时间线上。
     this.store.subscribe((event) => {
       if (event.type === 'utterance.played')

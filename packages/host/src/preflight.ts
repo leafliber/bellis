@@ -17,6 +17,11 @@ export interface PreflightInputs {
    * 此处传 undefined，免得报两次。
    */
   safetyBlocker: string | undefined;
+  /**
+   * 结果未知的意图（状态存储里停在 unknown 的）：它们隔离了各自的目标，目标上的新意图一律被拒，要先由所有者对账
+   * 或操作员结案。Stage 的发言在重启时已自动结案，不在其中。
+   */
+  unresolved: ReadonlyArray<{ id: number; target: string }>;
   /** profile 中的全部条目。 */
   plugins: readonly EntrySnapshot[];
   /** Stage 服务是否在场、页面是否已认证；没有 Stage 服务时为 undefined。 */
@@ -80,6 +85,20 @@ async function localQos(read: () => Promise<SidecarQos>): Promise<string | undef
   }
 }
 
+/** 结果未知的意图按目标列出：说明里带目标与意图编号，以及怎样结案。 */
+export function unresolvedFailures(
+  unresolved: ReadonlyArray<{ id: number; target: string }>,
+): string[] {
+  const byTarget = new Map<string, number[]>();
+  for (const intent of unresolved) {
+    byTarget.set(intent.target, [...(byTarget.get(intent.target) ?? []), intent.id]);
+  }
+  return [...byTarget].map(
+    ([target, ids]) =>
+      `目标 ${target} 有结果未知的意图（编号 ${ids.join('、')}），已隔离：核对外部状态后用 pnpm operator resolve <编号> <succeeded|failed> 结案`,
+  );
+}
+
 /**
  * 开播预检（见运维“开播预检”）。返回未通过的项，全部通过时为空；任一未通过都不允许进入真实输出模式。
  * 安全核的拒绝原因（监督模式本身的前置条件）列在最前。决策模型只在配置了探测时才发请求；启用了记忆时，
@@ -88,6 +107,7 @@ async function localQos(read: () => Promise<SidecarQos>): Promise<string | undef
 export async function preflight(inputs: PreflightInputs): Promise<string[]> {
   const failures: string[] = [];
   if (inputs.safetyBlocker !== undefined) failures.push(inputs.safetyBlocker);
+  failures.push(...unresolvedFailures(inputs.unresolved));
   for (const entry of inputs.plugins) {
     if (!entry.enabled || entry.state === 'active') continue;
     failures.push(

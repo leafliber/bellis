@@ -50,7 +50,13 @@ import {
 } from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
 import { KeyringSecretStore, SESSION_SECRET } from '@bellis/secret-store';
-import { type Review, ReviewService, type TtsRouting, TtsRoutingService } from '@bellis/speech';
+import {
+  interruptedSpeech,
+  type Review,
+  ReviewService,
+  type TtsRouting,
+  TtsRoutingService,
+} from '@bellis/speech';
 import {
   OBS_CONTROL,
   OBS_METERS,
@@ -131,10 +137,12 @@ const store = StateStore.open({
 store.subscribe((event) => {
   if (LOGGED_FACTS.has(event.type)) logEvent('fact', { type: event.type, data: event.data });
 });
-const recovery = store.recover();
+// 停在执行中的 Stage 发言当场结案（见状态存储“重启”）；其余结果未知的意图等所有者对账或操作员结案。
+const recovery = store.recover({ interrupt: interruptedSpeech });
 logEvent('host.recovered', {
   abandoned: recovery.abandoned.map((i) => i.key),
   orphaned: recovery.orphaned.map((i) => i.key),
+  interrupted: recovery.interrupted.map((i) => i.key),
 });
 
 const obsSecret = await readObsSecret(secrets, obsSecretName(config));
@@ -307,6 +315,7 @@ function runPreflight(target: Target, withSafety: boolean): Promise<string[]> {
   return preflight({
     target,
     safetyBlocker: withSafety ? core.preconditionBlocker(target) : undefined,
+    unresolved: unresolvedIntents(),
     plugins: host.snapshot(),
     stageReady: 'missing' in stage ? undefined : (stage.impl as Stage).ready,
     avatar:
@@ -321,6 +330,15 @@ function runPreflight(target: Target, withSafety: boolean): Promise<string[]> {
     memory: memoryEnabled() ? currentMemory() : undefined,
     inspectObs: () => emergency.inspect(config.safety.emergency),
   });
+}
+
+/** 结果未知的意图（目标被隔离）；读不出状态存储时由安全核的前置条件报出，这里列为空。 */
+function unresolvedIntents(): Array<{ id: number; target: string }> {
+  try {
+    return store.intentsIn('unknown').map((intent) => ({ id: intent.id, target: intent.target }));
+  } catch {
+    return [];
+  }
 }
 
 /** profile 中启用的条目里，有没有插件提供这个服务（不论此刻是否激活）。 */

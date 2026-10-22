@@ -218,12 +218,19 @@ test('出错与取消在同一时刻：取消先于决策插件处理到达，�
   );
 });
 
-test('崩溃重启后，此前执行中的意图被结案而没有重做', async () => {
+test('崩溃重启后，此前执行中的发言在恢复时自动结案而没有重做', async () => {
   const [, scenario] = regressions[2] as [string, Scenario];
   const result = await simulate(scenario);
   assert.equal(result.restarts, 1);
   const orphaned = result.history.events.filter((e) => e.type === 'intent.orphaned');
   assert.ok(orphaned.length > 0, '重启时应有执行中的意图被标为 unknown');
-  const reconciled = result.history.events.filter((e) => e.type === 'intent.reconciled');
-  assert.equal(reconciled.length, orphaned.length);
+  const interrupted = result.history.events.filter((e) => e.type === 'intent.interrupted');
+  assert.deepEqual(
+    interrupted.map((e) => (e.data as { id: number }).id),
+    orphaned.map((e) => (e.data as { id: number }).id),
+  );
+  assert.deepEqual(
+    result.history.events.filter((e) => e.type === 'intent.reconciled'),
+    [],
+  );
 });

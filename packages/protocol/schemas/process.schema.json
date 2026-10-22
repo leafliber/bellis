@@ -210,6 +210,32 @@
       },
       "additionalProperties": false
     },
+    "OperatorResolveParams": {
+      "type": "object",
+      "required": [
+        "id",
+        "outcome"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "succeeded"
+            },
+            {
+              "type": "string",
+              "const": "failed"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "OperatorConsoleLoginResult": {
       "type": "object",
       "required": [

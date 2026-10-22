@@ -24,6 +24,7 @@ const plugin = (id: string, state: EntrySnapshot['state'], enabled = true): Entr
 const ready: PreflightInputs = {
   target: 'M1',
   safetyBlocker: undefined,
+  unresolved: [],
   plugins: [plugin('stage', 'active'), plugin('moderation', 'waiting', false)],
   stageReady: true,
   avatar: { ready: true, status: '就绪' },
