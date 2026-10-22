@@ -41,7 +41,7 @@ export interface IrisPrepareRequest {
   judge: boolean;
   /** 召回判断的预算（秒，只能缩短缺省的 10 秒）；不给就不发。 */
   judgeBudgetSeconds?: number;
-  /** 0–8。 */
+  /** 0–8；0 表示只取人设，不取记忆。 */
   memoryLimit: number;
   /** 0–1500。 */
   tokenBudget: number;
@@ -61,10 +61,22 @@ export interface IrisMemory {
   sources: Array<{ messageId: number; entryId: string | null }>;
 }
 
+/**
+ * 召回准备的 `persona` 分区中 Bellis 用到的部分：当前角色描述的正文与版本号。分区里的更新提示
+ * （`needs_update`、`stale_basis_count`）不取。人设是角色全局的，任一入口返回同一份。
+ */
+export interface IrisPersona {
+  content: string;
+  /** 版本号；Iris 没有给出时为 null。 */
+  version: number | null;
+}
+
 export interface IrisRecall {
   /** 使用反馈用的召回标识，有效 24 小时，属于发起它的令牌。 */
   recallId: string;
   memories: IrisMemory[];
+  /** 当前人设；分区缺失或不合约定时没有。 */
+  persona?: IrisPersona;
   /** 召回判断的状态（例如 `disabled`），只用于记录。 */
   judgment?: string;
 }

@@ -3,7 +3,7 @@
  * 模型客户端与记忆插件报告的就绪状态（见观众接入“就绪”、决策模型“就绪”、运维“开播预检”）。
  */
 import type { DanmakuSource } from '@bellis/audience';
-import { type Llm, LlmError } from '@bellis/director';
+import { choosePersona, type Llm, LlmError } from '@bellis/director';
 import { IrisError, irisFailureText, type Memory, type MemoryLedger } from '@bellis/memory';
 
 /** 弹幕接入（`danmaku@1`）的状态。 */
@@ -110,6 +110,24 @@ export function memoryReport(memory: Memory | undefined, ledger: MemoryLedger): 
   if (!memory) return { ready: false, status: 'memory@1 不在场', ...counts };
   const report = memory.report;
   return { ready: report.ready === true, status: report.status, ...counts };
+}
+
+/** 决策插件此刻用的人设的来源与版本（见决策模型“人设”）；不含正文。 */
+export interface PersonaReport {
+  source: 'iris' | 'profile';
+  /** Iris 人设的版本号；profile 的人设、或 Iris 没给版本时为 null。 */
+  version: number | null;
+}
+
+export function personaReport(memory: Memory | undefined): PersonaReport {
+  const { source, version } = choosePersona(memory, '');
+  return { source, version };
+}
+
+/** 开播预检中 Iris 一项的说明：取当前人设失败（请求出错）时，只含类别、HTTP 状态与错误码。 */
+export function personaFailure(error: unknown): string {
+  if (error instanceof IrisError) return `Iris 没有当前人设（${irisFailureText(error)}）`;
+  return `Iris 没有当前人设（${error instanceof Error ? error.message : String(error)}）`;
 }
 
 /** 开播预检中 Iris 一项的说明：以宿主令牌访问 Iris（`GET /status`）失败时，只含类别、HTTP 状态与错误码。 */

@@ -70,6 +70,7 @@ import {
   type LlmReport,
   llmReport,
   memoryReport,
+  personaReport,
 } from './readiness.ts';
 import { pluginSecrets } from './secrets.ts';
 
@@ -221,6 +222,8 @@ const operator = createOperator({
     memoryEnabled() || memoryService()
       ? memoryReport(memoryService(), store.view(memoryLedger))
       : null,
+  // 决策插件用的人设：启用了决策插件才给出来源与版本（不含正文）。
+  persona: () => (directorEnabled() ? personaReport(memoryService()) : null),
   preflight: runPreflight,
   consoleLogin: () => consoleServer?.issueLogin(),
 });
@@ -346,10 +349,13 @@ function memoryService(): Memory | undefined {
   return 'missing' in found ? undefined : (found.impl as Memory);
 }
 
-/** 开播预检的 Iris 一项：memory@1 在场时以宿主令牌访问 Iris（GET /status）。 */
-function currentMemory(): { check?: () => Promise<void> } {
+/** 开播预检的 Iris 一项：memory@1 在场时以宿主令牌访问 Iris（GET /status），再取一次当前人设。 */
+function currentMemory(): {
+  check?: () => Promise<void>;
+  persona?: () => Promise<{ version: number | null } | undefined>;
+} {
   const memory = memoryService();
-  return memory ? { check: () => memory.check() } : {};
+  return memory ? { check: () => memory.check(), persona: () => memory.currentPersona() } : {};
 }
 
 function directorEnabled(): boolean {

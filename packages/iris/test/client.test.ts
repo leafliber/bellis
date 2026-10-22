@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { after, before, test } from 'node:test';
 import { systemClock } from '@bellis/kernel';
 import { IrisError, type IrisMessage } from '@bellis/memory';
-import { IrisClient } from '../src/index.ts';
+import { IrisClient, parsePersona } from '../src/index.ts';
 import { FakeIris } from './fake-iris.ts';
 
 const TOKEN = 'FAKE-IRIS-TOKEN-client-7c41b9';
@@ -120,6 +120,20 @@ test('召回准备只取记忆：关闭召回判断，不取人物要点、人�
   });
   assert.match(recall.recallId, /^recall-/);
   assert.equal(recall.judgment, 'disabled');
+  // 人设分区只取正文与版本号，更新提示不取。
+  assert.deepEqual(recall.persona, { content: '', version: null });
+  fake.persona = { content: '你是贝莉。', version: 3 };
+  const withPersona = await client().prepare(
+    ENTRY,
+    { text: '', judge: false, memoryLimit: 0, tokenBudget: 0 },
+    signal(),
+  );
+  assert.deepEqual(withPersona.persona, { content: '你是贝莉。', version: 3 });
+  assert.deepEqual(withPersona.memories, [], 'memory_limit 为 0 时只取人设');
+  fake.persona = { content: '', version: null };
+  assert.equal(parsePersona(null), undefined);
+  assert.equal(parsePersona({ version: 1 }), undefined);
+  assert.deepEqual(parsePersona({ content: 'x', version: 'v2' }), { content: 'x', version: null });
   const first = recall.memories[0];
   assert.ok(first);
   assert.equal(first.content, '主播喜欢猫');

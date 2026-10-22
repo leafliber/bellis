@@ -6,6 +6,7 @@ import {
   type IrisFeedbackResult,
   type IrisMemory,
   type IrisMessage,
+  type IrisPersona,
   type IrisPrepareRequest,
   type IrisRecall,
   type IrisStatus,
@@ -216,6 +217,16 @@ export function parseMemory(value: unknown): IrisMemory {
   };
 }
 
+/**
+ * 召回准备的 `persona` 分区：只取正文与版本号，更新提示不取。分区缺失或类型不对时为 undefined
+ * （不让整次召回失败）。
+ */
+export function parsePersona(value: unknown): IrisPersona | undefined {
+  if (!isRecord(value) || typeof value.content !== 'string') return undefined;
+  const version = value.version;
+  return { content: value.content, version: isInt(version) ? version : null };
+}
+
 /** 写入的请求体（契约字段名）：可选字段没给就不发。 */
 export function messageBody(message: IrisMessage): Record<string, unknown> {
   return {
@@ -370,9 +381,11 @@ export class IrisClient {
     if (typeof value.recall_id !== 'string') throw protocol('缺少 recall_id');
     if (!Array.isArray(value.memories)) throw protocol('缺少 memories');
     const judgment = isRecord(value.judgment) ? ascii(value.judgment.status, 32) : undefined;
+    const persona = parsePersona(value.persona);
     return {
       recallId: value.recall_id,
       memories: value.memories.map(parseMemory),
+      ...(persona === undefined ? {} : { persona }),
       ...(judgment === undefined ? {} : { judgment }),
     };
   }

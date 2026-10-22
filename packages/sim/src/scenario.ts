@@ -1,3 +1,4 @@
+import { TEST_PERSONA } from '@bellis/director';
 import type { ResolvedEntry } from '@bellis/kernel';
 import type { SimWriteFault } from '@bellis/memory';
 import fc from 'fast-check';
@@ -269,7 +270,9 @@ export function scenarioEntries(
     entry('llm', 'llm-replay', {
       config: { outputs: scenario.outputs.slice(outputsUsed).map(output), latencyMs: 200 },
     }),
-    entry('director', 'director', { config: { idleMs: 4000, recallTimeoutMs: 1000 } }),
+    entry('director', 'director', {
+      config: { persona: TEST_PERSONA, idleMs: 4000, recallTimeoutMs: 1000 },
+    }),
     entry('schedule', 'speech-schedule', {
       config: {
         announcements: scenario.announcements

@@ -1,3 +1,4 @@
+import { TEST_PERSONA } from '@bellis/director';
 import type { ResolvedEntry } from '@bellis/kernel';
 import type { SimIrisBackend } from '@bellis/memory';
 import type { SafetyConfig } from '@bellis/safety';
@@ -76,7 +77,7 @@ export function chain(options: ChainOptions = {}): ResolvedEntry[] {
       ? [entry('vote', 'audience-vote', { grant: ['vote.start'], config: options.vote })]
       : []),
     entry('llm', 'llm-replay', { config: { outputs: options.outputs ?? [] } }),
-    entry('director', 'director', { config: options.director ?? {} }),
+    entry('director', 'director', { config: { persona: TEST_PERSONA, ...options.director } }),
     entry('schedule', 'speech-schedule', {
       config: {
         announcements: options.announcements ?? [],

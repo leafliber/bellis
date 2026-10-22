@@ -50,7 +50,7 @@ export class SimIrisBackend {
     this.#recalls += 1;
     const memories = this.messages
       .filter((message) => message.entryId === entryId)
-      .slice(-limit)
+      .slice(limit > 0 ? -limit : Number.POSITIVE_INFINITY)
       .reverse()
       .map(
         (message): IrisMemory => ({
@@ -99,6 +99,13 @@ export const simIris = definePlugin({
       ),
       /** 召回时另外返回一条来源不在本入口的记忆（召回过滤应当丢弃它）。 */
       foreignMemory: Type.Boolean({ default: false }),
+      /** 召回准备返回的当前人设；不配置时正文为空（Iris 没有当前人设）。 */
+      persona: Type.Optional(
+        Type.Object({
+          content: Type.String(),
+          version: Type.Union([Type.Integer(), Type.Null()], { default: null }),
+        }),
+      ),
     }),
   },
   activate(ctx) {
@@ -173,7 +180,7 @@ export const simIris = definePlugin({
         return tracked(async () => {
           await wait(config.recallDelayMs, signal);
           const { recallId, memories } = backend.recall(entryId, request.memoryLimit);
-          if (config.foreignMemory) {
+          if (config.foreignMemory && request.memoryLimit > 0) {
             memories.push({
               id: 1_000_000 + memories.length,
               content: '这是别的入口里的记忆',
@@ -181,8 +188,15 @@ export const simIris = definePlugin({
               sources: [{ messageId: 1_000_000, entryId: null }],
             });
           }
-          trace?.record('iris.prepare', { recallId, ids: memories.map((m) => m.id) });
-          return { recallId, memories, judgment: request.judge ? 'applied' : 'disabled' };
+          trace?.record('iris.prepare', { entryId, recallId, ids: memories.map((m) => m.id) });
+          return {
+            recallId,
+            memories,
+            persona: config.persona
+              ? { content: config.persona.content, version: config.persona.version }
+              : { content: '', version: null },
+            judgment: request.judge ? 'applied' : 'disabled',
+          };
         });
       },
       feedback(recallId, memoryIds) {

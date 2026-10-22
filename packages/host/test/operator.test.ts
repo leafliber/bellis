@@ -24,7 +24,12 @@ import {
   type OperatorStatus,
   serveOperator,
 } from '../src/operator.ts';
-import type { DanmakuReport, LlmReport, MemoryStatusReport } from '../src/readiness.ts';
+import type {
+  DanmakuReport,
+  LlmReport,
+  MemoryStatusReport,
+  PersonaReport,
+} from '../src/readiness.ts';
 
 const isLogin = Compile(OperatorConsoleLoginResult);
 
@@ -63,6 +68,7 @@ async function setup(options: { alertLimit?: number } = {}) {
     danmaku: null as DanmakuReport | null,
     llm: null as LlmReport | null,
     memory: null as MemoryStatusReport | null,
+    persona: null as PersonaReport | null,
   };
   let server: ConsoleServer | undefined;
   const api = createOperator({
@@ -87,6 +93,7 @@ async function setup(options: { alertLimit?: number } = {}) {
     danmaku: () => world.danmaku,
     llm: () => world.llm,
     memory: () => world.memory,
+    persona: () => world.persona,
     preflight: async (target, withSafety) => {
       world.preflights.push([target, withSafety]);
       return [...world.failures];
@@ -435,6 +442,17 @@ test('记忆：状态在命令行与操作台相同；forget 登记本地墓碑�
   const s = await setup();
   try {
     assert.equal(((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).memory, null);
+    assert.equal(((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).persona, null);
+    // 人设的来源与版本（不含正文）：命令行与操作台相同。
+    s.world.persona = { source: 'iris', version: 3 };
+    assert.deepEqual(((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).persona, {
+      source: 'iris',
+      version: 3,
+    });
+    assert.deepEqual(((await s.http('GET', '/api/status')).body as OperatorStatus).persona, {
+      source: 'iris',
+      version: 3,
+    });
     s.world.memory = {
       ready: true,
       status: '就绪；安全停止中，写入暂停',

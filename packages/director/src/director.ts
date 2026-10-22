@@ -30,6 +30,7 @@ import Type, { type Static } from 'typebox';
 import { DEFAULT_DRIFT_PHRASES, type DriftSignal, driftSignals } from './drift.ts';
 import { type Llm, LlmError, type LlmModel, type LlmRequest, LlmService } from './llm.ts';
 import { parseIntent, type VoteAction } from './output.ts';
+import { choosePersona } from './persona.ts';
 import {
   buildMessages,
   type DecisionTrigger,
@@ -194,26 +195,49 @@ export const director = definePlugin({
       };
     };
 
+    /** 上一次用的人设的来源与版本：变了才记日志（不记正文）。 */
+    let lastPersona: string | undefined;
+
+    /**
+     * 这次决策用的人设（见决策模型“人设”）：记忆插件拿到过 Iris 的人设就用最近一次的，否则用 profile 的。
+     * 在召回之后选，这次召回带回的新版本立即生效。
+     */
+    const persona = () => {
+      const chosen = choosePersona(ctx.optional(MemoryService), config.persona);
+      const key = `${chosen.source}:${chosen.version}`;
+      if (key !== lastPersona) {
+        lastPersona = key;
+        ctx.log('director.persona', { source: chosen.source, version: chosen.version });
+      }
+      return chosen;
+    };
+
     const context = (
       triggers: DecisionTrigger[],
       taken: Candidate[],
       ended: EndedVoteContext | undefined,
       recall: MemoryRecall | undefined,
-    ): DirectorContext => ({
-      persona: config.persona,
-      triggers,
-      heard: lastOf(
-        speech
-          .heard()
-          .map((utterance) => utterance.heard)
-          .filter((text) => text !== ''),
-        config.heardLimit,
-      ),
-      candidates: taken.map((c) => ({ id: c.id, name: c.name, text: c.text, count: c.count })),
-      vote: voteContext(),
-      endedVote: ended ?? null,
-      memories: (recall?.memories ?? []).map((m) => ({ ...m })),
-    });
+    ): DirectorContext => {
+      const chosen = persona();
+      return {
+        persona: chosen.text,
+        ...(chosen.source === 'iris'
+          ? { personaSource: { from: 'iris' as const, version: chosen.version } }
+          : {}),
+        triggers,
+        heard: lastOf(
+          speech
+            .heard()
+            .map((utterance) => utterance.heard)
+            .filter((text) => text !== ''),
+          config.heardLimit,
+        ),
+        candidates: taken.map((c) => ({ id: c.id, name: c.name, text: c.text, count: c.count })),
+        vote: voteContext(),
+        endedVote: ended ?? null,
+        memories: (recall?.memories ?? []).map((m) => ({ ...m })),
+      };
+    };
 
     /** 召回的查询提示：候选弹幕的净化文本与刚结束的投票题目；都没有（冷场）时省略，由 Iris 自己构造。 */
     const recallQuery = (taken: Candidate[], ended: EndedVoteContext | undefined) => {

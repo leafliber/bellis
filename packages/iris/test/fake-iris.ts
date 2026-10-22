@@ -88,6 +88,8 @@ export class FakeIris {
   delayMs = 0;
   /** `GET /status` 的服务状态。 */
   service = 'ready';
+  /** 召回准备返回的当前人设（角色全局，任一入口相同）；正文为空表示没有当前人设。 */
+  persona: { content: string; version: number | null } = { content: '', version: null };
   readonly #token: string;
   readonly #server: Server;
   readonly #open = new Set<ServerResponse>();
@@ -234,18 +236,18 @@ export class FakeIris {
     const limit = typeof request.memory_limit === 'number' ? request.memory_limit : 8;
     const memories = this.messages
       .filter((m) => m.entryId === entryId)
-      .slice(-limit)
+      .slice(limit > 0 ? -limit : Number.POSITIVE_INFINITY)
       .reverse()
       .map(memoryOf);
     send(
       200,
       JSON.stringify({
         persona: {
-          version: null,
-          content: '',
+          version: this.persona.version,
+          content: this.persona.content,
           generated_at: null,
-          needs_update: false,
-          stale_basis_count: 0,
+          needs_update: true,
+          stale_basis_count: 2,
         },
         memories,
         recent_messages: [],
@@ -267,7 +269,7 @@ export class FakeIris {
     const memories = this.messages
       .filter((m) => String(m.body.content).includes(text))
       .filter((m) => request.entry_id === undefined || m.entryId === request.entry_id)
-      .slice(-limit)
+      .slice(limit > 0 ? -limit : Number.POSITIVE_INFINITY)
       .map(memoryOf);
     send(200, JSON.stringify({ memories, hints: [], recall_id: this.#recall(memories) }));
   }

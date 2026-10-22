@@ -500,6 +500,60 @@ test('写入的遥测：每批一个 span，只记条数与结果', async () => 
   }
 });
 
+test('人设：激活时从 Iris 取一次（只取人设、不取记忆，用取人设的入口）；超长截断并记日志，不记正文', async () => {
+  const long = '贝'.repeat(30);
+  const w = await world({
+    iris: { persona: { content: `  ${long}  `, version: 5 } },
+    config: { persona: { entryId: 'sim:persona', maxChars: 10 } },
+  });
+  try {
+    await w.flush();
+    assert.deepEqual(w.memory().persona, { text: '贝'.repeat(10), version: 5 });
+    const [prime] = w.trace.filter((t) => t.kind === 'iris.prepare');
+    assert.equal(prime?.data.entryId, 'sim:persona');
+    assert.deepEqual(prime?.data.ids, [], '只取人设，不取记忆');
+    assert.deepEqual(w.logged('memory.persona-truncated'), [{ version: 5, chars: 30, max: 10 }]);
+    assert.deepEqual(w.logged('memory.persona'), [{ version: 5, chars: 10 }]);
+    // 召回带回同一版人设：不再记日志。
+    assert.ok((await w.memory().recall({}, signal())).ok);
+    assert.equal(w.logged('memory.persona').length, 1);
+    assert.deepEqual(await w.memory().currentPersona(), { text: '贝'.repeat(10), version: 5 });
+    assert.ok(!JSON.stringify(w.logs).includes('贝贝贝'), '日志不写人设正文');
+  } finally {
+    await w.close();
+  }
+});
+
+test('Iris 没有当前人设（正文为空）：视同没有拿到，预检取到的是 undefined', async () => {
+  const w = await world({ iris: { persona: { content: '   ', version: 2 } } });
+  try {
+    await w.flush();
+    assert.equal(w.memory().persona, undefined);
+    assert.equal(await w.memory().currentPersona(), undefined);
+    assert.deepEqual(w.logged('memory.persona-missing'), [{}]);
+  } finally {
+    await w.close();
+  }
+});
+
+test('召回超时或出错：之前拿到的人设仍在缓存里', async () => {
+  const w = await world({
+    iris: { recallDelayMs: 3_000, persona: { content: '你是贝莉。', version: 7 } },
+  });
+  try {
+    await w.advance(3_000);
+    assert.deepEqual(w.memory().persona, { text: '你是贝莉。', version: 7 });
+    const deadline = new AbortController();
+    const pending = w.memory().recall({}, deadline.signal);
+    await w.advance(500);
+    deadline.abort(new DeadlineError('召回未在 500ms 内完成'));
+    assert.equal((await pending).ok, false);
+    assert.deepEqual(w.memory().persona, { text: '你是贝莉。', version: 7 });
+  } finally {
+    await w.close();
+  }
+});
+
 test('激活：入口 ID 未配置或不合法、隐私规则不是合法正则时以说明原因的错误失败', async () => {
   for (const [config, pattern] of [
     [{ entryId: '' }, /未配置入口 ID/],

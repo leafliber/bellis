@@ -16,6 +16,7 @@ import {
   IrisError,
   type IrisMemory,
   type IrisMessage,
+  type IrisPersona,
   IrisService,
   irisFailureText,
 } from './iris.ts';
@@ -30,7 +31,7 @@ import {
   validAccount,
 } from './ledger.ts';
 import { cleanText, DEFAULT_PRIVACY_RULES, PrivacyGateway } from './privacy.ts';
-import { type Memory, MemoryService, type RecalledMemory } from './service.ts';
+import { type Memory, type MemoryPersona, MemoryService, type RecalledMemory } from './service.ts';
 
 /** 写入 Iris 所需的能力（执行闸门）。不在 Rule of Two 的禁止清单里：写入的内容总含不可信输入。 */
 export const MEMORY_WRITE = 'memory.write';
@@ -95,6 +96,18 @@ export const MemoryConfig = Type.Object({
   ),
   /** 命中提示注入检测的弹幕不写入，召回的记忆命中也不用。 */
   skipInjection: Type.Boolean({ default: true }),
+  persona: Type.Object(
+    {
+      /**
+       * 取人设用的入口，缺省为 `entryId`。人设是角色全局的，令牌范围内任一已经存在的入口都返回同一份；
+       * 直播间入口还没写入过消息时 Iris 返回 404，可以先指向一个已经存在的入口。
+       */
+      entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+      /** 人设正文的字数上限（码点），超长截断并记日志。 */
+      maxChars: Type.Integer({ minimum: 1, maximum: 10_000, default: 2_000 }),
+    },
+    { default: {} },
+  ),
   privacy: Type.Object(
     {
       /** 隐私网关的规则（见 privacy.ts）；整体替换，空数组表示不过滤。 */
@@ -147,6 +160,8 @@ function describe(error: unknown): string {
  * - **召回**：只召回直播间入口内的公开事实（`prepare`，关闭召回判断，不取人物要点、人物摘要、近期原始消息与目标）；
  *   截止时间由调用方给。来源不全在本入口的、提到有墓碑的观众的、命中隐私规则或注入检测的记忆都丢弃。
  * - **使用反馈**：调用方回报这次召回里实际用到的编号（`m1`…），只回报这次给出的，没用到就回报空集。
+ * - **人设**：记住最近一次从 Iris 拿到的人设（召回准备的 `persona` 分区，只取正文与版本号；为空视同没有，超长截断），
+ *   激活时与每次召回时更新，开播预检时再取一次；决策插件据此选用人设（见决策模型“人设”）。
  *
  * 遥测：召回与每批写入各一个 span（`memory.recall`、`memory.write`），召回耗时记直方图
  * `bellis.memory.recall.duration`；只记条数、类别与耗时，不记内容。
@@ -173,7 +188,12 @@ export const memory = definePlugin({
   activate(ctx) {
     const config = ctx.config;
     const blocked =
-      config.entryId === '' ? '未配置入口 ID（entryId）' : entryIdBlocker(config.entryId);
+      config.entryId === ''
+        ? '未配置入口 ID（entryId）'
+        : (entryIdBlocker(config.entryId) ??
+          (config.persona.entryId === undefined
+            ? undefined
+            : entryIdBlocker(config.persona.entryId)));
     if (blocked) {
       ctx.log('memory.unavailable', { reason: blocked });
       throw new Error(`记忆插件不可用：${blocked}`);
@@ -500,6 +520,74 @@ export const memory = definePlugin({
     // 上次没写完的（含重启前在途的）：激活后补发。
     if (ledger().outbox.length > 0) schedule(0);
 
+    // ------------------------------------------------------------------ 人设
+
+    /** 最近一次从 Iris 拿到的非空人设：召回或预检时更新，召回超时或失败时决策用这一份。 */
+    let persona: MemoryPersona | undefined;
+    const personaEntry = config.persona.entryId ?? entryId;
+
+    /** 采用 Iris 给的人设：去掉首尾空白，为空视同没有拿到；超长截断。变了才记日志（不记正文）。 */
+    const adoptPersona = (raw: IrisPersona | undefined): MemoryPersona | undefined => {
+      const trimmed = raw?.content.trim() ?? '';
+      if (!raw || trimmed === '') return undefined;
+      const chars = [...trimmed];
+      const truncated = chars.length > config.persona.maxChars;
+      const next: MemoryPersona = {
+        text: truncated ? chars.slice(0, config.persona.maxChars).join('') : trimmed,
+        version: raw.version,
+      };
+      if (persona?.text !== next.text || persona.version !== next.version) {
+        if (truncated) {
+          ctx.log('memory.persona-truncated', {
+            version: next.version,
+            chars: chars.length,
+            max: config.persona.maxChars,
+          });
+        }
+        ctx.log('memory.persona', { version: next.version, chars: [...next.text].length });
+      }
+      persona = next;
+      return next;
+    };
+
+    /** 只取人设、不取记忆的召回准备（截止时间 CHECK_TIMEOUT_MS）。 */
+    const fetchPersona = async (): Promise<MemoryPersona | undefined> => {
+      const deadline = new AbortController();
+      const handle = clock.setTimeout(
+        () => deadline.abort(new DeadlineError('取人设超时')),
+        CHECK_TIMEOUT_MS,
+      );
+      try {
+        const result = await iris.prepare(
+          personaEntry,
+          { text: '', judge: false, memoryLimit: 0, tokenBudget: 0 },
+          AbortSignal.any([deadline.signal, ctx.signal]),
+        );
+        return adoptPersona(result.persona);
+      } catch (error) {
+        if (deadline.signal.aborted) {
+          throw new IrisError('timeout', `取人设未在 ${CHECK_TIMEOUT_MS}ms 内完成`);
+        }
+        throw error;
+      } finally {
+        clock.clearTimeout(handle);
+      }
+    };
+
+    // 激活时先取一次，第一次决策就能用上 Iris 的人设；取不到时决策先用 profile 的。
+    void fetchPersona().then(
+      (found) => {
+        if (!found) ctx.log('memory.persona-missing', {});
+      },
+      (error: unknown) => {
+        if (!ctx.signal.aborted) {
+          ctx.log('memory.persona-failed', {
+            kind: error instanceof IrisError ? error.kind : 'error',
+          });
+        }
+      },
+    );
+
     // ------------------------------------------------------------------ 召回
 
     /** 最近的召回：本地编号到 Iris 记忆 ID，Iris 是否给出了记忆，是否已回报。 */
@@ -577,6 +665,7 @@ export const memory = definePlugin({
           ctx.log('memory.recall-failed', { kind });
           return { ok: false, kind: 'error', detail: describe(error) };
         }
+        adoptPersona(result.persona);
         const tombstones = ledger().tombstones;
         const counts = { scope: 0, tombstone: 0, privacy: 0, injection: 0 };
         const kept: Array<RecalledMemory & { irisId: number }> = [];
@@ -675,6 +764,12 @@ export const memory = definePlugin({
           clock.clearTimeout(handle);
         }
       },
+
+      get persona() {
+        return persona;
+      },
+
+      currentPersona: () => fetchPersona(),
 
       get report() {
         const state = ledger();

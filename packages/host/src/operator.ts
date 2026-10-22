@@ -24,7 +24,7 @@ import type { Presentation } from '@bellis/stage';
 import type { StoredEvent } from '@bellis/store';
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
-import type { DanmakuReport, LlmReport, MemoryStatusReport } from './readiness.ts';
+import type { DanmakuReport, LlmReport, MemoryStatusReport, PersonaReport } from './readiness.ts';
 
 export type Target = 'M1' | 'M2' | 'M3';
 
@@ -77,6 +77,8 @@ export interface OperatorStatus {
    * 也没有记忆插件时为 null。
    */
   memory: MemoryStatusReport | null;
+  /** 决策插件此刻用的人设的来源（`iris` 或 `profile`）与版本，不含正文；profile 中没有启用决策插件时为 null。 */
+  persona: PersonaReport | null;
   preflight: PreflightRecord | null;
   plugins: PluginStatus[];
 }
@@ -106,6 +108,8 @@ export interface OperatorDeps {
   llm?(): LlmReport | null;
   /** 记忆的状态；不给时状态里总是 null。 */
   memory?(): MemoryStatusReport | null;
+  /** 人设的来源与版本；不给时状态里总是 null。 */
+  persona?(): PersonaReport | null;
   /** 开播预检；withSafety 时先列出安全核的前置条件（见 preflight.ts）。 */
   preflight(target: Target, withSafety: boolean): Promise<string[]>;
   /** 操作台的一次性登录令牌；操作台没有启动时为 undefined。 */
@@ -235,6 +239,7 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
         danmaku: deps.danmaku?.() ?? null,
         llm: deps.llm?.() ?? null,
         memory: deps.memory?.() ?? null,
+        persona: deps.persona?.() ?? null,
         preflight: lastPreflight,
         plugins: deps.plugins().map((e) => ({
           id: e.id,

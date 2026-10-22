@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '@bellis/config';
+import { TEST_PERSONA } from '@bellis/director';
 import {
   ClockService,
   DataDirService,
@@ -190,4 +191,15 @@ test('live 配置样例不带 patch；interaction patch 相对配置文件所在
   // 维护者在 live.json 的 patches 里写 "patches/interaction.json"、"patches/memory.json"，按配置文件所在目录解析。
   assert.ok(readJsonFile(path('patches/interaction.json')));
   assert.ok(readJsonFile(path('patches/memory.json')));
+});
+
+test('测试人设：live 样例与 sim profile 里决策插件的 persona 都是同一份测试人设（启用记忆时由 Iris 的人设取代）', () => {
+  const persona = (file: string) =>
+    (
+      resolveProfile(readJsonFile(path(file)), []).find((e) => e.id === 'director')?.config as
+        | { persona?: unknown }
+        | undefined
+    )?.persona;
+  assert.equal(persona('profiles/live.example.json'), TEST_PERSONA);
+  assert.equal(persona('profiles/sim.json'), TEST_PERSONA);
 });

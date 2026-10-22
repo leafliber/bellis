@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DeadlineError } from '@bellis/kernel';
-import type { Memory, RecalledMemory, RecallRequest, RecallResult } from '@bellis/memory';
+import type {
+  Memory,
+  MemoryPersona,
+  RecalledMemory,
+  RecallRequest,
+  RecallResult,
+} from '@bellis/memory';
 import { LlmError, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } from '../src/index.ts';
 import { candidate, silence, world } from './helpers.ts';
 
-/** 可控的记忆服务：自动应答（给出 `memories`），或由测试逐次应答（`manual`）。 */
-function fakeMemory(options: { memories?: RecalledMemory[]; manual?: boolean } = {}) {
+/**
+ * 可控的记忆服务：自动应答（给出 `memories`），或由测试逐次应答（`manual`）。`persona` 是它记住的 Iris 人设
+ * （测试可以随时改）。
+ */
+function fakeMemory(
+  options: { memories?: RecalledMemory[]; manual?: boolean; persona?: MemoryPersona } = {},
+) {
+  const state: { persona: MemoryPersona | undefined } = { persona: options.persona };
   const recalls: Array<{
     request: RecallRequest;
     signal: AbortSignal;
@@ -29,9 +41,13 @@ function fakeMemory(options: { memories?: RecalledMemory[]; manual?: boolean } =
       feedback.push([recallId, [...used]]);
     },
     check: async () => {},
+    get persona() {
+      return state.persona;
+    },
+    currentPersona: async () => state.persona,
     report: { ready: true, status: '就绪', pending: 0, written: 0, dropped: 0, tombstones: 0 },
   };
-  return { memory, recalls, feedback };
+  return { memory, recalls, feedback, state };
 }
 
 const MEMORIES: RecalledMemory[] = [

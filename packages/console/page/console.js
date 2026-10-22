@@ -60,6 +60,11 @@
  * @property {number} tombstones
  */
 /**
+ * @typedef {object} Persona
+ * @property {'iris' | 'profile'} source
+ * @property {number | null} version
+ */
+/**
  * @typedef {object} Status
  * @property {Mode} mode
  * @property {boolean} maintenance
@@ -73,6 +78,7 @@
  * @property {Danmaku | null} danmaku
  * @property {Llm | null} llm
  * @property {Memory | null} memory
+ * @property {Persona | null} persona
  * @property {Preflight | null} preflight
  * @property {PluginRow[]} plugins
  * @property {Alert[]} alerts
@@ -119,6 +125,7 @@ const llmText = byId('llm');
 const llmFailuresText = byId('llm-failures');
 const memoryText = byId('memory');
 const memoryCountsText = byId('memory-counts');
+const personaText = byId('persona');
 const preflightSummary = byId('preflight-summary');
 const preflightFailures = byId('preflight-failures');
 const pluginRows = byId('plugins');
@@ -247,6 +254,7 @@ function clearStatus() {
     llmFailuresText,
     memoryText,
     memoryCountsText,
+    personaText,
   ]) {
     node.className = '';
     setText(node, '未知');
@@ -313,6 +321,7 @@ function render(status) {
   renderHeld(status.held);
   renderVote(status.vote);
   renderReadiness(status.danmaku, status.llm, status.memory);
+  renderPersona(status.persona);
   renderPreflight(status.preflight);
   renderPlugins(status.plugins);
   renderAlerts(status.alerts);
@@ -423,6 +432,21 @@ function renderReadiness(danmaku, llm, memory) {
     memory === null
       ? '—'
       : `待发 ${memory.pending} 条，已写入 ${memory.written} 条，丢弃 ${memory.dropped} 条，墓碑 ${memory.tombstones} 名`,
+  );
+}
+
+/**
+ * 决策插件用的人设：来源与版本（不含正文）。
+ * @param {Persona | null} persona
+ */
+function renderPersona(persona) {
+  setText(
+    personaText,
+    persona === null
+      ? '没有启用决策插件'
+      : persona.source === 'iris'
+        ? `Iris 的当前人设（${persona.version === null ? '未编号' : `第 ${persona.version} 版`}）`
+        : 'profile 里的人设',
   );
 }
 

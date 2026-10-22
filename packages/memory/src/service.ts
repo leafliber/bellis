@@ -31,6 +31,15 @@ export type RecallResult =
   | { ok: true; recall: MemoryRecall }
   | { ok: false; kind: 'timeout' | 'aborted' | 'unavailable' | 'error'; detail: string };
 
+/**
+ * Iris 的当前人设（召回准备的 `persona` 分区）：正文已去掉首尾空白、截到上限；版本号 Iris 没给时为 null。
+ * 决策插件怎样选用见决策模型“人设”。
+ */
+export interface MemoryPersona {
+  text: string;
+  version: number | null;
+}
+
 /** 给操作员看的记忆状态。 */
 export interface MemoryReport {
   /** Iris 就绪（最近的请求没有处在连续失败中、也没有鉴权失败），且记忆插件在运行。 */
@@ -56,6 +65,13 @@ export interface Memory {
   feedback(recallId: string, used: readonly string[]): void;
   /** 开播预检：以宿主令牌访问 Iris（`GET /status`）；不通时以说明原因的错误结束。 */
   check(): Promise<void>;
+  /** 最近一次从 Iris 拿到的非空人设（每次召回与激活时更新）；从未拿到过时为 undefined。 */
+  readonly persona: MemoryPersona | undefined;
+  /**
+   * 开播预检：从 Iris 取一次当前人设（只取人设、不取记忆的召回准备），更新上面的缓存。Iris 没有非空的人设时为
+   * undefined；请求失败时以 `IrisError` 结束。
+   */
+  currentPersona(): Promise<MemoryPersona | undefined>;
   readonly report: MemoryReport;
 }
 

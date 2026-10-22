@@ -5,6 +5,7 @@ import {
   danmakuFailure,
   type LlmReport,
   memoryCheckFailure,
+  personaFailure,
   probeFailure,
 } from './readiness.ts';
 
@@ -49,9 +50,15 @@ export interface PreflightInputs {
   llm: (LlmReport & { probe?: () => Promise<void> }) | undefined;
   /**
    * 记忆：profile 中启用了提供 `memory@1` 的插件时给出；`check` 以宿主令牌访问 Iris（`GET /status`），
-   * `memory@1` 不在场时没有 `check`。没有启用记忆时为 undefined，不核对。
+   * `persona` 取一次 Iris 的当前人设（没有非空的人设时为 undefined）。`memory@1` 不在场时两者都没有。
+   * 没有启用记忆时为 undefined，不核对。
    */
-  memory: { check?: () => Promise<void> } | undefined;
+  memory:
+    | {
+        check?: () => Promise<void>;
+        persona?: () => Promise<{ version: number | null } | undefined>;
+      }
+    | undefined;
   /** OBS 应急目标的只读核对，返回未通过的项。 */
   inspectObs(): Promise<string[]>;
 }
@@ -124,10 +131,20 @@ export async function preflight(inputs: PreflightInputs): Promise<string[]> {
     if (!inputs.memory.check) {
       failures.push('记忆未就绪：memory@1 不在场（Iris 客户端或记忆插件没有激活，原因见插件状态）');
     } else {
+      let reachable = true;
       try {
         await inputs.memory.check();
       } catch (error) {
+        reachable = false;
         failures.push(memoryCheckFailure(error));
+      }
+      // 能访问 Iris 时再看人设：启用记忆时人设来自 Iris（见决策模型“人设”），没有就不能开播。
+      if (reachable && inputs.memory.persona) {
+        try {
+          if (!(await inputs.memory.persona())) failures.push('Iris 没有当前人设');
+        } catch (error) {
+          failures.push(personaFailure(error));
+        }
       }
     }
   }

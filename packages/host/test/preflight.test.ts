@@ -311,3 +311,48 @@ test('开播预检：启用了记忆时 memory@1 须在场，且能以宿主令�
   assert.deepEqual(await preflight({ ...ready, memory: undefined }), []);
   assert.equal(checks, 1);
 });
+
+test('开播预检：启用了记忆时 Iris 须返回非空的人设，否则“Iris 没有当前人设”；访问不了 Iris 时不再取人设', async () => {
+  let fetched = 0;
+  const withPersona = (persona: () => Promise<{ version: number | null } | undefined>) => ({
+    check: async () => {},
+    persona: async () => {
+      fetched += 1;
+      return persona();
+    },
+  });
+  assert.deepEqual(
+    await preflight({ ...ready, memory: withPersona(async () => ({ version: 3 })) }),
+    [],
+  );
+  assert.deepEqual(await preflight({ ...ready, memory: withPersona(async () => undefined) }), [
+    'Iris 没有当前人设',
+  ]);
+  // 直播间入口还没写入过消息时 Iris 返回 404：说明里带类别、HTTP 状态与错误码。
+  assert.deepEqual(
+    await preflight({
+      ...ready,
+      memory: withPersona(async () => {
+        throw new IrisError('not_found', '不存在：HTTP 404（entry_not_found）', {
+          status: 404,
+          code: 'entry_not_found',
+        });
+      }),
+    }),
+    ['Iris 没有当前人设（not_found，HTTP 404，entry_not_found）'],
+  );
+  assert.equal(fetched, 3);
+  const unreachable = {
+    check: async () => {
+      throw new IrisError('network', '连接失败');
+    },
+    persona: async () => {
+      fetched += 1;
+      return { version: 1 };
+    },
+  };
+  assert.deepEqual(await preflight({ ...ready, memory: unreachable }), [
+    'Iris 不能以宿主令牌访问（network）',
+  ]);
+  assert.equal(fetched, 3, '访问不了 Iris 时不再取人设');
+});

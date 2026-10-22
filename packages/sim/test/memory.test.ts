@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ReplayLlmService } from '@bellis/director';
+import { ReplayLlmService, TEST_PERSONA } from '@bellis/director';
 import { SimIrisBackend } from '@bellis/memory';
 import fc from 'fast-check';
 import { type Scenario, scenarioArbitrary, simulate } from '../src/index.ts';
@@ -39,6 +39,40 @@ test('全模拟链路：弹幕与角色说出口的部分写入模拟 Iris，下
     assert.ok(!user.replace(zone, '').includes('谢谢你来！'), '记忆只在不可信数据区');
   } finally {
     await world.close();
+  }
+});
+
+test('人设：模拟 Iris 有当前人设时系统消息用它并标明版本；没有时用 profile 的测试人设', async () => {
+  const withIris = await startChain({
+    moderation: { enabled: false },
+    messages: [{ atMs: 0, id: 'd1', viewer: 'v1', nickname: '小明', text: '主播你好' }],
+    outputs: [speak('你好！', 'c-d1')],
+    memory: { iris: { persona: { content: '你是贝莉，Iris 里的人设。', version: 2 } } },
+  });
+  try {
+    const llm = withIris.service(ReplayLlmService);
+    await withIris.until(() => llm.requests.length === 1, 10_000);
+    const [system, user] = llm.requests[0]?.messages ?? [];
+    assert.ok(system?.content.includes('你是贝莉，Iris 里的人设。'));
+    assert.ok(system?.content.includes('Iris 的当前人设，第 2 版'));
+    assert.ok(!system?.content.includes(TEST_PERSONA));
+    assert.ok(!(user?.content ?? '').includes('Iris 里的人设'));
+  } finally {
+    await withIris.close();
+  }
+  const withoutPersona = await startChain({
+    moderation: { enabled: false },
+    messages: [{ atMs: 0, id: 'd1', viewer: 'v1', nickname: '小明', text: '主播你好' }],
+    outputs: [speak('你好！', 'c-d1')],
+    memory: {},
+  });
+  try {
+    const llm = withoutPersona.service(ReplayLlmService);
+    await withoutPersona.until(() => llm.requests.length === 1, 10_000);
+    assert.ok(llm.requests[0]?.messages[0]?.content.includes(TEST_PERSONA));
+    assert.equal(llm.requests[0]?.context.personaSource, undefined);
+  } finally {
+    await withoutPersona.close();
   }
 });
 
