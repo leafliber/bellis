@@ -91,6 +91,7 @@ const status = {
   danmaku: null,
   llm: null,
   memory: null,
+  persona: null,
   preflight: null,
   plugins: [],
   alerts: [],
