@@ -10,7 +10,7 @@
 
 | 命令 | 作用 |
 | --- | --- |
-| `status` | 当前模式、在场确认是否有效与剩余时间、维护态、审核开关、呈现延迟、M1 的放行方式与等待中的句子（等待方式、已等多久）、进行中的投票（题目、开票说明播报中或倒计时剩余、各项票数、是否在缺口中）、弹幕接入的状态（`danmaku`：就绪与否、状态说明、当前缺口的原因、开始时刻与已持续多久）、决策模型的状态（`llm`：就绪与否、状态说明、连续失败数、最近一次失败的类别与时间），两者判定见[开播预检](#开播预检)，profile 中没有启用时为 null；记忆的状态（`memory`：就绪与否、状态说明、待发队列、累计写入与丢弃的条数、墓碑数，见[记忆的就绪](memory.md#就绪与开播预检)），profile 中没有启用记忆时为 null；最近一次开播预检的结果、插件状态与 WAITING 原因 |
+| `status` | 当前模式、在场确认是否有效与剩余时间、维护态、审核开关、呈现延迟、M1 的放行方式与等待中的句子（等待方式、已等多久）、进行中的投票（题目、开票说明播报中或倒计时剩余、各项票数、是否在缺口中）、弹幕接入的状态（`danmaku`：就绪与否、状态说明、当前缺口的原因、开始时刻与已持续多久）、决策模型的状态（`llm`：就绪与否、状态说明、连续失败数、最近一次失败的类别与时间），两者判定见[开播预检](#开播预检)，profile 中没有启用时为 null；记忆的状态（`memory`：就绪与否、状态说明、待发队列、累计写入与丢弃的条数、墓碑数，见[记忆的就绪](memory.md#就绪与开播预检)），profile 中没有启用记忆时为 null；决策插件此刻用的人设的来源与版本（`persona`：`iris` 与版本号，或 `profile`，不含正文，见[决策模型的人设](director.md#人设)），profile 中没有启用决策插件时为 null；最近一次开播预检的结果、插件状态与 WAITING 原因 |
 | `mode 目标` | 切换监督模式。升级只能由操作员显式执行；降级也可由安全核自动触发 |
 | `presence` | 确认在场（M2 的前提） |
 | `estop [原因]` | 急停。参数不合法时照样急停，用缺省原因“操作员急停” |
@@ -33,7 +33,7 @@
 - **响应头**：CSP 为 `default-src 'none'`，脚本、样式、连接只许 `'self'`，`frame-ancestors 'none'`、`base-uri 'none'`、`form-action 'none'`；另有 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`。
 - **接口**：`GET /api/status` 与 `pnpm operator status` 的内容相同，另加近期告警；`POST /api/mode`、`/api/presence`、`/api/emergency-stop`、`/api/veto`、`/api/release`、`/api/preflight` 与命令行的同名命令调同一个动作；`POST /api/login`、`GET /api/session`、`POST /api/logout` 管理会话。
 - **近期告警**：宿主订阅状态存储，环形保存最近 50 条重要事实：模式变化与拒绝、急停请求与完成、OBS 外部变化、看门狗动作、否决与等待放行超时、审核开关变化、TTS 换引擎与降级、弹幕缺口、投票中止、决策模型的告警（连续失败或连续漂移，已请求降级）、登记了墓碑（不写平台身份）。宿主重启后从空开始。
-- **页面**：每秒轮询状态；连不上宿主或会话失效时醒目提示，并把状态清成未知，不把过期的数据当作当前状态。顶部常显审核状态：审核插件关闭时为“审核已关闭”，未显式设置时为“审核状态未设置”。来自宿主的文本（句子可能受弹幕影响）只用 `textContent` 渲染。
+- **页面**：每秒轮询状态，显示人设的来源与版本；连不上宿主或会话失效时醒目提示，并把状态清成未知，不把过期的数据当作当前状态。顶部常显审核状态：审核插件关闭时为“审核已关闭”，未显式设置时为“审核状态未设置”。来自宿主的文本（句子可能受弹幕影响）只用 `textContent` 渲染。
 - **操作**：急停（一键，不二次确认）；确认在场（页面在线不算在场，必须操作员主动点）；切换监督模式（升级到 M1–M3 要再点一次确认）；只跑开播预检；M1 中逐句放行、否决与全部否决；注销。
 
 尚未提供（unsupported）：开播与下播、进入或退出维护态、查看结果未知的意图。
@@ -66,7 +66,9 @@
 
 - Iris 外发配置已核对：维护者核对后在 profile 里把 Iris 客户端的 `egressReviewed` 设为 true（确认的是什么见[记忆的 Iris 客户端](memory.md#iris-客户端)）。不是 true 时 Iris 客户端不激活、不发任何请求，`memory@1` 随之不在场。
 - `memory@1` 须在场：不在场时为 `记忆未就绪：memory@1 不在场（Iris 客户端或记忆插件没有激活，原因见插件状态）`，激活失败的原因在插件状态一项里。
-- 能以宿主令牌访问 Iris：每次预检发一个 `GET /status`（本机回环，截止 5 秒），服务为 `ready` 才通过；未通过时为 `Iris 不能以宿主令牌访问（<类别>，HTTP <状态>，<错误码>）`，或服务状态不是 ready 时的说明。不发写入与召回。
+- 能以宿主令牌访问 Iris：每次预检发一个 `GET /status`（本机回环，截止 5 秒），服务为 `ready` 才通过；未通过时为 `Iris 不能以宿主令牌访问（<类别>，HTTP <状态>，<错误码>）`，或服务状态不是 ready 时的说明。
+- Iris 有当前人设：能访问时再取一次人设（只取人设、不取记忆的召回准备，见[记忆的人设](memory.md#人设)），正文非空才通过；没有时为 `Iris 没有当前人设`，请求出错时括号里带类别、HTTP 状态与错误码（新部署的直播间入口还没有消息时是 404，处理见同一节）。启用记忆时人设来自 Iris（见[决策模型的人设](director.md#人设)），没有就不能开播。
+- 不发写入，也不取记忆。
 
 **显式探测**：模型客户端配置 `probeOnPreflight: true`（缺省 false）时，这一项改为每次预检发一个最小的请求：固定的极短提示词（只要求输出 `{"ok":true}`，不含人设、上下文与观众输入），按配置的型号、思考档位与输出方式，截止时间 `probeTimeoutMs`（缺省 10 秒，至多 20 秒）。应答正常结束、正文是一个 JSON 对象才通过；结果计入上面的就绪判定（成功清掉之前的失败）。未通过时为 `决策模型的探测请求失败（<类别>，HTTP <状态>，<错误码>）`。**探测会外发到模型服务、按调用计费**，切到 M1–M3 前与每次只跑预检各发一次；不打开就不发。
 
@@ -93,7 +95,7 @@
 2. 没有 `telemetry` 包的，从样例复制。
 3. 从样例整段复制 `interaction` 包（已有旧的弹幕、决策条目的，换成样例的写法），填：
    - `danmaku` 的 `config.appId`：直播开放平台的项目 ID。样例的 0 表示未配置，插件以“未配置项目 ID（appId）”加载失败、不连任何端点；
-   - `director` 的 `config.persona`：人设，由操作员按实际角色改写；`fallback.lines` 按需改；
+   - `director` 的 `config.persona`：样例是测试人设；启用记忆后人设来自 Iris，这一份只在没有启用记忆、或还没拿到过 Iris 的人设时用（见[决策模型的人设](director.md#人设)）；`fallback.lines` 按需改；
    - `llm` 的 `config`：型号不是机密，换型号只改 `model`（见[决策模型](director.md#模型客户端插件)）；`probeOnPreflight` 见上文。
 4. 录凭据（`pnpm secret set 名字`，值不回显，见 [Windows 平台](../platform/windows.md#凭据)）：`bilibili`（JSON `{"accessKeyId": "…", "accessKeySecret": "…"}`）、`bilibili-code`（主播身份码）、`ark`（方舟的 API Key）。
 5. 在 `config/live.json` 的 `patches` 加上 `"patches/interaction.json"`，跑 `pnpm operator preflight` 看弹幕接入与决策模型两项。
@@ -101,6 +103,7 @@
    - 从样例整段复制 `memory` 包，填 `memory` 的 `config.entryId`（Iris 的入口 ID，例如 `bellis:bilibili:<房间号>`；样例的空串表示未配置，插件以“未配置入口 ID（entryId）”加载失败）与 `selfName`（角色名）；
    - `iris` 的 `config.baseUrl` 是 Iris 的地址，缺省 `http://127.0.0.1:8080`，端口按容器的映射改；地址的主机须在 `grant` 里有对应的 `net.egress:<主机>`（样例授予 `127.0.0.1`）；
    - 核对 Iris 的外发配置后，把 `iris` 的 `config.egressReviewed` 改为 true（确认的是什么见[记忆的 Iris 客户端](memory.md#iris-客户端)）；
+   - 在 Iris 管理端设好角色名与背景作为人设初版，人设的候选保持“全部人工确认”；直播间入口还没有消息时，`memory` 的 `config.persona.entryId` 先指向令牌范围内已经存在的入口（见[记忆的人设](memory.md#人设)）；
    - 录凭据 `iris`（Iris 管理端创建的宿主令牌，范围包含上面的入口 ID）；
    - 在 `patches` 加上 `"patches/memory.json"`，跑 `pnpm operator preflight` 看 Iris 一项。
 

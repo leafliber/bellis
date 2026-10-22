@@ -10,7 +10,7 @@
 
 ## 不负责
 
-实时状态（那是[状态存储](state-store.md)）、权限、人设。人设由操作员管理，记忆不能改写它。不负责 Iris 自己的学习与外发（Iris 把收到的原文发给它配置的模型，由维护者核对，见下文[就绪与开播预检](#就绪与开播预检)）。
+实时状态（那是[状态存储](state-store.md)）、权限。人设由 Iris 提供、经维护者在 Iris 管理端确认，决策插件怎样选用见[决策模型的人设](director.md#人设)；记忆插件只负责取来并缓存（见下文[人设](#人设)），召回的记忆不能改写人设。不负责 Iris 自己的学习与外发（Iris 把收到的原文发给它配置的模型，由维护者核对，见下文[就绪与开播预检](#就绪与开播预检)）。
 
 ## iris-core v1 现状
 
@@ -26,6 +26,7 @@
 | 外发 | Iris 自己把原文发给它配置的模型 | Iris 的模型配置必须符合 Bellis 的外发与合规要求，维护者核对后在 profile 中确认 |
 | 部署 | 只在 macOS 验证过原生运行；提供 Docker 镜像。普通模式只监听回环地址，容器模式（`IRIS_CONTAINER=1`）才允许非回环监听，不提供 TLS；Host 缺省只接受 `127.0.0.1`、`localhost`、`[::1]` | 以 Docker 部署在本机，端口只映射到 127.0.0.1，令牌不出本机（D-23）；容器内运行与召回延迟由探针 S-09 验证 |
 | 许可 | iris-core 与其 TS 客户端均为 AGPL-3.0 | 按 HTTP 契约自写客户端（R-19） |
+| 人设 | 召回准备的 `persona` 分区是当前角色描述、版本与更新提示：初版来自管理端的角色名与背景，之后从角色的自我记忆中提炼候选；自 2026-10-10 起缺省“全部人工确认”，候选经管理员确认前一直用当前版 | Bellis 用它作人设（见[决策模型的人设](director.md#人设)），要求 Iris 保持全部人工确认；只取正文与版本号 |
 | 信任标记 | 消息没有“可信与否”的字段；记忆带说话人（`speaker_name`）、涉及的人（`about`）与来源消息 | 观众消息以 `kind: "message"` 归在观众名下写入，即“观众声称”；召回的一切都放进不可信数据区 |
 
 ## 两个插件
@@ -59,13 +60,23 @@
 
 - 决策插件在调用模型之前召回，截止时间是它的 `recallTimeoutMs`（缺省 2 秒，不计入模型调用的 `callTimeoutMs`）：到点、出错或记忆插件不在场都不带记忆继续决策；记忆插件没有及时响应中止信号也照样到点就走，晚到的结果不用。召回跟着这次决策时机走：在途的闲聊被取消时，召回一并取消。
 - 查询提示是候选弹幕的净化文本与刚结束的投票题目（至多 `recallQueryChars` 字，缺省 500）；冷场时不给，由 Iris 用本入口的近期消息自己构造。
-- 请求只取记忆：关闭召回判断（`judge: false`，打开时才发 `judge_budget_seconds`），不取人物要点（`participants: []`）、人物摘要（`people_limit: 0`）、近期原始消息（`recent_limit: 0`）与目标（`goal_limit: 0`）；`memory_limit` 与 `token_budget` 按配置。入口画像、persona 等分区不用。
+- 请求只取记忆与人设：关闭召回判断（`judge: false`，打开时才发 `judge_budget_seconds`），不取人物要点（`participants: []`）、人物摘要（`people_limit: 0`）、近期原始消息（`recent_limit: 0`）与目标（`goal_limit: 0`）；`memory_limit` 与 `token_budget` 按配置。返回的 `persona` 分区用来更新人设（见下文[人设](#人设)）；入口画像（`entry_profile`）与人物摘要（`people`）是不可信背景，P2 不进上下文。
 - 过滤（召回结果进入上下文前）：
   - 只用直播间入口内的：每条来源的入口都是本入口才用；来源入口在令牌范围外（为 null）或没有来源的不用；
   - 提到有墓碑的观众的不用（见下文[删除](#删除)）；
   - 命中隐私规则或注入检测的不用；
   - 正文去掉不可见字符、合并空白，截到 `recall.maxChars`（缺省 120）个字。
 - 留下的记忆按顺序编号 `m1`、`m2`…（只在这次召回里有效），连同 Iris 给的类别与立场放进决策模型上下文的不可信数据区（见[决策模型的提示词](director.md#提示词)）。
+
+## 人设
+
+决策插件选用人设的规则见[决策模型的人设](director.md#人设)；这里是记忆插件怎样从 Iris 取来：
+
+- 来源是召回准备的 `persona` 分区，只取正文（`content`）与版本号（`version`，Iris 没给时为 null）；更新提示（`needs_update`、`stale_basis_count`）不取。人设是角色全局的，任一入口返回同一份。
+- 什么时候取：激活时取一次（只取人设、不取记忆的召回准备：`text` 为空串，`memory_limit`、`token_budget` 为 0，截止 5 秒）；之后每次召回成功都带回当前版；开播预检时再取一次（`memory@1` 的 `currentPersona`）。
+- 缓存：记住最近一次拿到的非空人设（只在进程内，重启后重新取），召回超时或失败时决策插件用这一份（`memory@1` 的 `persona`）。
+- 整理：去掉首尾空白，为空视同没有拿到（缓存不变）；超过 `persona.maxChars`（缺省 2000）个字截断，记日志 `memory.persona-truncated`（版本、原字数、上限）。人设变了记 `memory.persona`（版本与字数）；激活时没取到记 `memory.persona-missing` 或 `memory.persona-failed`（类别）。日志都不写正文。
+- 取人设用的入口是 `persona.entryId`，缺省为 `entryId`。直播间入口在第一次写入消息之前不存在，Iris 对它返回 404；写入又要等进入真实输出模式，所以新部署时开播预检会报“Iris 没有当前人设（not_found…）”。这时把 `persona.entryId` 指向令牌范围内一个已经存在的入口（人设是全局的，结果相同），直播间入口有了消息之后可以改回。
 
 ## 使用反馈
 
@@ -136,7 +147,7 @@
 ## 就绪与开播预检
 
 - 记忆插件报告就绪（`memory@1` 的 `report`）：Iris 客户端就绪（最近的请求没有处在连续失败中、也没有鉴权失败），且插件在运行；状态说明后面加上写入为什么暂停（安全停止中、多久后重试）。待发队列、累计写入与丢弃的条数、墓碑数来自状态存储的记忆账本。显示在 `pnpm operator status` 与操作台上（见[运维](operations.md#操作台)）。
-- 开播预检中的 Iris 一项见[运维的开播预检](operations.md#开播预检)。
+- 开播预检中的 Iris 一项（含“Iris 没有当前人设”）见[运维的开播预检](operations.md#开播预检)。
 
 ## 配置
 
@@ -150,6 +161,7 @@
 | `recall` | `judge`（缺省 false）、`judgeBudgetSeconds`（打开判断时才发）、`memoryLimit`（1–8，缺省 5）、`tokenBudget`（缺省 600）、`maxChars`（缺省 120） |
 | `write` | `danmaku`、`speech`（是否写入，缺省都写）、`batchSize`、`flushDelayMs`、`capacity`、`retryMinMs`、`retryMaxMs`、`maxChars`，含义见上文[写入](#写入) |
 | `skipInjection` | 命中注入检测的弹幕不写、召回的记忆不用，缺省 true |
+| `persona` | `entryId`（取人设用的入口，缺省为 `entryId`）、`maxChars`（人设正文的字数上限，缺省 2000），见上文[人设](#人设) |
 | `privacy.rules` | 隐私网关的规则，见上文 |
 
 ## 遥测
