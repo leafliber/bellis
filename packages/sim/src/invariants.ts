@@ -1,8 +1,11 @@
 import { ballotKeys, decide, matchBallot } from '@bellis/audience';
 import { speakable } from '@bellis/speech';
 import type { StoredEvent } from '@bellis/store';
+import { checkDirector } from './director-check.ts';
 import { checkMemory } from './memory-check.ts';
+import { checkRecovery } from './recovery-check.ts';
 import { BLOCKED, SAMPLE_RATE, SAMPLES_PER_CHAR } from './scenario.ts';
+import { checkSupervision } from './supervision-check.ts';
 import { checkTelemetry } from './telemetry-check.ts';
 import type { TraceEntry } from './world.ts';
 
@@ -28,7 +31,10 @@ export interface History {
  * 6. 页面回报一句截断时，这一句的字幕（两段）已经清除；回报播完时，至迟在呈现延迟之后清除；
  * 7. 投票的不变量（见 {@link checkVotes}）；
  * 8. 遥测的不变量（见 {@link checkTelemetry}）；
- * 9. 记忆的不变量（见 {@link checkMemory}）。
+ * 9. 记忆的不变量（见 {@link checkMemory}）；
+ * 10. 决策模型失败的不变量（见 {@link checkDirector}）；
+ * 11. 监督模式与 OBS 外部变化的不变量（见 {@link checkSupervision}）；
+ * 12. 重启与结案的不变量（见 {@link checkRecovery}）。
  */
 export function checkHistory(history: History): string[] {
   const violations: string[] = [];
@@ -180,6 +186,9 @@ export function checkHistory(history: History): string[] {
   violations.push(...checkVotes(history));
   violations.push(...checkTelemetry(history));
   violations.push(...checkMemory(history));
+  violations.push(...checkDirector(history));
+  violations.push(...checkSupervision(history));
+  violations.push(...checkRecovery(history));
   return violations;
 }
 

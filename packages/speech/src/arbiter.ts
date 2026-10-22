@@ -1,4 +1,4 @@
-import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
+import { ClockService, definePlugin, type TimerHandle, TraceService } from '@bellis/kernel';
 import { type Lease, SafetyService } from '@bellis/safety';
 import { type PlaybackResult, STAGE_AUDIO, StageService } from '@bellis/stage';
 import { Metric, type Span, TelemetryService, useTracer } from '@bellis/telemetry';
@@ -12,6 +12,7 @@ import {
   type PreCheckVerdict,
   ReviewService,
   type Sentence,
+  SPEECH_INTENT,
   type Speech,
   type SpeechRequest,
   SpeechService,
@@ -131,6 +132,7 @@ async function* sentencesOf(
  * - 有遥测时（见运维“观测”）：每段发言一个 span（父为请求带来的链路），每句一个 span，其下是发声前检查、
  *   放行环节、授权、TTS 合成各一个 span，Stage 服务的播出 span 也挂在这一句下；另记“弹幕到首音”、
  *   “TTS 首包”与“许可续约滞后”的直方图。
+ * - 在仿真里把收到的每个请求（编号、来源与文本）写进追踪（`speech.requested`），含被拒与丢弃的。
  */
 export const speechArbiter = definePlugin({
   manifest: {
@@ -146,6 +148,7 @@ export const speechArbiter = definePlugin({
       `${ModerationService.ref}?`,
       `${ReviewService.ref}?`,
       `${TelemetryService.ref}?`,
+      `${TraceService.ref}?`,
     ],
     permissions: ['speech.output'],
     process: 'in-process',
@@ -160,6 +163,7 @@ export const speechArbiter = definePlugin({
     const stage = ctx.service(StageService);
     const tts = ctx.service(TtsService);
     const tracer = useTracer(ctx, 'speech-arbiter');
+    const trace = ctx.optional(TraceService);
     const queue: Item[] = [];
     const history: UtteranceOutcome[] = [];
     const seen = new Set<string>();
@@ -484,15 +488,15 @@ export const speechArbiter = definePlugin({
             try {
               decision = await safety.authorize({
                 key,
-                type: 'speech.play',
-                target: 'stage',
+                type: SPEECH_INTENT.type,
+                target: SPEECH_INTENT.target,
                 payload,
                 source: {
                   origin: request.source,
                   inputs: request.inputs,
                   untrusted: request.untrusted,
                 },
-                capabilities: ['speech.output'],
+                capabilities: [SPEECH_INTENT.capability],
                 timeSensitive: true,
               });
               authorizeSpan.setAttributes({
@@ -700,6 +704,11 @@ export const speechArbiter = definePlugin({
 
     const speech: Speech = {
       request(request) {
+        trace?.record('speech.requested', {
+          id: request.id,
+          source: request.source,
+          text: typeof request.text === 'string' ? request.text : null,
+        });
         if (ctx.signal.aborted) return refuse(request, { end: 'unavailable', reason: '仲裁停用' });
         if (seen.has(request.id)) return refuse(request, { end: 'duplicate' });
         seen.add(request.id);

@@ -162,6 +162,63 @@ test('重启恢复：未开始的放弃，执行中的标为 unknown，可人工
   }
 });
 
+test('重启恢复：按判定当场结案停在执行中的意图（intent.interrupted），目标不再隔离；其余照旧结果未知', () => {
+  const db = tempDb();
+  try {
+    let store = StateStore.open({ path: db.path });
+    const speech = store.authorize(intent('u1#0', { target: 'stage', type: 'speech.play' })).intent;
+    const write = store.authorize(
+      intent('memory.write:1', { target: 'iris:room', type: 'memory.write', timeSensitive: false }),
+    ).intent;
+    store.start(speech.id);
+    store.start(write.id);
+    store.close();
+
+    store = StateStore.open({ path: db.path });
+    const seen: string[] = [];
+    const report = store.recover({
+      interrupt: (i) => {
+        seen.push(i.key);
+        return i.type === 'speech.play' ? '重启中断' : undefined;
+      },
+    });
+    // 判定只看停在执行中、刚标为结果未知的意图。
+    assert.deepEqual(seen, ['u1#0', 'memory.write:1']);
+    assert.deepEqual(
+      report.interrupted.map((i) => [i.id, i.state, i.error]),
+      [[speech.id, 'failed', '重启中断']],
+    );
+    assert.deepEqual(
+      report.orphaned.map((i) => [i.id, i.state]),
+      [[write.id, 'unknown']],
+    );
+    const events = store.events().filter((e) => e.type.startsWith('intent.'));
+    assert.deepEqual(
+      events.slice(-3).map((e) => [e.type, (e.data as { id: number }).id]),
+      [
+        ['intent.orphaned', speech.id],
+        ['intent.orphaned', write.id],
+        ['intent.interrupted', speech.id],
+      ],
+    );
+    assert.deepEqual(events.at(-1)?.data, {
+      id: speech.id,
+      key: 'u1#0',
+      target: 'stage',
+      error: '重启中断',
+    });
+    // 结案的目标不再隔离；还结果未知的目标仍隔离。
+    assert.equal(store.authorize(intent('u2#0', { target: 'stage' })).duplicate, false);
+    assert.throws(
+      () => store.authorize(intent('memory.write:2', { target: 'iris:room' })),
+      ResourceIsolated,
+    );
+    store.close();
+  } finally {
+    db.cleanup();
+  }
+});
+
 test('许可令牌只增不减，重启后不回退', () => {
   const db = tempDb();
   try {

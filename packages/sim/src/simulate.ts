@@ -4,10 +4,11 @@ import { join } from 'node:path';
 import { VoteService, type Votes } from '@bellis/audience';
 import { ReplayLlmService } from '@bellis/director';
 import { SimIrisBackend, tombstoneFact } from '@bellis/memory';
+import type { ObsChange } from '@bellis/safety';
 import { type TelemetryMemory, TelemetryMemoryService } from '@bellis/telemetry';
 import { checkHistory, type History } from './invariants.ts';
 import { type Scenario, scenarioEntries } from './scenario.ts';
-import { type TraceEntry, World } from './world.ts';
+import { simSafety, type TraceEntry, World } from './world.ts';
 
 export interface SimulationOptions {
   /** 每步推进的模拟时间。 */
@@ -29,8 +30,10 @@ export interface SimulationResult {
 /**
  * 运行一个场景（R-07）：同一个种子总得到同一条追踪。
  * 每一步检查执行许可至多一个持有者、许可令牌不回退；结束后检查排空与追踪上的不变量。
- * 场景里的“重启”模拟进程崩溃：放弃当前世界，在同一个状态存储上重新启动，
- * 由操作员结案结果未知的意图后切回 M0。
+ * 场景里的“重启”模拟进程崩溃：放弃当前世界，在同一个状态存储上重新启动，与宿主相同：停在执行中的 Stage 发言
+ * 在恢复时自动结案，其余结果未知的意图由所有者在激活时对账。之后操作员切回场景的模式（M0，或真实输出模式的
+ * 场景切到 M2）；还有结果未知的意图时开播预检不通过、不切换，等场景里的操作员动作 `resolve` 结案后再升级。
+ * 每个操作员动作先写进追踪（`operator.action`；OBS 外部变化带上它会不会改变 OBS 的状态）。
  */
 export async function simulate(
   scenario: Scenario,
@@ -51,6 +54,21 @@ export async function simulate(
   /** 模拟 Iris 是进程外的服务：宿主崩溃重启，它的数据还在。 */
   const iris = new SimIrisBackend();
 
+  const target = scenario.mode ?? 'M0';
+  /**
+   * 操作员切到场景的模式：M2 先确认在场。还有结果未知的意图时开播预检不通过，不切换（记进追踪）。
+   */
+  const enter = (world: World) => {
+    const unresolved = world.store.intentsIn('unknown').map((intent) => intent.id);
+    if (unresolved.length > 0) {
+      world.record('operator.preflight-refused', { unresolved });
+      // 预检不通过不是违例：操作员结案之后再升级。
+      return { ok: true } as const;
+    }
+    if (target === 'M2') world.safety.confirmPresence();
+    return world.safety.requestMode(target);
+  };
+
   const boot = async (fromMs: number, startAt: number): Promise<World> => {
     const world = new World({
       entries: scenarioEntries(scenario, fromMs, outputsUsed, { telemetry: withTelemetry }),
@@ -60,14 +78,13 @@ export async function simulate(
       startAt,
       bootId: `b${restarts}`,
       iris,
+      // 真实输出模式的场景：安全核按非仿真配置，只允许 M1–M3（设备仍是模拟的）。
+      ...(target === 'M2' ? { safety: { simulation: false } } : {}),
     });
     world.record('world.start', { restarts });
     await world.kernel.settled();
-    for (const intent of world.store.intentsIn('unknown')) {
-      world.store.resolve(intent.id, { ok: false, error: '仿真：操作员确认未播出' }, 'operator');
-    }
-    const mode = world.safety.requestMode('M0');
-    if (!mode.ok) violations.push(`启动后无法进入 M0：${mode.reason}`);
+    const mode = enter(world);
+    if (!mode.ok) violations.push(`启动后无法进入 ${target}：${mode.reason}`);
     return world;
   };
   const collect = (world: World) => {
@@ -93,11 +110,34 @@ export async function simulate(
         (operations[next]?.atMs ?? Number.POSITIVE_INFINITY) <= elapsed
       ) {
         const operation = operations[next++];
-        if (operation?.action === 'estop') {
+        if (!operation) break;
+        const { safeScene, stageSource } = simSafety.emergency;
+        const change: ObsChange | undefined =
+          operation.action === 'obs-scene'
+            ? { kind: 'scene', sceneName: safeScene }
+            : operation.action === 'obs-mute'
+              ? { kind: 'mute', inputName: stageSource, muted: true }
+              : undefined;
+        world.record('operator.action', {
+          action: operation.action,
+          ...(change ? { changed: world.obs.changes(change) } : {}),
+        });
+        if (change) {
+          // 在 OBS 里按热键或手动操作，不经 Bellis。
+          world.obs.external(change);
+        } else if (operation.action === 'estop') {
           void world.safety.emergencyStop('仿真急停');
-        } else if (operation?.action === 'upgrade') {
-          world.safety.requestMode('M0');
-        } else if (operation?.action === 'restart') {
+        } else if (operation.action === 'resolve') {
+          // 操作员核对后结案全部结果未知的意图（与 pnpm operator resolve 记同一种事实），按没有发生处理。
+          for (const intent of world.store.intentsIn('unknown')) {
+            world.store.resolve(intent.id, { ok: false, error: '仿真：操作员结案' }, 'operator');
+          }
+        } else if (operation.action === 'upgrade') {
+          // 像操作员一样先把 OBS 切回直播场景、取消静音，再升级。
+          world.obs.external({ kind: 'scene', sceneName: 'Live' });
+          world.obs.external({ kind: 'mute', inputName: stageSource, muted: false });
+          enter(world);
+        } else if (operation.action === 'restart') {
           outputsUsed += world.service(ReplayLlmService).requests.length;
           collect(world);
           const { now } = world.crash();

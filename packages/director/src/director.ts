@@ -11,6 +11,7 @@ import {
   definePlugin,
   defineService,
   type TimerHandle,
+  TraceService,
   withDeadline,
 } from '@bellis/kernel';
 import { type Memory, type MemoryRecall, MemoryService, type RecallResult } from '@bellis/memory';
@@ -750,23 +751,59 @@ export interface ReplayLlm extends Llm {
 
 export const ReplayLlmService = defineService<ReplayLlm>('llm-replay', 1);
 
+/** 回放能模拟的失败：模型客户端的失败类别（见 {@link LlmErrorKind}），取消（`aborted`）除外。 */
+const ReplayFailure = Type.Union([
+  Type.Literal('auth'),
+  Type.Literal('rate_limit'),
+  Type.Literal('server'),
+  Type.Literal('request'),
+  Type.Literal('timeout'),
+  Type.Literal('network'),
+  Type.Literal('protocol'),
+  Type.Literal('incomplete'),
+]);
+
+/**
+ * 一次调用的回放：字符串是这次的输出（耗时 `latencyMs`）；`error` 让这次调用以这类失败结束；
+ * `output` 加 `afterMs` 给出这次的耗时（超过决策插件的截止时间即超时），`ignoreAbort` 时不理会中止信号、
+ * 到点照样给出输出，模拟没有及时响应中止的客户端。
+ */
+const ReplayOutput = Type.Union([
+  Type.String(),
+  Type.Object({
+    error: ReplayFailure,
+    afterMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  }),
+  Type.Object({
+    output: Type.String(),
+    afterMs: Type.Integer({ minimum: 0 }),
+    ignoreAbort: Type.Optional(Type.Boolean()),
+  }),
+]);
+
+/**
+ * 回放模型（仿真与测试用）。在仿真里把每次调用写进追踪（`llm.request`：调用序号与上下文里的候选编号；
+ * 结局 `llm.output`、`llm.error`，以及先于结局到达的中止 `llm.aborted`，带是否因截止时间；失败给出之后、
+ * 决策插件处理之前到达的取消带 `afterResult`），不变量据此独立推出每次调用对决策插件意味着什么。
+ */
 export const replayLlm = definePlugin({
   manifest: {
     id: 'llm-replay',
-    version: '0.2.0',
+    version: '0.3.0',
     tier: 'ordinary',
     provides: [LlmService.ref, ReplayLlmService.ref],
-    inject: [ClockService.ref],
+    inject: [ClockService.ref, `${TraceService.ref}?`],
     permissions: [],
     process: 'in-process',
     config: Type.Object({
-      outputs: Type.Array(Type.String()),
-      /** 每次调用的模拟耗时。 */
+      outputs: Type.Array(ReplayOutput),
+      /** 每次调用的模拟耗时（没有单独给出时）。 */
       latencyMs: Type.Integer({ minimum: 0, default: 0 }),
     }),
   },
   activate(ctx) {
     const clock = ctx.service(ClockService);
+    const trace = ctx.optional(TraceService);
     const requests: LlmRequest[] = [];
     let next = 0;
     const replay: ReplayLlm = {
@@ -778,17 +815,62 @@ export const replayLlm = definePlugin({
       requests,
       complete(request, signal) {
         requests.push(structuredClone(request));
-        const output = ctx.config.outputs[next] ?? '{"action":"silence","reason":"回放结束"}';
+        const call = next;
+        const item = ctx.config.outputs[call] ?? '{"action":"silence","reason":"回放结束"}';
         next += 1;
+        trace?.record('llm.request', {
+          call,
+          candidates: request.context.candidates.map((c) => c.id),
+        });
+        const plan =
+          typeof item === 'string'
+            ? { output: item, afterMs: ctx.config.latencyMs, ignoreAbort: false }
+            : 'error' in item
+              ? { error: item.error, afterMs: item.afterMs ?? ctx.config.latencyMs }
+              : {
+                  output: item.output,
+                  afterMs: item.afterMs,
+                  ignoreAbort: item.ignoreAbort ?? false,
+                };
         return new Promise((resolve, reject) => {
+          let settled = false;
           const onAbort = () => {
+            if (settled) return;
+            trace?.record('llm.aborted', {
+              call,
+              deadline: signal.reason instanceof DeadlineError,
+            });
+            if ('output' in plan && plan.ignoreAbort) return;
+            settled = true;
             clock.clearTimeout(timer);
             reject(new LlmError('aborted', '已取消'));
           };
           const timer = clock.setTimeout(() => {
             signal.removeEventListener('abort', onAbort);
-            resolve(output);
-          }, ctx.config.latencyMs);
+            settled = true;
+            if ('error' in plan) {
+              trace?.record('llm.error', { call, kind: plan.error });
+              reject(new LlmError(plan.error, `回放的失败：${plan.error}`));
+              // 失败已经给出、决策插件还没处理（处理在微任务里）时，同一时刻别的定时器触发的取消先到：
+              // 决策插件把这次调用当作取消。仿真里只有这种中止发生在任何微任务运行之前，记下它；
+              // 决策插件处理失败时自己发的中止在微任务里，不记。
+              let drained = false;
+              queueMicrotask(() => {
+                drained = true;
+              });
+              signal.addEventListener(
+                'abort',
+                () => {
+                  if (!drained)
+                    trace?.record('llm.aborted', { call, deadline: false, afterResult: true });
+                },
+                { once: true },
+              );
+            } else {
+              trace?.record('llm.output', { call, output: plan.output });
+              resolve(plan.output);
+            }
+          }, plan.afterMs);
           if (signal.aborted) onAbort();
           else signal.addEventListener('abort', onAbort, { once: true });
         });

@@ -61,6 +61,17 @@ export interface RecoveryReport {
   abandoned: Intent[];
   /** 重启时停在执行中的意图，结果未知，已标为 `unknown`，等待对账或人工结案。 */
   orphaned: Intent[];
+  /** 重启时停在执行中、按 {@link RecoveryOptions.interrupt} 当场结案为失败的意图（先标为 `unknown` 再结案）。 */
+  interrupted: Intent[];
+}
+
+export interface RecoveryOptions {
+  /**
+   * 停在执行中的意图里，哪些在重启时当场结案为失败：返回结案说明，不结案时返回 undefined。用于结果虽未知、
+   * 但重启后目标状态已经确定、永不重做的动作（例如 Stage 的发言，见状态存储“重启”）。结案记事实
+   * `intent.interrupted`，目标随之不再隔离。
+   */
+  interrupt?(intent: Intent): string | undefined;
 }
 
 export interface StoreOptions {
@@ -384,10 +395,11 @@ export class StateStore {
   }
 
   /**
-   * 重启后调用一次：还没开始执行的意图标为失败（放弃）；停在执行中的意图标为 `unknown`。
-   * 永不重做副作用。可对账的意图由其所有者查询外部状态后用 `resolve` 补记。
+   * 重启后调用一次：还没开始执行的意图标为失败（放弃）；停在执行中的意图标为 `unknown`，其中
+   * `options.interrupt` 认出的当场结案为失败。永不重做副作用。其余结果未知的意图由所有者查询外部状态后
+   * 用 `resolve` 补记，或由操作员结案。
    */
-  recover(): RecoveryReport {
+  recover(options: RecoveryOptions = {}): RecoveryReport {
     return this.transaction((tx) => {
       const abandoned = this.intentsIn('pending').map((intent) => {
         this.#update(intent.id, 'failed', { error: '重启时尚未执行，已放弃' });
@@ -404,7 +416,25 @@ export class StateStore {
         });
         return this.intent(intent.id) as Intent;
       });
-      return { abandoned, orphaned };
+      const interrupted: Intent[] = [];
+      for (const intent of orphaned) {
+        const error = options.interrupt?.(intent);
+        if (error === undefined) continue;
+        this.#update(intent.id, 'failed', { error });
+        tx.append('intent.interrupted', {
+          id: intent.id,
+          key: intent.key,
+          target: intent.target,
+          error,
+        });
+        interrupted.push(this.intent(intent.id) as Intent);
+      }
+      const closed = new Set(interrupted.map((intent) => intent.id));
+      return {
+        abandoned,
+        orphaned: orphaned.filter((intent) => !closed.has(intent.id)),
+        interrupted,
+      };
     }, 'recover');
   }
 

@@ -66,6 +66,31 @@ export const VOTE_OPTIONS = [
 
 export const NICKNAMES = ['小明', '小​红‮', '🔥🔥', '超级管理员', 'Viewer_1'] as const;
 
+/** 决策插件一次调用的截止时间：超时的回放比它晚到。 */
+export const CALL_TIMEOUT_MS = 2000;
+/** 超时的回放晚到的输出：一个合法的说话意图，它的文本从不该交给发声。 */
+export const LATE_TEXT = '这句回答来得太晚了。';
+/** 决策插件的固定过渡语。 */
+export const FALLBACK_LINE = '稍等，我想一想。';
+/** 决策插件连续失败多少次告警并请求降级（插件的缺省值）。 */
+export const ALARM_AFTER = 3;
+/** M1 逐句放行的固定延迟（真实输出模式的场景里，决策插件的降级可能把 M2 降到 M1）。 */
+export const REVIEW_DELAY_MS = 500;
+
+/** 回放能模拟的模型调用失败（模型客户端的失败类别，取消除外）。 */
+export const LLM_FAILURES = [
+  'auth',
+  'rate_limit',
+  'server',
+  'request',
+  'timeout',
+  'network',
+  'protocol',
+  'incomplete',
+] as const;
+
+export type OperatorAction = 'estop' | 'upgrade' | 'restart' | 'resolve' | 'obs-scene' | 'obs-mute';
+
 export interface Scenario {
   seed: number;
   moderation: { enabled: boolean; onError: 'skip' | 'pass'; delayMs: number };
@@ -73,16 +98,31 @@ export interface Scenario {
   danmaku: Array<{ atMs: number; viewer: number; nickname: number; text: number }>;
   /** 弹幕接收缺口：期间到点的弹幕收不到。缺省没有。 */
   gaps?: Array<{ atMs: number; durationMs: number }>;
-  /** 回放的模型输出。 */
+  /**
+   * 回放的模型输出。`timeout` 比决策插件的截止时间晚到（`ignoreAbort` 时不理会中止、到点照样给出
+   * {@link LATE_TEXT}），`error` 以模型客户端的这类失败结束。
+   */
   outputs: Array<
     | { kind: 'reply'; sentences: number[]; target: number }
     | { kind: 'chatter'; sentences: number[] }
     | { kind: 'invalid' }
     | { kind: 'silence' }
     | { kind: 'vote'; question: number; options: number; durationSec: number }
+    | { kind: 'timeout'; ignoreAbort: boolean }
+    | { kind: 'error'; error: (typeof LLM_FAILURES)[number] }
   >;
   announcements: Array<{ atMs: number; sentences: number[]; immediate: boolean }>;
-  operator: Array<{ atMs: number; action: 'estop' | 'upgrade' | 'restart' }>;
+  /**
+   * 操作员动作：急停、升级、崩溃重启、结案全部结果未知的意图（`resolve`），以及在 OBS 里不经 Bellis 切到安全场景
+   * （`obs-scene`）或静音 Stage 源（`obs-mute`），即热键或手动操作。升级之前先像操作员一样把 OBS 切回直播场景、
+   * 取消静音；还有结果未知的意图时开播预检不通过，不升级。
+   */
+  operator: Array<{ atMs: number; action: OperatorAction }>;
+  /**
+   * 操作员把世界切到的模式：M0（仿真，缺省），或 M2（真实输出模式，设备仍是模拟的；在场确认有效，
+   * 降级可能降到 M1，M1 有固定延迟的逐句放行）。启动、重启与升级都切到它。
+   */
+  mode?: 'M0' | 'M2';
   /** 呈现延迟（stage-sync 的初值；仿真里没有音量表，一直用它）。缺省 0。 */
   presentationMs?: number;
   /** 模拟 TTS 的每分钟请求数上限：到了上限，下一句安静等到窗口里空出名额（云端 TTS 限流，R-10）。缺省 0 不限。 */
@@ -149,6 +189,8 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
           }),
           weight: 2,
         },
+        fc.record({ kind: fc.constant('timeout' as const), ignoreAbort: fc.boolean() }),
+        fc.record({ kind: fc.constant('error' as const), error: fc.constantFrom(...LLM_FAILURES) }),
       ),
       { maxLength: 8 },
     ),
@@ -159,10 +201,18 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
     operator: fc.array(
       fc.record({
         atMs: time(maxDurationMs),
-        action: fc.constantFrom('estop' as const, 'upgrade' as const, 'restart' as const),
+        action: fc.constantFrom<OperatorAction>(
+          'estop',
+          'upgrade',
+          'restart',
+          'resolve',
+          'obs-scene',
+          'obs-mute',
+        ),
       }),
       { maxLength: 4 },
     ),
+    mode: fc.constantFrom('M0' as const, 'M2' as const),
     presentationMs: fc.nat(30).map((n) => n * 10),
     ttsRpm: fc.constantFrom(0, 0, 2, 4),
     memory: fc.record({
@@ -181,8 +231,22 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
 
 const text = (indices: readonly number[]) => indices.map((i) => SENTENCES[i] ?? '').join('');
 
-function output(item: Scenario['outputs'][number]): string {
+/** 回放模型的一次调用（`llm-replay` 的 outputs 一项）。 */
+type ReplayItem =
+  | string
+  | { error: string }
+  | { output: string; afterMs: number; ignoreAbort: boolean };
+
+function output(item: Scenario['outputs'][number]): ReplayItem {
   switch (item.kind) {
+    case 'timeout':
+      return {
+        output: JSON.stringify({ action: 'speak', text: LATE_TEXT }),
+        afterMs: CALL_TIMEOUT_MS + 1000,
+        ignoreAbort: item.ignoreAbort,
+      };
+    case 'error':
+      return { error: item.error };
     case 'reply':
       return JSON.stringify({
         action: 'speak',
@@ -271,7 +335,14 @@ export function scenarioEntries(
       config: { outputs: scenario.outputs.slice(outputsUsed).map(output), latencyMs: 200 },
     }),
     entry('director', 'director', {
-      config: { persona: TEST_PERSONA, idleMs: 4000, recallTimeoutMs: 1000 },
+      config: {
+        persona: TEST_PERSONA,
+        idleMs: 4000,
+        recallTimeoutMs: 1000,
+        callTimeoutMs: CALL_TIMEOUT_MS,
+        alarmAfter: ALARM_AFTER,
+        fallback: { lines: [FALLBACK_LINE] },
+      },
     }),
     entry('schedule', 'speech-schedule', {
       config: {
@@ -299,6 +370,9 @@ export function scenarioEntries(
             },
           }),
         ]
+      : []),
+    ...(scenario.mode === 'M2'
+      ? [entry('review', 'speech-review', { config: { delayMs: REVIEW_DELAY_MS } })]
       : []),
     ...(options.telemetry === false ? [] : [entry('telemetry', 'telemetry-memory')]),
   ];

@@ -12,6 +12,7 @@ import {
 import { type SimIrisBackend, SimIrisBackendService } from '@bellis/memory';
 import { builtinPlugins, builtinProjections } from '@bellis/plugins';
 import { type SafetyConfig, SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
+import { interruptedSpeech } from '@bellis/speech';
 import { ObsMetersService } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { MemoryObs } from './memory-obs.ts';
@@ -60,6 +61,16 @@ export interface LogEntry {
   fields: Record<string, unknown>;
 }
 
+/** 同时写进追踪的日志：不变量要看到的、只记日志不记事实的结局。 */
+const TRACED_LOGS: ReadonlySet<string> = new Set(['safety.obs-external-ignored']);
+
+/** 除发言结果、投票与记忆之外，同时写进追踪的事实（`fact.<类型>`）：决策模型的告警、降级请求与 OBS 外部变化。 */
+const TRACED_FACTS: ReadonlySet<string> = new Set([
+  'director.alarmed',
+  'safety.downgrade-requested',
+  'safety.obs-external',
+]);
+
 /**
  * 进程内的完整世界：状态存储、安全核、插件内核与核心服务，全部由同一个手动时钟与种子驱动。
  * 用于全模拟链路测试与确定性仿真（R-07）。
@@ -80,15 +91,18 @@ export class World {
     const shuffle = seededRandom((options.seed ?? 0) ^ 0x5bd1e995);
     // 零点对应墙钟起点：遥测的时间戳与事件时间戳在同一条墙钟时间线上。
     this.clock = new ManualClock(options.startAt ?? 0, (count) => shuffle.int(0, count - 1), epoch);
-    const log = (event: string, fields: Record<string, unknown> = {}) =>
+    const log = (event: string, fields: Record<string, unknown> = {}) => {
       this.logs.push({ event, fields });
+      if (TRACED_LOGS.has(event)) this.record(`log.${event}`, { ...fields });
+    };
     this.storePath = options.storePath ?? ':memory:';
     this.store = StateStore.open({
       path: this.storePath,
       projections: builtinProjections,
       now: () => epoch + Math.floor(this.clock.now()),
     });
-    this.store.recover();
+    // 与宿主相同：停在执行中的 Stage 发言当场结案，其余结果未知的意图等所有者对账或操作员结案。
+    this.store.recover({ interrupt: interruptedSpeech });
     // 发言结果与投票的事实同时写进追踪，与 Stage 的回报、送出的弹幕排在同一条时间线上。
     this.store.subscribe((event) => {
       if (event.type === 'utterance.played')
@@ -97,6 +111,8 @@ export class World {
         this.record(`fact.${event.type}`, { ...(event.data as object) });
       else if (event.type.startsWith('memory.'))
         this.record(`fact.${event.type}`, { factSeq: event.seq, ...(event.data as object) });
+      else if (TRACED_FACTS.has(event.type))
+        this.record(`fact.${event.type}`, { ...(event.data as object) });
     });
     let kernel: Kernel | undefined;
     this.safety = new SafetyCore({
