@@ -2,6 +2,7 @@ export * from './director-check.ts';
 export * from './invariants.ts';
 export * from './memory-check.ts';
 export * from './memory-obs.ts';
+export * from './recovery-check.ts';
 export * from './scenario.ts';
 export * from './simulate.ts';
 export * from './supervision-check.ts';

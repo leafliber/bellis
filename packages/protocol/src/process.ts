@@ -117,6 +117,8 @@ export const OperatorMethod = {
   ConsoleLogin: 'operator.console_login',
   /** 登记观众删除请求的本地墓碑（见记忆“删除”）。 */
   Forget: 'operator.forget',
+  /** 操作员结案：为结果未知的意图补记结局，解除它对目标的隔离（见状态存储“重启”）。 */
+  Resolve: 'operator.resolve',
 } as const;
 
 export const OperatorModeParams = Type.Object(
@@ -171,6 +173,19 @@ export const OperatorForgetParams = Type.Object(
   closed,
 );
 export type OperatorForgetParams = Static<typeof OperatorForgetParams>;
+
+/**
+ * 操作员结案：意图编号（`pnpm operator resolve --list` 与 `status` 的 `unresolved` 里列出），结局取状态存储的
+ * 两种终态：`succeeded`（核对后确认已经发生）或 `failed`（确认没有发生，或无法核对、按没有发生处理）。
+ */
+export const OperatorResolveParams = Type.Object(
+  {
+    id: Type.Integer({ minimum: 1 }),
+    outcome: Type.Union([Type.Literal('succeeded'), Type.Literal('failed')]),
+  },
+  closed,
+);
+export type OperatorResolveParams = Static<typeof OperatorResolveParams>;
 
 /**
  * 操作台的一次性登录令牌：只存在宿主内存里，短时间内有效、只能用一次（R-20）。命令行用浏览器打开

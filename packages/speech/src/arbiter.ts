@@ -12,6 +12,7 @@ import {
   type PreCheckVerdict,
   ReviewService,
   type Sentence,
+  SPEECH_INTENT,
   type Speech,
   type SpeechRequest,
   SpeechService,
@@ -487,15 +488,15 @@ export const speechArbiter = definePlugin({
             try {
               decision = await safety.authorize({
                 key,
-                type: 'speech.play',
-                target: 'stage',
+                type: SPEECH_INTENT.type,
+                target: SPEECH_INTENT.target,
                 payload,
                 source: {
                   origin: request.source,
                   inputs: request.inputs,
                   untrusted: request.untrusted,
                 },
-                capabilities: ['speech.output'],
+                capabilities: [SPEECH_INTENT.capability],
                 timeSensitive: true,
               });
               authorizeSpan.setAttributes({

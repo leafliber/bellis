@@ -9,6 +9,8 @@
  *   pnpm operator release [句键]         M1 中放行等待的句子；不给句键时放行全部
  *   pnpm operator preflight [M1|M2|M3]   只跑开播预检，不切换模式
  *   pnpm operator forget <平台ID>        登记观众删除请求的本地墓碑（B 站为 open_id，见记忆“删除”）
+ *   pnpm operator resolve <意图编号> <succeeded|failed>   操作员结案结果未知的意图，解除对目标的隔离
+ *   pnpm operator resolve --list         列出结果未知的意图（编号、类型、目标）
  *   pnpm operator console                用浏览器打开本机操作台（一次性登录令牌）
  */
 import { connect, decodeSessionKey, RpcPeer } from '@bellis/channel';

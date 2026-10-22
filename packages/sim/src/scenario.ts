@@ -89,7 +89,7 @@ export const LLM_FAILURES = [
   'incomplete',
 ] as const;
 
-export type OperatorAction = 'estop' | 'upgrade' | 'restart' | 'obs-scene' | 'obs-mute';
+export type OperatorAction = 'estop' | 'upgrade' | 'restart' | 'resolve' | 'obs-scene' | 'obs-mute';
 
 export interface Scenario {
   seed: number;
@@ -113,8 +113,9 @@ export interface Scenario {
   >;
   announcements: Array<{ atMs: number; sentences: number[]; immediate: boolean }>;
   /**
-   * 操作员动作：急停、升级、崩溃重启，以及在 OBS 里不经 Bellis 切到安全场景（`obs-scene`）或静音 Stage 源
-   * （`obs-mute`），即热键或手动操作。升级之前先像操作员一样把 OBS 切回直播场景、取消静音。
+   * 操作员动作：急停、升级、崩溃重启、结案全部结果未知的意图（`resolve`），以及在 OBS 里不经 Bellis 切到安全场景
+   * （`obs-scene`）或静音 Stage 源（`obs-mute`），即热键或手动操作。升级之前先像操作员一样把 OBS 切回直播场景、
+   * 取消静音；还有结果未知的意图时开播预检不通过，不升级。
    */
   operator: Array<{ atMs: number; action: OperatorAction }>;
   /**
@@ -204,6 +205,7 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
           'estop',
           'upgrade',
           'restart',
+          'resolve',
           'obs-scene',
           'obs-mute',
         ),

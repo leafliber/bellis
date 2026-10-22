@@ -18,14 +18,14 @@
  *   本进程里的 fetch，不是网络层。
  * 强制结束用 process.kill（Windows 上是 TerminateProcess），不经停止协议，同 drill-safety 的崩溃；看门狗随即接管
  * OBS。之后停掉旧会话，在同一个状态存储上重新拉起宿主与看门狗（宿主不会自动重启），记下宿主的恢复报告
- * （`host.recovered`：放弃与结果未知的意图键），切回直播场景、取消静音、确认在场、预检通过后再进入 M2，送一条探测
- * 弹幕，观察 --observe-ms；memory 时机再等重启前在途的那一批补发完。
+ * （`host.recovered`：放弃、结果未知与自动结案的意图键），切回直播场景、取消静音、确认在场、预检通过后再进入 M2，
+ * 送一条探测弹幕，观察 --observe-ms；memory 时机再等重启前在途的那一批补发完。
  *
  * 每轮用一个新的状态存储（系统临时目录），轮与轮互不影响。核对（依据是状态存储里的事实序号与类型）：
  * - speech：被打断的发言（意图键 `<发言编号>#<句序号>`）重启后没有任何一句再授权或开始执行；重启前执行中的那一句
- *   记为结果未知（`intent.orphaned`）；这段发言没有写回（`utterance.played`），--memory 时也没有排队写入 Iris。
- *   另记 Stage 目标是否被结果未知的意图隔离、重启后被隔离拒绝的意图数：有时效的意图只能由操作员结案，而结案的
- *   命令尚未提供（运维“尚未提供”），隔离期间探测弹幕的回应也播不出来。
+ *   在恢复时记为结果未知并当场自动结案（`intent.orphaned`、`intent.interrupted`）；这段发言没有写回
+ *   （`utterance.played`），--memory 时也没有排队写入 Iris。Stage 目标没有被隔离（结束时没有停在结果未知的发言意图，
+ *   重启后没有发言因隔离被拒），重启后发言照常：--model replay 时探测弹幕的回应要播出来。
  * - vote：这次投票只开了一次（`vote.started` 一条），重启后记为中止（`vote.aborted`，cause 为 restart），没有结果；
  *   开票说明只播了一次、重启后没有再请求，没有结果播报；开票意图结果未知后由投票插件对账为成功。
  * - memory：重启前执行中的写入意图结果未知后由记忆插件对账；重启前在途的那一批在重启后补发并记 `memory.written`；
@@ -34,9 +34,9 @@
  *   接口没有按去重键列出消息的读取，这项核对依赖 Iris“同一入口相同的键返回原消息”的契约（S-09 已核对）。
  *
  * 弹幕用录制回放注入（danmaku-replay，`startOn: output`，进入 M2 后 3 秒送出）；B 站真实平台的测试暂缓。
- * --model real（缺省）用维护者配置的决策模型（会外发、按调用计费；模型可能不回应或不发起投票，这一轮记为没能制造出
- * 这个时机）；--model replay 把模型客户端换成回放（llm-replay，输出是写好的回应与投票），决策插件的冷场闲聊关掉，
- * 时机确定、不外发。--memory 时启用 Iris 客户端与记忆插件，入口改成 --entry（缺省 bellis:drill，演练专用，宿主令牌
+ * --model replay（缺省）把模型客户端换成回放（llm-replay，输出是写好的回应与投票），决策插件的冷场闲聊关掉，时机
+ * 确定、不外发；--model real 用维护者配置的决策模型另跑（会外发、按调用计费；模型可能不回应或不发起投票，这一轮记为
+ * 没能制造出这个时机，探测弹幕也未必得到回应）。--memory 时启用 Iris 客户端与记忆插件，入口改成 --entry（缺省 bellis:drill，演练专用，宿主令牌
  * 的范围须包含它）。其余照用维护者的配置（TTS、Stage、形象、OBS），SecretStore 服务名 bellis。
  *
  * 推流进行中、或有别的 Bellis 进程在运行时拒绝运行。结束后把节目场景、静音与 Stage 源的设置（含 URL）恢复原样并
@@ -200,6 +200,7 @@ function evidence(event: StoreEvent) {
   for (const field of [
     'id',
     'key',
+    'target',
     'ref',
     'kind',
     'voteId',
@@ -438,6 +439,8 @@ export function verify(
   killSeq: number,
   target: Record<string, unknown>,
   memory: boolean,
+  /** 重启后探测弹幕一定得到回应（回放模型）；真实模型可能不回应，不作要求。 */
+  expectProbeReply = false,
 ) {
   const restart = restartSeq(events, killSeq);
   const after = events.filter((e) => e.seq >= restart);
@@ -463,15 +466,30 @@ export function verify(
         e.type === 'memory.queued' && e.data.kind === 'self_output' && e.data.ref === utterance,
     );
     const orphaned = recovery.filter((e) => e.type === 'intent.orphaned' && own(e));
+    const interrupted = after.filter((e) => e.type === 'intent.interrupted' && own(e));
     const isolated = intents.filter((i) => i.state === 'unknown' && i.target === 'stage');
     const denied = after.filter(
       (e) => e.type === 'intent.denied' && String(e.data.reason ?? '').includes('隔离'),
+    );
+    // 重启后发言照常：探测弹幕的回应播出了（回放模型时一定有回应）。
+    const replied = after.filter(
+      (e) =>
+        e.type === 'utterance.played' &&
+        e.data.source === 'danmaku-reply' &&
+        typeof e.data.heard === 'string' &&
+        e.data.heard !== '',
     );
     const problems = [
       ...(redone.length > 0 ? ['被打断的发言重启后又授权或执行了'] : []),
       ...(writeback.length > 0 ? ['被打断的发言有写回（宿主在播出中被结束，不该记下结果）'] : []),
       ...(memory && queued.length > 0 ? ['被打断的发言排队写入了 Iris'] : []),
       ...(orphaned.length === 0 ? ['重启前执行中的那一句没有记为结果未知'] : []),
+      ...(interrupted.length !== orphaned.length
+        ? ['重启前执行中的那一句没有在恢复时自动结案']
+        : []),
+      ...(isolated.length > 0 ? ['Stage 目标还被结果未知的发言意图隔离'] : []),
+      ...(denied.length > 0 ? [`重启后有 ${denied.length} 个意图因隔离被拒`] : []),
+      ...(expectProbeReply && replied.length === 0 ? ['重启后探测弹幕的回应没有播出'] : []),
     ];
     return {
       ...base,
@@ -481,9 +499,10 @@ export function verify(
       writeback: writeback.map(evidence),
       queuedForIris: queued.map(evidence),
       orphaned: orphaned.map(evidence),
-      // 发现：有时效的意图只能由操作员结案，结案的命令尚未提供；隔离期间新的发言都被拒绝。
+      interrupted: interrupted.map(evidence),
       stageIsolated: isolated.map((i) => ({ id: i.id, key: i.key })),
       deniedAsIsolated: denied.length,
+      replyAfterRestart: replied.map(evidence),
       evidence: events
         .filter((e) => own(e) || (e.type === 'utterance.played' && e.data.id === utterance))
         .map(evidence),
@@ -630,7 +649,15 @@ async function round(
     }
     const events = phase.store.events();
     const intents = phase.store.intents();
-    record.result = verify(timing, events, intents, killSeq, target, options.memory !== undefined);
+    record.result = verify(
+      timing,
+      events,
+      intents,
+      killSeq,
+      target,
+      options.memory !== undefined,
+      options.model === 'replay',
+    );
     if (timing === 'memory')
       record.iris = await verifyIris(options, events).catch((error) => ({
         error: (error as Error).message,
@@ -657,7 +684,7 @@ async function main(): Promise<void> {
       config: { type: 'string', default: 'config/live.json' },
       rounds: { type: 'string', default: '3' },
       timings: { type: 'string' },
-      model: { type: 'string', default: 'real' },
+      model: { type: 'string', default: 'replay' },
       memory: { type: 'boolean', default: false },
       entry: { type: 'string', default: 'bellis:drill' },
       'kill-after-ms': { type: 'string', default: '1500' },

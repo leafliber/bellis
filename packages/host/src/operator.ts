@@ -16,17 +16,34 @@ import {
   OperatorModeParams,
   OperatorPreflightParams,
   OperatorReleaseParams,
+  OperatorResolveParams,
   OperatorVetoParams,
 } from '@bellis/protocol';
 import type { EmergencyReport, Mode, SafetyCore } from '@bellis/safety';
 import type { HeldSentence, ReviewMode, ReviewSettings } from '@bellis/speech';
 import type { Presentation } from '@bellis/stage';
-import type { StoredEvent } from '@bellis/store';
+import type { Intent, StoredEvent } from '@bellis/store';
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
 import type { DanmakuReport, LlmReport, MemoryStatusReport, PersonaReport } from './readiness.ts';
 
 export type Target = 'M1' | 'M2' | 'M3';
+
+/**
+ * 结果未知的意图（状态存储里停在 unknown 的）：它隔离了自己的目标，要所有者对账或操作员结案
+ * （`pnpm operator resolve`）。只有编号、键、类型、目标与能力，没有载荷。
+ */
+export interface UnresolvedIntent {
+  id: number;
+  key: string;
+  type: string;
+  target: string;
+  capabilities: string[];
+  /** 有时效的只能由操作员结案；没有时效的通常由所有者对账，所有者不在场时也由操作员结案。 */
+  timeSensitive: boolean;
+  /** 标为结果未知的时刻。 */
+  since: string;
+}
 
 /** M1 中等待放行的一句（来自 `speech.held`）。 */
 export interface HeldEntry extends HeldSentence {
@@ -79,6 +96,8 @@ export interface OperatorStatus {
   memory: MemoryStatusReport | null;
   /** 决策插件此刻用的人设的来源（`iris` 或 `profile`）与版本，不含正文；profile 中没有启用决策插件时为 null。 */
   persona: PersonaReport | null;
+  /** 结果未知的意图（目标被隔离）；读不出状态存储时为 null。 */
+  unresolved: UnresolvedIntent[] | null;
   preflight: PreflightRecord | null;
   plugins: PluginStatus[];
 }
@@ -134,6 +153,13 @@ export interface OperatorApi {
   consoleLogin(): OperatorConsoleLoginResult | { ok: false; reason: string };
   /** 登记观众删除请求的本地墓碑（事实 memory.tombstoned）。 */
   forget(params: OperatorForgetParams): { ok: true } | { ok: false; reason: string };
+  /**
+   * 操作员结案：为结果未知的意图补记结局（事实 `intent.reconciled`，`by: "operator"`），目标随之不再隔离。
+   * 不是结果未知的意图、状态存储不可用时拒绝。
+   */
+  resolve(
+    params: OperatorResolveParams,
+  ): { ok: true; intent: UnresolvedIntent & { state: string } } | { ok: false; reason: string };
   /** 取消对状态存储的订阅。 */
   dispose(): void;
 }
@@ -167,6 +193,10 @@ const ALERTS: Record<string, (data: Record<string, unknown>) => string | undefin
     d.cause === 'drift'
       ? `决策输出连续 ${d.count} 次重复或漂移（${d.detail}），已请求降级`
       : `决策模型连续失败 ${d.count} 次（最近一次：${d.detail}），已请求降级`,
+  'intent.reconciled': (d) =>
+    d.by === 'operator'
+      ? `操作员结案：意图 ${d.id}（${'result' in d ? 'succeeded' : 'failed'}）`
+      : undefined,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -212,6 +242,23 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
     return failures;
   };
 
+  const describeIntent = (intent: Intent): UnresolvedIntent => ({
+    id: intent.id,
+    key: intent.key,
+    type: intent.type,
+    target: intent.target,
+    capabilities: [...intent.capabilities],
+    timeSensitive: intent.timeSensitive,
+    since: new Date(intent.updatedAt).toISOString(),
+  });
+  const unresolved = (): UnresolvedIntent[] | null => {
+    try {
+      return core.store.intentsIn('unknown').map(describeIntent);
+    } catch {
+      return null;
+    }
+  };
+
   /** 送出前在等待中的句键，送出后不再等待的就是被处理了的。 */
   const settled = (key: string | undefined, send: () => void): string[] => {
     const before = key === undefined ? [...held.keys()] : held.has(key) ? [key] : [];
@@ -240,6 +287,7 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
         llm: deps.llm?.() ?? null,
         memory: deps.memory?.() ?? null,
         persona: deps.persona?.() ?? null,
+        unresolved: unresolved(),
         preflight: lastPreflight,
         plugins: deps.plugins().map((e) => ({
           id: e.id,
@@ -297,6 +345,24 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
       }
       return { ok: true };
     },
+    resolve({ id, outcome }) {
+      let intent: Intent | undefined;
+      try {
+        intent = core.store.intent(id);
+        if (intent?.state !== 'unknown')
+          return { ok: false, reason: `意图 ${id} 不是结果未知的意图` };
+        const resolved = core.store.resolve(
+          id,
+          outcome === 'succeeded'
+            ? { ok: true, result: null }
+            : { ok: false, error: '操作员结案：按没有发生处理' },
+          'operator',
+        );
+        return { ok: true, intent: { ...describeIntent(resolved), state: resolved.state } };
+      } catch {
+        return { ok: false, reason: '状态存储不可用，没有结案' };
+      }
+    },
     dispose: unsubscribe,
   };
 }
@@ -316,6 +382,7 @@ const vetoParams = checked<OperatorVetoParams>(OperatorVetoParams);
 const releaseParams = checked<OperatorReleaseParams>(OperatorReleaseParams);
 const preflightParams = checked<OperatorPreflightParams>(OperatorPreflightParams);
 const forgetParams = checked<OperatorForgetParams>(OperatorForgetParams);
+const resolveParams = checked<OperatorResolveParams>(OperatorResolveParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
 
 /**
@@ -334,6 +401,7 @@ export function operatorActions(api: OperatorApi): Record<Method, (params: unkno
     [OperatorMethod.Preflight]: (params) => api.preflight(preflightParams(params)),
     [OperatorMethod.ConsoleLogin]: () => api.consoleLogin(),
     [OperatorMethod.Forget]: (params) => api.forget(forgetParams(params)),
+    [OperatorMethod.Resolve]: (params) => api.resolve(resolveParams(params)),
   };
 }
 

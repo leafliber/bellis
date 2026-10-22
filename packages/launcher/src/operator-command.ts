@@ -8,7 +8,7 @@ import { OperatorConsoleLoginResult, OperatorMethod } from '@bellis/protocol';
 import { Compile } from 'typebox/compile';
 
 export const OPERATOR_USAGE =
-  '用法：operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [M1|M2|M3] | forget 平台ID | console>';
+  '用法：operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [M1|M2|M3] | forget 平台ID | resolve 意图编号 <succeeded|failed> | resolve --list | console>';
 
 export interface OperatorCommandIo {
   /** 经本机通道调宿主的操作员方法。 */
@@ -20,6 +20,7 @@ export interface OperatorCommandIo {
 
 export type OperatorCommand =
   | { kind: 'call'; method: string; params: Record<string, unknown> }
+  | { kind: 'unresolved' }
   | { kind: 'console' };
 
 const isLogin = Compile(OperatorConsoleLoginResult);
@@ -69,6 +70,12 @@ export function parseOperatorArgs(args: readonly string[]): OperatorCommand | un
     case 'forget':
       // 观众的平台稳定 ID（B 站为 open_id）；格式由宿主按同一份 Schema 校验。
       return rest.length === 1 ? call(OperatorMethod.Forget, { account: rest[0] }) : undefined;
+    case 'resolve':
+      // --list 列出结果未知的意图（取自 status）；结案要给意图编号与结局，结局由宿主按同一份 Schema 校验。
+      if (rest.length === 1 && rest[0] === '--list') return { kind: 'unresolved' };
+      return rest.length === 2 && /^[1-9][0-9]{0,15}$/.test(rest[0] ?? '')
+        ? call(OperatorMethod.Resolve, { id: Number(rest[0]), outcome: rest[1] })
+        : undefined;
     case 'console':
       return rest.length === 0 ? { kind: 'console' } : undefined;
     default:
@@ -89,6 +96,11 @@ export async function runOperatorCommand(
   if (command.kind === 'call') {
     io.print(JSON.stringify(await io.request(command.method, command.params), null, 2));
     return 0;
+  }
+  if (command.kind === 'unresolved') {
+    const status = (await io.request(OperatorMethod.Status, {})) as { unresolved?: unknown };
+    io.print(JSON.stringify(status.unresolved ?? null, null, 2));
+    return status.unresolved === null ? 1 : 0;
   }
   const login = await io.request(OperatorMethod.ConsoleLogin, {});
   if (!isLogin.Check(login)) {
