@@ -473,6 +473,88 @@ test('记忆：状态在命令行与操作台相同；forget 登记本地墓碑�
   }
 });
 
+test('结果未知的意图：命令行与操作台的状态里列出；resolve 由操作员结案、解除隔离并进近期告警，不合法的拒绝', async () => {
+  const s = await setup();
+  try {
+    // 上一个进程里执行中的写入：重启时标为结果未知，隔离它的目标。
+    const written = s.store.authorize({
+      key: 'memory.write:memory#b0.3:1',
+      type: 'memory.write',
+      target: 'iris:bellis:drill',
+      payloadHash: 'hash',
+      source: { origin: 'memory', inputs: [], untrusted: true },
+      capabilities: ['memory.write'],
+      timeSensitive: false,
+    }).intent;
+    s.store.start(written.id);
+    s.store.recover();
+
+    const listed = ((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).unresolved;
+    assert.equal(listed?.length, 1);
+    assert.deepEqual(
+      { ...listed?.[0], since: undefined },
+      {
+        id: written.id,
+        key: 'memory.write:memory#b0.3:1',
+        type: 'memory.write',
+        target: 'iris:bellis:drill',
+        capabilities: ['memory.write'],
+        timeSensitive: false,
+        since: undefined,
+      },
+    );
+    // 操作台显示同一份（只读）。
+    assert.deepEqual(
+      ((await s.http('GET', '/api/status')).body as OperatorStatus).unresolved,
+      listed,
+    );
+
+    for (const params of [
+      {},
+      { id: written.id },
+      { id: written.id, outcome: 'unknown' },
+      { id: 0, outcome: 'failed' },
+      { id: written.id, outcome: 'failed', extra: 1 },
+    ]) {
+      assert.deepEqual(await s.cli.request(OperatorMethod.Resolve, params), {
+        ok: false,
+        reason: '参数不合法',
+      });
+    }
+    assert.deepEqual(await s.cli.request(OperatorMethod.Resolve, { id: 999, outcome: 'failed' }), {
+      ok: false,
+      reason: '意图 999 不是结果未知的意图',
+    });
+
+    const reply = (await s.cli.request(OperatorMethod.Resolve, {
+      id: written.id,
+      outcome: 'failed',
+    })) as { ok: boolean; intent: { id: number; state: string } };
+    assert.equal(reply.ok, true);
+    assert.equal(reply.intent.state, 'failed');
+    assert.deepEqual(
+      s.events('intent.reconciled').map((e) => e.data),
+      [{ id: written.id, by: 'operator', error: '操作员结案：按没有发生处理' }],
+    );
+    assert.deepEqual(
+      ((await s.cli.request(OperatorMethod.Status)) as OperatorStatus).unresolved,
+      [],
+    );
+    assert.equal(
+      s.api.alerts().find((a) => a.type === 'intent.reconciled')?.text,
+      `操作员结案：意图 ${written.id}（failed）`,
+    );
+    // 已经结案的不能再结一次；目标不再隔离。
+    assert.deepEqual(
+      await s.cli.request(OperatorMethod.Resolve, { id: written.id, outcome: 'succeeded' }),
+      { ok: false, reason: `意图 ${written.id} 不是结果未知的意图` },
+    );
+    assert.equal(s.store.intentsIn('unknown').length, 0);
+  } finally {
+    await s.close();
+  }
+});
+
 test('决策模型连续失败或漂移的告警进近期告警', async () => {
   const s = await setup();
   try {

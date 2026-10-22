@@ -312,3 +312,16 @@ test('开播预检：启用了记忆时 memory@1 须在场，且能以宿主令�
   assert.deepEqual(await preflight({ ...ready, memory: undefined }), []);
   assert.equal(checks, 1);
 });
+
+test('开播预检：有结果未知的意图时按目标列出意图编号与结案方法；结案之后通过', async () => {
+  const unresolved = [
+    { id: 7, target: 'iris:bellis:drill' },
+    { id: 9, target: 'obs:Stage' },
+    { id: 12, target: 'iris:bellis:drill' },
+  ];
+  assert.deepEqual(await preflight({ ...ready, unresolved }), [
+    '目标 iris:bellis:drill 有结果未知的意图（编号 7、12），已隔离：核对外部状态后用 pnpm operator resolve <编号> <succeeded|failed> 结案',
+    '目标 obs:Stage 有结果未知的意图（编号 9），已隔离：核对外部状态后用 pnpm operator resolve <编号> <succeeded|failed> 结案',
+  ]);
+  assert.deepEqual(await preflight({ ...ready, unresolved: [] }), []);
+});
