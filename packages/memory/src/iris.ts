@@ -19,8 +19,8 @@ export interface IrisMessage {
   occurredAt: string;
   /** 去重键：同一入口相同的键返回原消息；Bellis 持久保存，重试沿用原键。 */
   dedupeKey: string;
-  /** `message`：别人说的话（观众声称）；`self_output`：角色自己说出口的话。 */
-  kind: 'message' | 'self_output';
+  /** `message`：别人说的话（观众声称）；`self_output`：角色自己说出口的话；`event`：入口建立的事件。 */
+  kind: 'message' | 'self_output' | 'event';
   /** 首次创建入口时用：名字、类型与学习节奏；之后 Iris 沿用已保存的值。 */
   entryName?: string;
   entryKind?: string;

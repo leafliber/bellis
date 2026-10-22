@@ -82,6 +82,8 @@ function errorBody(
 export class FakeIris {
   readonly requests: IrisRequest[] = [];
   readonly messages: StoredMessage[] = [];
+  /** 已经存在的入口：首次接收消息时创建；召回准备对不存在的入口返回 404（契约）。 */
+  readonly entries = new Set<string>();
   /** 依次用于下一次请求的应答（覆盖正常处理）。 */
   readonly overrides: Override[] = [];
   /** 正常应答前的延迟（毫秒）。 */
@@ -216,6 +218,7 @@ export class FakeIris {
       if (existing) return existing.id;
       const stored = { id: this.messages.length + 1, entryId, dedupeKey: key, body: item };
       this.messages.push(stored);
+      this.entries.add(entryId);
       return stored.id;
     });
     const pending = this.messages.filter((m) => m.entryId === entryId).length;
@@ -232,6 +235,10 @@ export class FakeIris {
   }
 
   #prepare(entryId: string, body: unknown, send: (status: number, payload: string) => void): void {
+    if (!this.entries.has(entryId)) {
+      send(404, errorBody('entry_not_found', '入口不存在'));
+      return;
+    }
     const request = isRecord(body) ? body : {};
     const limit = typeof request.memory_limit === 'number' ? request.memory_limit : 8;
     const memories = this.messages

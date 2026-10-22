@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { MEMORY_WRITE } from '../src/index.ts';
 import { flush, request, setup } from './helpers.ts';
 
 test('安全停止中拒绝一切意图，并记录判定', async () => {
@@ -143,6 +144,79 @@ test('超出速率即拒绝并降级', async () => {
       reason: '超出速率：speech.output',
     });
     assert.equal(s.safety.mode, 'M1');
+  } finally {
+    await s.close();
+  }
+});
+
+/** 写 Iris 的意图（记忆插件按批申请）：来源含不可信输入，没有时效。 */
+const memoryWrite = (overrides: Partial<Parameters<typeof request>[0]> = {}) =>
+  request({
+    holder: 'memory#4',
+    type: MEMORY_WRITE,
+    target: 'iris:bellis:test',
+    capabilities: [MEMORY_WRITE],
+    source: { origin: 'memory', inputs: ['d1'], untrusted: true },
+    timeSensitive: false,
+    ...overrides,
+  });
+
+test('写 Iris（memory.write）是安全停止下的例外：照常判定与授予；其它检查照旧', async () => {
+  const s = await setup();
+  try {
+    assert.equal(s.safety.mode, 'safe-stop');
+    const allowed = await s.safety.authorize(memoryWrite());
+    assert.ok(allowed.allowed, '安全停止中照常授予');
+    // 没有能力照样拒绝；混了别的能力就不是例外。
+    assert.deepEqual(await s.safety.authorize(memoryWrite({ holder: 'speaker#1' })), {
+      allowed: false,
+      reason: 'speaker#1 没有能力 memory.write',
+    });
+    assert.deepEqual(
+      await s.safety.authorize(memoryWrite({ capabilities: [MEMORY_WRITE, 'speech.output'] })),
+      { allowed: false, reason: '安全停止中，不产生新输出' },
+    );
+    // 别的输出照旧拒绝。
+    assert.deepEqual(await s.safety.authorize(request()), {
+      allowed: false,
+      reason: '安全停止中，不产生新输出',
+    });
+    // 维护态中拒绝（维护态只能从安全停止进入，例外不适用）。
+    assert.ok(s.safety.enterMaintenance().ok);
+    assert.deepEqual(await s.safety.authorize(memoryWrite()), {
+      allowed: false,
+      reason: '安全停止中，不产生新输出',
+    });
+    s.safety.exitMaintenance();
+    assert.ok((await s.safety.authorize(memoryWrite())).allowed);
+  } finally {
+    await s.close();
+  }
+});
+
+test('写 Iris：状态存储不可用时拒绝', async () => {
+  let broken = false;
+  const s = await setup(
+    {},
+    {
+      fault: (point) => {
+        if (broken && point.endsWith('before-commit')) {
+          throw Object.assign(new Error('disk full'), { code: 'ERR_SQLITE_ERROR', errcode: 13 });
+        }
+      },
+    },
+  );
+  try {
+    broken = true;
+    assert.deepEqual(await s.safety.authorize(memoryWrite()), {
+      allowed: false,
+      reason: '状态存储不可用',
+    });
+    broken = false;
+    assert.deepEqual(await s.safety.authorize(memoryWrite()), {
+      allowed: false,
+      reason: '状态存储不可用',
+    });
   } finally {
     await s.close();
   }

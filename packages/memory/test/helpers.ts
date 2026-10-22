@@ -43,6 +43,11 @@ export interface Setup {
   storePath?: string;
   /** 记忆插件的授权；缺省授予 memory.write。 */
   grant?: string[];
+  /**
+   * 直播间入口还不存在（新部署）：模拟 Iris 对它的召回准备返回 404，记忆插件应当自己建立入口。
+   * 缺省为 false：入口早已存在。
+   */
+  freshEntry?: boolean;
   /** 起始模式：缺省切到 M0；`safe-stop` 时保持安全停止。 */
   mode?: 'M0' | 'safe-stop';
   telemetry?: boolean;
@@ -93,6 +98,7 @@ export async function world(setup: Setup = {}) {
   });
   kernel = host;
   const backend = setup.backend ?? new SimIrisBackend();
+  if (!setup.freshEntry) backend.createEntry(ENTRY);
   const trace: Array<{ kind: string; data: Record<string, unknown> }> = [];
   const listeners = new Set<(danmaku: Danmaku) => void>();
   const source: DanmakuSource = {

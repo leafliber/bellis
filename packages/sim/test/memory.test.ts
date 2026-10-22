@@ -6,8 +6,17 @@ import fc from 'fast-check';
 import { type Scenario, scenarioArbitrary, simulate } from '../src/index.ts';
 import { speak, startChain } from './helpers.ts';
 
+/** 入口早已存在的模拟 Iris 数据。 */
+function withEntry(): SimIrisBackend {
+  const backend = new SimIrisBackend();
+  backend.createEntry('sim:room');
+  return backend;
+}
+
 test('全模拟链路：弹幕与角色说出口的部分写入模拟 Iris，下一次决策召回它们，只放进不可信数据区', async () => {
   const backend = new SimIrisBackend();
+  // 入口早已存在（新部署时入口的建立见记忆插件的测试）。
+  backend.createEntry('sim:room');
   const world = await startChain({
     moderation: { enabled: false },
     messages: [
@@ -47,7 +56,10 @@ test('人设：模拟 Iris 有当前人设时系统消息用它并标明版本�
     moderation: { enabled: false },
     messages: [{ atMs: 0, id: 'd1', viewer: 'v1', nickname: '小明', text: '主播你好' }],
     outputs: [speak('你好！', 'c-d1')],
-    memory: { iris: { persona: { content: '你是贝莉，Iris 里的人设。', version: 2 } } },
+    memory: {
+      backend: withEntry(),
+      iris: { persona: { content: '你是贝莉，Iris 里的人设。', version: 2 } },
+    },
   });
   try {
     const llm = withIris.service(ReplayLlmService);
@@ -179,8 +191,12 @@ test('回归：重启那一刻到达的弹幕在新旧两次启动里都送出�
   assert.equal(delivered.length, 2, '新旧两次启动各送出一次');
   const stored = result.history.trace
     .filter((e) => e.kind === 'iris.write')
-    .flatMap((e) => (Array.isArray(e.data.stored) ? e.data.stored : []));
-  assert.equal(stored.length, 1);
+    .flatMap((e) =>
+      Array.isArray(e.data.stored) ? (e.data.stored as Array<{ kind: string }>) : [],
+    );
+  assert.equal(stored.filter((m) => m.kind === 'message').length, 1);
+  // 新部署：入口建立的事件也只存一条。
+  assert.equal(stored.filter((m) => m.kind === 'event').length, 1);
 });
 
 test('生成的场景里记忆确实在工作：写入、召回、墓碑与故障都出现过（不变量不是空转）', async () => {

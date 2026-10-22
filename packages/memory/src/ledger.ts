@@ -17,7 +17,18 @@ export const MemoryFact = {
   Tombstoned: 'memory.tombstoned',
 } as const;
 
-export type QueuedKind = 'message' | 'self_output';
+/** `message`：观众的弹幕；`self_output`：角色的发言；`event`：入口建立的事件（固定文本，不含观众内容）。 */
+export type QueuedKind = 'message' | 'self_output' | 'event';
+
+/**
+ * 入口建立的事件消息：直播间入口还不存在时（取人设或召回得到 404）写这一条来创建入口。来源编号与正文固定，
+ * 不含观众内容；去重键按入口固定（{@link dedupeKey}），重启、换数据库都不会重复建立。
+ */
+export const ENTRY_EVENT = {
+  ref: 'entry-created',
+  sender: 'Bellis',
+  content: '这个直播间入口由 Bellis 建立。',
+} as const;
 
 /** 待发队列里的一条。 */
 export interface QueuedItem {
@@ -61,7 +72,7 @@ function queued(event: StoredEvent): QueuedItem | undefined {
   const d = event.data;
   if (!isRecord(d)) return undefined;
   const { kind, ref, account, sender, content } = d;
-  if (kind !== 'message' && kind !== 'self_output') return undefined;
+  if (kind !== 'message' && kind !== 'self_output' && kind !== 'event') return undefined;
   if (typeof ref !== 'string' || typeof sender !== 'string' || typeof content !== 'string')
     return undefined;
   if (account !== null && (typeof account !== 'string' || !validAccount(account))) return undefined;
@@ -117,9 +128,11 @@ export const memoryLedger: Projection<MemoryLedger> = {
  * - 观众的弹幕：本状态存储的前缀加平台消息编号（`bellis:<前缀>:m:<编号>`）。平台重发同一条弹幕
  *   （断线重连、宿主重启之后）得到同一个键，Iris 按键返回原消息，不会写两次；
  * - 角色的发言（以及编号太长或含空白、控制字符的弹幕）：前缀加 `memory.queued` 的序号
- *   （`bellis:<前缀>:<序号>`）。同一句话说了两次是两段发言，各写一次。
+ *   （`bellis:<前缀>:<序号>`）。同一句话说了两次是两段发言，各写一次；
+ * - 入口建立的事件：`bellis:event:<来源编号>`，不带前缀，同一入口永远是同一个键。
  */
 export function dedupeKey(epoch: string, item: Pick<QueuedItem, 'seq' | 'kind' | 'ref'>): string {
+  if (item.kind === 'event') return `bellis:event:${item.ref}`;
   if (item.kind === 'message' && /^[\x21-\x7e]{1,200}$/.test(item.ref)) {
     return `bellis:${epoch}:m:${item.ref}`;
   }

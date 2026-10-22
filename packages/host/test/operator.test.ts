@@ -455,7 +455,7 @@ test('记忆：状态在命令行与操作台相同；forget 登记本地墓碑�
     });
     s.world.memory = {
       ready: true,
-      status: '就绪；安全停止中，写入暂停',
+      status: '就绪；写入失败，约 4 秒后重试',
       pending: 3,
       written: 10,
       dropped: 1,

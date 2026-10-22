@@ -1,4 +1,10 @@
-import { dedupeKey, MemoryFact, type QueuedKind, type SimIrisMessage } from '@bellis/memory';
+import {
+  dedupeKey,
+  ENTRY_EVENT,
+  MemoryFact,
+  type QueuedKind,
+  type SimIrisMessage,
+} from '@bellis/memory';
 import type { History } from './invariants.ts';
 
 interface Queued {
@@ -26,6 +32,7 @@ const numbers = (value: unknown): number[] =>
  *    `memory.queued`（去重键由它确定地派生），内容、类型与平台 ID 一致。
  * 2. 同一事实不重复写入（含跨重启）：同一个去重键在 Iris 里至多一条消息；同一条弹幕（平台消息编号）在 Iris 里
  *    至多一条消息，平台重发也一样；同一段发言至多排队一次；记为已写入的都真的在 Iris 里。
+ *    入口建立的事件是固定文本、不带平台 ID，同一入口在 Iris 里至多一条（同一个去重键）。
  * 3. 墓碑：登记之后，这名观众的消息不再排队、不再发出；召回进入上下文的记忆不含他写入 Iris 的消息。
  */
 export function checkMemory(history: History): string[] {
@@ -45,11 +52,19 @@ export function checkMemory(history: History): string[] {
     if (event.type === MemoryFact.Queued) {
       const item: Queued = {
         seq: event.seq,
-        kind: data.kind === 'self_output' ? 'self_output' : 'message',
+        kind: data.kind === 'self_output' || data.kind === 'event' ? data.kind : 'message',
         ref: String(data.ref),
         account: typeof data.account === 'string' ? data.account : null,
         content: String(data.content),
       };
+      if (
+        item.kind === 'event' &&
+        (item.ref !== ENTRY_EVENT.ref ||
+          item.content !== ENTRY_EVENT.content ||
+          item.account !== null)
+      ) {
+        violations.push(`排队的事件 ${item.ref} 不是固定的入口建立事件`);
+      }
       const key = dedupeKey(epoch, item);
       keyOfSeq.set(event.seq, key);
       byKey.set(key, [...(byKey.get(key) ?? []), item]);

@@ -7,7 +7,7 @@ import {
   type TimerHandle,
   TraceService,
 } from '@bellis/kernel';
-import { SafetyService } from '@bellis/safety';
+import { MEMORY_WRITE, SafetyService } from '@bellis/safety';
 import { type UtteranceOutcome, UtterancePlayed } from '@bellis/speech';
 import { ErrorType, Metric, TelemetryService, useTracer } from '@bellis/telemetry';
 import Type, { type Static } from 'typebox';
@@ -22,6 +22,7 @@ import {
 } from './iris.ts';
 import {
   dedupeKey,
+  ENTRY_EVENT,
   MemoryFact,
   memoryLedger,
   pseudonym,
@@ -33,8 +34,11 @@ import {
 import { cleanText, DEFAULT_PRIVACY_RULES, PrivacyGateway } from './privacy.ts';
 import { type Memory, type MemoryPersona, MemoryService, type RecalledMemory } from './service.ts';
 
-/** 写入 Iris 所需的能力（执行闸门）。不在 Rule of Two 的禁止清单里：写入的内容总含不可信输入。 */
-export const MEMORY_WRITE = 'memory.write';
+/**
+ * 写入 Iris 所需的能力（执行闸门，定义在安全核）：不在 Rule of Two 的禁止清单里（写入的内容总含不可信输入），
+ * 安全停止下照常判定（不是观众能看到或听到的输出）。
+ */
+export { MEMORY_WRITE };
 
 /** 首次创建入口时的类型：直播间。 */
 const ENTRY_KIND = 'live';
@@ -98,11 +102,6 @@ export const MemoryConfig = Type.Object({
   skipInjection: Type.Boolean({ default: true }),
   persona: Type.Object(
     {
-      /**
-       * 取人设用的入口，缺省为 `entryId`。人设是角色全局的，令牌范围内任一已经存在的入口都返回同一份；
-       * 直播间入口还没写入过消息时 Iris 返回 404，可以先指向一个已经存在的入口。
-       */
-      entryId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
       /** 人设正文的字数上限（码点），超长截断并记日志。 */
       maxChars: Type.Integer({ minimum: 1, maximum: 10_000, default: 2_000 }),
     },
@@ -154,7 +153,8 @@ function describe(error: unknown): string {
  * - **待发队列**：有界，满了丢弃最旧的并记录；按批写入，失败按退避重试（429、503 按 Retry-After），
  *   Iris 拒收（400、413）时二分找出那一条丢弃并记录；不阻塞直播。
  * - **执行闸门**：每一批作为一个没有时效的意图（能力 `memory.write`，目标 `iris:<入口>`）申请授权后再写；
- *   安全停止中不申请，等模式恢复。执行中崩溃的意图在重启后对账为失败，这批仍在队列里，以原键补发。
+ *   安全停止下照常写（安全核的例外）。执行中崩溃的意图在重启后对账为失败，这批仍在队列里，以原键补发。
+ * - **入口的建立**：直播间入口还不存在（取人设或召回得到 404）时，写一条固定文本的事件消息建立入口，再取人设。
  * - **墓碑**（`memory.tombstoned`，操作员登记）：队列里这名观众的条目立即移除，此后不写入；发出之前再核对一次。
  *   召回的记忆提到这名观众（说话人、涉及的人或正文里有他的代号）的不用。
  * - **召回**：只召回直播间入口内的公开事实（`prepare`，关闭召回判断，不取人物要点、人物摘要、近期原始消息与目标）；
@@ -188,12 +188,7 @@ export const memory = definePlugin({
   activate(ctx) {
     const config = ctx.config;
     const blocked =
-      config.entryId === ''
-        ? '未配置入口 ID（entryId）'
-        : (entryIdBlocker(config.entryId) ??
-          (config.persona.entryId === undefined
-            ? undefined
-            : entryIdBlocker(config.persona.entryId)));
+      config.entryId === '' ? '未配置入口 ID（entryId）' : entryIdBlocker(config.entryId);
     if (blocked) {
       ctx.log('memory.unavailable', { reason: blocked });
       throw new Error(`记忆插件不可用：${blocked}`);
@@ -231,8 +226,6 @@ export const memory = definePlugin({
     let timer: TimerHandle | undefined;
     let timerDue = Number.POSITIVE_INFINITY;
     let flushing = false;
-    /** 安全停止中：不申请授权，等模式恢复。 */
-    let waitingForMode = false;
     let backoffMs = 0;
     let retryAt: number | undefined;
     /** 二分找 Iris 拒收的那一条：下一批至多这么多条；0 表示按 batchSize。 */
@@ -284,11 +277,6 @@ export const memory = definePlugin({
       if (flushing || ctx.signal.aborted) return;
       const outbox = ledger().outbox;
       if (outbox.length === 0) return;
-      if (safety.mode === 'safe-stop') {
-        waitingForMode = true;
-        return;
-      }
-      waitingForMode = false;
       flushing = true;
       try {
         await writeBatch(outbox);
@@ -347,8 +335,7 @@ export const memory = definePlugin({
         span.fail('denied');
         span.end();
         ctx.log('memory.write-denied', { reason });
-        if (safety.mode === 'safe-stop') waitingForMode = true;
-        else retryLater(undefined);
+        retryLater(undefined);
         return;
       }
       let ids: number[] | undefined;
@@ -383,6 +370,7 @@ export const memory = definePlugin({
         backoffMs = 0;
         retryAt = undefined;
         split = 0;
+        if (batch.some(isEntryEvent)) entryCreated();
         if (ledger().outbox.length > 0) schedule(0);
         return;
       }
@@ -425,13 +413,16 @@ export const memory = definePlugin({
       retryLater(failure);
     };
 
-    const enqueue = (item: {
-      kind: QueuedKind;
-      ref: string;
-      account: string | null;
-      sender: string;
-      content: string;
-    }) => {
+    const enqueue = (
+      item: {
+        kind: QueuedKind;
+        ref: string;
+        account: string | null;
+        sender: string;
+        content: string;
+      },
+      delayMs = config.write.flushDelayMs,
+    ) => {
       const over = ledger().outbox.length + 1 - config.write.capacity;
       if (over > 0) {
         const oldest = ledger().outbox.slice(0, over);
@@ -445,7 +436,7 @@ export const memory = definePlugin({
         overflowing = false;
       }
       safety.record(MemoryFact.Queued, item);
-      schedule(config.write.flushDelayMs);
+      schedule(delayMs);
     };
 
     const filtered = (source: 'danmaku' | 'speech', ref: string, categories: string[]) => {
@@ -508,11 +499,6 @@ export const memory = definePlugin({
     const danmaku = ctx.optional(DanmakuService);
     if (danmaku) ctx.register(danmaku.subscribe(onDanmaku));
     ctx.on(UtterancePlayed, onPlayed);
-    ctx.register(
-      safety.onControl((signal) => {
-        if (signal.kind === 'mode' && signal.mode !== 'safe-stop' && waitingForMode) schedule(0);
-      }),
-    );
     ctx.register(() => {
       if (timer !== undefined) clock.clearTimeout(timer);
       timer = undefined;
@@ -524,7 +510,47 @@ export const memory = definePlugin({
 
     /** 最近一次从 Iris 拿到的非空人设：召回或预检时更新，召回超时或失败时决策用这一份。 */
     let persona: MemoryPersona | undefined;
-    const personaEntry = config.persona.entryId ?? entryId;
+
+    // ------------------------------------------------------------------ 入口的建立
+
+    const notFound = (error: unknown) => error instanceof IrisError && error.kind === 'not_found';
+    const isEntryEvent = (item: QueuedItem) =>
+      item.kind === 'event' && item.ref === ENTRY_EVENT.ref;
+    /** 本实例已经写过入口建立的事件：之后再 404 也不再建立（避免反复写）。 */
+    let entryEnsured = false;
+    /** 等入口建立的事件写完的（开播预检取人设时）。 */
+    const entryWaiters = new Set<() => void>();
+
+    /**
+     * 直播间入口还不存在（取人设或召回得到 404）：写一条入口建立的事件消息来创建入口。走待发队列与执行闸门，
+     * 立即发出；还在队列里的不再排队，去重键按入口固定，重启不会重复建立。
+     */
+    const ensureEntry = () => {
+      if (ctx.signal.aborted || entryEnsured || ledger().outbox.some(isEntryEvent)) return;
+      ctx.log('memory.entry-missing', {});
+      enqueue({ kind: 'event', account: null, ...ENTRY_EVENT }, 0);
+    };
+
+    /** 入口建立的事件写完了：唤醒等着的，再取一次人设。 */
+    const entryCreated = () => {
+      entryEnsured = true;
+      ctx.log('memory.entry-created', {});
+      for (const wake of [...entryWaiters]) wake();
+      entryWaiters.clear();
+      void primePersona();
+    };
+
+    /** 等入口建立的事件写完，至多 `ms` 毫秒。 */
+    const waitEntry = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const handle = clock.setTimeout(done, ms);
+        function done() {
+          clock.clearTimeout(handle);
+          entryWaiters.delete(done);
+          resolve();
+        }
+        entryWaiters.add(done);
+      });
 
     /** 采用 Iris 给的人设：去掉首尾空白，为空视同没有拿到；超长截断。变了才记日志（不记正文）。 */
     const adoptPersona = (raw: IrisPersona | undefined): MemoryPersona | undefined => {
@@ -559,7 +585,7 @@ export const memory = definePlugin({
       );
       try {
         const result = await iris.prepare(
-          personaEntry,
+          entryId,
           { text: '', judge: false, memoryLimit: 0, tokenBudget: 0 },
           AbortSignal.any([deadline.signal, ctx.signal]),
         );
@@ -574,19 +600,26 @@ export const memory = definePlugin({
       }
     };
 
-    // 激活时先取一次，第一次决策就能用上 Iris 的人设；取不到时决策先用 profile 的。
-    void fetchPersona().then(
-      (found) => {
-        if (!found) ctx.log('memory.persona-missing', {});
-      },
-      (error: unknown) => {
-        if (!ctx.signal.aborted) {
+    /** 取人设并记下结果；入口还不存在时建立入口，写完之后再取一次。 */
+    const primePersona = () =>
+      fetchPersona().then(
+        (found) => {
+          if (!found) ctx.log('memory.persona-missing', {});
+        },
+        (error: unknown) => {
+          if (ctx.signal.aborted) return;
+          if (notFound(error) && !entryEnsured) {
+            ensureEntry();
+            return;
+          }
           ctx.log('memory.persona-failed', {
             kind: error instanceof IrisError ? error.kind : 'error',
           });
-        }
-      },
-    );
+        },
+      );
+
+    // 激活时先取一次，第一次决策就能用上 Iris 的人设；取不到时决策先用 profile 的。
+    void primePersona();
 
     // ------------------------------------------------------------------ 召回
 
@@ -663,6 +696,8 @@ export const memory = definePlugin({
           const kind = error instanceof IrisError ? error.kind : 'error';
           finish('error', kind);
           ctx.log('memory.recall-failed', { kind });
+          // 直播间入口还不存在：建立它（下一次召回就有了）。
+          if (notFound(error)) ensureEntry();
           return { ok: false, kind: 'error', detail: describe(error) };
         }
         adoptPersona(result.persona);
@@ -769,14 +804,23 @@ export const memory = definePlugin({
         return persona;
       },
 
-      currentPersona: () => fetchPersona(),
+      async currentPersona() {
+        try {
+          return await fetchPersona();
+        } catch (error) {
+          if (!notFound(error) || entryEnsured) throw error;
+          // 新部署：直播间入口还不存在。建立入口，等它写完再取一次。
+          const written = waitEntry(CHECK_TIMEOUT_MS);
+          ensureEntry();
+          await written;
+          return fetchPersona();
+        }
+      },
 
       get report() {
         const state = ledger();
         const notes: string[] = [];
-        if (state.outbox.length > 0 && (waitingForMode || safety.mode === 'safe-stop')) {
-          notes.push('安全停止中，写入暂停');
-        } else if (retryAt !== undefined && retryAt > clock.now()) {
+        if (retryAt !== undefined && retryAt > clock.now()) {
           notes.push(`写入失败，约 ${Math.ceil((retryAt - clock.now()) / 1000)} 秒后重试`);
         }
         return {

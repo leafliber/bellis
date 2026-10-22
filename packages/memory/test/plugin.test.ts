@@ -7,6 +7,7 @@ import { DeadlineError } from '@bellis/kernel';
 import { Metric } from '@bellis/telemetry';
 import {
   dedupeKey,
+  ENTRY_EVENT,
   type Iris,
   IrisError,
   IrisService,
@@ -126,20 +127,16 @@ test('隐私网关与注入检测拦下的不写入，只记类别与来源编�
   }
 });
 
-test('经执行闸门：每批一个没有时效的意图（memory.write，来源含不可信输入）；安全停止中暂停，恢复后补发', async () => {
+test('经执行闸门：每批一个没有时效的意图（memory.write，来源含不可信输入）；安全停止中照常写入', async () => {
   const w = await world({ mode: 'safe-stop' });
   try {
+    assert.equal(w.safety.mode, 'safe-stop');
     await w.danmaku({ id: 'd1', viewer: 'open-1', text: '第一条' });
     await w.played('u1', '谢谢你来');
-    await w.advance(5_000);
-    assert.equal(w.backend.messages.length, 0, '安全停止中不写');
-    assert.equal(w.events('intent.denied').length, 0, '安全停止中不申请授权，不刷拒绝');
-    assert.match(w.memory().report.status, /安全停止中，写入暂停/);
-    assert.equal(w.memory().report.pending, 2);
-
-    assert.deepEqual(w.safety.requestMode('M0'), { ok: true });
-    await w.advance(100);
-    assert.equal(w.backend.messages.length, 2, '恢复后补发');
+    await w.advance(2_500);
+    assert.equal(w.backend.messages.length, 2, '安全停止中照常写入');
+    assert.equal(w.events('intent.denied').length, 0);
+    assert.equal(w.memory().report.pending, 0);
     const intents = w.store.intentsIn('succeeded').filter((i) => i.type === MEMORY_WRITE);
     assert.equal(intents.length, 1, '一批一个意图');
     const [intent] = intents;
@@ -500,17 +497,17 @@ test('写入的遥测：每批一个 span，只记条数与结果', async () => 
   }
 });
 
-test('人设：激活时从 Iris 取一次（只取人设、不取记忆，用取人设的入口）；超长截断并记日志，不记正文', async () => {
+test('人设：激活时从 Iris 取一次（只取人设、不取记忆）；超长截断并记日志，不记正文', async () => {
   const long = '贝'.repeat(30);
   const w = await world({
     iris: { persona: { content: `  ${long}  `, version: 5 } },
-    config: { persona: { entryId: 'sim:persona', maxChars: 10 } },
+    config: { persona: { maxChars: 10 } },
   });
   try {
     await w.flush();
     assert.deepEqual(w.memory().persona, { text: '贝'.repeat(10), version: 5 });
     const [prime] = w.trace.filter((t) => t.kind === 'iris.prepare');
-    assert.equal(prime?.data.entryId, 'sim:persona');
+    assert.equal(prime?.data.entryId, ENTRY);
     assert.deepEqual(prime?.data.ids, [], '只取人设，不取记忆');
     assert.deepEqual(w.logged('memory.persona-truncated'), [{ version: 5, chars: 30, max: 10 }]);
     assert.deepEqual(w.logged('memory.persona'), [{ version: 5, chars: 10 }]);
@@ -549,6 +546,113 @@ test('召回超时或出错：之前拿到的人设仍在缓存里', async () =>
     deadline.abort(new DeadlineError('召回未在 500ms 内完成'));
     assert.equal((await pending).ok, false);
     assert.deepEqual(w.memory().persona, { text: '你是贝莉。', version: 7 });
+  } finally {
+    await w.close();
+  }
+});
+
+test('新部署：直播间入口还不存在（404）时写一条入口建立的事件来创建入口（安全停止中也写），随后取到人设', async () => {
+  const w = await world({
+    freshEntry: true,
+    mode: 'safe-stop',
+    iris: { persona: { content: '你是贝莉。', version: 1 } },
+  });
+  try {
+    await w.advance(100);
+    assert.deepEqual(
+      w.backend.messages.map((m) => [m.kind, m.sender, m.content, m.account, m.dedupeKey]),
+      [['event', ENTRY_EVENT.sender, ENTRY_EVENT.content, null, 'bellis:event:entry-created']],
+    );
+    assert.deepEqual(w.memory().persona, { text: '你是贝莉。', version: 1 });
+    assert.deepEqual(
+      w.logs.map((l) => l.event).filter((e) => e.startsWith('memory.entry')),
+      ['memory.entry-missing', 'memory.entry-created'],
+    );
+    // 这条写入同样经闸门：一个没有时效的 memory.write 意图。
+    const intents = w.store.intentsIn('succeeded').filter((i) => i.type === MEMORY_WRITE);
+    assert.deepEqual(
+      intents.map((i) => i.source.inputs),
+      [[ENTRY_EVENT.ref]],
+    );
+    assert.equal(w.safety.mode, 'safe-stop');
+  } finally {
+    await w.close();
+  }
+});
+
+test('新部署：开播预检取人设时入口还不存在，等入口建立写完再取；Iris 本身没有人设时仍为 undefined', async () => {
+  for (const [persona, expected] of [
+    [
+      { content: '你是贝莉。', version: 2 },
+      { text: '你是贝莉。', version: 2 },
+    ],
+    [undefined, undefined],
+  ] as const) {
+    // 激活时的那一次取人设故意慢：预检先碰到 404。
+    const w = await world({
+      freshEntry: true,
+      iris: { recallDelayMs: 50, ...(persona ? { persona } : {}) },
+    });
+    try {
+      const pending = w.memory().currentPersona();
+      await w.advance(500);
+      assert.deepEqual(await pending, expected);
+      assert.equal(w.backend.messages.filter((m) => m.kind === 'event').length, 1);
+    } finally {
+      await w.close();
+    }
+  }
+});
+
+test('召回得到 404（入口不存在）时同样建立入口；建立入口只写一次（含重启，应答丢失时按同一个键补发）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bellis-memory-'));
+  const storePath = join(dir, 'state.db');
+  const backend = new SimIrisBackend();
+  try {
+    // 应答在路上时崩溃：Iris 已经存下入口建立的事件，Bellis 还不知道。
+    const first = await world({
+      storePath,
+      backend,
+      freshEntry: true,
+      iris: { writeDelayMs: 5_000 },
+      bootId: 'b0',
+    });
+    await first.advance(100);
+    assert.equal(backend.messages.length, 1);
+    assert.equal(first.ledger().outbox.length, 1, '还没收到应答，仍在队列里');
+    first.crash();
+
+    const second = await world({ storePath, backend, bootId: 'b1', startAt: 1_000 });
+    try {
+      await second.advance(100);
+      assert.equal(backend.messages.length, 1, '同一个键补发，Iris 只存一次');
+      assert.equal(second.ledger().outbox.length, 0);
+      // 入口已经存在：召回不再 404，也不再建立。
+      const recalled = await second.memory().recall({}, signal());
+      assert.ok(recalled.ok);
+      await second.advance(2_500);
+      const sent = [...first.trace, ...second.trace]
+        .filter((t) => t.kind === 'memory.write-sent')
+        .flatMap((t) => t.data.keys as string[])
+        .filter((key) => key === 'bellis:event:entry-created');
+      assert.equal(sent.length, 2, '第一次发出，重启后按同一个键补发一次');
+      assert.equal(second.events('memory.queued').length, 1, '只排队过一次');
+    } finally {
+      await second.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  // 召回碰到 404：建立入口。
+  const w = await world({ freshEntry: true, iris: { recallDelayMs: 10 } });
+  try {
+    const pending = w.memory().recall({}, signal());
+    await w.advance(50);
+    const result = await pending;
+    assert.equal(result.ok, false);
+    await w.advance(100);
+    assert.equal(w.backend.messages.filter((m) => m.kind === 'event').length, 1);
+    assert.equal(w.logged('memory.entry-missing').length, 1, '激活与召回都碰到 404，也只排队一次');
   } finally {
     await w.close();
   }

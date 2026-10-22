@@ -91,7 +91,7 @@ export function probeFailure(error: unknown): string {
 export interface MemoryStatusReport {
   /** Iris 就绪（最近的请求没有处在连续失败中、也没有鉴权失败），且记忆插件在运行。 */
   ready: boolean;
-  /** 状态说明：只含失败的类别、HTTP 状态与错误码；写入暂停时说明原因。不在场时为“memory@1 不在场”。 */
+  /** 状态说明：只含失败的类别、HTTP 状态与错误码；写入在等重试时说明约多久后重试。不在场时为“memory@1 不在场”。 */
   status: string;
   /** 待发队列、累计写入与丢弃的条数、登记了墓碑的观众数：来自状态存储的记忆账本，记忆插件不在场时照样有。 */
   pending: number;

@@ -17,15 +17,28 @@ export interface SimIrisMessage {
 /**
  * 模拟 Iris 的数据（仿真与测试用）：按契约在同一入口里按去重键去重（重复的键返回原消息的 ID，不覆盖正文），
  * 召回时把最近存下的消息当作记忆返回（说话人为写入时的显示名，来源为那条消息）。它代表进程外的服务，
- * 由仿真在各次启动之间保留（核心服务 `iris.sim-backend@1`），宿主崩溃重启后数据仍在。
+ * 由仿真在各次启动之间保留（核心服务 `iris.sim-backend@1`），宿主崩溃重启后数据仍在。入口在首次接收消息时创建，
+ * 对还不存在的入口做召回准备得 404（与契约一致）。
  */
 export class SimIrisBackend {
   readonly messages: SimIrisMessage[] = [];
   readonly feedback: Array<{ recallId: string; memoryIds: number[] }> = [];
   readonly #byKey = new Map<string, number>();
+  /** 已经存在的入口：首次接收消息时自动创建（契约），也可以由测试直接建立（例如管理端早已建好）。 */
+  readonly #entries = new Set<string>();
   #recalls = 0;
 
+  /** 直接建立入口（不写消息）。 */
+  createEntry(entryId: string): void {
+    this.#entries.add(entryId);
+  }
+
+  hasEntry(entryId: string): boolean {
+    return this.#entries.has(entryId);
+  }
+
   write(entryId: string, messages: readonly IrisMessage[]): number[] {
+    this.#entries.add(entryId);
     return messages.map((message) => {
       const key = `${entryId}\u0000${message.dedupeKey}`;
       const existing = this.#byKey.get(key);
@@ -179,6 +192,14 @@ export const simIris = definePlugin({
       prepare(entryId, request, signal) {
         return tracked(async () => {
           await wait(config.recallDelayMs, signal);
+          // 契约：召回准备的入口须已存在（首次接收消息时创建），否则 404。
+          if (!backend.hasEntry(entryId)) {
+            trace?.record('iris.prepare-missing', { entryId });
+            throw new IrisError('not_found', '不存在：HTTP 404（entry_not_found）', {
+              status: 404,
+              code: 'entry_not_found',
+            });
+          }
           const { recallId, memories } = backend.recall(entryId, request.memoryLimit);
           if (config.foreignMemory && request.memoryLimit > 0) {
             memories.push({
