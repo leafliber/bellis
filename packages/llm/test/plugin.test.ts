@@ -200,12 +200,11 @@ test('凭据或配置缺失：加载失败并说明原因，不连任何端点',
       await w.close();
     }
   }
-  // 没有输出方式：配置不合 Schema，同样加载失败。
+  // 没有写输出方式：用缺省的 json_object（S-11 之后定），照常激活，激活本身不连端点。
   const { outputMode: _omit, ...noMode } = base;
   const w = await world({ ...noMode, endpoint: fake.url });
   try {
-    assert.equal(w.state()?.state, 'failed');
-    assert.match(String(w.state()?.reason), /outputMode/);
+    assert.equal(w.state()?.state, 'active');
   } finally {
     await w.close();
   }
