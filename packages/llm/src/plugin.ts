@@ -50,9 +50,12 @@ export const LlmOpenAiConfig = Type.Object({
   }),
   /**
    * 意图的输出方式：`json_schema`（严格的结构化输出）、`json_object`、`tool`（单个函数，`tool_choice` 指定它）、
-   * `prompt`（只在提示词里要求 JSON）。没有缺省值：S-11 之后再定。
+   * `prompt`（只在提示词里要求 JSON）。缺省 `json_object`：S-11 实测它合法率最高、热启动最快（见决策模型“模型接入”）。
    */
-  outputMode: literals(OUTPUT_MODES),
+  outputMode: Type.Union(
+    OUTPUT_MODES.map((mode) => Type.Literal(mode)),
+    { default: 'json_object' },
+  ),
   /** 思考开关 `thinking.type`；不配置就不发。 */
   thinking: Type.Optional(literals(THINKING)),
   /** 思考档位 `reasoning_effort`；不配置就不发。 */
