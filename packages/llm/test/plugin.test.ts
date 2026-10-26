@@ -17,7 +17,7 @@ import { MemorySecretStore } from '@bellis/secret-store';
 import { StateStore } from '@bellis/store';
 import { ARK_PROVIDER, llmOpenAi, PROBE_REQUEST } from '../src/index.ts';
 import { FakeChat, respond, status } from './fake-chat.ts';
-import { ARK_MODEL, arkReasoningStream, INTENT } from './fixtures.ts';
+import { ARK_MODEL, arkReasoningStream, INTENT, pieces, REASONING_MARK } from './fixtures.ts';
 
 const KEY = 'FAKE-ARK-KEY-plugin-5d8e2a';
 const GRANT = ['net.egress:ark.cn-beijing.volces.com', 'net.egress:127.0.0.1', 'secret:ark'];
@@ -143,12 +143,17 @@ test('提供 llm@1：型号与厂商来自配置；返回正文；traceparent �
     const llm = w.llm();
     assert.deepEqual(llm.model, { provider: ARK_PROVIDER, name: ARK_MODEL });
     const firsts: string[] = [];
+    const deltas: string[] = [];
     const output = await llm.complete(request, new AbortController().signal, {
       onFirstChunk: () => firsts.push('chunk'),
       onFirstOutput: () => firsts.push('output'),
+      onOutput: (delta) => deltas.push(delta),
     });
     assert.equal(output, INTENT);
     assert.deepEqual(firsts, ['chunk', 'output']);
+    // 正文的增量透传给调用方（决策插件的增量解析），按到达的顺序拼起来就是返回值，不含思考内容。
+    assert.deepEqual(deltas, pieces(INTENT, 7));
+    assert.ok(!deltas.join('').includes(REASONING_MARK));
     const sent = fake.requests.at(-1);
     assert.equal(sent?.headers.traceparent, undefined);
     assert.equal(sent?.body.reasoning_effort, 'low');

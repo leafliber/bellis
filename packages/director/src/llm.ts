@@ -56,7 +56,10 @@ export interface LlmUsage {
   responseModel?: string;
 }
 
-/** 模型客户端在调用过程中报给决策插件的信息，只用于遥测；都可以不调用。取消之后不再调用。 */
+/**
+ * 模型客户端在调用过程中报给决策插件的信息；都可以不调用，取消之后不再调用。`onOutput` 供决策插件增量解析，
+ * 其余只用于遥测。
+ */
 export interface LlmCallOptions {
   /** 拿到用量（以及实际应答的型号）时调用。 */
   onUsage?(usage: LlmUsage): void;
@@ -64,6 +67,11 @@ export interface LlmCallOptions {
   onFirstChunk?(): void;
   /** 流式调用收到第一个正文块时调用：第一段非空的正文，或函数调用方式下第一段非空的函数参数；思考内容不算。 */
   onFirstOutput?(): void;
+  /**
+   * 流式调用每收到一段正文（函数调用方式下为函数参数）的增量时调用，按到达的顺序拼起来就是返回值；思考内容不在其中。
+   * 不流式的客户端不调用。
+   */
+  onOutput?(delta: string): void;
 }
 
 /** 模型客户端跟踪的失败（就绪判定与操作员状态用）。 */

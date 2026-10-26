@@ -54,10 +54,8 @@ export interface ChatRequest {
   output: LlmOutputFormat;
 }
 
-export interface ChatObserver extends LlmCallOptions {
-  /** 每段正文（函数调用方式下为函数参数）的增量，思考内容不在其中。探针用来测意图完整的时刻。 */
-  onOutput?(delta: string): void;
-}
+/** 调用过程中的回调（`llm@1` 的调用选项）：探针用 `onOutput` 测意图完整的时刻。 */
+export type ChatObserver = LlmCallOptions;
 
 export interface ChatResult {
   /** 正文；函数调用方式下为函数参数。 */
