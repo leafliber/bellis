@@ -121,7 +121,7 @@
 | `endpoint` | Chat Completions 的完整地址，缺省为方舟北京的 `https://ark.cn-beijing.volces.com/api/v3/chat/completions` |
 | `model` | 型号（方舟上为 Model ID），不是机密；换型号只改这里 |
 | `provider` | 遥测的 `gen_ai.provider.name`，缺省 `volcengine.ark`（GenAI 约定的已知取值里没有火山方舟，按约定用自定义值） |
-| `outputMode` | 意图的输出方式：`json_schema`、`json_object`、`tool`、`prompt`；没有缺省值 |
+| `outputMode` | 意图的输出方式：`json_schema`、`json_object`、`tool`、`prompt`；缺省 `json_object`（依据见下文 S-11） |
 | `thinking` | 思考开关 `thinking.type`（`enabled`、`disabled`）；不配置就不发 |
 | `reasoningEffort` | 思考档位 `reasoning_effort`（`minimal`、`low`、`medium`、`high`）；不配置就不发 |
 | `temperature`、`maxTokens` | 不配置就不发 |
@@ -134,7 +134,20 @@
 | `probeOnPreflight` | 开播预检时发一个最小的探测请求，缺省 false；会外发、会计费（见[运维的开播预检](operations.md#开播预检)） |
 | `probeTimeoutMs` | 探测的截止时间，缺省 10 秒，至多 20 秒 |
 
-整体截止时间由决策插件给（`callTimeoutMs`）。思考开关、思考档位与输出方式先按配置走，缺省值待 S-11 之后再定（PENDING）。样例 profile 用 GLM-5.3-flash：思考不能关闭，所以不发 `thinking`，只发 `reasoning_effort: low`；输出方式用 `prompt`，不发未核实的参数。
+整体截止时间由决策插件给（`callTimeoutMs`）。样例 profile 用 GLM-5.3-flash：思考不能关闭，所以不发 `thinking`，只发 `reasoning_effort: low`；输出方式 `json_object`。方舟的标准在线推理端点（`/api/v3`）用按量计费的 API Key；维护者用的是 Agent Plan 的套餐密钥，端点为 `https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions`，同一外发主机。套餐密钥在 `/api/v3` 上以 401 被拒。
+
+**S-11 实测**（2026-10-23，GLM-5.3-flash，Agent Plan 端点，`reasoning_effort: low`，决策插件真实的提示词与合成的弹幕上下文，每种输出方式冷、热各 10 次；冷启动指距上一请求超过 6 秒；意图完整指累计输出第一次通过 `parseIntent`）：
+
+| 输出方式 | 合法 | 意图完整 p50（冷 / 热） | p95（冷 / 热） |
+| --- | --- | --- | --- |
+| `json_object` | 20/20 | 2.1s / 1.7s | 5.0s / 2.5s |
+| `prompt` | 20/20 | 2.6s / 2.9s | 5.4s / 5.2s |
+| `json_schema`（严格） | 16/20 | 2.6s / 2.3s | 5.2s / 5.1s |
+| `tool` | 13/20，另 5 次协议错误 | 5.1s / 5.0s | 5.6s / 5.4s |
+
+- `reasoning_effort: low` 下思考 token 很少：p50 0，最大 20。首块与首个正文块几乎同时到达。
+- 中途取消之后没有再到达的回调。计费在流里看不到，要在方舟控制台核对（PENDING）。
+- 只测了 GLM-5.3-flash，没有测对照型号；整条链路的时延见[时延目标](../architecture.md#时延目标)。
 
 **请求**：`POST` 到端点，请求头 `Content-Type: application/json`、`Accept: text/event-stream`、`Authorization: Bearer <API Key>`；请求体：
 
