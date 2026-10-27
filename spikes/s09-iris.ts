@@ -2,13 +2,15 @@
  * 探针 S-09：iris-core 在本机 Docker 中稳定运行，宿主经 127.0.0.1 访问，召回在预算内（见 docs/plan/spikes.md）。
  *
  *   node spikes/s09-iris.ts --egress-reviewed [--base-url http://127.0.0.1:8080] [--entry bellis:s09]
- *        [--rounds 20] [--judge-budget-s 2] [--learn-wait-s 0] [--restart-check] [--out 结果文件]
+ *        [--rounds 20] [--judge-budget-s 2] [--learn-wait-s 0] [--query 文本] [--restart-check] [--out 结果文件]
  *     --egress-reviewed  必须显式给出：确认维护者已核对 Iris 的外发配置（Iris 会把探针写入的合成样本发给它配置的
  *                        模型学习，合规“Iris 外发”）。
  *     --entry            测试专用的入口 ID，缺省 bellis:s09，不用正式直播间的入口；宿主令牌的范围须包含它。
  *     --rounds           召回判断关闭与打开各测多少次召回准备（prepare）。
  *     --judge-budget-s   打开召回判断时的预算（秒，只能缩短缺省的 10 秒）。
  *     --learn-wait-s     写入后请求立即学习（POST /entries/{id}/learn），至多等这么久再测召回；0 表示不等。
+ *     --query            召回准备、定向查询与延迟测量用的文本，缺省为本次写入的合成话题。入口里已有别的来源学到的
+ *                        记忆时（例如演练入口），用与它们相关的文本才召回得到，“回报一条用到的记忆”才测得到。
  *     --restart-check    写入之后提示操作员手动运行 `docker restart iris`（探针自己不运行 docker），按回车后
  *                        等 Iris 重新就绪，再用同样的去重键写一次：返回同样的消息 ID 即数据仍在。
  *     --fake             不连 Iris：在本机起按契约实现的伪 Iris，用来检查探针本身（令牌用随机值）。
@@ -109,6 +111,7 @@ async function main(): Promise<void> {
       rounds: { type: 'string', default: '20' },
       'judge-budget-s': { type: 'string', default: '2' },
       'learn-wait-s': { type: 'string', default: '0' },
+      query: { type: 'string' },
       'restart-check': { type: 'boolean', default: false },
       out: { type: 'string' },
     },
@@ -229,6 +232,7 @@ async function main(): Promise<void> {
     pace: 'realtime',
   });
   const topic = `观星${runId.slice(-6)}`;
+  const query = values.query ?? topic;
   const batch = [
     message(1, `今晚想看${topic}，带了三脚架`),
     message(2, `${topic}要找没有光污染的地方`),
@@ -280,7 +284,7 @@ async function main(): Promise<void> {
   try {
     const recall = await client.prepare(
       entry,
-      { text: topic, judge: false, memoryLimit: 8, tokenBudget: 1500 },
+      { text: query, judge: false, memoryLimit: 8, tokenBudget: 1500 },
       signal(),
     );
     check(
@@ -316,7 +320,7 @@ async function main(): Promise<void> {
     check('召回准备（judge=false）返回 recall_id 与记忆', false, describe(error));
   }
   try {
-    const found = await client.search({ text: topic, entryId: entry, limit: 8 }, signal());
+    const found = await client.search({ text: query, entryId: entry, limit: 8 }, signal());
     check(
       '定向查询（POST /memories/search，带入口）',
       found.recallId !== '',
@@ -336,7 +340,7 @@ async function main(): Promise<void> {
         await client.prepare(
           entry,
           {
-            text: topic,
+            text: query,
             judge,
             ...(judge ? { judgeBudgetSeconds: judgeBudget } : {}),
             memoryLimit: 8,
