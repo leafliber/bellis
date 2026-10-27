@@ -68,6 +68,11 @@ export const NICKNAMES = ['小明', '小​红‮', '🔥🔥', '超级管理员
 
 /** 决策插件一次调用的截止时间：超时的回放比它晚到。 */
 export const CALL_TIMEOUT_MS = 2000;
+/**
+ * 按块回放的第一块在调用开始后这么久到达。块的间隔取 20、60、150ms，块的时刻因此总与截止时间错开（差的个位是 5），
+ * 输出不会与截止时间落在同一时刻（那时谁先到由定时器的先后决定，不变量推不出结局）。
+ */
+export const STREAM_FIRST_MS = 205;
 /** 超时的回放晚到的输出：一个合法的说话意图，它的文本从不该交给发声。 */
 export const LATE_TEXT = '这句回答来得太晚了。';
 /** 决策插件的固定过渡语。 */
@@ -89,6 +94,15 @@ export const LLM_FAILURES = [
   'incomplete',
 ] as const;
 
+/**
+ * 按块回放的结尾：正常结束；最终输出不合法（文本之后多了一个不认识的字段）；送出前 `cut`% 的字符之后以这类失败
+ * 结束（流到一半出错）。
+ */
+export type StreamEnd =
+  | { kind: 'ok' }
+  | { kind: 'invalid' }
+  | { kind: 'error'; error: (typeof LLM_FAILURES)[number]; cut: number };
+
 export type OperatorAction = 'estop' | 'upgrade' | 'restart' | 'resolve' | 'obs-scene' | 'obs-mute';
 
 export interface Scenario {
@@ -100,7 +114,9 @@ export interface Scenario {
   gaps?: Array<{ atMs: number; durationMs: number }>;
   /**
    * 回放的模型输出。`timeout` 比决策插件的截止时间晚到（`ignoreAbort` 时不理会中止、到点照样给出
-   * {@link LATE_TEXT}），`error` 以模型客户端的这类失败结束。
+   * {@link LATE_TEXT}），`error` 以模型客户端的这类失败结束。`stream` 按块回放（流式客户端）一个 `replyTo` 写在
+   * `text` 之前的说话意图，决策插件可以增量开口：`target` 为 null 时是闲聊（`replyTo` 写 null），否则回应这条弹幕
+   * （可能不在本次上下文里）；块的大小与间隔可能让截止时间先到；结尾见 {@link StreamEnd}。
    */
   outputs: Array<
     | { kind: 'reply'; sentences: number[]; target: number }
@@ -110,6 +126,14 @@ export interface Scenario {
     | { kind: 'vote'; question: number; options: number; durationSec: number }
     | { kind: 'timeout'; ignoreAbort: boolean }
     | { kind: 'error'; error: (typeof LLM_FAILURES)[number] }
+    | {
+        kind: 'stream';
+        sentences: number[];
+        target: number | null;
+        chunkChars: number;
+        chunkMs: number;
+        end: StreamEnd;
+      }
   >;
   announcements: Array<{ atMs: number; sentences: number[]; immediate: boolean }>;
   /**
@@ -191,6 +215,25 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
         },
         fc.record({ kind: fc.constant('timeout' as const), ignoreAbort: fc.boolean() }),
         fc.record({ kind: fc.constant('error' as const), error: fc.constantFrom(...LLM_FAILURES) }),
+        {
+          arbitrary: fc.record({
+            kind: fc.constant('stream' as const),
+            sentences,
+            target: fc.option(fc.nat(16), { nil: null, freq: 3 }),
+            chunkChars: fc.integer({ min: 1, max: 12 }),
+            chunkMs: fc.constantFrom(20, 60, 150),
+            end: fc.oneof(
+              { arbitrary: fc.constant<StreamEnd>({ kind: 'ok' }), weight: 2 },
+              fc.constant<StreamEnd>({ kind: 'invalid' }),
+              fc.record({
+                kind: fc.constant('error' as const),
+                error: fc.constantFrom(...LLM_FAILURES),
+                cut: fc.integer({ min: 1, max: 99 }),
+              }),
+            ),
+          }),
+          weight: 4,
+        },
       ),
       { maxLength: 8 },
     ),
@@ -235,10 +278,45 @@ const text = (indices: readonly number[]) => indices.map((i) => SENTENCES[i] ?? 
 type ReplayItem =
   | string
   | { error: string }
-  | { output: string; afterMs: number; ignoreAbort: boolean };
+  | { output: string; afterMs: number; ignoreAbort: boolean }
+  | { stream: string; chunkChars: number; chunkMs: number; afterMs: number; error?: string };
+
+/**
+ * 按块回放的输出：`action`、`replyTo` 写在 `text` 之前（决策插件可以增量开口），文本由 {@link SENTENCES} 拼成，
+ * 不含需要转义的字符（不变量据此从送出的块里直接读出文本）。
+ */
+export function streamReplay(item: Extract<Scenario['outputs'][number], { kind: 'stream' }>): {
+  stream: string;
+  error?: (typeof LLM_FAILURES)[number];
+} {
+  const full = JSON.stringify({
+    action: 'speak',
+    replyTo: item.target === null ? null : `c-d${item.target}`,
+    text: text(item.sentences),
+    memories: null,
+  });
+  switch (item.end.kind) {
+    case 'ok':
+      return { stream: full };
+    case 'invalid':
+      return { stream: `${full.slice(0, -1)},"mood":"开心"}` };
+    case 'error': {
+      const chars = [...full];
+      const sent = Math.max(1, Math.floor((chars.length * item.end.cut) / 100));
+      return { stream: chars.slice(0, sent).join(''), error: item.end.error };
+    }
+  }
+}
 
 function output(item: Scenario['outputs'][number]): ReplayItem {
   switch (item.kind) {
+    case 'stream':
+      return {
+        ...streamReplay(item),
+        chunkChars: item.chunkChars,
+        chunkMs: item.chunkMs,
+        afterMs: STREAM_FIRST_MS,
+      };
     case 'timeout':
       return {
         output: JSON.stringify({ action: 'speak', text: LATE_TEXT }),

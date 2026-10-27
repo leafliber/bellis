@@ -234,6 +234,8 @@ test('模型调用的 GenAI span 与推理指标：型号、用量、耗时与�
       'gen_ai.usage.reasoning.output_tokens': 10,
       'gen_ai.response.model': 'test-model-1',
       'bellis.director.action': 'speak',
+      // 这个客户端不报正文增量：没有开口，整段解析。
+      'bellis.director.streamed': false,
     });
     // 超时之后才报来的用量不记。
     assert.deepEqual(timedOut?.attributes, {
@@ -242,6 +244,7 @@ test('模型调用的 GenAI span 与推理指标：型号、用量、耗时与�
       'gen_ai.request.model': 'test-model',
       'bellis.director.candidates': 1,
       'bellis.director.trigger': 'candidates',
+      'bellis.director.streamed': false,
       'error.type': 'timeout',
     });
     assert.equal(timedOut?.error, true);

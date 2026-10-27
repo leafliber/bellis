@@ -5,12 +5,15 @@ import { Compile } from 'typebox/compile';
 /**
  * 决策模型的输出：只能从枚举的意图类型里选（动作选择模式），参数由确定性代码校验。
  * 优先级不在这里：发声的优先级由确定性代码按触发来源决定（D-33）。
- * 每个意图的 `action` 写在最前面（以后增量解析时先知道动作类型）；`description` 用于提示词与严格 schema 的说明。
+ * 每个意图的 `action` 写在最前面（增量解析时先知道动作类型）；`description` 用于提示词与严格 schema 的说明。
  */
 const closed = { additionalProperties: false } as const;
 
 /** 一次召回至多给出的记忆条数（与 Iris 召回准备的 `memory_limit` 上限一致）。 */
 export const MAX_MEMORIES = 8;
+
+/** 说话的文本至多这么多字（码点）；增量解析时超过即停止这段发言。 */
+export const MAX_SPEAK_TEXT = 200;
 
 /**
  * 这次输出实际用到的记忆编号（使用反馈，见记忆“召回”）。只接受本次数据里出现的编号，其余忽略；
@@ -34,7 +37,7 @@ export const SpeakAction = Type.Object(
         description: '回应的候选弹幕编号；不回应具体某条弹幕时为 null',
       }),
     ),
-    text: Type.String({ minLength: 1, maxLength: 200, description: '要说的话' }),
+    text: Type.String({ minLength: 1, maxLength: MAX_SPEAK_TEXT, description: '要说的话' }),
     memories: UsedMemories,
   },
   { ...closed, description: '说话' },

@@ -16,7 +16,7 @@ import {
 } from '@bellis/kernel';
 import { type Memory, type MemoryRecall, MemoryService, type RecallResult } from '@bellis/memory';
 import { SafetyService } from '@bellis/safety';
-import { SpeechService } from '@bellis/speech';
+import { type SpeechRequest, SpeechService, type UtteranceOutcome } from '@bellis/speech';
 import {
   ErrorType,
   GenAi,
@@ -30,7 +30,7 @@ import {
 import Type, { type Static } from 'typebox';
 import { DEFAULT_DRIFT_PHRASES, type DriftSignal, driftSignals } from './drift.ts';
 import { type Llm, LlmError, type LlmModel, type LlmRequest, LlmService } from './llm.ts';
-import { parseIntent, type VoteAction } from './output.ts';
+import { MAX_SPEAK_TEXT, parseIntent, type VoteAction } from './output.ts';
 import { choosePersona } from './persona.ts';
 import {
   buildMessages,
@@ -40,6 +40,7 @@ import {
   INTENT_OUTPUT,
   type VoteContext,
 } from './prompt.ts';
+import { IntentScanner, type ScanEvent, TextQueue } from './stream.ts';
 
 const UNKNOWN_MODEL: LlmModel = { provider: 'unknown', name: 'unknown' };
 
@@ -54,6 +55,11 @@ export const DirectorConfig = Type.Object({
   heardLimit: Type.Integer({ minimum: 0, default: 8 }),
   /** 一次调用的截止时间（含思考与全部输出），到点即取消。 */
   callTimeoutMs: Type.Integer({ minimum: 1, default: 8_000 }),
+  /**
+   * 增量解析：模型流式输出时边到边扫描，说话的文本一开始（满足开口条件时）就交给发声，流读完再整段校验
+   * （见决策模型“解析”）。关掉时整段解析，用于真机对照与回退。
+   */
+  streamOutput: Type.Boolean({ default: true }),
   /**
    * 召回记忆的截止时间（记忆插件在场时，在调用模型之前召回）：到点就不带记忆继续决策，不计入 `callTimeoutMs`。
    */
@@ -105,30 +111,45 @@ const lastOf = <T>(list: readonly T[], n: number): T[] => (n <= 0 ? [] : list.sl
 /** 被取消的调用（更高优先级的时机到来，或插件停用）。 */
 class Cancelled extends Error {}
 
+/** 增量开口的发言：交给发声的文本流、回应对象，以及已经扫到的文本（最终校验时与整段解析的结果比较）。 */
+interface OpenedSpeech {
+  queue: TextQueue;
+  replyTo: string | undefined;
+  text: string;
+  /** `text` 的码点数。 */
+  chars: number;
+  outcome: Promise<UtteranceOutcome>;
+}
+
 /**
  * 决策模型（普通插件）：在决策时机到来时组装上下文、调用模型、把输出解析成枚举的意图（见决策模型）。
  *
  * - 时机：新一批候选到达、冷场计时到期、投票正常结束（扩展点 `vote.ended`）。同时只有一个在途调用：
- *   在途的是不带候选与投票结果的闲聊调用时，新到的候选或投票结束取消它并立即重来；否则新时机排队，
+ *   在途的是不带候选与投票结果、还没开口的闲聊调用时，新到的候选或投票结束取消它并立即重来；否则新时机排队，
  *   排队的时机在在途调用结束后合并成一次调用；在途时冷场计时到期不另排。每次调用都有截止时间。
  * - 提示词由确定性代码组装（prompt.ts）：观众内容只在不可信数据区里；输出各种方式共用 `parseIntent` 解析与校验，
  *   非法输出丢弃，不修补。
- * - 失败：超时或出错时放弃本次时机，有观众在等回应时可播一句固定过渡语；连续失败每满 `alarmAfter` 次告警
- *   （事实 `director.alarmed`）并请求安全核降级。人设漂移信号连续命中同样处理。
+ * - 增量解析（`streamOutput`，见 stream.ts）：流式客户端报来正文增量时边到边扫描，说话的文本一开始、动作与回应对象
+ *   都已确定且回应对象在本次上下文里，就把文本流交给发声（开口）；开口之后这次调用不再可被取消。流读完仍由
+ *   `parseIntent` 整段校验，与已送出的一致才让文本流正常结束，否则文本流以错误结束、算一次非法输出；
+ *   模型出错、超时或插件停用时文本流同样以错误结束。投票与沉默不提前开口。
+ * - 失败：超时或出错时放弃本次时机，有观众在等回应、且还没开口时可播一句固定过渡语；连续失败每满 `alarmAfter`
+ *   次告警（事实 `director.alarmed`）并请求安全核降级。人设漂移信号连续命中同样处理。
  * - 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
  * - 记忆插件（`memory@1`，可选依赖）在场时，调用模型之前召回，截止时间 `recallTimeoutMs`，到点、出错都不带记忆
  *   继续；记忆只放进不可信数据区。决策后回报使用反馈：意图里写的、这次召回给出的编号，没有用到就是空集。
  *
  * 遥测（见运维“观测”）：一次模型调用一个 GenAI span（`chat <型号>`，父为排第一的候选，其余候选以 links
  * 关联），记 `gen_ai.client.inference.duration`；模型客户端报来用量时 token 数记在 span 上，流式客户端报来
- * 第一块时记 `gen_ai.client.inference.time_to_first_chunk`、第一个正文块时记 `bellis.llm.time_to_first_output`。
+ * 第一块时记 `gen_ai.client.inference.time_to_first_chunk`、第一个正文块时记 `bellis.llm.time_to_first_output`；
+ * span 上记是否开口（`bellis.director.streamed`），开口的时刻记事件 `bellis.director.speech_started`。
  * 回应弹幕的发言以被回应的候选为父、以 link 关联这次调用，带上链路起点；闲聊与开票说明以这次调用为父。
  * 不记上下文与模型输出。
  */
 export const director = definePlugin({
   manifest: {
     id: 'director',
-    version: '0.2.0',
+    version: '0.3.0',
     tier: 'ordinary',
     provides: [],
     inject: [
@@ -158,6 +179,7 @@ export const director = definePlugin({
     const pending = new Set<DecisionTrigger>();
     /** 刚结束、还没交给模型的投票。 */
     let endedVote: EndedVoteContext | undefined;
+    /** 在途的调用：还没开口的闲聊调用可以被新到的候选或投票结束取消。 */
     let inflight: { cancellable: boolean; cancel(by: string): void } | undefined;
     let running = false;
     let failures = 0;
@@ -387,6 +409,37 @@ export const director = definePlugin({
       ...lastOf(outputs, config.drift.recent),
     ];
 
+    /** 记下交给发声的文本（漂移的重复检测用）。 */
+    const remember = (text: string) => {
+      outputs.push(text);
+      if (outputs.length > config.drift.recent) outputs.shift();
+    };
+
+    /**
+     * 把说话意图交给发声（整段解析与增量开口共用）：来源、可抢占点与输入按回应对象定，模型不能指定（D-33）；
+     * 文本可以是流。
+     */
+    const say = (
+      text: SpeechRequest['text'],
+      target: Candidate | undefined,
+      call: Span,
+      untrusted: boolean,
+    ): Promise<UtteranceOutcome> => {
+      calls += 1;
+      const trace = speechTrace(call, target);
+      return speech.request({
+        id: `director:${ctx.instanceId}:${calls}`,
+        source: target ? 'danmaku-reply' : 'chatter',
+        text,
+        expiresAt: clock.now() + config.replyTtlMs,
+        // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
+        preempt: target ? 'sentence' : 'immediate',
+        inputs: target ? target.sources : [],
+        untrusted,
+        ...(trace ? { trace } : {}),
+      });
+    };
+
     /**
      * 发起投票：交给投票插件（`vote@1`），规则、计票与口播都在那里；优先级与发声来源也由那里的确定性代码决定，
      * 模型不能指定（D-33）。成功、被拒都记日志，不写题目与选项（模型输出可能复述弹幕）。
@@ -434,8 +487,6 @@ export const director = definePlugin({
           (t !== 'candidates' || taken.length > 0) && (t !== 'vote-ended' || ended !== undefined),
       );
       const reasons: DecisionTrigger[] = effective.length > 0 ? effective : ['idle'];
-      // 不带候选与投票结果的调用（闲聊）可以被新到的候选或投票结束取消。
-      const cancellable = taken.length === 0 && ended === undefined;
       const model = llm.model ?? UNKNOWN_MODEL;
       const call = tracer.startSpan(`chat ${model.name}`, {
         kind: 'client',
@@ -449,8 +500,11 @@ export const director = definePlugin({
           'bellis.director.trigger': reasons.join(','),
         },
       });
-      /** 结束这次调用的 span；出错时带上类别（不带模型输出）。 */
+      /** 增量开口之后交给发声的文本流与已送出的文本（见下文 `open`）。 */
+      let opened: OpenedSpeech | undefined;
+      /** 结束这次调用的 span：记是否开口；出错时带上类别（不带模型输出）。 */
       const endCall = (errorType?: string) => {
+        call.setAttributes({ 'bellis.director.streamed': opened !== undefined });
         if (errorType) call.fail(errorType);
         call.end();
       };
@@ -461,13 +515,15 @@ export const director = definePlugin({
         controller.signal.addEventListener('abort', () => reject(new Cancelled()), { once: true }),
       );
       cancelled.catch(() => {});
-      inflight = {
-        cancellable,
-        cancel: (by) => {
+      const current = {
+        // 不带候选与投票结果的调用（闲聊）可以被新到的候选或投票结束取消，开口之后不再可以。
+        cancellable: taken.length === 0 && ended === undefined,
+        cancel: (by: string) => {
           cancelledBy ??= by;
           controller.abort();
         },
       };
+      inflight = current;
       // 召回记忆（记忆插件在场时）：有截止时间，到点就不带记忆继续；被取消时这次时机结束。
       let recalled: { recall: MemoryRecall; memory: Memory } | undefined;
       try {
@@ -485,9 +541,11 @@ export const director = definePlugin({
         return;
       }
       const recall = recalled?.recall;
+      // 上下文里有弹幕或记忆，输出就受不可信输入影响。
+      const untrusted = taken.length > 0 || (recall?.memories.length ?? 0) > 0;
       /**
        * 使用反馈：每次召回恰好回报一次。说话等发言结果（观众一个字也没听到就回报空集），发起投票等开票结果；
-       * 失败、取消、沉默与非法输出回报空集。
+       * 失败、取消、沉默与非法输出（含开口之后最终校验不通过）回报空集。
        */
       let reported = false;
       const report = (used: readonly string[]) => {
@@ -518,6 +576,47 @@ export const director = definePlugin({
           metricAttributes(errorType),
           call,
         );
+      /** 增量解析（`streamOutput` 时）：扫描流式客户端报来的正文增量。 */
+      const scanner = config.streamOutput ? new IntentScanner() : undefined;
+      /**
+       * 说话的文本开始时决定是否开口：动作已确定为说话，回应对象已在文本之前出现（字符串或 null），是字符串时
+       * 在本次上下文里。任一不满足就不提前开口，留给整段解析（判定与现在相同）。
+       */
+      const open = ({ action, replyTo }: Extract<ScanEvent, { type: 'text-start' }>) => {
+        if (action?.kind !== 'string' || action.value !== 'speak') return;
+        if (replyTo === undefined || replyTo.kind === 'other') return;
+        const target =
+          replyTo.kind === 'string' ? taken.find((c) => c.id === replyTo.value) : undefined;
+        if (replyTo.kind === 'string' && !target) return;
+        // 观众开始听到这段话之后，这次调用不再被新的时机取消。
+        current.cancellable = false;
+        call.addEvent('bellis.director.speech_started');
+        const queue = new TextQueue();
+        opened = {
+          queue,
+          replyTo: target?.id,
+          text: '',
+          chars: 0,
+          outcome: say(queue, target, call, untrusted),
+        };
+      };
+      /** 文本的增量：记下并送进文本流；超过说话文本的上限时文本流以错误结束（最终校验也不会通过）。 */
+      const feed = (spoken: OpenedSpeech, delta: string) => {
+        spoken.text += delta;
+        spoken.chars += [...delta].length;
+        if (spoken.chars > MAX_SPEAK_TEXT) {
+          spoken.queue.fail(new Error(`说话的文本超过 ${MAX_SPEAK_TEXT} 字`));
+        } else {
+          spoken.queue.push(delta);
+        }
+      };
+      const onOutput = (delta: string) => {
+        if (settled || !scanner) return;
+        for (const event of scanner.push(delta)) {
+          if (event.type === 'text-start') open(event);
+          else if (event.type === 'text' && opened) feed(opened, event.delta);
+        }
+      };
       const contextValue = context(reasons, taken, ended, recall);
       const request: LlmRequest = {
         messages: buildMessages(contextValue),
@@ -561,6 +660,7 @@ export const director = definePlugin({
                   call,
                 );
               },
+              onOutput,
             }),
             cancelled,
           ]),
@@ -573,22 +673,55 @@ export const director = definePlugin({
         // 截止时间到点：以 DeadlineError 作中止原因，模型客户端据此把这次调用记为超时（就绪判定用）。
         controller.abort(error instanceof DeadlineError ? error : undefined);
         report([]);
+        const kind = cancelledBy !== undefined ? 'cancelled' : failureKind(error);
+        // 已经开口：文本流以错误结束，仲裁不再开始后续的句子（说明里只有类别）。
+        opened?.queue.fail(new Error(`决策模型调用没有完成：${kind}`));
         if (cancelledBy !== undefined) {
           recordDuration('cancelled');
           endCall('cancelled');
           ctx.log('director.cancelled', { by: cancelledBy });
           return;
         }
-        const kind = failureKind(error);
         recordDuration(kind);
         endCall(kind);
-        failed(kind, message(error), call, taken.length > 0);
+        // 已经开口时不播过渡语：观众已经听到了这次回应的开头。
+        failed(kind, message(error), call, taken.length > 0 && opened === undefined);
         return;
       }
       settled = true;
       inflight = undefined;
       recordDuration();
       const parsed = parseIntent(output);
+      if (opened) {
+        // 开口之后的最终校验：整段合法、仍是说话、回应对象与文本都与已交给发声的完全相同，文本流才正常结束。
+        const final = parsed.ok ? parsed.action : undefined;
+        if (
+          final?.action !== 'speak' ||
+          final.replyTo !== opened.replyTo ||
+          final.text !== opened.text
+        ) {
+          opened.queue.fail(new Error('模型输出没有通过最终校验'));
+          report([]);
+          endCall('invalid_output');
+          failed(
+            'invalid_output',
+            parsed.ok ? '最终输出与已交给发声的回应对象或文本不一致' : parsed.reason,
+            call,
+            taken.length > 0,
+          );
+          return;
+        }
+        call.setAttributes({ 'bellis.director.action': final.action });
+        const used = usedMemories(recall, final.memories);
+        noteDrift(driftSignals(final.text, recentTexts(), config.drift), call);
+        endCall();
+        succeeded();
+        remember(final.text);
+        opened.queue.end();
+        // 观众一个字也没听到：记忆没有用上。
+        void opened.outcome.then((outcome) => report(outcome.heard === '' ? [] : used));
+        return;
+      }
       if (!parsed.ok) {
         report([]);
         endCall('invalid_output');
@@ -615,23 +748,8 @@ export const director = definePlugin({
         noteDrift(driftSignals(action.text, recentTexts(), config.drift), call);
         endCall();
         succeeded();
-        calls += 1;
-        outputs.push(action.text);
-        if (outputs.length > config.drift.recent) outputs.shift();
-        const trace = speechTrace(call, target);
-        void speech
-          .request({
-            id: `director:${ctx.instanceId}:${calls}`,
-            source: target ? 'danmaku-reply' : 'chatter',
-            text: action.text,
-            expiresAt: clock.now() + config.replyTtlMs,
-            // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
-            preempt: target ? 'sentence' : 'immediate',
-            inputs: target ? target.sources : [],
-            // 上下文里有弹幕或记忆，输出就受不可信输入影响。
-            untrusted: taken.length > 0 || (recall?.memories.length ?? 0) > 0,
-            ...(trace ? { trace } : {}),
-          })
+        remember(action.text);
+        void say(action.text, target, call, untrusted)
           // 观众一个字也没听到：记忆没有用上。
           .then((outcome) => report(outcome.heard === '' ? [] : used));
       } else if (action.action === 'vote') {
@@ -650,8 +768,7 @@ export const director = definePlugin({
           taken,
           `director:${ctx.instanceId}:${calls}`,
           traceRef(call),
-          // 上下文里有弹幕或记忆，题目与选项就受不可信输入影响。
-          taken.length > 0 || (recall?.memories.length ?? 0) > 0,
+          untrusted,
           (ok) => report(ok ? used : []),
         );
       } else {
@@ -766,10 +883,19 @@ const ReplayFailure = Type.Union([
 /**
  * 一次调用的回放：字符串是这次的输出（耗时 `latencyMs`）；`error` 让这次调用以这类失败结束；
  * `output` 加 `afterMs` 给出这次的耗时（超过决策插件的截止时间即超时），`ignoreAbort` 时不理会中止信号、
- * 到点照样给出输出，模拟没有及时响应中止的客户端。
+ * 到点照样给出输出，模拟没有及时响应中止的客户端；`stream` 按块回放，模拟流式客户端：`afterMs`（缺省
+ * `latencyMs`）后送出第一块，之后每隔 `chunkMs` 一块，每块 `chunkChars` 个字符（码点），经 `onOutput` 送出
+ * （第一块时也报首块与第一个正文块），送完之后给出整段输出；给了 `error` 时送完改以这类失败结束（流到一半出错）。
  */
 const ReplayOutput = Type.Union([
   Type.String(),
+  Type.Object({
+    stream: Type.String(),
+    chunkChars: Type.Integer({ minimum: 1 }),
+    chunkMs: Type.Integer({ minimum: 0 }),
+    afterMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    error: Type.Optional(ReplayFailure),
+  }),
   Type.Object({
     error: ReplayFailure,
     afterMs: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -780,16 +906,73 @@ const ReplayOutput = Type.Union([
     ignoreAbort: Type.Optional(Type.Boolean()),
   }),
 ]);
+type ReplayOutput = Static<typeof ReplayOutput>;
+
+/** 回放一次调用的计划：第一块（不分块时为结局）之前的耗时、依次送出的块与间隔，以及结局。 */
+interface ReplayPlan {
+  afterMs: number;
+  chunks: string[];
+  chunkMs: number;
+  ending: { output: string; ignoreAbort: boolean } | { error: Static<typeof ReplayFailure> };
+}
+
+function replayPlan(item: ReplayOutput, latencyMs: number): ReplayPlan {
+  if (typeof item === 'string') {
+    return {
+      afterMs: latencyMs,
+      chunks: [],
+      chunkMs: 0,
+      ending: { output: item, ignoreAbort: false },
+    };
+  }
+  if ('stream' in item) {
+    const chars = [...item.stream];
+    const chunks: string[] = [];
+    for (let i = 0; i < chars.length; i += item.chunkChars) {
+      chunks.push(chars.slice(i, i + item.chunkChars).join(''));
+    }
+    return {
+      afterMs: item.afterMs ?? latencyMs,
+      chunks,
+      chunkMs: item.chunkMs,
+      ending: item.error ? { error: item.error } : { output: item.stream, ignoreAbort: false },
+    };
+  }
+  if ('error' in item) {
+    return {
+      afterMs: item.afterMs ?? latencyMs,
+      chunks: [],
+      chunkMs: 0,
+      ending: { error: item.error },
+    };
+  }
+  return {
+    afterMs: item.afterMs,
+    chunks: [],
+    chunkMs: 0,
+    ending: { output: item.output, ignoreAbort: item.ignoreAbort ?? false },
+  };
+}
+
+/** 回调调用方：调用方自己出错不影响这次调用（与流式客户端相同）。 */
+function notify(callback: () => void): void {
+  try {
+    callback();
+  } catch {
+    // 回调只用于遥测与增量解析。
+  }
+}
 
 /**
  * 回放模型（仿真与测试用）。在仿真里把每次调用写进追踪（`llm.request`：调用序号与上下文里的候选编号；
- * 结局 `llm.output`、`llm.error`，以及先于结局到达的中止 `llm.aborted`，带是否因截止时间；失败给出之后、
- * 决策插件处理之前到达的取消带 `afterResult`），不变量据此独立推出每次调用对决策插件意味着什么。
+ * 按块回放时每一块 `llm.chunk`（这一块的内容，先于交给调用方）；结局 `llm.output`、`llm.error`，以及先于结局到达的
+ * 中止 `llm.aborted`，带是否因截止时间；失败给出之后、决策插件处理之前到达的取消带 `afterResult`），不变量据此
+ * 独立推出每次调用对决策插件意味着什么。中止之后不再送出块。
  */
 export const replayLlm = definePlugin({
   manifest: {
     id: 'llm-replay',
-    version: '0.3.0',
+    version: '0.4.0',
     tier: 'ordinary',
     provides: [LlmService.ref, ReplayLlmService.ref],
     inject: [ClockService.ref, `${TraceService.ref}?`],
@@ -813,7 +996,7 @@ export const replayLlm = definePlugin({
       ready: true,
       status: '回放',
       requests,
-      complete(request, signal) {
+      complete(request, signal, options) {
         requests.push(structuredClone(request));
         const call = next;
         const item = ctx.config.outputs[call] ?? '{"action":"silence","reason":"回放结束"}';
@@ -822,35 +1005,50 @@ export const replayLlm = definePlugin({
           call,
           candidates: request.context.candidates.map((c) => c.id),
         });
-        const plan =
-          typeof item === 'string'
-            ? { output: item, afterMs: ctx.config.latencyMs, ignoreAbort: false }
-            : 'error' in item
-              ? { error: item.error, afterMs: item.afterMs ?? ctx.config.latencyMs }
-              : {
-                  output: item.output,
-                  afterMs: item.afterMs,
-                  ignoreAbort: item.ignoreAbort ?? false,
-                };
+        const plan = replayPlan(item, ctx.config.latencyMs);
+        const { ending } = plan;
         return new Promise((resolve, reject) => {
           let settled = false;
+          /** 中止之后不再送出块（`ignoreAbort` 的输出照样到点给出）。 */
+          let aborted = false;
           const onAbort = () => {
             if (settled) return;
             trace?.record('llm.aborted', {
               call,
               deadline: signal.reason instanceof DeadlineError,
             });
-            if ('output' in plan && plan.ignoreAbort) return;
+            aborted = true;
+            if ('output' in ending && ending.ignoreAbort) return;
             settled = true;
             clock.clearTimeout(timer);
             reject(new LlmError('aborted', '已取消'));
           };
-          const timer = clock.setTimeout(() => {
+          let sent = 0;
+          /** 送出下一块；送完（或不分块）时给出结局。 */
+          const step = () => {
+            const delta = plan.chunks[sent];
+            if (delta !== undefined && !aborted) {
+              sent += 1;
+              trace?.record('llm.chunk', { call, delta });
+              if (sent === 1) {
+                notify(() => options?.onFirstChunk?.());
+                notify(() => options?.onFirstOutput?.());
+              }
+              notify(() => options?.onOutput?.(delta));
+              if (settled) return;
+              if (sent < plan.chunks.length) {
+                timer = clock.setTimeout(step, plan.chunkMs);
+                return;
+              }
+            }
+            finish();
+          };
+          const finish = () => {
             signal.removeEventListener('abort', onAbort);
             settled = true;
-            if ('error' in plan) {
-              trace?.record('llm.error', { call, kind: plan.error });
-              reject(new LlmError(plan.error, `回放的失败：${plan.error}`));
+            if ('error' in ending) {
+              trace?.record('llm.error', { call, kind: ending.error });
+              reject(new LlmError(ending.error, `回放的失败：${ending.error}`));
               // 失败已经给出、决策插件还没处理（处理在微任务里）时，同一时刻别的定时器触发的取消先到：
               // 决策插件把这次调用当作取消。仿真里只有这种中止发生在任何微任务运行之前，记下它；
               // 决策插件处理失败时自己发的中止在微任务里，不记。
@@ -867,10 +1065,11 @@ export const replayLlm = definePlugin({
                 { once: true },
               );
             } else {
-              trace?.record('llm.output', { call, output: plan.output });
-              resolve(plan.output);
+              trace?.record('llm.output', { call, output: ending.output });
+              resolve(ending.output);
             }
-          }, plan.afterMs);
+          };
+          let timer = clock.setTimeout(step, plan.afterMs);
           if (signal.aborted) onAbort();
           else signal.addEventListener('abort', onAbort, { once: true });
         });

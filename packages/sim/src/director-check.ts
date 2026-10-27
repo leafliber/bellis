@@ -19,6 +19,21 @@ interface Expected {
 
 const FALLBACK_ID = /^director:.+:fallback:\d+$/u;
 
+/**
+ * 仿真里按块回放的说话意图的开头：`action` 为说话，`replyTo`（null 或字符串）在 `text` 之前，到文本的开引号为止
+ * （场景按这个键序生成，见 scenario.ts 的 `streamReplay`）。
+ */
+const SPEAK_HEAD = /^\{"action":"speak","replyTo":(null|"([^"\\]*)"),"text":"/u;
+
+/** 送出的原始输出里文本已经送出的部分：仿真的文本不含需要转义的字符，到下一个引号为止。 */
+function streamedText(raw: string): string {
+  const head = SPEAK_HEAD.exec(raw);
+  if (!head) return '';
+  const rest = raw.slice(head[0].length);
+  const end = rest.indexOf('"');
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
 /** 模型给出了输出：按决策插件的规则（整段解析、回应对象须在本次上下文里）推出结局。 */
 function classify(output: string, candidates: readonly string[]): Outcome {
   const parsed = parseIntent(output);
@@ -31,14 +46,35 @@ function classify(output: string, candidates: readonly string[]): Outcome {
 }
 
 /**
- * 决策模型失败的不变量（见决策模型“失败与降级”）。每次调用的结局由回放模型的记录独立推出：先到的中止
- * （截止时间到点算超时，否则是取消）、出错，或给出的输出（非法、回应对象不在上下文中算失败）。出错给出之后、
- * 决策插件处理之前到达的取消（同一时刻别的定时器触发）让这次调用算作取消；给出输出之后再到的取消不改变结局。
- * 1. 失败与取消的调用不产生任何发言；超时的调用晚到的输出（{@link LATE_TEXT}）从不交给发声；成功的说话意图
- *    恰好交给发声一次，文本不变；
- * 2. 过渡语只在超时或出错、且这次取到了候选时播，每一串连续失败至多一句（成功才清零，取消不算）；
+ * 已经开口的调用给出了输出：整段合法、仍是说话、回应对象与送出的文本都与开口时一致才算成功（发言已经交给发声，
+ * 不再另交），否则是非法输出。
+ */
+function classifyOpened(output: string, replyTo: string | null): Outcome {
+  const parsed = parseIntent(output);
+  const action = parsed.ok ? parsed.action : undefined;
+  if (
+    action?.action === 'speak' &&
+    (action.replyTo ?? null) === replyTo &&
+    action.text === streamedText(output)
+  )
+    return { kind: 'success', speech: undefined };
+  return { kind: 'failure', failure: 'invalid_output', callFailed: false };
+}
+
+/**
+ * 决策模型失败与增量开口的不变量（见决策模型“解析”与“失败与降级”）。每次调用的结局由回放模型的记录独立推出：
+ * 先到的中止（截止时间到点算超时，否则是取消）、出错，或给出的输出（非法、回应对象不在上下文中算失败）。出错给出
+ * 之后、决策插件处理之前到达的取消（同一时刻别的定时器触发）让这次调用算作取消；给出输出之后再到的取消不改变结局。
+ * 1. 失败与取消的调用不产生任何发言（开口的除外，见 4）；超时的调用晚到的输出（{@link LATE_TEXT}）从不交给发声；
+ *    成功、没有开口的说话意图恰好交给发声一次，文本不变；
+ * 2. 过渡语只在超时或出错、这次取到了候选、且没有开口时播，每一串连续失败至多一句（成功才清零，取消不算）；
  * 3. 连续失败每满 {@link ALARM_AFTER} 次记一次告警（`director.alarmed`），告警（含漂移告警）之后安全核随即收到
- *    降级请求，模式随之下降（已在安全停止时不变）。
+ *    降级请求，模式随之下降（已在安全停止时不变）；
+ * 4. 增量开口（按块回放 `llm.chunk`）：送出的输出以说话意图的开头（`replyTo` 在 `text` 之前）开始、回应对象为 null
+ *    或在本次上下文里时，送出这个开头的那一块之后立即有一个文本为流的发声请求，此外没有流式的发声请求；开口之后
+ *    这次调用不再被取消；开口的调用给出的输出与开口时的回应对象与文本一致才算成功，否则是非法输出；出错与超时
+ *    照常算失败。开口的发言在调用成功之前（或调用失败之后）从不完整结束，它开始播出的句子依次都在这次调用已经
+ *    送出的文本里。
  * 各次启动分别计（新进程里的决策插件从零开始）。
  */
 export function checkDirector(history: History): string[] {
@@ -54,6 +90,17 @@ export function checkDirector(history: History): string[] {
   let downgradeFrom: string | undefined;
   /** 已经出错、还要看决策插件处理之前有没有取消先到的调用。 */
   let failedCall: { call: number; kind: string } | undefined;
+  /** 每次调用已经送出的块拼起来的原始输出。 */
+  let raw = new Map<number, string>();
+  /** 刚送出说话意图开头、应当立即开口的调用。 */
+  let pendingOpen: { call: number; replyTo: string | null; seq: number } | undefined;
+  /** 开口的调用：发言编号与回应对象；开口的发言属于哪次调用。 */
+  let opened = new Map<number, { id: string; replyTo: string | null }>();
+  let streamOf = new Map<string, number>();
+  /** 开口的调用的结局（成功或失败）；还没有结局时不在。 */
+  let streamResult = new Map<number, 'success' | 'failure'>();
+  /** 当前世界里每段发言开始播出的句子（字幕）。 */
+  let begun = new Map<string, string[]>();
 
   /** 上一次有结局的调用应当带来的都已出现（下一次调用、重启与结束时核对）。 */
   const settle = () => {
@@ -84,7 +131,12 @@ export function checkDirector(history: History): string[] {
   const decide = (call: number, outcome: Outcome) => {
     if (decided.has(call)) return;
     decided.add(call);
-    if (outcome.kind === 'cancelled') return;
+    if (outcome.kind === 'cancelled') {
+      if (opened.has(call)) violations.push(`第 ${call} 次调用开口之后被取消`);
+      return;
+    }
+    if (opened.has(call))
+      streamResult.set(call, outcome.kind === 'success' ? 'success' : 'failure');
     if (outcome.kind === 'success') {
       streak = 0;
       fallbackUsed = false;
@@ -93,7 +145,8 @@ export function checkDirector(history: History): string[] {
     }
     streak += 1;
     const waiting = (candidates.get(call)?.length ?? 0) > 0;
-    const fallback = outcome.callFailed && waiting && !fallbackUsed;
+    // 已经开口：观众已经听到了这次回应的开头，不播过渡语。
+    const fallback = outcome.callFailed && waiting && !fallbackUsed && !opened.has(call);
     if (fallback) fallbackUsed = true;
     expected = {
       call,
@@ -103,13 +156,47 @@ export function checkDirector(history: History): string[] {
     };
   };
 
+  /** 开口的发言写回时：调用成功之前不完整结束；开始播出的句子依次都在已经送出的文本里。 */
+  const checkStreamed = (id: string, end: unknown) => {
+    const call = streamOf.get(id);
+    if (call === undefined) return;
+    const result = streamResult.get(call);
+    if (end === 'complete' && result !== 'success') {
+      violations.push(
+        `第 ${call} 次调用开口的发言 ${id} 在调用${result === undefined ? '有结局之前' : '失败之后'}完整结束`,
+      );
+    }
+    const sent = streamedText(raw.get(call) ?? '');
+    let at = 0;
+    for (const subtitle of begun.get(id) ?? []) {
+      const found = sent.indexOf(subtitle, at);
+      if (found < 0) {
+        violations.push(`发言 ${id} 播出的“${subtitle}”不在第 ${call} 次调用已经送出的文本里`);
+        break;
+      }
+      at = found + subtitle.length;
+    }
+  };
+
   for (const entry of history.trace) {
     const call = Number(entry.data.call);
-    // 决策插件处理出错的结果（发言、告警）或开始下一次调用之前，先定下那次出错的结局。
+    const directorStream =
+      entry.kind === 'speech.requested' &&
+      entry.data.text === null &&
+      String(entry.data.id).startsWith('director:') &&
+      !FALLBACK_ID.test(String(entry.data.id));
+    if (pendingOpen && !directorStream) {
+      violations.push(
+        `第 ${pendingOpen.call} 次调用送出了说话意图的开头（第 ${pendingOpen.seq} 条追踪），却没有立即开口`,
+      );
+      pendingOpen = undefined;
+    }
+    // 决策插件处理出错的结果（发言、告警、开口的发言因此结束）或开始下一次调用之前，先定下那次出错的结局。
     if (
       entry.kind === 'world.start' ||
       entry.kind === 'llm.request' ||
       (entry.kind === 'speech.requested' && String(entry.data.id).startsWith('director:')) ||
+      (entry.kind === 'fact.utterance' && streamOf.has(String(entry.data.id))) ||
       entry.kind === 'fact.director.alarmed'
     )
       commitError();
@@ -121,6 +208,11 @@ export function checkDirector(history: History): string[] {
         streak = 0;
         fallbackUsed = false;
         mode = 'safe-stop';
+        raw = new Map();
+        opened = new Map();
+        streamOf = new Map();
+        streamResult = new Map();
+        begun = new Map();
         break;
       case 'control.mode': {
         const next = String(entry.data.mode);
@@ -136,6 +228,17 @@ export function checkDirector(history: History): string[] {
         settle();
         candidates.set(call, (entry.data.candidates as string[] | undefined) ?? []);
         break;
+      case 'llm.chunk': {
+        const before = raw.get(call) ?? '';
+        const now = before + String(entry.data.delta);
+        raw.set(call, now);
+        const head = SPEAK_HEAD.exec(now);
+        if (!head || SPEAK_HEAD.test(before) || opened.has(call) || decided.has(call)) break;
+        const replyTo = head[1] === 'null' ? null : (head[2] as string);
+        if (replyTo === null || candidates.get(call)?.includes(replyTo))
+          pendingOpen = { call, replyTo, seq: entry.seq };
+        break;
+      }
       case 'llm.aborted':
         if (entry.data.afterResult === true) {
           if (failedCall?.call === call) {
@@ -155,9 +258,17 @@ export function checkDirector(history: History): string[] {
         commitError();
         failedCall = { call, kind: String(entry.data.kind) };
         break;
-      case 'llm.output':
-        decide(call, classify(String(entry.data.output), candidates.get(call) ?? []));
+      case 'llm.output': {
+        const output = String(entry.data.output);
+        const stream = opened.get(call);
+        decide(
+          call,
+          stream
+            ? classifyOpened(output, stream.replyTo)
+            : classify(output, candidates.get(call) ?? []),
+        );
         break;
+      }
       case 'speech.requested': {
         const id = String(entry.data.id);
         const text = entry.data.text;
@@ -170,12 +281,32 @@ export function checkDirector(history: History): string[] {
               `过渡语 ${id} 不在一串连续失败里第一次超时或出错之后（第 ${entry.seq} 条追踪）`,
             );
           if (text !== FALLBACK_LINE) violations.push(`过渡语 ${id} 不是配置的那一句`);
+        } else if (directorStream) {
+          if (pendingOpen) {
+            opened.set(pendingOpen.call, { id, replyTo: pendingOpen.replyTo });
+            streamOf.set(id, pendingOpen.call);
+            pendingOpen = undefined;
+          } else {
+            violations.push(
+              `流式发言 ${id} 不是在一次调用刚送出说话意图的开头时请求的（第 ${entry.seq} 条追踪）`,
+            );
+          }
         } else if (id.startsWith('director:')) {
           if (expected !== undefined && expected.speech === text) expected.speech = undefined;
           else violations.push(`发言 ${id} 不来自一次成功的模型调用（第 ${entry.seq} 条追踪）`);
         }
         break;
       }
+      case 'page.begin': {
+        const id = String(entry.data.sentenceId).replace(/#\d+$/u, '');
+        const list = begun.get(id) ?? [];
+        list.push(String(entry.data.subtitle));
+        begun.set(id, list);
+        break;
+      }
+      case 'fact.utterance':
+        checkStreamed(String(entry.data.id), entry.data.end);
+        break;
       case 'fact.director.alarmed': {
         if (entry.data.cause === 'failures') {
           if (expected?.alarm !== undefined && expected.alarm === entry.data.count)
@@ -198,6 +329,7 @@ export function checkDirector(history: History): string[] {
       }
     }
   }
+  if (pendingOpen) violations.push(`第 ${pendingOpen.call} 次调用送出了说话意图的开头，却没有开口`);
   commitError();
   settle();
   return violations;
