@@ -289,12 +289,21 @@ export interface ReviewSettings {
 }
 
 /**
+ * 放行环节拦下一句：`block` 为原因。`abandon` 为 true 时这一句所属发言剩下的句子一并放弃（不给句键的否决，
+ * 见发声“M1 的逐句放行”）：仲裁不再处理后续句子，发言就此结束。
+ */
+export interface ReviewVerdict {
+  block: string;
+  abandon?: true;
+}
+
+/**
  * M1 的逐句放行环节：仲裁在 M1 下每句播出前交给它，放行时返回 undefined，
- * 被否决、超时或因停止与模式变化撤回时返回拦下的原因。
+ * 被否决、超时或因停止与模式变化撤回时返回拦下的结论。
  */
 export interface Review {
   readonly settings: ReviewSettings;
-  hold(sentence: HeldSentence, signal: AbortSignal): Promise<string | undefined>;
+  hold(sentence: HeldSentence, signal: AbortSignal): Promise<ReviewVerdict | undefined>;
 }
 
 export const ReviewService = defineService<Review>('speech.review', 1);

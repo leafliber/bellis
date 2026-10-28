@@ -275,19 +275,27 @@ test('命令行（RPC）与操作台（HTTP）调同一套操作员动作：结�
 test('等待放行的句子：状态里看得到等待方式与等了多久；逐句或全部放行、否决经控制通道送达', async () => {
   const s = await setup();
   try {
-    // 代替 speech-review：控制通道上的放行与否决记成结束事件。
+    // 代替 speech-review：控制通道上的放行与否决记成结束事件；不给句键的否决带 abandoned。
     s.core.control.subscribe((signal) => {
       if (signal.kind !== 'release' && signal.kind !== 'veto') return;
-      for (const key of signal.key === undefined ? ['u1#0', 'u1#1', 'u2#0'] : [signal.key]) {
+      for (const key of signal.key === undefined
+        ? ['u1#0', 'u1#1', 'u2#0', 'u3#0']
+        : [signal.key]) {
         if (!held.has(key)) continue;
         held.delete(key);
         if (signal.kind === 'release') s.core.record('speech.released', { key, by: 'operator' });
         else
-          s.core.record('speech.vetoed', { key, subtitle: `字幕 ${key}`, reason: signal.reason });
+          s.core.record('speech.vetoed', {
+            key,
+            utteranceId: key.split('#')[0],
+            subtitle: `字幕 ${key}`,
+            reason: signal.reason,
+            ...(signal.key === undefined ? { abandoned: true } : {}),
+          });
       }
     });
     const held = new Set<string>();
-    for (const key of ['u1#0', 'u1#1', 'u2#0']) {
+    for (const key of ['u1#0', 'u1#1', 'u2#0', 'u3#0']) {
       held.add(key);
       s.core.record('speech.held', {
         key,
@@ -307,6 +315,7 @@ test('等待放行的句子：状态里看得到等待方式与等了多久；�
         ['u1#0', 'approve', 30_000, 1500, '字幕 u1#0'],
         ['u1#1', 'approve', 30_000, 1500, '字幕 u1#1'],
         ['u2#0', 'approve', 30_000, 1500, '字幕 u2#0'],
+        ['u3#0', 'approve', 30_000, 1500, '字幕 u3#0'],
       ],
     );
 
@@ -319,9 +328,23 @@ test('等待放行的句子：状态里看得到等待方式与等了多久；�
       ok: true,
       released: [],
     });
+    // 给句键的否决只针对那一句，不放弃发言。
+    assert.deepEqual((await s.http('POST', '/api/veto', { key: 'u3#0' })).body, {
+      ok: true,
+      vetoed: ['u3#0'],
+      abandoned: [],
+    });
+    // 不给句键：否决全部等待中的句子，并列出就此放弃的发言。
     assert.deepEqual(await s.cli.request(OperatorMethod.Veto, {}), {
       ok: true,
       vetoed: ['u1#1', 'u2#0'],
+      abandoned: ['u1', 'u2'],
+    });
+    // 此刻没有句子在等待：什么也不做。
+    assert.deepEqual((await s.http('POST', '/api/veto', {})).body, {
+      ok: true,
+      vetoed: [],
+      abandoned: [],
     });
     const after = (await s.http('GET', '/api/status')).body as OperatorStatus & {
       alerts: Array<{ type: string; text: string }>;
@@ -329,7 +352,11 @@ test('等待放行的句子：状态里看得到等待方式与等了多久；�
     assert.deepEqual(after.held, []);
     assert.deepEqual(
       after.alerts.map((a) => a.text),
-      ['已否决：字幕 u1#1', '已否决：字幕 u2#0'],
+      [
+        '已否决：字幕 u3#0',
+        '已否决，并放弃这段发言剩下的句子：字幕 u1#1',
+        '已否决，并放弃这段发言剩下的句子：字幕 u2#0',
+      ],
     );
   } finally {
     await s.close();

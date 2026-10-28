@@ -676,9 +676,17 @@ byId('preflight-run').addEventListener('click', async () => {
   say(failures.length === 0 ? '开播预检全部通过' : `开播预检有 ${failures.length} 项未通过`);
 });
 
+// 全部否决：否决此刻等待中的句子，并放弃它们所属发言剩下的句子（发声“M1 的逐句放行”）。
 byId('veto-all').addEventListener('click', async () => {
   const data = await act('/api/veto', {}, '全部否决');
-  if (data) say(`已否决 ${Array.isArray(data.vetoed) ? data.vetoed.length : 0} 句`);
+  if (!data) return;
+  const vetoed = Array.isArray(data.vetoed) ? data.vetoed.length : 0;
+  const abandoned = Array.isArray(data.abandoned) ? data.abandoned.length : 0;
+  say(
+    vetoed === 0
+      ? '没有等待放行的句子，什么也没有否决'
+      : `已否决 ${vetoed} 句，并放弃所属的 ${abandoned} 段发言剩下的句子`,
+  );
 });
 
 byId('logout').addEventListener('click', async () => {
