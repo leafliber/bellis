@@ -306,4 +306,4 @@ export interface Review {
   hold(sentence: HeldSentence, signal: AbortSignal): Promise<ReviewVerdict | undefined>;
 }
 
-export const ReviewService = defineService<Review>('speech.review', 1);
+export const ReviewService = defineService<Review>('speech.review', 2);
