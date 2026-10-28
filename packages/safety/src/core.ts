@@ -410,7 +410,10 @@ export class SafetyCore {
     }
   }
 
-  /** 操作员否决 M1 中等待放行的句子（key 为空时否决全部），经控制通道送到持有它们的插件。 */
+  /**
+   * 操作员否决 M1 中等待放行的句子，经控制通道送到持有它们的插件。key 为空时否决全部，并放弃它们所属发言
+   * 剩下的句子（见发声“M1 的逐句放行”）。
+   */
   veto(key: string | undefined): void {
     this.control.broadcast({ kind: 'veto', key, reason: '操作员否决' });
   }

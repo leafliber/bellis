@@ -1,25 +1,32 @@
 import { ClockService, definePlugin, type TimerHandle } from '@bellis/kernel';
 import { SafetyService } from '@bellis/safety';
 import Type from 'typebox';
-import { type HeldSentence, type Review, ReviewService, type ReviewSettings } from './types.ts';
+import {
+  type HeldSentence,
+  type Review,
+  ReviewService,
+  type ReviewSettings,
+  type ReviewVerdict,
+} from './types.ts';
 
 interface Pending {
   sentence: HeldSentence;
   timer: TimerHandle;
-  done(reason: string | undefined): void;
+  done(verdict: ReviewVerdict | undefined): void;
   detach(): void;
 }
 
 type Ending =
   | { event: 'released'; by: 'operator' | 'delay' }
-  | { event: 'vetoed'; reason: string }
+  | { event: 'vetoed'; reason: string; abandon: boolean }
   | { event: 'withdrawn'; reason: string; timedOut?: true };
 
 /**
  * M1 的逐句放行环节，两种方式（配置 `mode`）：
  * - `delay`（缺省）：每句播出前等待 profile 配置的延迟，期满放行；期间操作员可以否决，也可以提前放行。
  * - `approve`：每句等操作员放行才播出；超过 `approveTimeoutMs` 没放行就撤回，不播出。
- * 否决与放行都经安全核的控制通道送到这里（`pnpm operator veto` / `release`，或操作台）。
+ * 否决与放行都经安全核的控制通道送到这里（`pnpm operator veto` / `release`，或操作台）。给句键时只针对那一句；
+ * 不给句键的否决否决此刻等待中的句子，并告诉仲裁放弃它们所属发言剩下的句子（`abandon`，事实里记 `abandoned`）。
  * 每句等待恰好以一个事件结束：放行 `speech.released`（`by` 为 operator 或 delay）、否决 `speech.vetoed`，
  * 或撤回 `speech.withdrawn`（超时、停止、模式变化、发言中止、插件停用；都不播出）。
  */
@@ -58,7 +65,11 @@ export const speechReview = definePlugin({
       clock.clearTimeout(item.timer);
       item.detach();
       if (ending.event === 'vetoed') {
-        safety.record('speech.vetoed', { ...item.sentence, reason: ending.reason });
+        safety.record('speech.vetoed', {
+          ...item.sentence,
+          reason: ending.reason,
+          ...(ending.abandon ? { abandoned: true } : {}),
+        });
       } else if (ending.event === 'released') {
         safety.record('speech.released', { key, by: ending.by });
       } else {
@@ -68,7 +79,13 @@ export const speechReview = definePlugin({
           ...(ending.timedOut ? { timedOut: true } : {}),
         });
       }
-      item.done(ending.event === 'released' ? undefined : ending.reason);
+      item.done(
+        ending.event === 'released'
+          ? undefined
+          : ending.event === 'vetoed' && ending.abandon
+            ? { block: ending.reason, abandon: true }
+            : { block: ending.reason },
+      );
     };
     const withdrawAll = (reason: string) => {
       for (const key of [...pending.keys()]) settle(key, { event: 'withdrawn', reason });
@@ -78,8 +95,10 @@ export const speechReview = definePlugin({
     ctx.register(
       safety.onControl((signal) => {
         if (signal.kind === 'veto') {
+          // 不给句键：否决此刻等待中的句子，并放弃它们所属发言剩下的句子。
+          const abandon = signal.key === undefined;
           for (const key of keysOf(signal.key))
-            settle(key, { event: 'vetoed', reason: signal.reason });
+            settle(key, { event: 'vetoed', reason: signal.reason, abandon });
         } else if (signal.kind === 'release') {
           for (const key of keysOf(signal.key)) settle(key, { event: 'released', by: 'operator' });
         } else if (signal.kind === 'stop') {
@@ -94,8 +113,8 @@ export const speechReview = definePlugin({
     const review: Review = {
       settings,
       hold(sentence, signal) {
-        if (ctx.signal.aborted) return Promise.resolve('放行环节停用');
-        if (signal.aborted) return Promise.resolve('发言已中止');
+        if (ctx.signal.aborted) return Promise.resolve({ block: '放行环节停用' });
+        if (signal.aborted) return Promise.resolve({ block: '发言已中止' });
         return new Promise((resolve) => {
           const key = sentence.key;
           const onAbort = () => settle(key, { event: 'withdrawn', reason: '发言已中止' });

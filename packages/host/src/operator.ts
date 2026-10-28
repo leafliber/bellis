@@ -147,7 +147,11 @@ export interface OperatorApi {
   /** 确认在场（M2 的前提）。 */
   presence(): { ok: true };
   emergencyStop(params: OperatorEmergencyParams): Promise<EmergencyReport>;
-  veto(params: OperatorVetoParams): { ok: true; vetoed: string[] };
+  /**
+   * 否决等待中的句子，`vetoed` 是被否决的句键。不给句键时还放弃这些句子所属发言剩下的句子，`abandoned` 是
+   * 就此结束的发言编号（取自放行环节记下的、带 `abandoned` 的 `speech.vetoed`）；给句键时为空。
+   */
+  veto(params: OperatorVetoParams): { ok: true; vetoed: string[]; abandoned: string[] };
   release(params: OperatorReleaseParams): { ok: true; released: string[] };
   preflight(params: OperatorPreflightParams): Promise<{ target: Target; failures: string[] }>;
   consoleLogin(): OperatorConsoleLoginResult | { ok: false; reason: string };
@@ -178,7 +182,10 @@ const ALERTS: Record<string, (data: Record<string, unknown>) => string | undefin
       : `OBS 外部静音了 Stage 源「${d.input}」${d.resync === true ? '（重连后核对发现）' : ''}`,
   'watchdog.acted': (d) =>
     `看门狗已执行应急动作（${d.reason}，OBS ${d.ok === true ? '已确认' : '未确认'}）`,
-  'speech.vetoed': (d) => `已否决：${d.subtitle}`,
+  'speech.vetoed': (d) =>
+    d.abandoned === true
+      ? `已否决，并放弃这段发言剩下的句子：${d.subtitle}`
+      : `已否决：${d.subtitle}`,
   'speech.withdrawn': (d) => (d.timedOut === true ? `等待放行超时，已撤回：${d.key}` : undefined),
   'moderation.switched': (d) => (d.enabled === true ? '审核插件已启用' : '审核插件已关闭'),
   'tts.switched': (d) => `TTS 换引擎：${d.from ?? '无'} → ${d.to ?? '无'}（${d.reason}）`,
@@ -210,9 +217,18 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
   const held = new Map<string, { entry: Omit<HeldEntry, 'heldAt' | 'waitedMs'>; at: number }>();
   const alerts: Alert[] = [];
   let lastPreflight: PreflightRecord | null = null;
+  /** 正在送出的否决：收集放行环节就此放弃的发言编号。 */
+  let abandoning: Set<string> | undefined;
 
   const unsubscribe = deps.subscribe((event) => {
     const data = isRecord(event.data) ? event.data : {};
+    if (
+      event.type === 'speech.vetoed' &&
+      data.abandoned === true &&
+      typeof data.utteranceId === 'string'
+    ) {
+      abandoning?.add(data.utteranceId);
+    }
     if (event.type === 'speech.held' && typeof data.key === 'string') {
       held.set(data.key, {
         entry: data as unknown as Omit<HeldEntry, 'heldAt' | 'waitedMs'>,
@@ -323,7 +339,14 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
       return core.emergencyStop(reason ?? '操作员急停');
     },
     veto({ key }) {
-      return { ok: true, vetoed: settled(key, () => core.veto(key)) };
+      const abandoned = new Set<string>();
+      abandoning = abandoned;
+      try {
+        const vetoed = settled(key, () => core.veto(key));
+        return { ok: true, vetoed, abandoned: [...abandoned] };
+      } finally {
+        abandoning = undefined;
+      }
     },
     release({ key }) {
       return { ok: true, released: settled(key, () => core.release(key)) };

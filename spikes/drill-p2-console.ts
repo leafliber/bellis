@@ -25,26 +25,30 @@
  * “等待放行”里操作：
  * - A 逐句放行：每一句都点“放行”；
  * - B 放行一句后否决下一句：第 1 句放行，第 2 句点它的“否决”，之后的句子逐句放行；
- * - C 全部否决：每出现一句等待放行，就点“全部否决”；
+ * - C 全部否决：第 1 句出现在等待放行里时点一次“全部否决”；
  * - D 等待放行超时：不操作。
  * 阶段之间不用按键：回应结束（`utterance.played`）即核对，然后等下一条弹幕（回放从进入 M1 起按固定时刻送出，不能
  * 按需送出）。每个阶段从它的弹幕到点起至多 --phase-ms，下一条弹幕也在这时送出；到时回应还没结束记为失败样本，
  * 不剔除。阶段开始时不在 M1（例如被急停）就记下来并重新进入 M1。最后请操作员目视确认近期告警与审核状态，停止会话
  * （宿主计划内停止：切安全场景并静音）。宿主就绪之后在本终端按 Ctrl+C 中止：当前步骤结束后停止会话、恢复 OBS。
  *
- * 发声“M1 的逐句放行”：被否决或撤回的句子跳过、不播出，不给句键的否决针对全部等待中的句子。仲裁逐句处理，一句播完
- * 或跳过之后才把下一句交给放行环节，所以等待中的句子至多一句：“全部否决”只否决此刻等待的那一句，发言随后的句子
- * 照常逐句等待放行。阶段 C 因此要每句点一次，阶段 B 否决之后的句子也要逐句放行。
+ * 发声“M1 的逐句放行”：被否决或撤回的句子跳过、不播出。仲裁逐句处理，一句播完或跳过之后才把下一句交给放行环节，
+ * 所以等待中的句子至多一句。单句的“否决”（给句键）只跳过那一句，发言随后的句子照常逐句等待放行，所以阶段 B 否决
+ * 之后的句子要逐句放行；“全部否决”（不给句键）否决此刻等待的那一句，并放弃这段发言剩下的句子，所以阶段 C 只点
+ * 一次。
  *
  * 核对（依据是状态存储里的事实序号与类型；每秒经操作员连接读一次 status，它与操作台的 `/api/status` 相同，只是没有
  * 近期告警）：
  * - 每个阶段：这条弹幕的回应（决策插件的一段 `danmaku-reply` 发言）在时限内结束；进入放行环节的句数与写好的相同
- *   （--model replay）；每一句都先进入等待（`speech.held`），且在上一句结束（播完或跳过）之后才进入；阶段中一直在 M1。
+ *   （--model replay；C 除外，见下）；每一句都先进入等待（`speech.held`），且在上一句结束（播完或跳过）之后才进入；
+ *   阶段中一直在 M1。
  * - A：每句都由操作员放行（`speech.released`，by 为 operator），之后才授权（`intent.authorized`）、开始执行
  *   （`intent.started`）并完整播出（`intent.succeeded` 的 complete）；写回（`utterance.played`）为 complete、没有跳过。
- * - B：第 1 句同 A；第 2 句被否决（`speech.vetoed`），没有授权、没有执行，记为跳过（`sentence.skipped`）；之后的
- *   句子在否决之后照常进入等待、放行后播出；写回只跳过第 2 句。
- * - C：每一句都被否决，没有任何一句授权或执行；写回为空、全部跳过。
+ * - B：第 1 句同 A；第 2 句被单句否决（`speech.vetoed`，不带 `abandoned`），没有授权、没有执行，记为跳过
+ *   （`sentence.skipped`）；之后的句子在否决之后照常进入等待、放行后播出；写回只跳过第 2 句。
+ * - C：第 1 句被全部否决（`speech.vetoed`，带 `abandoned`），没有授权、没有执行，记为跳过；其余句子不再进入等待
+ *   （没有任何事实），没有授权与执行；写回（`utterance.played`）为 stopped，只跳过第 1 句，只含已播出的部分
+ *   （这里为空）。
  * - D：每一句等满 --approve-timeout-ms 后撤回（`speech.withdrawn`，timedOut），没有授权与执行；等待中 status 的 held
  *   列出这一句（等待方式 approve），结束后不再列出。近期告警（“等待放行超时，已撤回”）由这条事实生成，只在操作台的
  *   `/api/status` 里；本演练不登录操作台，由操作员目视确认。
@@ -53,8 +57,9 @@
  * - 操作台：宿主日志里操作台登录（`console.login`）与拒绝请求（`console.refused`）的次数。
  *
  * 局限：只演练 approve；delay（固定延迟，期间可否决或提前放行）走同一条否决与放行的路径，计时不同，不在其中。脚本
- * 分不出操作员点的是“全部否决”还是单句的“否决”（记的事实相同），也分不出操作来自操作台还是命令行；按钮点了没有、
- * 页面显示什么，只能靠事实与目视确认。status 每秒读一次，放行很快的句子可能没被读到在等待中（只有 D 要求读到）。
+ * 按 `speech.vetoed` 带不带 `abandoned` 分辨“全部否决”与单句的“否决”，但分不出操作来自操作台还是命令行；按钮点了
+ * 没有、页面显示什么，只能靠事实与目视确认。--model real 时 C 的回应若只有 1 句，放弃剩下的句子这一点无从核对。
+ * status 每秒读一次，放行很快的句子可能没被读到在等待中（只有 D 要求读到）。
  *
  * 推流进行中、或有别的 Bellis 进程在运行时拒绝运行。会切换节目场景、静音 Stage 源并改写 Stage 浏览器源的 URL；
  * 结束后把节目场景、静音与 Stage 源的设置（含 URL）恢复原样并读回比对。结果写 <前缀>.json（缺省
@@ -124,8 +129,8 @@ export const PHASES: readonly PhaseSpec[] = [
     label: 'C 全部否决',
     danmaku: '主播分几句聊聊最近看的动画？',
     reply: '这一段要全部否决。每一句都不该播出。听到声音就说明有问题。',
-    guide: (n) =>
-      `回应${count(n)}每出现一句等待放行，就点“等待放行”上方的“全部否决”（一次只等一句，要每句点一次），直到不再出现新的句子。`,
+    guide: (n, sec) =>
+      `回应${count(n)}第 1 句出现在“等待放行”里时，点上方的“全部否决”一次（至多等 ${sec} 秒）：这一句被否决，这段回应剩下的句子不再出现、不会播出。`,
   },
   {
     name: 'timeout',
@@ -238,6 +243,8 @@ interface SentenceTrace {
     at: number;
     by?: unknown;
     timedOut?: boolean;
+    /** 全部否决（不给句键）：这段发言剩下的句子一并放弃。 */
+    abandoned?: boolean;
   };
   skipped?: number;
   authorized?: { seq: number; id: number };
@@ -277,6 +284,7 @@ export function sentenceTraces(events: readonly StoreEvent[], utterance: string)
         at: e.recordedAt,
         ...(e.type === 'speech.released' ? { by: d.by } : {}),
         ...(e.type === 'speech.withdrawn' ? { timedOut: d.timedOut === true } : {}),
+        ...(e.type === 'speech.vetoed' ? { abandoned: d.abandoned === true } : {}),
       };
     } else if (e.type === 'sentence.skipped' && d.utteranceId === utterance) {
       of(`${prefix}${String(d.index)}`).skipped = e.seq;
@@ -341,13 +349,14 @@ export function verifyPhase(
   const nth = (s: SentenceTrace) => `第 ${s.index + 1} 句`;
   const describe = (s: SentenceTrace) =>
     s.ending
-      ? `${s.ending.type}${s.ending.by === undefined ? '' : `/${String(s.ending.by)}`}${s.ending.timedOut ? '/timedOut' : ''}`
+      ? `${s.ending.type}${s.ending.by === undefined ? '' : `/${String(s.ending.by)}`}${s.ending.timedOut ? '/timedOut' : ''}${s.ending.abandoned ? '/abandoned' : ''}`
       : '没有结束等待';
 
   if (!seen.ended) problems.push('阶段超时：到时这段回应还没结束');
   const off = [...new Set(seen.modes.filter((m) => m !== 'M1'))];
   if (off.length > 0) problems.push(`阶段中模式不是 M1：${off.join('、')}`);
-  if (seen.expected !== undefined && sentences.length !== seen.expected)
+  // C 的句数在下面核对：全部否决之后剩下的句子不再进入放行环节。
+  if (name !== 'veto-all' && seen.expected !== undefined && sentences.length !== seen.expected)
     problems.push(`这段回应有 ${sentences.length} 句进入放行环节，写好的是 ${seen.expected} 句`);
   sentences.forEach((s, i) => {
     if (!s.held) problems.push(`${nth(s)}没有进入放行环节（没有 speech.held）`);
@@ -395,6 +404,8 @@ export function verifyPhase(
     if (!first || !second || rest.length === 0) problems.push('回应不足 3 句，没能做成这个阶段');
     if (first) releasedThenPlayed(first);
     if (second) notPlayed(second, 'vetoed');
+    if (second?.ending?.abandoned)
+      problems.push('第 2 句用的是“全部否决”（应点这一句的“否决”），这段回应剩下的句子因此被放弃');
     for (const s of rest) {
       // 被否决的只是那一句：之后的句子照常进入等待，由操作员逐句放行。
       if (second?.ending && s.held && s.held.seq < second.ending.seq)
@@ -403,12 +414,16 @@ export function verifyPhase(
     }
     writeback('complete', second ? [second.index] : [], true);
   } else if (name === 'veto-all') {
-    for (const s of sentences) notPlayed(s, 'vetoed');
-    writeback(
-      'complete',
-      sentences.map((s) => s.index),
-      false,
-    );
+    const [first, ...rest] = sentences;
+    if (!first) problems.push('没有句子进入放行环节');
+    else {
+      notPlayed(first, 'vetoed');
+      if (first.ending?.type === 'vetoed' && !first.ending.abandoned)
+        problems.push(`${nth(first)}是单句否决（应点“全部否决”），没有放弃剩下的句子`);
+    }
+    // 全部否决放弃这段回应剩下的句子：它们不再进入等待，也没有授权与执行，事实里不该出现。
+    for (const s of rest) problems.push(`${nth(s)}在全部否决之后还有记录（${describe(s)}）`);
+    writeback('stopped', first ? [first.index] : [], false);
   } else {
     for (const s of sentences) {
       notPlayed(s, 'withdrawn');
@@ -440,6 +455,7 @@ export function verifyPhase(
       ending: s.ending ? { type: s.ending.type, seq: s.ending.seq } : null,
       ...(s.ending?.by === undefined ? {} : { by: s.ending.by }),
       ...(s.ending?.timedOut ? { timedOut: true } : {}),
+      ...(s.ending?.abandoned ? { abandoned: true } : {}),
       waitedMs: s.held && s.ending ? s.ending.at - s.held.at : null,
       seenInStatus: seen.heldSeen.includes(s.key),
       skippedSeq: s.skipped ?? null,
