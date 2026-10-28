@@ -1,8 +1,8 @@
 /**
- * P2 真机演练（drill-p2-latency、drill-p2-restart）共用的部分：
+ * P2 真机演练（drill-p2-latency、drill-p2-restart、drill-p2-console）共用的部分：
  * - 读维护者的真实配置（`config/live.json` 与它的 profile、patch），生成演练的临时 patch 与配置：配置原样，只把
  *   状态存储换到系统临时目录（演练的事实与内容不进直播用的事件日志，结束时删除），patch 列表末尾加上演练的 patch；
- * - 像 `pnpm start` 一样用正式的 SecretStore 服务名 bellis 拉起宿主与看门狗，操作员连接、开播预检与进入 M2；
+ * - 像 `pnpm start` 一样用正式的 SecretStore 服务名 bellis 拉起宿主与看门狗，操作员连接、开播预检与进入 M1 或 M2；
  * - 只读打开状态存储（宿主运行中也能读）；
  * - OBS 的盘点、推流检查、恢复与读回核对（见 obs-snapshot.ts）。
  * 报告只写编号、类型、计数与时延：这里给出的辅助都不读、不打印凭据的值，宿主日志（含发言内容）不落盘。
@@ -392,10 +392,11 @@ export class LiveHost {
   }
 
   /**
-   * 像操作员一样回到可以开播的状态并进入 M2：还在输出模式时先急停，切回直播场景、取消静音、确认在场，
-   * 等开播预检通过（本地 TTS 等可能还在加载），再切到 M2；超时仍未通过时抛错，带上未通过的项。
+   * 像操作员一样回到可以开播的状态并进入输出模式（M1 或 M2）：还在输出模式时先急停，切回直播场景、取消静音、
+   * 确认在场（M2 的前提，M1 不要求），等这个模式的开播预检通过（本地 TTS 等可能还在加载），再切过去；超时仍未
+   * 通过时抛错，带上未通过的项。
    */
-  async enterM2(scene: ObsScene, timeoutMs: number): Promise<void> {
+  async enter(scene: ObsScene, target: 'M1' | 'M2', timeoutMs: number): Promise<void> {
     const status = await this.call(OperatorMethod.Status);
     if (status.mode !== 'safe-stop')
       await this.call(OperatorMethod.EmergencyStop, { reason: '演练：复位' });
@@ -406,8 +407,7 @@ export class LiveHost {
     await this.call(OperatorMethod.Presence);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      const failures = (await this.call(OperatorMethod.Preflight, { target: 'M2' }))
-        .failures as string[];
+      const failures = (await this.call(OperatorMethod.Preflight, { target })).failures as string[];
       if (failures.length === 0) break;
       if (Date.now() > deadline)
         throw new Error(
@@ -415,8 +415,13 @@ export class LiveHost {
         );
       await sleep(1000);
     }
-    const m2 = await this.call(OperatorMethod.Mode, { target: 'M2' });
-    if (m2.ok !== true) throw new Error(`进入 M2 失败：${JSON.stringify(m2)}`);
+    const result = await this.call(OperatorMethod.Mode, { target });
+    if (result.ok !== true) throw new Error(`进入 ${target} 失败：${JSON.stringify(result)}`);
+  }
+
+  /** 进入 M2（见 {@link enter}）。 */
+  enterM2(scene: ObsScene, timeoutMs: number): Promise<void> {
+    return this.enter(scene, 'M2', timeoutMs);
   }
 
   /** 强制结束宿主进程（Windows 上是 TerminateProcess），不经停止协议；看门狗随后接管 OBS。 */
