@@ -38,4 +38,10 @@ jobs:
           # 缺省按一组通配符在整个仓库里找依赖文件算缓存键，会遍历 node_modules，Windows 上要十几分钟。
           cache-dependency-glob: uv.lock
       - run: uv sync --locked
+      # 仿真与状态存储的测试在临时目录里开 SQLite（synchronous=FULL）。Windows runner 缺省的 TEMP 在 C: 盘，
+      # 几个测试文件并发落盘时 fsync 慢到超时；改用工作区所在盘上的 RUNNER_TEMP。
+      - if: runner.os == 'Windows'
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - run: pnpm run check
