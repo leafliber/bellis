@@ -11,6 +11,7 @@ import {
   PreCheck,
   type PreCheckVerdict,
   ReviewService,
+  type ReviewVerdict,
   type Sentence,
   SPEECH_INTENT,
   type Speech,
@@ -126,7 +127,8 @@ async function* sentencesOf(
  * - 按来源定优先级（D-33），过期丢弃，按去重键去重；
  * - 更高优先级、且属于可抢占来源的请求，在当前发言声明的可抢占点打断它（句边界或立即）；
  * - 每句先经发声前检查（审核插件），持有 Stage 音频输出许可、经安全核授权后才合成与播放；
- *   每次等待之后都重新检查停止、软收尾与抢占；
+ *   每次等待之后都重新检查停止、软收尾与抢占；M1 下放行环节要求放弃时（不给句键的否决），
+ *   这段发言剩下的句子不再处理，按 `stopped` 结束；
  * - 被打断的发言按 Stage 回报的播放游标截断，只把观众实际听到的部分写回；急停且 OBS 应急静音成功时，
  *   正在播的那一句再扣掉呈现延迟（发声文档“播放游标与写回”）。
  * - 有遥测时（见运维“观测”）：每段发言一个 span（父为请求带来的链路），每句一个 span，其下是发声前检查、
@@ -336,15 +338,19 @@ export const speechArbiter = definePlugin({
       );
     };
 
+    /**
+     * 这一句能不能播：发声前检查，M1 下再经放行环节。放行时为 undefined，拦下时给出原因；放行环节要求放弃
+     * 这段发言剩下的句子时带 `abandon`（不给句键的否决）。
+     */
     const preCheck = async (
       request: SpeechRequest,
       sentence: Sentence,
       previous: string | undefined,
       signal: AbortSignal,
       parent: Span,
-    ) => {
+    ): Promise<ReviewVerdict | undefined> => {
       if (safety.moderationEnabled === true && ctx.optional(ModerationService) === undefined) {
-        return '审核已启用但审核插件不可用';
+        return { block: '审核已启用但审核插件不可用' };
       }
       const checkSpan = tracer.startSpan('speech.pre_check', { parent });
       let verdict: PreCheckVerdict | undefined;
@@ -363,11 +369,11 @@ export const speechArbiter = definePlugin({
       } finally {
         checkSpan.end();
       }
-      if (verdict) return verdict.block;
+      if (verdict) return { block: verdict.block };
       // M1：逐句等待放行，期间操作员可以否决；没有放行环节就一句也不播。
       if (safety.mode !== 'M1') return undefined;
       const review = ctx.optional(ReviewService);
-      if (!review) return 'M1 需要逐句放行环节（speech-review），但它不在场';
+      if (!review) return { block: 'M1 需要逐句放行环节（speech-review），但它不在场' };
       const reviewSpan = tracer.startSpan('speech.review', {
         parent,
         attributes: { 'bellis.review.mode': review.settings.mode },
@@ -461,12 +467,14 @@ export const speechArbiter = definePlugin({
             if (afterCheck) return finish(afterCheck);
             if (blocked !== undefined) {
               fate = 'skipped';
-              result.skipped.push({ index: sentence.index, reason: blocked });
+              result.skipped.push({ index: sentence.index, reason: blocked.block });
               safety.record('sentence.skipped', {
                 utteranceId: request.id,
                 index: sentence.index,
-                reason: blocked,
+                reason: blocked.block,
               });
+              // 不给句键的否决：这段发言剩下的句子一并放弃，不再读流的下一段。
+              if (blocked.abandon) return finish({ end: 'stopped', reason: blocked.block });
               continue;
             }
 

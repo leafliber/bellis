@@ -9,7 +9,7 @@ export type ControlSignal =
    */
   | { kind: 'emergency-completed'; reason: string; obsOk: boolean }
   | { kind: 'mode'; mode: Mode; reason: string }
-  /** M1 中否决等待放行的句子；key 为空时否决全部。 */
+  /** M1 中否决等待放行的句子；key 为空时否决全部，并放弃它们所属发言剩下的句子（由放行环节转告仲裁）。 */
   | { kind: 'veto'; key: string | undefined; reason: string }
   /** M1 中放行等待中的句子（逐句放行，或提前结束固定延迟）；key 为空时放行全部。 */
   | { kind: 'release'; key: string | undefined; reason: string };

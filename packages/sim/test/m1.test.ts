@@ -56,19 +56,21 @@ test('M1：每句先等待固定延迟，期满放行后播出', async () => {
   }
 });
 
-test('M1：等待中被操作员否决的句子不播出并记入事件，后面的句子照常等待放行', async () => {
+test('M1：给句键的否决只跳过那一句，记入事件，后面的句子照常等待放行', async () => {
   const world = await startM1({ review: true });
   try {
     void world.service(SpeechService).request(say('a', '不该说的话。第二句。'));
     await world.until(() => world.events('speech.held').length === 1);
-    world.safety.veto(undefined);
+    world.safety.veto('a#0');
     await world.until(() => played(world).length === 1, 20_000);
     const [a] = played(world);
+    assert.equal(a?.end, 'complete');
     assert.equal(a?.heard, '第二句。');
     assert.deepEqual(a?.skipped, [{ index: 0, reason: '操作员否决' }]);
     const vetoed = world.events('speech.vetoed');
     assert.equal(vetoed.length, 1);
     assert.equal((vetoed[0]?.data as { subtitle?: string } | undefined)?.subtitle, '不该说的话。');
+    assert.equal((vetoed[0]?.data as { abandoned?: boolean } | undefined)?.abandoned, undefined);
     // 被否决的句子没有授权。
     const keys = world.events('intent.authorized').map((e) => (e.data as { key: string }).key);
     assert.ok(!keys.includes('a#0'));
@@ -159,7 +161,7 @@ test('M1 逐句放行：否决的句子不播；等待超时撤回、不播出�
   try {
     void world.service(SpeechService).request(say('a', '第一句。第二句。'));
     await world.until(() => world.events('speech.held').length === 1);
-    world.safety.veto(undefined);
+    world.safety.veto('a#0');
     await world.until(() => world.events('speech.held').length === 2);
     await world.until(() => played(world).length === 1, 20_000);
     const [a] = played(world);
@@ -237,6 +239,169 @@ test('M1 固定延迟期满放行时记为延迟放行', async () => {
       world.events('speech.released').map((e) => e.data),
       [{ key: 'a#0', by: 'delay' }],
     );
+  } finally {
+    await world.close();
+  }
+});
+
+const keysOf = (world: World, type: string) =>
+  world.events(type).map((e) => (e.data as { key: string }).key);
+
+/**
+ * 发言 a 的第 2 句（a#1）在等待中被全部否决之后的共同核对：只有这一句记 `speech.vetoed`（带 abandoned）与
+ * `sentence.skipped`；发言按 stopped 结束，写回只含已播出的第 1 句，`skipped` 只列被否决的那一句。
+ * 剩下的句子没有进入等待、没有授权，由各个测试按句键核对。
+ */
+function assertSecondVetoedAll(world: World) {
+  const [a] = played(world);
+  assert.equal(a?.end, 'stopped');
+  assert.equal(a?.reason, '操作员否决');
+  assert.equal(a?.heard, '第一句。');
+  assert.deepEqual(a?.skipped, [{ index: 1, reason: '操作员否决' }]);
+  assert.deepEqual(
+    world.events('speech.vetoed').map((e) => e.data),
+    [
+      {
+        key: 'a#1',
+        utteranceId: 'a',
+        index: 1,
+        source: 'chatter',
+        subtitle: '第二句。',
+        reason: '操作员否决',
+        abandoned: true,
+      },
+    ],
+  );
+  assert.deepEqual(
+    world.events('sentence.skipped').map((e) => e.data),
+    [{ utteranceId: 'a', index: 1, reason: '操作员否决' }],
+  );
+  assertOneEnding(world);
+}
+
+test('M1 逐句放行：全部否决放弃这段发言剩下的句子，写回只含已播出的部分；下一段发言照常', async () => {
+  const world = await startM1({ review: true, config: APPROVE });
+  try {
+    void world.service(SpeechService).request(say('a', '第一句。第二句。第三句。'));
+    await world.until(() => world.events('speech.held').length === 1);
+    world.safety.release('a#0');
+    await world.until(() => world.events('speech.held').length === 2, 20_000);
+    world.safety.veto(undefined);
+    await world.until(() => played(world).length === 1, 20_000);
+    // 之后再等也没有句子进入等待（approve 的等待上限是 5 秒）。
+    await world.run(10_000);
+    assert.deepEqual(keysOf(world, 'speech.held'), ['a#0', 'a#1']);
+    assert.deepEqual(keysOf(world, 'intent.authorized'), ['a#0']);
+    assertSecondVetoedAll(world);
+
+    // 放弃的只是那一段发言：下一段照常逐句等待放行。
+    void world.service(SpeechService).request(say('b', '下一段。'));
+    await world.until(() => world.events('speech.held').length === 3);
+    world.safety.release('b#0');
+    await world.until(() => played(world).length === 2, 20_000);
+    assert.equal(played(world)[1]?.end, 'complete');
+    assert.equal(played(world)[1]?.heard, '下一段。');
+  } finally {
+    await world.close();
+  }
+});
+
+test('M1 固定延迟：全部否决放弃这段发言剩下的句子，它们不会到点自动放行', async () => {
+  const world = await startM1({ review: true });
+  try {
+    void world.service(SpeechService).request(say('a', '第一句。第二句。第三句。'));
+    // 第 1 句期满放行并播出，第 2 句进入等待时全部否决。
+    await world.until(() => world.events('speech.held').length === 2, 20_000);
+    assert.deepEqual(
+      world.events('speech.released').map((e) => e.data),
+      [{ key: 'a#0', by: 'delay' }],
+    );
+    world.safety.veto(undefined);
+    await world.until(() => played(world).length === 1, 20_000);
+    await world.run(3 * DELAY_MS);
+    assert.deepEqual(keysOf(world, 'speech.held'), ['a#0', 'a#1']);
+    assert.deepEqual(keysOf(world, 'intent.authorized'), ['a#0']);
+    assert.equal(world.events('speech.released').length, 1);
+    assertSecondVetoedAll(world);
+  } finally {
+    await world.close();
+  }
+});
+
+test('M1：此刻没有句子在等待时，全部否决什么也不做', async () => {
+  const world = await startM1({ review: true, config: APPROVE });
+  try {
+    // 还没有发言时。
+    world.safety.veto(undefined);
+    void world.service(SpeechService).request(say('a', '第一句。第二句。'));
+    await world.until(() => world.events('speech.held').length === 1);
+    world.safety.release('a#0');
+    // 第 1 句已放行、第 2 句还没进入等待时。
+    world.safety.veto(undefined);
+    await world.until(() => world.events('speech.held').length === 2, 20_000);
+    world.safety.release('a#1');
+    await world.until(() => played(world).length === 1, 20_000);
+    assert.equal(world.events('speech.vetoed').length, 0);
+    const [a] = played(world);
+    assert.equal(a?.end, 'complete');
+    assert.equal(a?.heard, '第一句。第二句。');
+    assert.deepEqual(a?.skipped, []);
+    assertOneEnding(world);
+  } finally {
+    await world.close();
+  }
+});
+
+/** 记下读了几段、是否被叫停的文本流；每段一句，读取方要就给。 */
+function countedText(chunks: readonly string[]) {
+  const reads = { pulls: 0, returned: false };
+  const text: AsyncIterable<string> = {
+    [Symbol.asyncIterator]: () => ({
+      next: async () => {
+        const value = chunks[reads.pulls];
+        reads.pulls += 1;
+        return value === undefined
+          ? { done: true as const, value: undefined }
+          : { done: false as const, value };
+      },
+      return: async () => {
+        reads.returned = true;
+        return { done: true as const, value: undefined };
+      },
+    }),
+  };
+  return { text, reads };
+}
+
+test('M1：文本为流时，给句键的否决照常读下一段；全部否决之后不再读流的下一段', async () => {
+  const world = await startM1({ review: true, config: APPROVE });
+  try {
+    const speech = world.service(SpeechService);
+    const single = countedText(['第一句。', '第二句。']);
+    void speech.request({ ...say('a', ''), text: single.text });
+    await world.until(() => world.events('speech.held').length === 1);
+    world.safety.veto('a#0');
+    await world.until(() => world.events('speech.held').length === 2, 20_000);
+    assert.equal(single.reads.pulls, 2);
+    world.safety.release('a#1');
+    await world.until(() => played(world).length === 1, 20_000);
+    assert.equal(played(world)[0]?.heard, '第二句。');
+
+    const all = countedText(['第一句。', '第二句。', '第三句。']);
+    void speech.request({ ...say('b', ''), text: all.text });
+    await world.until(() => world.events('speech.held').length === 3);
+    assert.equal(all.reads.pulls, 1);
+    world.safety.veto(undefined);
+    await world.until(() => played(world).length === 2, 20_000);
+    await world.run(10_000);
+    // 只读了第一段：放弃之后叫停了流，不再读下一段。
+    assert.deepEqual(all.reads, { pulls: 1, returned: true });
+    assert.deepEqual(keysOf(world, 'speech.held'), ['a#0', 'a#1', 'b#0']);
+    const b = played(world)[1];
+    assert.equal(b?.end, 'stopped');
+    assert.equal(b?.heard, '');
+    assert.deepEqual(b?.skipped, [{ index: 0, reason: '操作员否决' }]);
+    assertOneEnding(world);
   } finally {
     await world.close();
   }

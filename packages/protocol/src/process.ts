@@ -142,7 +142,10 @@ export const OperatorEmergencyParams = Type.Object(
 );
 export type OperatorEmergencyParams = Static<typeof OperatorEmergencyParams>;
 
-/** 否决指定的句子（`发言编号#句序号`）；不给 key 时否决全部等待中的句子。 */
+/**
+ * 否决指定的句子（`发言编号#句序号`）；不给 key 时否决全部等待中的句子，并放弃它们所属发言剩下的句子
+ * （见发声“M1 的逐句放行”）。
+ */
 export const OperatorVetoParams = Type.Object(
   { key: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })) },
   closed,

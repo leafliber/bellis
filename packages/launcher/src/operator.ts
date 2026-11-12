@@ -5,7 +5,8 @@
  *   pnpm operator mode <M0|M1|M2|M3|safe-stop>
  *   pnpm operator presence
  *   pnpm operator estop [原因]
- *   pnpm operator veto [句键]            M1 中否决等待放行的句子；不给句键时否决全部（句键见 status 的 held）
+ *   pnpm operator veto [句键]            M1 中否决等待放行的句子（句键见 status 的 held）；不给句键时否决全部，
+ *                                        并放弃它们所属发言剩下的句子
  *   pnpm operator release [句键]         M1 中放行等待的句子；不给句键时放行全部
  *   pnpm operator preflight [M1|M2|M3]   只跑开播预检，不切换模式
  *   pnpm operator forget <平台ID>        登记观众删除请求的本地墓碑（B 站为 open_id，见记忆“删除”）
