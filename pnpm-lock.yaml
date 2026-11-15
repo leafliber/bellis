@@ -371,6 +371,9 @@ importers:
       '@bellis/store':
         specifier: workspace:*
         version: link:../store
+      '@bellis/telemetry':
+        specifier: workspace:*
+        version: link:../telemetry
       typebox:
         specifier: 1.3.37
         version: 1.3.37

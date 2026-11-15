@@ -34,10 +34,12 @@ import {
   definePlugin,
   Kernel,
   ManualClock,
+  seededRandom,
 } from '@bellis/kernel';
 import { MemoryService } from '@bellis/memory';
 import {
   GAME_LEASE_REFUSED,
+  type GameActionCommitted,
   type GameCoreHealth,
   type GameDecisionPointOpened,
   type GameGoalSubmitParams,
@@ -66,6 +68,14 @@ import { SimulatedCrash, StateStore } from '@bellis/store';
 import Type from 'typebox';
 import type { PendingCall } from '../../director/test/helpers.ts';
 import { MemoryObs } from '../../sim/src/memory-obs.ts';
+import {
+  MemoryWriter,
+  Metric,
+  type OtlpMetrics,
+  type OtlpTraces,
+  TelemetryCore,
+  TelemetryService,
+} from '../../telemetry/src/index.ts';
 import { createOperator } from '../src/operator.ts';
 import {
   SYNTHETIC_INJECTION,
@@ -93,6 +103,7 @@ type SetupOptions = {
   fault?: (point: string) => void;
   director?: Record<string, unknown>;
   gamePacing?: { holdMs?: number; voiceWaitMs?: number };
+  telemetry?: 'memory' | 'broken';
 };
 
 function addSpeech(
@@ -326,6 +337,39 @@ async function setup(options: SetupOptions = {}) {
   });
   kernel.provideCore(GameRuntimePortService, host.port);
   kernel.provideCore(ClockService, clock);
+  const writer = new MemoryWriter();
+  const telemetry =
+    options.telemetry === 'memory'
+      ? new TelemetryCore({
+          clock,
+          random: seededRandom(3),
+          resource: { 'service.name': 'bellis.host' },
+          writer,
+          maxQueue: 100,
+          batchSize: 100,
+          flushIntervalMs: 0,
+        })
+      : undefined;
+  if (telemetry) kernel.provideCore(TelemetryService, telemetry);
+  if (options.telemetry === 'broken') {
+    const fail = () => {
+      throw new Error('合成遥测故障');
+    };
+    kernel.provideCore(TelemetryService, {
+      tracer: () => ({
+        startSpan: () => ({
+          traceparent: undefined,
+          setAttributes: fail,
+          addEvent: fail,
+          addLink: fail,
+          fail,
+          end: fail,
+        }),
+        record: fail,
+      }),
+      sidecarEnv: () => ({}),
+    });
+  }
   kernel.provideScoped(SafetyService, ({ instanceId, permissions }) =>
     safetyFacade(safety, instanceId, permissions),
   );
@@ -382,6 +426,7 @@ async function setup(options: SetupOptions = {}) {
     safety,
     store,
     operator,
+    telemetryLines: writer.lines,
     model,
     stage,
     async mode() {
@@ -392,6 +437,7 @@ async function setup(options: SetupOptions = {}) {
     async close() {
       await server.close();
       await kernel.shutdown();
+      await telemetry?.close();
       operator.dispose();
       store.close();
     },
@@ -580,6 +626,47 @@ const goal = (h: Harness, goalId = 'g-1'): GameGoalSubmitParams => ({
   expiresAtMs: h.wireNowMs() + 500,
   traceparent: null,
 });
+
+const observedAction = (
+  h: Harness,
+  actionId: string,
+  overrides: Partial<GameActionCommitted>,
+): GameActionCommitted => ({
+  actionId,
+  atMs: h.wireNowMs(),
+  goalId: null,
+  category: 'advance',
+  summary: 'synthetic-private-action-summary',
+  selection: null,
+  traceparent: null,
+  ...overrides,
+});
+
+function samples(h: Harness, name: string) {
+  return h.telemetryLines
+    .flatMap((line) => (JSON.parse(line) as Partial<OtlpMetrics>).resourceMetrics ?? [])
+    .flatMap((resource) => resource.scopeMetrics)
+    .flatMap((scope) => scope.metrics)
+    .filter((metric) => metric.name === name && metric.unit === 's')
+    .flatMap((metric) => metric.histogram.dataPoints)
+    .flatMap((point) => point.exemplars);
+}
+
+function gameSpans(h: Harness) {
+  return h.telemetryLines
+    .flatMap((line) => (JSON.parse(line) as Partial<OtlpTraces>).resourceSpans ?? [])
+    .flatMap((resource) => resource.scopeSpans)
+    .filter(({ scope }) => scope.name === 'game-bridge')
+    .flatMap(({ spans }) => spans);
+}
+
+function gameErrors(h: Harness) {
+  return gameSpans(h).flatMap((span) =>
+    (span.attributes ?? []).flatMap(({ key, value }) =>
+      key === 'error.type' && 'stringValue' in value ? [value.stringValue] : [],
+    ),
+  );
+}
 
 function point(h: Harness, id = 'd-1'): GameDecisionPointOpened {
   return {
@@ -1958,6 +2045,341 @@ test('意图经安全核授权，RPC 应答与动作事实分离，旧连接的�
     );
     assert.equal(late.ok, false);
     unsubscribe();
+  } finally {
+    await h.close();
+  }
+});
+
+const GAME_TRACE_ID = '13131313131313131313131313131313';
+const OPENED_TRACE = `00-${GAME_TRACE_ID}-1111111111111111-01`;
+const RESOLVE_TRACE = `00-${GAME_TRACE_ID}-2222222222222222-01`;
+const ACTION_TRACE = `00-${GAME_TRACE_ID}-3333333333333333-01`;
+
+test('游戏首动作从发送到持久化动作的 wire 时刻，等回执且只计一次', async () => {
+  const h = await setup({ telemetry: 'memory' });
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const params = { ...goal(h), objective: 'synthetic-private-goal', traceparent: RESOLVE_TRACE };
+    const reachedGuard = Promise.withResolvers<void>();
+    const guard = Promise.withResolvers<undefined>();
+    const ack = Promise.withResolvers<unknown>();
+    h.safety.addGuard((request) => {
+      if (request.type !== Method.GoalSubmit) return;
+      reachedGuard.resolve();
+      return guard.promise;
+    });
+    semantic.answerWith(() => ack.promise);
+    const submitted = h.game.submitGoal(params, SOURCE);
+    await reachedGuard.promise;
+    h.clock.advance(20);
+    guard.resolve(undefined);
+    await until(() => semantic.submissions.length === 1);
+    assert.deepEqual(semantic.commands[0], params);
+    const sentAt = h.wireNowMs();
+
+    h.clock.advance(45);
+    semantic.rpc.notify(
+      Method.ActionCommitted,
+      observedAction(h, 'other', { goalId: 'another-goal' }),
+    );
+    semantic.rpc.notify(
+      Method.ActionCommitted,
+      observedAction(h, 'early', { goalId: params.goalId, atMs: sentAt - 1 }),
+    );
+    const action = observedAction(h, 'first', {
+      goalId: params.goalId,
+      atMs: sentAt + 31,
+      traceparent: ACTION_TRACE,
+    });
+    semantic.rpc.notify(Method.ActionCommitted, action);
+    await until(
+      () => h.store.events().filter((event) => event.type === Method.ActionCommitted).length === 3,
+    );
+    assert.deepEqual(samples(h, Metric.GameFirstAction), []);
+    ack.resolve({});
+    assert.equal((await submitted).ok, true);
+
+    semantic.rpc.notify(Method.ActionCommitted, action);
+    semantic.rpc.notify(Method.ActionCommitted, { ...action, actionId: 'second' });
+    await until(
+      () => h.store.events().filter((event) => event.type === Method.ActionCommitted).length === 4,
+    );
+    const duplicate = await h.game.submitGoal(params, SOURCE);
+    assert.ok(duplicate.ok && duplicate.duplicate);
+    await flush();
+    const first = samples(h, Metric.GameFirstAction);
+    assert.deepEqual(
+      first.map((sample) => sample.asDouble),
+      [0.031],
+    );
+    assert.deepEqual(samples(h, Metric.GameDecisionDuration), []);
+    const command = gameSpans(h).find((span) => span.spanId === first[0]?.spanId);
+    assert.equal(command?.traceId, GAME_TRACE_ID);
+    assert.equal(command?.parentSpanId, '2222222222222222');
+    assert.ok(
+      command?.links?.some(
+        (link) => link.traceId === GAME_TRACE_ID && link.spanId === '3333333333333333',
+      ),
+    );
+    for (const reason of ['duplicate', 'invalid_time', 'unmatched_action'])
+      assert.ok(gameErrors(h).includes(reason), reason);
+    assert.doesNotMatch(h.telemetryLines.join('\n'), /synthetic-private/);
+  } finally {
+    await h.close();
+  }
+});
+
+test('决策耗时在接纳时记录，候选更新沿用首次打开，截止前动作可以晚到', async () => {
+  const h = await setup({ telemetry: 'memory' });
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const firstAtMs = h.wireNowMs();
+    const pointWithTrace = {
+      ...syntheticPoint(firstAtMs, 'd-trace', {
+        resolveByMs: firstAtMs + 100,
+        deadlineMs: firstAtMs + 160,
+      }),
+      traceparent: OPENED_TRACE,
+    };
+    semantic.rpc.notify(Method.DecisionPointOpened, pointWithTrace);
+    await until(() => h.game.status().decision !== null);
+    h.clock.advance(25);
+    const updated = {
+      ...pointWithTrace,
+      atMs: h.wireNowMs(),
+      candidates: pointWithTrace.candidates.slice(0, 1),
+      timing: { resolveByMs: firstAtMs + 80, deadlineMs: firstAtMs + 110 },
+    };
+    semantic.rpc.notify(Method.DecisionPointOpened, updated);
+    await until(() => h.game.status().decision?.atMs === updated.atMs);
+    h.clock.advance(12);
+    const selection = { decisionPointId: 'd-trace', optionId: 'desk', source: 'director' as const };
+    const params = { ...selection, traceparent: RESOLVE_TRACE };
+    assert.equal((await h.game.resolveDecision(params, SOURCE)).ok, true);
+    assert.deepEqual(semantic.commands[0], params);
+    await flush();
+    const decision = samples(h, Metric.GameDecisionDuration);
+    assert.deepEqual(
+      decision.map((sample) => sample.asDouble),
+      [0.037],
+    );
+    assert.deepEqual(samples(h, Metric.GameFirstAction), []);
+    const opening = gameSpans(h).find((span) => span.spanId === decision[0]?.spanId);
+    assert.equal(opening?.parentSpanId, '1111111111111111');
+    assert.equal(opening?.traceId, GAME_TRACE_ID);
+
+    h.clock.advance(106);
+    semantic.rpc.notify(
+      Method.ActionCommitted,
+      observedAction(h, 'executed-too-late', {
+        atMs: firstAtMs + 111,
+        category: 'select',
+        selection,
+      }),
+    );
+    await until(() => gameErrors(h).includes('expired'));
+    assert.deepEqual(samples(h, Metric.GameFirstAction), []);
+    semantic.rpc.notify(
+      Method.ActionCommitted,
+      observedAction(h, 'late-report', {
+        atMs: firstAtMs + 85,
+        category: 'select',
+        selection,
+        traceparent: ACTION_TRACE,
+      }),
+    );
+    await until(() => samples(h, Metric.GameFirstAction).length === 1);
+    assert.deepEqual(
+      samples(h, Metric.GameFirstAction).map((sample) => sample.asDouble),
+      [0.048],
+    );
+    assert.equal(samples(h, Metric.GameDecisionDuration).length, 1);
+  } finally {
+    await h.close();
+  }
+});
+
+test('过期、替换、选项不符及 Runtime 兜底只结束各自的测量', async () => {
+  const h = await setup({ telemetry: 'memory' });
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const open = async (point: GameDecisionPointOpened) => {
+      semantic.rpc.notify(Method.DecisionPointOpened, point);
+      await until(() => h.game.status().decision?.decisionPointId === point.decisionPointId);
+    };
+    const apply = async (id: string) => {
+      const result = await h.game.resolveDecision(
+        { decisionPointId: id, optionId: 'desk', source: 'director', traceparent: null },
+        SOURCE,
+      );
+      assert.equal(result.ok, true);
+    };
+    const select = (id: string, source: 'director' | 'default', optionId = 'desk') =>
+      semantic.rpc.notify(
+        Method.ActionCommitted,
+        observedAction(h, `action-${id}`, {
+          category: 'select',
+          selection: { decisionPointId: id, source, optionId },
+        }),
+      );
+
+    const now = h.wireNowMs();
+    await open(syntheticPoint(now, 'expired', { resolveByMs: now + 20, deadlineMs: now + 50 }));
+    h.clock.advance(25);
+    select('expired', 'default');
+    await until(() => h.game.status().decision === null);
+    assert.deepEqual(samples(h, Metric.GameDecisionDuration), []);
+
+    await open(syntheticPoint(h.wireNowMs(), 'replaced'));
+    await apply('replaced');
+    await open(syntheticPoint(h.wireNowMs(), 'mismatch'));
+    select('replaced', 'director');
+    await apply('mismatch');
+    select('mismatch', 'director', 'door');
+    await until(() => h.game.status().decision === null);
+
+    await open(syntheticPoint(h.wireNowMs(), 'late-default'));
+    await apply('late-default');
+    select('late-default', 'default');
+    await until(() => h.game.status().decision === null);
+    await flush();
+    assert.equal(samples(h, Metric.GameDecisionDuration).length, 3);
+    assert.deepEqual(samples(h, Metric.GameFirstAction), []);
+    for (const reason of ['expired', 'replaced', 'mismatched_action', 'runtime_default'])
+      assert.ok(gameErrors(h).includes(reason), reason);
+    assert.equal(semantic.submissions.length, 3);
+  } finally {
+    await h.close();
+  }
+});
+
+test('动作先到也不能把明确拒绝或未知回执计为成功，决策耗时留在失败 span', async () => {
+  for (const failure of ['refused', 'unknown']) {
+    const h = await setup({ telemetry: 'memory' });
+    try {
+      const { semantic } = await pair(h);
+      await h.mode();
+      await until(() => h.game.status().inputPermitted);
+      semantic.rpc.notify(Method.DecisionPointOpened, point(h));
+      await until(() => h.game.status().decision !== null);
+      h.clock.advance(9);
+      const reply = Promise.withResolvers<unknown>();
+      semantic.answerWith(() => reply.promise);
+      const selection = { decisionPointId: 'd-1', optionId: 'a', source: 'director' as const };
+      const resolving = h.game.resolveDecision({ ...selection, traceparent: null }, SOURCE);
+      await until(() => semantic.submissions.length === 1);
+      h.clock.advance(11);
+      semantic.rpc.notify(
+        Method.ActionCommitted,
+        observedAction(h, 'early-action', { category: 'select', selection }),
+      );
+      await until(() => h.game.status().decision === null);
+      if (failure === 'refused')
+        reply.reject(new RpcError(RpcErrorCode.InvalidParams, 'synthetic'));
+      else reply.resolve({ invalid: 'synthetic-private-response' });
+      const result = await resolving;
+      assert.equal(result.intent?.state, failure === 'refused' ? 'failed' : 'unknown');
+      await flush();
+      assert.deepEqual(samples(h, Metric.GameDecisionDuration), []);
+      assert.deepEqual(samples(h, Metric.GameFirstAction), []);
+      assert.ok(gameErrors(h).includes(failure), failure);
+      const measurement = gameSpans(h).find((span) => span.name === 'game.decision');
+      assert.ok(
+        measurement?.attributes?.some(
+          ({ key, value }) =>
+            key === 'bellis.game.decision_ms' && 'intValue' in value && value.intValue === '9',
+        ),
+      );
+      assert.doesNotMatch(h.telemetryLines.join('\n'), /synthetic-private/);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test('同 Runtime 重连也切断旧目标关联，遥测写出故障不影响命令和持久事实', async () => {
+  for (const telemetry of ['memory', 'broken'] as const) {
+    const h = await setup({ telemetry });
+    try {
+      const { semantic, core } = await pair(h);
+      await h.mode();
+      await until(() => h.game.status().inputPermitted);
+      assert.equal((await h.game.submitGoal(goal(h, 'before-reconnect'), SOURCE)).ok, true);
+      semantic.connection.close();
+      await until(() => !h.game.status().mainConnected && core.stops.length === 1);
+      const replacement = await main(h);
+      replacement.health();
+      core.health();
+      await until(() => h.game.status().inputPermitted);
+      replacement.rpc.notify(
+        Method.ActionCommitted,
+        observedAction(h, 'old-goal', { goalId: 'before-reconnect' }),
+      );
+      await until(() => h.store.events().some((event) => event.type === Method.ActionCommitted));
+      assert.deepEqual(samples(h, Metric.GameFirstAction), []);
+      if (telemetry === 'memory') assert.ok(gameErrors(h).includes('connection_changed'));
+      assert.equal((await h.game.submitGoal(goal(h, 'current-goal'), SOURCE)).ok, true);
+      h.clock.advance(8);
+      replacement.rpc.notify(
+        Method.ActionCommitted,
+        observedAction(h, 'new-goal', { goalId: 'current-goal' }),
+      );
+      await until(
+        () =>
+          h.store.events().filter((event) => event.type === Method.ActionCommitted).length === 2,
+      );
+      assert.equal(h.game.status().inputPermitted, true);
+      await flush();
+      assert.deepEqual(
+        samples(h, Metric.GameFirstAction).map((sample) => sample.asDouble),
+        telemetry === 'memory' ? [0.008] : [],
+      );
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test('迟到报告窗口耗尽后关闭首动作 span，已接纳目标照常续约', async () => {
+  const h = await setup({ telemetry: 'memory' });
+  try {
+    const { semantic, core } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const sentAt = h.wireNowMs();
+    const submitted = { ...goal(h), expiresAtMs: sentAt + 60 };
+    assert.equal((await h.game.submitGoal(submitted, SOURCE)).ok, true);
+    for (let i = 0; i < 8; i++) {
+      core.clock.advance(250);
+      h.clock.advance(250);
+      await until(() => core.renewals.length >= i + 2);
+      semantic.health({ goalId: submitted.goalId });
+      core.health();
+      await until(
+        () =>
+          h.game.status().health?.atMs === h.wireNowMs() &&
+          h.game.status().realtimeHealth?.atMs === h.wireNowMs(),
+      );
+    }
+    assert.equal(gameErrors(h).includes('missing_action'), false);
+    h.clock.advance(60);
+    await until(() => gameErrors(h).includes('missing_action'));
+    semantic.rpc.notify(
+      Method.ActionCommitted,
+      observedAction(h, 'after-observation-window', {
+        atMs: sentAt + 25,
+        goalId: submitted.goalId,
+      }),
+    );
+    await until(() => h.store.events().some((event) => event.type === Method.ActionCommitted));
+    assert.deepEqual(samples(h, Metric.GameFirstAction), []);
+    assert.equal(h.game.status().inputPermitted, true);
   } finally {
     await h.close();
   }

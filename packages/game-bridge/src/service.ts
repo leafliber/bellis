@@ -74,6 +74,10 @@ export type GameCommandResult =
   | { ok: true; intent: Intent; duplicate: boolean }
   | { ok: false; reason: string; intent?: Intent };
 
+export type GameCommand =
+  | { method: 'goal.submit'; payload: GameGoalSubmitParams }
+  | { method: 'decision.resolve'; payload: GameDecisionResolveParams };
+
 export interface GamePacingHold {
   readonly accepted: Promise<boolean>;
   remainingMs(): number;

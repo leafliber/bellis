@@ -48,4 +48,8 @@ export const Metric = {
   LlmFirstOutput: 'bellis.llm.time_to_first_output',
   /** 记忆召回：记忆插件发出召回准备到拿到结果（含超时、出错与取消），按 `bellis.memory.outcome` 分。 */
   MemoryRecallDuration: 'bellis.memory.recall.duration',
+  /** 游戏命令实际发送到其首个已核验动作。 */
+  GameFirstAction: 'bellis.game.time_to_first_action',
+  /** 决策点首次打开到 Bellis 实际发送选择。 */
+  GameDecisionDuration: 'bellis.game.decision.duration',
 } as const;
