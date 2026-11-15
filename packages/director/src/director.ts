@@ -213,6 +213,7 @@ export const director = definePlugin({
           opened: boolean;
           game: GameTurn | undefined;
           cancel(by: string): void;
+          tightenDeadline(resolveByMs: number): void;
         }
       | undefined;
     let running = false;
@@ -775,9 +776,15 @@ export const director = definePlugin({
       };
       const controller = new AbortController();
       let cancelledBy: string | undefined;
+      let resolveByMs = timed ? turn?.point?.timing?.resolveByMs : undefined;
+      let tightenedTimer: TimerHandle | undefined;
+      const abortReason = () => {
+        const reason = controller.signal.reason;
+        return reason instanceof DeadlineError ? reason : new Cancelled();
+      };
       // 取消时不等客户端收尾：客户端没有及时响应中止信号也照样结束这次调用。
       const cancelled = new Promise<never>((_, reject) =>
-        controller.signal.addEventListener('abort', () => reject(new Cancelled()), { once: true }),
+        controller.signal.addEventListener('abort', () => reject(abortReason()), { once: true }),
       );
       cancelled.catch(() => {});
       const current = {
@@ -787,6 +794,15 @@ export const director = definePlugin({
         cancel: (by: string) => {
           cancelledBy ??= by;
           controller.abort();
+        },
+        tightenDeadline(next: number) {
+          if (!turn || resolveByMs === undefined || next >= resolveByMs) return;
+          resolveByMs = next;
+          if (tightenedTimer) clock.clearTimeout(tightenedTimer);
+          const expire = () => controller.abort(new DeadlineError('已到游戏决定余量线'));
+          const remaining = next - turn.game.wireNowMs();
+          if (remaining <= 0) expire();
+          else tightenedTimer = clock.setTimeout(expire, remaining);
         },
       };
       inflight = current;
@@ -903,7 +919,6 @@ export const director = definePlugin({
         ...(gameContent ? { gameContent: true } : {}),
         ...(call.traceparent ? { traceparent: call.traceparent } : {}),
       };
-      const resolveByMs = timed ? turn?.point?.timing?.resolveByMs : undefined;
       const remaining = () =>
         resolveByMs === undefined || !turn
           ? config.callTimeoutMs
@@ -957,7 +972,7 @@ export const director = definePlugin({
           timeout,
           '决策模型调用',
         );
-        if (controller.signal.aborted) throw new Cancelled();
+        if (controller.signal.aborted) throw abortReason();
         if (timed && (remaining() <= 0 || clock.now() - startedAt >= timeout)) {
           throw new DeadlineError('已到游戏决定截止时间');
         }
@@ -984,6 +999,8 @@ export const director = definePlugin({
         // 已经开口时不播过渡语：观众已经听到了这次回应的开头。
         failed(kind, message(error), call, taken.length > 0 && opened === undefined);
         return;
+      } finally {
+        if (tightenedTimer) clock.clearTimeout(tightenedTimer);
       }
       settled = true;
       inflight = undefined;
@@ -1292,8 +1309,16 @@ export const director = definePlugin({
       }
       const t = game.observe(fact);
       if (t) trigger(t);
-      if (inflight?.game && !inflight.opened && !game.isCurrent(inflight.game))
-        inflight.cancel('game-stale');
+      const current = inflight;
+      if (!current?.game || current.opened) return;
+      if (!game.isCurrent(current.game)) current.cancel('game-stale');
+      else if (
+        fact.method === 'decision_point.opened' &&
+        fact.payload.timing &&
+        fact.runtimeId === current.game.runtimeId &&
+        fact.payload.decisionPointId === current.game.point?.decisionPointId
+      )
+        current.tightenDeadline(fact.payload.timing.resolveByMs);
     });
     ctx.register(() => {
       if (idleTimer) clock.clearTimeout(idleTimer);
