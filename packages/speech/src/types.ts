@@ -74,6 +74,8 @@ export interface SpeechRequest {
   inputs: readonly string[];
   /** 是否混入了不可信输入。 */
   untrusted: boolean;
+  /** 输出来自包含游戏数据的上下文。保留到发言写回，供模型外发门控。 */
+  gameContent?: boolean;
   /**
    * 产生它的链路（见运维“观测”）：发言的 span 以它为父；回应弹幕时带 `originAt`，
    * 第一句在 Stage 开始播出时记“弹幕到首音”。没有遥测时不出现。
@@ -94,6 +96,7 @@ export type UtteranceEnd =
 export interface UtteranceOutcome {
   id: string;
   source: SpeechSource;
+  gameContent?: boolean;
   /** 观众实际听到的字幕文本。 */
   heard: string;
   /** 最后一句在中途被打断且没有时间映射时为 true：只知道被打断，不猜具体位置。 */

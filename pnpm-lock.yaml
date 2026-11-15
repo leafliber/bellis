@@ -322,12 +322,18 @@ importers:
       '@bellis/audience':
         specifier: workspace:*
         version: link:../audience
+      '@bellis/game-bridge':
+        specifier: workspace:*
+        version: link:../game-bridge
       '@bellis/kernel':
         specifier: workspace:*
         version: link:../kernel
       '@bellis/memory':
         specifier: workspace:*
         version: link:../memory
+      '@bellis/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@bellis/safety':
         specifier: workspace:*
         version: link:../safety

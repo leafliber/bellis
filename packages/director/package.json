@@ -8,8 +8,10 @@
   },
   "dependencies": {
     "@bellis/audience": "workspace:*",
+    "@bellis/game-bridge": "workspace:*",
     "@bellis/kernel": "workspace:*",
     "@bellis/memory": "workspace:*",
+    "@bellis/protocol": "workspace:*",
     "@bellis/safety": "workspace:*",
     "@bellis/speech": "workspace:*",
     "@bellis/telemetry": "workspace:*",

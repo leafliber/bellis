@@ -179,6 +179,7 @@ export const speechArbiter = definePlugin({
     ): UtteranceOutcome => ({
       id: request.id,
       source: request.source,
+      ...(request.gameContent ? { gameContent: true } : {}),
       heard: '',
       interruptedMidSentence: false,
       end: 'complete',
