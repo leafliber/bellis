@@ -109,6 +109,14 @@
 
   操作员用 `pnpm operator veto` / `release` 或操作台（见[运维](operations.md#操作台)）否决或放行，不给句键时针对全部等待中的句子；被否决或撤回的句子跳过、不播出。放行环节不在场时，M1 下一句也不播。每句等待恰好以一个事件结束：放行 `speech.released`（`by` 为 `operator` 或 `delay`）、否决 `speech.vetoed`，或因超时、停止、模式变化、发言中止而撤回 `speech.withdrawn`（超时的带 `timedOut`）；等待开始时记 `speech.held`（带等待方式），操作员在 `pnpm operator status` 的 `held` 与操作台上看到等待中的句子与等待方式。否决与放行都经安全核的控制通道送达，不经普通事件队列。
 
+### 游戏解说
+
+游戏关键反应和带 `commentary` 的发言使用[暂缓推进](game-bridge.md#看点与暂缓推进)。`commentary` 绑定 Runtime 会话。`gameContent` 标记数据来源，供决策模型核对外发许可。发声优先级与抢占点仍按发声来源确定。
+
+发声仲裁在请求入队时绑定语义连接。首句通过审核和执行闸门、TTS 就绪后，仲裁在交给 Stage 前等待 hold 回执。`gamePacing.holdMs` 缺省 30 秒，回执本地等待至多 1 秒。未确认 hold 或发言已过期时放弃解说。播放期间连接失效或到达 hold 的到期线时截断解说并清理。
+
+`gamePacing.voiceWaitMs` 缺省为 0，设为正值时对已知的配音忙状态等待，截止取配置时限和发言过期时刻中较早者。到限仍忙时放弃解说，空闲或未知时继续准备。停止或抢占都能打断配音和回执等待。
+
 ## 播放游标与写回
 
 - **播放游标**是 Stage 回报的“句编号 + 该句已实际播出的采样数”。
