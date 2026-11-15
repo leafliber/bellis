@@ -503,18 +503,20 @@ export const director = definePlugin({
       origin?: {
         gameContent: boolean;
         gameReaction?: boolean;
+        commentary?: boolean;
         turn?: GameTurn | undefined;
         actionId?: string;
       },
     ): Promise<UtteranceOutcome> => {
       calls += 1;
       const trace = speechTrace(call, target);
+      const source = target ? 'danmaku-reply' : origin?.gameReaction ? 'game-reaction' : 'chatter';
       return speech.request({
         id:
           origin?.turn && origin.actionId
             ? `game:${origin.turn.runtimeId}:${origin.actionId}:comment`
             : `director:${ctx.instanceId}:${calls}`,
-        source: target ? 'danmaku-reply' : origin?.gameReaction ? 'game-reaction' : 'chatter',
+        source,
         text,
         expiresAt: clock.now() + config.replyTtlMs,
         // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
@@ -522,6 +524,9 @@ export const director = definePlugin({
         inputs: [...(target?.sources ?? []), ...(origin?.turn?.inputs ?? [])],
         untrusted,
         ...(origin?.gameContent ? { gameContent: true } : {}),
+        ...(origin?.turn && (source === 'game-reaction' || origin.commentary)
+          ? { commentary: { runtimeId: origin.turn.runtimeId } }
+          : {}),
         ...(trace ? { trace } : {}),
       });
     };
@@ -1049,6 +1054,10 @@ export const director = definePlugin({
         return;
       }
       if (action.action === 'speak') {
+        if (action.commentary && turn && !game.isCurrent(turn)) {
+          dropIntent('解说的游戏局面已失效');
+          return;
+        }
         const target =
           action.replyTo === undefined ? undefined : taken.find((c) => c.id === action.replyTo);
         if (action.replyTo !== undefined && !target) {
@@ -1067,7 +1076,10 @@ export const director = definePlugin({
         endCall();
         succeeded();
         remember(action.text);
-        void say(action.text, target, call, untrusted, speechOrigin)
+        void say(action.text, target, call, untrusted, {
+          ...speechOrigin,
+          commentary: action.commentary === true && !!turn,
+        })
           // 观众一个字也没听到：记忆没有用上。
           .then((outcome) => report(outcome.heard === '' ? [] : used));
       } else if (action.action === 'vote') {

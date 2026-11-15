@@ -74,12 +74,27 @@ export type GameCommandResult =
   | { ok: true; intent: Intent; duplicate: boolean }
   | { ok: false; reason: string; intent?: Intent };
 
+export interface GamePacingHold {
+  readonly accepted: Promise<boolean>;
+  remainingMs(): number;
+  release(): void;
+}
+
+/** 暂缓推进与配音状态绑在同一次已认证的语义连接。 */
+export interface GamePacing {
+  readonly signal: AbortSignal;
+  voiceActivity(): GameSituationObserved['voiceActivity'];
+  subscribeVoice(listener: () => void): () => void;
+  hold(ttlMs: number, traceparent: string | null): GamePacingHold | undefined;
+}
+
 export interface Game {
   status(): GameStatus;
   /** 与局面时刻和截止时间同域，仿真使用注入的单调时钟。 */
   wireNowMs(): number;
   /** 回调只接收已经写入状态存储的事实。 */
   subscribe(listener: (fact: GameFact) => void): () => void;
+  pacing(runtimeId?: string): GamePacing | undefined;
   /** 可在发送前追加本机判断。闸门仍独立授权，判断失败时不发命令。 */
   submitGoal(
     params: GameGoalSubmitParams,

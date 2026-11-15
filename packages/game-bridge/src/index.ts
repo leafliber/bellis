@@ -45,6 +45,7 @@ export const gameBridge = definePlugin({
       status: () => bridge.status(),
       wireNowMs: () => bridge.wireNowMs(),
       subscribe: (listener) => bridge.subscribe(listener),
+      pacing: (runtimeId) => bridge.pacing(runtimeId),
       submitGoal: (params, source, stillValid) => bridge.submitGoal(params, source, stillValid),
       resolveDecision: (params, source, stillValid) =>
         bridge.resolveDecision(params, source, stillValid),

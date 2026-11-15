@@ -44,13 +44,24 @@ import {
   type GameInputReleased,
   type GameLeaseRenewParams,
   type GameMainHealth,
+  type GameSituationObserved,
   Role as HostRole,
   GameBridgeMethod as Method,
   GameBridgeRole as Role,
   RpcErrorCode,
+  type RpcParams,
 } from '@bellis/protocol';
 import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
-import { type SpeechRequest, SpeechService, type UtteranceOutcome } from '@bellis/speech';
+import {
+  PreCheck,
+  type Speech,
+  type SpeechRequest,
+  SpeechService,
+  simTts,
+  speechArbiter,
+  type UtteranceOutcome,
+} from '@bellis/speech';
+import { type PlaybackResult, STAGE_AUDIO, StageService } from '@bellis/stage';
 import { SimulatedCrash, StateStore } from '@bellis/store';
 import Type from 'typebox';
 import type { PendingCall } from '../../director/test/helpers.ts';
@@ -81,7 +92,70 @@ type SetupOptions = {
   storePath?: string;
   fault?: (point: string) => void;
   director?: Record<string, unknown>;
+  gamePacing?: { holdMs?: number; voiceWaitMs?: number };
 };
+
+function addSpeech(
+  kernel: Kernel,
+  safety: SafetyCore,
+  gamePacing: NonNullable<SetupOptions['gamePacing']>,
+) {
+  const plays: string[] = [];
+  const pending = new Map<string, PromiseWithResolvers<PlaybackResult>>();
+  const finish = (sentenceId: string, complete: boolean) => {
+    const playback = pending.get(sentenceId);
+    assert.ok(playback, sentenceId);
+    pending.delete(sentenceId);
+    playback.resolve({ sentenceId, played: 0, complete });
+  };
+  kernel.provideCore(StageService, {
+    ready: true,
+    presentation: { delayMs: 0, samples: 0, source: 'none' },
+    play(sentence, _audio, token) {
+      assert.ok(safety.leases.isValid(STAGE_AUDIO, token));
+      plays.push(sentence.id);
+      const playback = Promise.withResolvers<PlaybackResult>();
+      pending.set(sentence.id, playback);
+      return playback.promise;
+    },
+    truncate: (sentenceId) => {
+      if (pending.has(sentenceId)) finish(sentenceId, false);
+    },
+    onEvent: () => () => {},
+    envelope: () => undefined,
+    setPresentation() {},
+  });
+  kernel.add(
+    [
+      {
+        id: 'speech',
+        plugin: 'speech-arbiter',
+        config: { gamePacing },
+        disabled: false,
+        explicitSwitch: false,
+        grant: ['speech.output'],
+      },
+      {
+        id: 'tts',
+        plugin: 'tts-sim',
+        config: {},
+        disabled: false,
+        explicitSwitch: false,
+        grant: [],
+      },
+    ],
+    catalog(speechArbiter, simTts),
+  );
+  return {
+    plays,
+    finish,
+    speech(): Speech {
+      const found = kernel.services.resolve(SpeechService.name, SpeechService.major);
+      assert.ok(!('missing' in found));
+      return found.impl as Speech;
+    },
+  };
+}
 
 function addDirector(kernel: Kernel, config: Record<string, unknown>) {
   const calls: PendingCall[] = [];
@@ -230,8 +304,8 @@ async function setup(options: SetupOptions = {}) {
     clock,
     config: {
       simulation: options.simulation ?? false,
-      leaseTtlMs: { [GAME_INPUT]: 500 },
-      leaseCapabilities: { [GAME_INPUT]: GAME_INPUT },
+      leaseTtlMs: { [GAME_INPUT]: 500, [STAGE_AUDIO]: 2_000 },
+      leaseCapabilities: { [GAME_INPUT]: GAME_INPUT, [STAGE_AUDIO]: 'speech.output' },
       presenceTtlMs: 60_000,
       rateLimits: {},
       guardTimeoutMs: 50,
@@ -256,6 +330,7 @@ async function setup(options: SetupOptions = {}) {
     safetyFacade(safety, instanceId, permissions),
   );
   const model = options.director ? addDirector(kernel, options.director) : undefined;
+  const stage = options.gamePacing ? addSpeech(kernel, safety, options.gamePacing) : undefined;
   kernel.add(
     [
       {
@@ -300,6 +375,7 @@ async function setup(options: SetupOptions = {}) {
     clock,
     wireNowMs,
     game,
+    kernel,
     host,
     path,
     key,
@@ -307,6 +383,7 @@ async function setup(options: SetupOptions = {}) {
     store,
     operator,
     model,
+    stage,
     async mode() {
       safety.confirmPresence();
       assert.deepEqual(safety.requestMode(options.simulation ? 'M0' : 'M2'), { ok: true });
@@ -345,6 +422,10 @@ async function main(h: Harness, run = 'run', describe?: () => object) {
   );
   const submissions: string[] = [];
   const commands: unknown[] = [];
+  const pacing: Array<{
+    method: typeof Method.PacingHold | typeof Method.PacingRelease;
+    params: RpcParams;
+  }> = [];
   let answer: () => unknown = () => ({});
   for (const method of [Method.GoalSubmit, Method.DecisionResolve]) {
     p.rpc.handle(method, (params) => {
@@ -353,10 +434,25 @@ async function main(h: Harness, run = 'run', describe?: () => object) {
       return answer();
     });
   }
+  let answerPacing: (method: typeof Method.PacingHold | typeof Method.PacingRelease) => unknown =
+    () => ({});
+  for (const method of [Method.PacingHold, Method.PacingRelease] as const) {
+    p.rpc.handle(method, (params) => {
+      pacing.push({ method, params });
+      return answerPacing(method);
+    });
+  }
   return {
     ...p,
     submissions,
     commands,
+    pacing,
+    answerPacingWith(handle: typeof answerPacing) {
+      answerPacing = handle;
+    },
+    voice(voiceActivity: GameSituationObserved['voiceActivity'], atMs = h.wireNowMs()) {
+      p.rpc.notify(Method.SituationObserved, syntheticSituation(atMs, { voiceActivity }));
+    },
     answerWith(handle: () => unknown) {
       answer = handle;
     },
@@ -500,6 +596,343 @@ function point(h: Harness, id = 'd-1'): GameDecisionPointOpened {
 const choice = (decisionPoint: string, optionId = 'desk') =>
   JSON.stringify({ action: 'choose', decisionPoint, optionId });
 const quiet = JSON.stringify({ action: 'silence', reason: '' });
+
+function commentary(h: Harness, id: string, overrides: Partial<SpeechRequest> = {}): SpeechRequest {
+  return {
+    id,
+    source: 'game-reaction',
+    text: '看这里。',
+    expiresAt: h.clock.now() + 5_000,
+    preempt: 'sentence',
+    inputs: [],
+    untrusted: true,
+    ...overrides,
+  };
+}
+
+test('一段游戏解说在首句播出前 hold，播完 release，多句与同句重入都复用这一段', async () => {
+  const h = await setup({ simulation: true, gamePacing: { holdMs: 500, voiceWaitMs: 100 } });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    assert.equal(h.game.status().inputPermitted, false);
+    const speech = stage.speech();
+    const request = commentary(h, 'reaction', { text: '看这里。再看那边。' });
+    const played = speech.request(request);
+    await until(() => stage.plays.length === 1);
+    const [hold] = semantic.pacing;
+    assert.equal(hold?.method, Method.PacingHold);
+    assert.equal(hold?.params.expiresAtMs, h.wireNowMs() + 500);
+    assert.ok(h.store.events().some((e) => e.type === 'pacing.held'));
+    assert.equal((await speech.request(request)).end, 'duplicate');
+    stage.finish('reaction#0', true);
+    await until(() => stage.plays.length === 2);
+    assert.equal(semantic.pacing.length, 1);
+    stage.finish('reaction#1', true);
+    assert.equal((await played).end, 'complete');
+    await until(() => h.store.events().some((e) => e.type === 'pacing.released'));
+    assert.deepEqual(semantic.pacing[1], {
+      method: Method.PacingRelease,
+      params: { holdId: hold?.params.holdId, traceparent: null },
+    });
+    assert.equal(semantic.pacing.length, 2);
+    assert.equal(h.store.events().filter((e) => e.type === 'intent.authorized').length, 2);
+
+    const ordinary = speech.request(
+      commentary(h, 'ordinary', { source: 'chatter', gameContent: true }),
+    );
+    await until(() => stage.plays.length === 3);
+    stage.finish('ordinary#0', true);
+    assert.equal((await ordinary).end, 'complete');
+    assert.equal(semantic.pacing.length, 2);
+  } finally {
+    await h.close();
+  }
+});
+
+test('显式解说保留回复来源，等配音转闲后才发送 hold', async () => {
+  const h = await setup({ simulation: true, gamePacing: { voiceWaitMs: 200 } });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    semantic.voice('busy');
+    await until(() => h.game.pacing()?.voiceActivity() === 'busy');
+    const played = stage.speech().request(
+      commentary(h, 'reply', {
+        source: 'danmaku-reply',
+        commentary: { runtimeId: 'run' },
+      }),
+    );
+    await until(() => h.store.intentByKey('reply#0')?.state === 'executing');
+    assert.equal(semantic.pacing.length, 0);
+    assert.equal(stage.plays.length, 0);
+    h.clock.advance(50);
+    semantic.voice('idle');
+    await until(() => stage.plays.length === 1);
+    assert.equal(semantic.pacing[0]?.method, Method.PacingHold);
+    stage.finish('reply#0', true);
+    assert.equal((await played).source, 'danmaku-reply');
+    await until(() => semantic.pacing.length === 2);
+  } finally {
+    await h.close();
+  }
+});
+
+for (const end of ['unavailable', 'expired'] as const) {
+  test(`配音仍忙且本地等待到限时结束为 ${end}`, async () => {
+    const h = await setup({ simulation: true, gamePacing: { voiceWaitMs: 200 } });
+    const { stage } = h;
+    assert.ok(stage);
+    try {
+      const { semantic } = await pair(h);
+      await h.mode();
+      semantic.voice('busy');
+      await until(() => h.game.pacing()?.voiceActivity() === 'busy');
+      const played = stage
+        .speech()
+        .request(commentary(h, 'busy', { expiresAt: end === 'expired' ? 100 : 500 }));
+      await until(() => h.store.intentByKey('busy#0')?.state === 'executing');
+      h.clock.advance(200);
+      assert.equal((await played).end, end);
+      assert.equal(semantic.pacing.length, 0);
+      assert.equal(stage.plays.length, 0);
+    } finally {
+      await h.close();
+    }
+  });
+}
+
+test('等待 hold 回执时变忙仍受同一个配音截止时刻约束', async () => {
+  const h = await setup({ simulation: true, gamePacing: { voiceWaitMs: 100 } });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    const ack = Promise.withResolvers<unknown>();
+    semantic.answerPacingWith((method) => (method === Method.PacingHold ? ack.promise : {}));
+    const played = stage.speech().request(commentary(h, 'busy-after-hold'));
+    await until(() => semantic.pacing.length === 1);
+    h.clock.advance(70);
+    semantic.voice('busy');
+    await until(() => h.game.pacing()?.voiceActivity() === 'busy');
+    ack.resolve({});
+    await until(() => h.store.events().some((e) => e.type === 'pacing.held'));
+    assert.equal(stage.plays.length, 0);
+    h.clock.advance(30);
+    assert.equal((await played).end, 'unavailable');
+    assert.equal(stage.plays.length, 0);
+    await until(() => semantic.pacing.length === 2);
+    assert.equal(semantic.pacing[1]?.method, Method.PacingRelease);
+  } finally {
+    await h.close();
+  }
+});
+
+test('全部被审核跳过的解说不暂缓游戏', async () => {
+  const h = await setup({ simulation: true, gamePacing: {} });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    const detach = h.kernel.extensions.add(PreCheck, () => ({ block: '合成审核拒绝' }));
+    const outcome = await stage.speech().request(commentary(h, 'filtered'));
+    detach();
+    assert.equal(outcome.skipped.length, 1);
+    assert.equal(semantic.pacing.length, 0);
+    assert.equal(stage.plays.length, 0);
+  } finally {
+    await h.close();
+  }
+});
+
+test('暂缓回执等待期间计时决策照常送达，发言抢占后只清理迟到的 hold', async () => {
+  const h = await setup({ simulation: true, simulatedPort: true, gamePacing: {} });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const reply = Promise.withResolvers<unknown>();
+    semantic.answerPacingWith((method) => (method === Method.PacingHold ? reply.promise : {}));
+    const speech = stage.speech();
+    const waiting = speech.request(commentary(h, 'deferred'));
+    await until(() => semantic.pacing.length === 1);
+    assert.equal(stage.plays.length, 0);
+    const now = h.wireNowMs();
+    semantic.rpc.notify(
+      Method.DecisionPointOpened,
+      syntheticPoint(now, 'timed', {
+        resolveByMs: now + 150,
+        deadlineMs: now + 200,
+      }),
+    );
+    await until(() => h.game.status().decision?.decisionPointId === 'timed');
+    const outcome = await h.game.resolveDecision(
+      {
+        decisionPointId: 'timed',
+        optionId: 'desk',
+        source: 'director',
+        traceparent: null,
+      },
+      SOURCE,
+    );
+    assert.ok(outcome.ok);
+    assert.deepEqual(semantic.submissions, [Method.DecisionResolve]);
+    const urgent = speech.request(commentary(h, 'urgent', { source: 'safety' }));
+    assert.equal((await waiting).end, 'preempted');
+    await until(() => stage.plays.length === 1);
+    assert.deepEqual(stage.plays, ['urgent#0']);
+    reply.resolve({});
+    await until(() => semantic.pacing.length === 2);
+    assert.equal(semantic.pacing[1]?.method, Method.PacingRelease);
+    stage.finish('urgent#0', true);
+    assert.equal((await urgent).end, 'complete');
+  } finally {
+    await h.close();
+  }
+});
+
+test('回执结果不明时放弃发言并清理对应的 hold', async () => {
+  const h = await setup({ simulation: true, gamePacing: {} });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    semantic.answerPacingWith((method) =>
+      method === Method.PacingHold ? { unexpected: true } : {},
+    );
+    assert.equal((await stage.speech().request(commentary(h, 'unknown-ack'))).end, 'unavailable');
+    await until(() => h.store.events().some((e) => e.type === 'pacing.released'));
+    assert.equal(stage.plays.length, 0);
+    assert.equal(semantic.pacing[1]?.params.holdId, semantic.pacing[0]?.params.holdId);
+    assert.ok(h.store.events().some((e) => e.type === 'pacing.unconfirmed'));
+  } finally {
+    await h.close();
+  }
+});
+
+test('hold 回执超过本地等待时限后结束解说，迟到的受理仍释放原 hold', async () => {
+  const h = await setup({ simulation: true, gamePacing: {} });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    const reply = Promise.withResolvers<unknown>();
+    semantic.answerPacingWith((method) => (method === Method.PacingHold ? reply.promise : {}));
+    const played = stage.speech().request(commentary(h, 'ack-timeout'));
+    await until(() => semantic.pacing.length === 1);
+    h.clock.advance(1_000);
+    assert.equal((await played).end, 'unavailable');
+    assert.equal(stage.plays.length, 0);
+    reply.resolve({});
+    await until(() => semantic.pacing.length === 2);
+    assert.equal(semantic.pacing[1]?.method, Method.PacingRelease);
+    assert.equal(semantic.pacing[1]?.params.holdId, semantic.pacing[0]?.params.holdId);
+  } finally {
+    await h.close();
+  }
+});
+
+test('hold 到期截断解说并释放，同一发言不会续挂新的 hold', async () => {
+  const h = await setup({ simulation: true, gamePacing: { holdMs: 100 } });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    const played = stage
+      .speech()
+      .request(commentary(h, 'hold-expiry', { text: '看这里。再看那边。' }));
+    await until(() => stage.plays.length === 1);
+    h.clock.advance(100);
+    assert.equal((await played).end, 'stopped');
+    await until(() => semantic.pacing.length === 2);
+    assert.equal(semantic.pacing[1]?.method, Method.PacingRelease);
+    assert.deepEqual(stage.plays, ['hold-expiry#0']);
+  } finally {
+    await h.close();
+  }
+});
+
+test('断链及桥重装使旧解说作废，迟到的 hold 清理不发往新连接', async () => {
+  const h = await setup({ simulation: true, gamePacing: {} });
+  const { stage } = h;
+  assert.ok(stage);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    const reply = Promise.withResolvers<unknown>();
+    semantic.answerPacingWith(() => reply.promise);
+    const speech = stage.speech();
+    const inflight = speech.request(commentary(h, 'old-active'));
+    await until(() => semantic.pacing.length === 1);
+    const queued = speech.request(commentary(h, 'old-queued'));
+    const closed = once(semantic.connection, 'close');
+    semantic.connection.close();
+    await closed;
+    assert.equal((await inflight).end, 'stopped');
+    assert.equal((await queued).end, 'unavailable');
+
+    await h.kernel.disable('game');
+    await h.kernel.enable('game');
+    const service = h.kernel.services.resolve(GameService.name, GameService.major);
+    assert.ok(!('missing' in service));
+    const { semantic: replacement } = await pair({ ...h, game: service.impl as Game });
+    reply.resolve({});
+    await flush();
+    assert.equal(replacement.pacing.length, 0);
+    const current = speech.request(commentary(h, 'new-active'));
+    await until(() => stage.plays.length === 1);
+    stage.finish('new-active#0', true);
+    assert.equal((await current).end, 'complete');
+    await until(() => replacement.pacing.length === 2);
+    assert.equal(replacement.pacing[0]?.method, Method.PacingHold);
+  } finally {
+    await h.close();
+  }
+});
+
+test('普通游戏上下文保留数据来源，只有显式解说携带 Runtime 会话标记', async () => {
+  const h = await setup({ director: {}, simulation: true });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    semantic.voice('idle');
+    await until(() => h.game.pacing()?.voiceActivity() === 'idle');
+    for (const explicit of [false, true]) {
+      const n: number = model.calls.length;
+      model.send(explicit ? '这里怎么了？' : '今天好吗？');
+      await until(() => model.calls.length === n + 1);
+      const call: PendingCall | undefined = model.calls[n];
+      assert.ok(call?.request.context.game);
+      call.resolve(
+        JSON.stringify({
+          action: 'speak',
+          replyTo: call.request.context.candidates[0]?.id,
+          text: explicit ? '门还锁着。' : '今天很好。',
+          ...(explicit ? { commentary: true } : {}),
+        }),
+      );
+      await until(() => model.spoken.length === n + 1);
+      assert.equal(model.spoken[n]?.gameContent, true);
+      assert.equal(model.spoken[n]?.source, 'danmaku-reply');
+      assert.deepEqual(model.spoken[n]?.commentary, explicit ? { runtimeId: 'run' } : undefined);
+    }
+  } finally {
+    await h.close();
+  }
+});
 
 test('模型热替换后用发言来源移除直接及间接包含游戏数据的近期发言', async () => {
   const h = await setup({

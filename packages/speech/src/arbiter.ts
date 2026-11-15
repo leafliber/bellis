@@ -1,8 +1,10 @@
+import { type GamePacing, GameService } from '@bellis/game-bridge';
 import { ClockService, definePlugin, type TimerHandle, TraceService } from '@bellis/kernel';
 import { type Lease, SafetyService } from '@bellis/safety';
 import { type PlaybackResult, STAGE_AUDIO, StageService } from '@bellis/stage';
 import { Metric, type Span, TelemetryService, useTracer } from '@bellis/telemetry';
 import Type from 'typebox';
+import { waitForPacing, waitForVoice } from './pacing.ts';
 import { heardPrefix, Segmenter, subtitleStarts } from './segment.ts';
 import {
   ModerationService,
@@ -26,6 +28,8 @@ import {
 
 interface Item {
   request: SpeechRequest;
+  /** null 表示解说绑定的连接不可用。 */
+  pacing: GamePacing | null | undefined;
   seq: number;
   resolve(outcome: UtteranceOutcome): void;
   /** 这段发言的 span：从收到请求起，到写回之前结束。 */
@@ -50,7 +54,11 @@ interface Active {
   onStarted: ((sentenceId: string) => void) | undefined;
   /** 这段发言已有一句在 Stage 上开始播出（“弹幕到首音”只记第一句）。 */
   firstAudio: boolean;
+  releasePacing: (() => void) | undefined;
 }
+
+type PacingFailure = { end: 'expired' | 'unavailable'; reason: string };
+const PACING_ACK_MS = 1_000;
 
 /**
  * 把合成的音频原样交出，同时看第一帧何时到、迭代何时结束（遥测用）。停止读取（`return`）立即转给提供方，
@@ -149,12 +157,20 @@ export const speechArbiter = definePlugin({
       `${ReviewService.ref}?`,
       `${TelemetryService.ref}?`,
       `${TraceService.ref}?`,
+      `${GameService.ref}?`,
     ],
     permissions: ['speech.output'],
     process: 'in-process',
     config: Type.Object({
       historySize: Type.Integer({ minimum: 1, default: 20 }),
       maxQueue: Type.Integer({ minimum: 1, default: 16 }),
+      gamePacing: Type.Object(
+        {
+          holdMs: Type.Integer({ minimum: 1, maximum: 30_000, default: 30_000 }),
+          voiceWaitMs: Type.Integer({ minimum: 0, maximum: 30_000, default: 0 }),
+        },
+        { default: {}, additionalProperties: false },
+      ),
     }),
   },
   activate(ctx) {
@@ -262,14 +278,65 @@ export const speechArbiter = definePlugin({
       current[field] ??= reason;
       current.interrupted.resolve();
     };
+    const releasePacing = (current: Active) => {
+      const release = current.releasePacing;
+      current.releasePacing = undefined;
+      release?.();
+    };
+    const stopActive = (current: Active, reason: string) => {
+      interrupt(current, 'stopped', reason);
+      current.abort.abort(new Error(reason));
+      if (current.sentenceId) stage.truncate(current.sentenceId);
+      releasePacing(current);
+    };
     const hardStop = (reason: string) => {
       for (const item of queue.splice(0)) {
         dropQueued(item, outcome(item.request, { end: 'stopped', reason }));
       }
-      if (!active) return;
-      interrupt(active, 'stopped', reason);
-      active.abort.abort(new Error(reason));
-      if (active.sentenceId) stage.truncate(active.sentenceId);
+      if (active) stopActive(active, reason);
+    };
+
+    const startPacing = async (
+      current: Active,
+      game: GamePacing,
+      traceparent: string | null,
+    ): Promise<PacingFailure | undefined> => {
+      const { request } = current.item;
+      const { holdMs, voiceWaitMs } = ctx.config.gamePacing;
+      const interrupted = new AbortController();
+      void current.interrupted.promise.then(() => interrupted.abort());
+      const signal = AbortSignal.any([game.signal, interrupted.signal, ctx.signal]);
+      const unavailable = (reason: string): PacingFailure =>
+        clock.now() >= request.expiresAt
+          ? { end: 'expired', reason: '等待解说时发言已过期' }
+          : { end: 'unavailable', reason };
+      const voiceDeadline = Math.min(clock.now() + voiceWaitMs, request.expiresAt);
+      const voiceReady = () => waitForVoice(game, clock, voiceDeadline - clock.now(), signal);
+
+      if (voiceWaitMs > 0 && !(await voiceReady())) return unavailable('游戏配音仍忙');
+      if (signal.aborted || clock.now() >= request.expiresAt) return unavailable('游戏解说已撤回');
+      const hold = game.hold(holdMs, traceparent);
+      if (!hold) return unavailable('游戏连接不可用于暂缓推进');
+      const expiry = clock.setTimeout(
+        () => stopActive(current, '游戏暂缓推进已到期'),
+        hold.remainingMs(),
+      );
+      current.releasePacing = () => {
+        clock.clearTimeout(expiry);
+        hold.release();
+      };
+      const confirmed = await waitForPacing(
+        hold.accepted,
+        clock,
+        Math.min(PACING_ACK_MS, request.expiresAt - clock.now()),
+        signal,
+      );
+      if (!confirmed) return unavailable('游戏暂缓推进未确认');
+      // 配音可能在等待回执期间开始，沿用第一次等待的截止时刻。
+      if (voiceWaitMs > 0 && !(await voiceReady())) return unavailable('游戏配音仍忙');
+      if (signal.aborted || hold.remainingMs() <= 0 || clock.now() >= request.expiresAt)
+        return unavailable('游戏解说已撤回');
+      return undefined;
     };
 
     /** 等着下一次 OBS 应急动作结果的句子。 */
@@ -415,9 +482,13 @@ export const speechArbiter = definePlugin({
     };
 
     const speak = async (current: Active): Promise<UtteranceOutcome> => {
-      const { request } = current.item;
+      const { request, pacing } = current.item;
       const result = outcome(request, {});
       const finish = (fields: Partial<UtteranceOutcome>) => Object.assign(result, fields);
+      if (pacing === null || pacing?.signal.aborted)
+        return finish({ end: 'unavailable', reason: '游戏解说的语义连接不可用' });
+      const disconnected = () => stopActive(current, '游戏解说的语义连接已断开');
+      pacing?.signal.addEventListener('abort', disconnected, { once: true });
       /** 停止、软收尾或被抢占时返回结束方式；每次等待之后都要检查。 */
       const halted = (): Partial<UtteranceOutcome> | undefined => {
         if (current.stopped) return { end: 'stopped', reason: current.stopped };
@@ -520,6 +591,7 @@ export const speechArbiter = definePlugin({
             let playback: PlaybackResult | undefined;
             let synthesis: Synthesis | undefined;
             let ttsError: string | undefined;
+            let pacingFailure: PacingFailure | undefined;
             // 这一句的合成在发言中止时取消；合成了却没有播完（被打断、截断或出错）时也取消，
             // 不让云端 TTS 继续合成没人听的部分。
             const sentenceAbort = new AbortController();
@@ -572,6 +644,15 @@ export const speechArbiter = definePlugin({
                 }
                 if (halted()) throw new Error('播出前被打断');
                 if (expired !== undefined) throw new Error(expired);
+                if (pacing && !current.releasePacing) {
+                  pacingFailure = await startPacing(
+                    current,
+                    pacing,
+                    current.item.span.traceparent ?? null,
+                  );
+                  if (pacingFailure) throw new Error(pacingFailure.reason);
+                  if (halted()) throw new Error('播出前被打断');
+                }
                 const sentenceId = `${p.utteranceId}#${p.index}`;
                 current.sentenceId = sentenceId;
                 const voiced = synthesis;
@@ -626,6 +707,10 @@ export const speechArbiter = definePlugin({
               previous = sentence.subtitle;
               continue;
             }
+            if (pacingFailure) {
+              fate = pacingFailure.end;
+              return finish(halted() ?? pacingFailure);
+            }
             // 合成中等到过期，或要等的限流额度到过期之后才恢复：这一句与剩下的句子都不播。
             if (expired !== undefined) {
               fate = 'expired';
@@ -659,6 +744,9 @@ export const speechArbiter = definePlugin({
           end: 'unavailable',
           reason: error instanceof Error ? error.message : String(error),
         });
+      } finally {
+        pacing?.signal.removeEventListener('abort', disconnected);
+        releasePacing(current);
       }
     };
 
@@ -680,6 +768,7 @@ export const speechArbiter = definePlugin({
           emergency: undefined,
           onStarted: undefined,
           firstAudio: false,
+          releasePacing: undefined,
         };
         active = current;
         item.span.addEvent('bellis.speech.dequeued');
@@ -714,8 +803,12 @@ export const speechArbiter = definePlugin({
         if (seen.has(request.id)) return refuse(request, { end: 'duplicate' });
         seen.add(request.id);
         if (request.expiresAt <= clock.now()) return refuse(request, { end: 'expired' });
+        const pacing =
+          request.source === 'game-reaction' || request.commentary
+            ? (ctx.optional(GameService)?.pacing(request.commentary?.runtimeId) ?? null)
+            : undefined;
         return new Promise((resolve) => {
-          queue.push({ request, seq: seq++, resolve, span: utteranceSpan(request) });
+          queue.push({ request, pacing, seq: seq++, resolve, span: utteranceSpan(request) });
           queue.sort(
             (a, b) => PRIORITY[b.request.source] - PRIORITY[a.request.source] || a.seq - b.seq,
           );

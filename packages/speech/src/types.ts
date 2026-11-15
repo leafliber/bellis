@@ -76,6 +76,8 @@ export interface SpeechRequest {
   untrusted: boolean;
   /** 输出来自包含游戏数据的上下文。保留到发言写回，供模型外发门控。 */
   gameContent?: boolean;
+  /** 本次发言是指定 Runtime 会话的解说。优先级仍由 source 决定。 */
+  commentary?: { runtimeId: string };
   /**
    * 产生它的链路（见运维“观测”）：发言的 span 以它为父；回应弹幕时带 `originAt`，
    * 第一句在 Stage 开始播出时记“弹幕到首音”。没有遥测时不出现。
