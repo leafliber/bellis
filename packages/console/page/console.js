@@ -38,6 +38,21 @@
  * @property {boolean} gap
  */
 /**
+ * @typedef {object} Game
+ * @property {'WAITING' | 'READY' | 'MANUAL'} state
+ * @property {string | null} reason
+ * @property {boolean} mainConnected
+ * @property {boolean} coreConnected
+ * @property {string | null} runtimeId
+ * @property {boolean} inputPermitted
+ * @property {'autonomous' | 'waiting_vote' | 'paused' | 'manual' | null} mode
+ * @property {string | null} goalId
+ * @property {{ decisionPointId: string, timing: { resolveRemainingMs: number, remainingMs: number } | null } | null} decision
+ * @property {{ code: string, summary: string } | null} lastRejection
+ * @property {number | null} riskScore
+ * @property {boolean | null} riskLimitExceeded
+ */
+/**
  * @typedef {object} Danmaku
  * @property {boolean} ready
  * @property {string} status
@@ -84,6 +99,7 @@
  * @property {{ mode: 'delay' | 'approve', delayMs: number, approveTimeoutMs: number } | null} review
  * @property {Held[]} held
  * @property {Vote | null} vote
+ * @property {Game | null} game
  * @property {Danmaku | null} danmaku
  * @property {Llm | null} llm
  * @property {Memory | null} memory
@@ -129,6 +145,9 @@ const heldList = byId('held');
 const heldEmpty = byId('held-empty');
 const voteSummary = byId('vote-summary');
 const voteOptions = byId('vote-options');
+const gamePanel = byId('game-panel');
+const gameTakeoverButton = /** @type {HTMLButtonElement} */ (byId('game-takeover'));
+const gameReturnButton = /** @type {HTMLButtonElement} */ (byId('game-return'));
 const danmakuText = byId('danmaku');
 const danmakuGapText = byId('danmaku-gap');
 const llmText = byId('llm');
@@ -278,6 +297,7 @@ function clearStatus() {
   // 等待放行的句子可以操作，过期了就不再列出；其余部分变灰保留，便于排查。
   renderHeld([]);
   heldEmpty.hidden = true;
+  renderGame(null);
 }
 
 /** @param {string} why */
@@ -336,6 +356,7 @@ function render(status) {
   );
   renderHeld(status.held);
   renderVote(status.vote);
+  renderGame(status.game);
   renderReadiness(status.danmaku, status.llm, status.memory);
   renderPersona(status.persona);
   renderUnresolved(status.unresolved);
@@ -401,6 +422,42 @@ function renderVote(vote) {
   );
   const rows = vote.options.map((option, i) => make('li', `${option}：${vote.counts[i] ?? 0} 票`));
   voteOptions.replaceChildren(...rows);
+}
+
+/** @param {Game | null} game */
+function renderGame(game) {
+  gamePanel.hidden = game === null;
+  gameTakeoverButton.disabled = !game || game.state === 'MANUAL';
+  gameReturnButton.disabled = game?.state !== 'MANUAL';
+
+  const modes = { autonomous: '自主', waiting_vote: '等待投票', paused: '暂停', manual: '人工' };
+  const decision = game?.decision;
+  const timing = decision?.timing;
+  const rejection = game?.lastRejection;
+  setText(
+    byId('game-state'),
+    game?.reason ? `${game.state}（${game.reason}）` : (game?.state ?? '—'),
+  );
+  setText(
+    byId('game-connections'),
+    game
+      ? `语义${game.mainConnected ? '已连接' : '未连接'}，控制${game.coreConnected ? '已连接' : '未连接'}${game.runtimeId ? `（会话 ${game.runtimeId}）` : ''}`
+      : '—',
+  );
+  setText(byId('game-mode'), game?.mode ? modes[game.mode] : '—');
+  setText(byId('game-input'), game?.inputPermitted ? '已确认' : '无');
+  setText(byId('game-goal'), game?.goalId ?? '—');
+  setText(
+    byId('game-decision'),
+    decision
+      ? `${decision.decisionPointId}（${timing ? `距余量线 ${timing.resolveRemainingMs}ms，距截止 ${timing.remainingMs}ms` : '无计时'}）`
+      : '—',
+  );
+  setText(byId('game-rejection'), rejection ? `${rejection.code}（${rejection.summary}）` : '—');
+  setText(
+    byId('game-risk'),
+    game?.riskScore == null ? '—' : `${game.riskScore}${game.riskLimitExceeded ? '（超限）' : ''}`,
+  );
 }
 
 /**
@@ -656,6 +713,17 @@ byId('presence-confirm').addEventListener('click', async () => {
   const data = await act('/api/presence', {}, '确认在场');
   if (data?.ok === true) say('已确认在场');
 });
+
+for (const { button, path, label } of [
+  { button: gameTakeoverButton, path: '/api/game-takeover', label: '接管游戏' },
+  { button: gameReturnButton, path: '/api/game-return', label: '交还游戏控制' },
+]) {
+  button.addEventListener('click', async () => {
+    const data = await act(path, {}, label);
+    if (data)
+      say(data.ok === true ? `${label}已受理` : `${label}被拒绝：${data.reason}`, data.ok !== true);
+  });
+}
 
 for (const button of modeButtons) {
   button.addEventListener('click', () => {

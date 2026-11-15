@@ -153,6 +153,11 @@
       },
       "additionalProperties": false
     },
+    "OperatorGameControlParams": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "OperatorVetoParams": {
       "type": "object",
       "properties": {

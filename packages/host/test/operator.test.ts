@@ -12,9 +12,17 @@ import {
   RpcPeer,
 } from '@bellis/channel';
 import { ConsoleServer } from '@bellis/console';
+import { GameControlFact, GameRuntimeHost, type GameStatus } from '@bellis/game-bridge';
 import { ManualClock } from '@bellis/kernel';
 import { SimObs } from '@bellis/obs';
-import { OperatorConsoleLoginResult, OperatorMethod } from '@bellis/protocol';
+import {
+  GameBridgeMethod,
+  GameBridgeRole,
+  type GameMainHealth,
+  type GameSituationObserved,
+  OperatorConsoleLoginResult,
+  OperatorMethod,
+} from '@bellis/protocol';
 import { ObsEmergencyConnection, SafetyCore } from '@bellis/safety';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
@@ -32,6 +40,35 @@ import type {
 } from '../src/readiness.ts';
 
 const isLogin = Compile(OperatorConsoleLoginResult);
+const gameHealth: GameMainHealth = {
+  atMs: 0,
+  ready: true,
+  mode: 'autonomous',
+  goalId: 'goal-1',
+  decisionPointId: null,
+  prerequisites: [],
+  firstActionMs: null,
+  frameAgeMs: 20,
+  queueDepth: 0,
+  riskScore: 0.25,
+  riskLimitExceeded: false,
+  lastRejection: { atMs: 0, code: 'forbidden', summary: '动作不在白名单内' },
+};
+
+function currentGame(): GameStatus {
+  return {
+    state: 'READY',
+    reason: null,
+    mainConnected: true,
+    coreConnected: true,
+    runtimeId: 'run-1',
+    adapter: null,
+    health: gameHealth,
+    realtimeHealth: null,
+    decision: null,
+    inputPermitted: true,
+  };
+}
 
 /** 宿主装配的一部分：安全核（模拟 OBS）、操作员动作、本机通道上的命令行入口与操作台。 */
 async function setup(options: { alertLimit?: number } = {}) {
@@ -61,6 +98,11 @@ async function setup(options: { alertLimit?: number } = {}) {
     watchdogConnected: () => true,
   });
   core.setModeration(false);
+  const gameRuntime = new GameRuntimeHost({
+    simulated: true,
+    wireNowMs: () => clock.now(),
+    emergencyStop: () => assert.fail('操作员游戏动作不走媒体急停'),
+  });
   const world = {
     failures: [] as string[],
     preflights: [] as Array<[string, boolean]>,
@@ -69,6 +111,7 @@ async function setup(options: { alertLimit?: number } = {}) {
     llm: null as LlmReport | null,
     memory: null as MemoryStatusReport | null,
     persona: null as PersonaReport | null,
+    game: null as GameStatus | null,
   };
   let server: ConsoleServer | undefined;
   const api = createOperator({
@@ -94,6 +137,14 @@ async function setup(options: { alertLimit?: number } = {}) {
     llm: () => world.llm,
     memory: () => world.memory,
     persona: () => world.persona,
+    game: {
+      current: () => {
+        const { game } = world;
+        return game ? { status: () => game, wireNowMs: gameRuntime.port.wireNowMs } : undefined;
+      },
+      takeOver: () => gameRuntime.takeOver(),
+      returnControl: () => gameRuntime.returnControl(),
+    },
     preflight: async (target, withSafety) => {
       world.preflights.push([target, withSafety]);
       return [...world.failures];
@@ -174,6 +225,7 @@ async function setup(options: { alertLimit?: number } = {}) {
     logs,
     api,
     world,
+    gameRuntime,
     cli,
     http,
     events: (type: string) => store.events().filter((e) => e.type === type),
@@ -266,6 +318,188 @@ test('命令行（RPC）与操作台（HTTP）调同一套操作员动作：结�
     assert.deepEqual(
       s.events('safety.emergency-requested').map((e) => (e.data as { reason: string }).reason),
       ['操作员急停', '命令行急停'],
+    );
+  } finally {
+    await s.close();
+  }
+});
+
+test('游戏接管与交还走认证的无参数操作员入口，交还被拒保持人工锁存', async () => {
+  const s = await setup();
+  try {
+    const commands = [
+      [OperatorMethod.GameTakeover, '/api/game-takeover'],
+      [OperatorMethod.GameReturn, '/api/game-return'],
+    ] as const;
+    const disabled = { ok: false, reason: '游戏桥尚未启用' };
+    for (const [method, path] of commands) {
+      assert.deepEqual(await s.cli.request(method), disabled);
+      assert.deepEqual((await s.http('POST', path, {})).body, disabled);
+    }
+
+    const game = currentGame();
+    s.world.game = game;
+    let verified = false;
+    const calls: string[] = [];
+    s.gameRuntime.port.register({
+      connect: () => assert.fail('这里只接操作员，不连接 Runtime'),
+      takeOver(reason) {
+        calls.push('takeover');
+        if (game.state === 'MANUAL') return;
+        game.state = 'MANUAL';
+        game.reason = reason;
+        game.inputPermitted = false;
+        s.core.record(GameControlFact.Taken, { target: 'game:synthetic', reason });
+      },
+      returnControl() {
+        calls.push('return');
+        if (!verified) return { ok: false, reason: '等待实时核核验输入释放' };
+        game.state = 'READY';
+        game.reason = null;
+        return { ok: true };
+      },
+    });
+
+    for (const [method, path] of commands) {
+      const invalid = { ok: false, reason: '参数不合法' };
+      const extra = { force: true };
+      assert.deepEqual(await s.cli.request(method, extra), invalid);
+      const bad = await s.http('POST', path, extra);
+      assert.equal(bad.status, 400);
+      assert.deepEqual(bad.body, invalid);
+      assert.equal((await s.http('POST', path, {}, { cookie: '' })).status, 401);
+      assert.equal((await s.http('POST', path, {}, { 'x-bellis-csrf': '' })).status, 403);
+    }
+    assert.deepEqual(calls, []);
+
+    assert.deepEqual(await s.cli.request(OperatorMethod.GameTakeover), { ok: true });
+    assert.deepEqual((await s.http('POST', '/api/game-takeover', {})).body, { ok: true });
+    assert.equal(s.events(GameControlFact.Taken).length, 1);
+    const refused = { ok: false, reason: '等待实时核核验输入释放' };
+    assert.deepEqual(await s.cli.request(OperatorMethod.GameReturn), refused);
+    const refusal = await s.http('POST', '/api/game-return', {});
+    assert.equal(refusal.status, 200);
+    assert.deepEqual(refusal.body, refused);
+    const status = (await s.cli.request(OperatorMethod.Status)) as OperatorStatus;
+    assert.equal(status.game?.state, 'MANUAL');
+    assert.equal(status.game?.inputPermitted, false);
+
+    verified = true;
+    assert.deepEqual((await s.http('POST', '/api/game-return', {})).body, { ok: true });
+    assert.equal(s.api.status().game?.state, 'READY');
+    assert.deepEqual(calls, ['takeover', 'takeover', 'return', 'return', 'return']);
+    assert.equal(s.core.mode, 'safe-stop');
+  } finally {
+    await s.close();
+  }
+});
+
+test('CLI 和操作台显示相同的游戏摘要，计时用 Runtime 单调时钟', async () => {
+  const s = await setup();
+  try {
+    assert.equal(s.api.status().game, null);
+    const game = currentGame();
+    game.decision = {
+      decisionPointId: 'point-1',
+      atMs: 0,
+      prompt: '合成题目',
+      options: [{ id: 'option-1', label: '合成选项' }],
+      candidates: [],
+      timing: { resolveByMs: 1200, deadlineMs: 1620 },
+      traceparent: null,
+    };
+    s.world.game = game;
+    s.clock.advance(1000);
+    const cli = (await s.cli.request(OperatorMethod.Status)) as OperatorStatus;
+    const http = (await s.http('GET', '/api/status')).body as OperatorStatus;
+    assert.deepEqual(http.game, cli.game);
+    assert.deepEqual(cli.game, {
+      state: 'READY',
+      reason: null,
+      mainConnected: true,
+      coreConnected: true,
+      runtimeId: 'run-1',
+      inputPermitted: true,
+      mode: 'autonomous',
+      goalId: 'goal-1',
+      decision: {
+        decisionPointId: 'point-1',
+        timing: { resolveByMs: 1200, deadlineMs: 1620, resolveRemainingMs: 200, remainingMs: 620 },
+      },
+      lastRejection: gameHealth.lastRejection,
+      riskScore: 0.25,
+      riskLimitExceeded: false,
+    });
+    s.clock.advance(1000);
+    assert.equal(s.api.status().game?.decision?.timing?.remainingMs, 0);
+    game.decision.timing = null;
+    assert.equal(s.api.status().game?.decision?.timing, null);
+    s.world.game = null;
+    assert.equal(((await s.http('GET', '/api/status')).body as OperatorStatus).game, null);
+  } finally {
+    await s.close();
+  }
+});
+
+test('Runtime 卡住与动作拒绝按会话去重，接管和请求人工仍各记一次', async () => {
+  const s = await setup();
+  try {
+    const observe = (
+      atMs: number,
+      screenType: GameSituationObserved['screenType'],
+      runtimeId = 'run-1',
+    ) =>
+      s.core.record(GameBridgeMethod.SituationObserved, {
+        role: GameBridgeRole.Main,
+        runtimeId,
+        payload: {
+          atMs,
+          screenType,
+          screenTypeExtension: null,
+          summary: '合成局面',
+          currentLine: null,
+          interactables: [],
+          lookpoints: [],
+          voiceActivity: 'unknown',
+          rereading: false,
+          failure: null,
+          traceparent: null,
+        } satisfies GameSituationObserved,
+      });
+    const report = (health: Partial<GameMainHealth> = {}, runtimeId = 'run-1') =>
+      s.core.record(GameBridgeMethod.HealthReported, {
+        role: GameBridgeRole.Main,
+        runtimeId,
+        payload: { ...gameHealth, ...health },
+      });
+    observe(10, '卡住');
+    observe(11, '卡住');
+    observe(9, '对话');
+    observe(12, '卡住');
+    s.core.record('director.game-assistance-requested', {});
+    s.core.record(GameControlFact.Taken, { target: 'game:synthetic', reason: '操作员接管游戏' });
+    observe(13, '对话');
+    observe(14, '卡住');
+    report();
+    report({ atMs: 20 });
+    report({ atMs: 21, lastRejection: null });
+    report({ atMs: 22 });
+    report({ atMs: 25, lastRejection: { atMs: 23, code: 'blocked', summary: '拒绝新动作' } });
+    report({ atMs: 27 });
+    observe(30, '卡住', 'run-2');
+    report({ atMs: 31 }, 'run-2');
+    assert.deepEqual(
+      s.api.alerts().map(({ type, text }) => [type, text]),
+      [
+        [GameBridgeMethod.SituationObserved, 'Game Runtime 报告卡住'],
+        ['director.game-assistance-requested', '游戏卡住，决策模型请求操作员处理'],
+        [GameControlFact.Taken, '游戏进入人工模式：操作员接管游戏'],
+        [GameBridgeMethod.SituationObserved, 'Game Runtime 报告卡住'],
+        [GameBridgeMethod.HealthReported, '游戏动作被拒绝（forbidden）：动作不在白名单内'],
+        [GameBridgeMethod.HealthReported, '游戏动作被拒绝（blocked）：拒绝新动作'],
+        [GameBridgeMethod.SituationObserved, 'Game Runtime 报告卡住'],
+        [GameBridgeMethod.HealthReported, '游戏动作被拒绝（forbidden）：动作不在白名单内'],
+      ],
     );
   } finally {
     await s.close();

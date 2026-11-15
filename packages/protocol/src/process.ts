@@ -107,6 +107,8 @@ export const OperatorMethod = {
   Mode: 'operator.mode',
   Presence: 'operator.presence',
   EmergencyStop: 'operator.emergency_stop',
+  GameTakeover: 'operator.game_takeover',
+  GameReturn: 'operator.game_return',
   /** M1 中否决等待放行的句子。 */
   Veto: 'operator.veto',
   /** M1 中放行等待中的句子（逐句放行，或提前结束固定延迟）。 */
@@ -141,6 +143,9 @@ export const OperatorEmergencyParams = Type.Object(
   closed,
 );
 export type OperatorEmergencyParams = Static<typeof OperatorEmergencyParams>;
+
+/** 游戏接管和交还只操作当前游戏桥，均不接受参数。 */
+export const OperatorGameControlParams = Type.Object({}, closed);
 
 /** 否决指定的句子（`发言编号#句序号`）；不给 key 时否决全部等待中的句子。 */
 export const OperatorVetoParams = Type.Object(

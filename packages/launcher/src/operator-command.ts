@@ -8,7 +8,7 @@ import { OperatorConsoleLoginResult, OperatorMethod } from '@bellis/protocol';
 import { Compile } from 'typebox/compile';
 
 export const OPERATOR_USAGE =
-  '用法：operator <status | mode 目标 | presence | estop [原因] | veto [句键] | release [句键] | preflight [M1|M2|M3] | forget 平台ID | resolve 意图编号 <succeeded|failed> | resolve --list | console>';
+  '用法：operator <status | mode 目标 | presence | estop [原因] | game-takeover | game-return | veto [句键] | release [句键] | preflight [M1|M2|M3] | forget 平台ID | resolve 意图编号 <succeeded|failed> | resolve --list | console>';
 
 export interface OperatorCommandIo {
   /** 经本机通道调宿主的操作员方法。 */
@@ -45,6 +45,10 @@ export function parseOperatorArgs(args: readonly string[]): OperatorCommand | un
       return rest.length === 0 ? call(OperatorMethod.Status, {}) : undefined;
     case 'presence':
       return rest.length === 0 ? call(OperatorMethod.Presence, {}) : undefined;
+    case 'game-takeover':
+      return rest.length === 0 ? call(OperatorMethod.GameTakeover, {}) : undefined;
+    case 'game-return':
+      return rest.length === 0 ? call(OperatorMethod.GameReturn, {}) : undefined;
     case 'mode':
       return rest.length === 1 ? call(OperatorMethod.Mode, { target: rest[0] }) : undefined;
     case 'estop':

@@ -9,6 +9,7 @@ class FakeElement {
   textContent = '';
   className = '';
   hidden = false;
+  disabled = false;
   value = '';
   readonly dataset: Record<string, string> = {};
   readonly classList = new Set<string>();
@@ -88,6 +89,7 @@ const status = {
   review: null,
   held: [],
   vote: null,
+  game: null,
   danmaku: null,
   llm: null,
   memory: null,
@@ -130,4 +132,44 @@ test('操作台：没有结果未知的意图时显示“没有”，读不出�
   assert.deepEqual(none('unresolved').children, []);
   const broken = await renderPage({ ...status, unresolved: null });
   assert.equal(broken('unresolved-summary').textContent, '读不出状态存储');
+});
+
+test('操作台显示游戏状态和期限，只有人工锁存时显示可交还', async () => {
+  const byId = await renderPage({
+    ...status,
+    unresolved: [],
+    game: {
+      state: 'MANUAL',
+      reason: '已接管',
+      mainConnected: true,
+      coreConnected: false,
+      runtimeId: 'run-1',
+      inputPermitted: false,
+      mode: 'manual',
+      goalId: 'goal-1',
+      decision: {
+        decisionPointId: 'point-1',
+        timing: { resolveRemainingMs: 200, remainingMs: 620 },
+      },
+      lastRejection: { code: 'blocked', summary: '<b>合成拒绝</b>' },
+      riskScore: 0.25,
+      riskLimitExceeded: true,
+    },
+  });
+  assert.equal(byId('game-panel').hidden, false);
+  assert.equal(byId('game-state').textContent, 'MANUAL（已接管）');
+  assert.equal(byId('game-connections').textContent, '语义已连接，控制未连接（会话 run-1）');
+  assert.equal(byId('game-mode').textContent, '人工');
+  assert.equal(byId('game-input').textContent, '无');
+  assert.equal(byId('game-goal').textContent, 'goal-1');
+  assert.equal(byId('game-decision').textContent, 'point-1（距余量线 200ms，距截止 620ms）');
+  assert.equal(byId('game-rejection').textContent, 'blocked（<b>合成拒绝</b>）');
+  assert.equal(byId('game-risk').textContent, '0.25（超限）');
+  assert.equal(byId('game-takeover').disabled, true);
+  assert.equal(byId('game-return').disabled, false);
+
+  const absent = await renderPage({ ...status, unresolved: [] });
+  assert.equal(absent('game-panel').hidden, true);
+  assert.equal(absent('game-takeover').disabled, true);
+  assert.equal(absent('game-return').disabled, true);
 });
