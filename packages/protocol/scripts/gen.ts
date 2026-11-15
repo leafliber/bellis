@@ -9,12 +9,15 @@
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ChannelAccept,
   ChannelChallenge,
   ChannelHello,
+  GAME_BRIDGE_MAJOR,
+  GameBridgeMethods,
+  gameBridgeSchemas,
   ProcessShutdownParams,
   ProcessShutdownResult,
   RpcCancelParams,
@@ -39,7 +42,7 @@ const suffix = '.schema.json';
 const check = process.argv.includes('--check');
 
 /**
- * 只生成 sidecar 实际用到的消息。路径相对仓库根；每个模块一次生成，互不引用。
+ * 生成 sidecar 与 Game Runtime 实际用到的消息。路径相对仓库根；每个模块一次生成，互不引用。
  */
 const pythonModules = [
   {
@@ -66,6 +69,12 @@ const pythonModules = [
     path: 'sidecars/tts_local/src/tts_local/protocol.py',
     defs: { TtsInfoResult, TtsStatus, TtsSynthesizeParams, TtsSynthesizeResult, TtsWordsParams },
   },
+  {
+    name: 'game-bridge',
+    path: 'packages/protocol/models/game_bridge.py',
+    defs: gameBridgeSchemas,
+    options: ['--strict-types', 'str', 'int', 'bool', 'float', '--enum-field-as-literal', 'all'],
+  },
 ];
 
 const PYTHON_HEADER =
@@ -86,10 +95,6 @@ const CODEGEN_OPTIONS = [
   '--skip-root-model',
   '--field-constraints',
   '--use-annotated',
-  '--strict-types',
-  'str',
-  'int',
-  'bool',
   '--use-type-alias',
   '--reuse-model',
   '--keep-model-order',
@@ -105,6 +110,9 @@ function render(name: string, defs: Record<string, unknown>): string {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: `urn:bellis:schema:${name}`,
     $defs: defs,
+    ...(name === 'game-bridge'
+      ? { 'x-major': GAME_BRIDGE_MAJOR, 'x-methods': GameBridgeMethods }
+      : {}),
   };
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
@@ -127,11 +135,17 @@ function uvRun(args: readonly string[], input: string): string {
   return result.stdout.replace(/\r\n/g, '\n');
 }
 
-function renderPython(name: string, path: string, defs: Record<string, unknown>): string {
+function renderPython(
+  name: string,
+  path: string,
+  defs: Record<string, unknown>,
+  options: readonly string[] = ['--strict-types', 'str', 'int', 'bool'],
+): string {
   const schema = render(name, defs);
-  const generated = uvRun(['datamodel-codegen', ...CODEGEN_OPTIONS], schema);
+  const generated = uvRun(['datamodel-codegen', ...CODEGEN_OPTIONS, ...options], schema);
   const fixed = uvRun(
-    ['ruff', 'check', '--fix', '--quiet', '--stdin-filename', path, '-'],
+    // 长的字面量枚举由下面的 format 换行，再由完整 lint 检查。
+    ['ruff', 'check', '--fix', '--extend-ignore', 'E501', '--quiet', '--stdin-filename', path, '-'],
     generated,
   );
   return uvRun(['ruff', 'format', '--quiet', '--stdin-filename', path, '-'], fixed);
@@ -149,7 +163,10 @@ function emit(file: string, label: string, content: string): void {
   }
   if (current === content) return;
   stale.push(label);
-  if (!check) writeFileSync(file, content);
+  if (!check) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, content);
+  }
 }
 
 mkdirSync(outDir, { recursive: true });
@@ -165,8 +182,8 @@ for (const file of readdirSync(outDir).filter((f) => f.endsWith(suffix))) {
   if (!check) rmSync(join(outDir, file));
 }
 
-for (const { name, path, defs } of pythonModules) {
-  emit(join(root, path), path, renderPython(name, path, defs));
+for (const { name, path, defs, options } of pythonModules) {
+  emit(join(root, path), path, renderPython(name, path, defs, options));
 }
 
 if (check && stale.length > 0) {

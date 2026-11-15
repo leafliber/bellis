@@ -1,0 +1,244 @@
+[
+  {
+    "name": "describe-request",
+    "sender": "bellis",
+    "message": { "jsonrpc": "2.0", "id": 1, "method": "game.describe", "params": { "major": 1 } },
+    "valid": true
+  },
+  {
+    "name": "describe-result",
+    "sender": "runtime",
+    "responseTo": "game.describe",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": { "major": 1, "runtimeId": "run-02", "nowMs": 144000 }
+    },
+    "valid": true
+  },
+  {
+    "name": "integer-token-lexeme",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"lease.renew\",\"params\":{\"token\":7,\"expiresAtMs\":144500}}",
+    "valid": true
+  },
+  {
+    "name": "fractional-spelling-of-integer-token",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"lease.renew\",\"params\":{\"token\":7.0,\"expiresAtMs\":144500}}",
+    "valid": false
+  },
+  {
+    "name": "exponent-spelling-of-integer-token",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"lease.renew\",\"params\":{\"token\":7e0,\"expiresAtMs\":144500}}",
+    "valid": false
+  },
+  {
+    "name": "boolean-is-not-an-integer-token",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"lease.renew\",\"params\":{\"token\":true,\"expiresAtMs\":144500}}",
+    "valid": false
+  },
+  {
+    "name": "lease-renew-with-max-token",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":\"renew-3\",\"method\":\"lease.renew\",\"params\":{\"token\":9007199254740991,\"expiresAtMs\":144500}}",
+    "valid": true
+  },
+  {
+    "name": "lease-renew-ack",
+    "sender": "runtime",
+    "responseTo": "lease.renew",
+    "message": { "jsonrpc": "2.0", "id": "renew-3", "result": {} },
+    "valid": true
+  },
+  {
+    "name": "stop-current-and-earlier",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "input.stop",
+      "params": { "throughToken": 9007199254740991, "reason": "operator stop" }
+    },
+    "valid": true
+  },
+  {
+    "name": "stop-before-first-lease",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "method": "input.stop",
+      "params": { "throughToken": 0, "reason": "safe stop" }
+    },
+    "valid": true
+  },
+  {
+    "name": "stop-ack",
+    "sender": "runtime",
+    "responseTo": "input.stop",
+    "message": { "jsonrpc": "2.0", "id": 4, "result": {} },
+    "valid": true
+  },
+  {
+    "name": "release-confirmed",
+    "sender": "runtime",
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "input.released",
+      "params": {
+        "token": 9007199254740991,
+        "atMs": 144350,
+        "reason": "lease_revoked",
+        "verification": "verified"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "release-verification-failed",
+    "sender": "runtime",
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "input.released",
+      "params": {
+        "token": null,
+        "atMs": 144350,
+        "reason": "core_start",
+        "verification": "residual"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "core-health-without-frame",
+    "sender": "runtime",
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": { "atMs": 144355, "leaseState": "revoked", "frameAgeMs": null, "queueDepth": 0 }
+    },
+    "valid": true
+  },
+  {
+    "name": "control-role-denies-semantic-method",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "method": "pacing.release",
+      "params": { "holdId": "hold-01", "traceparent": null }
+    },
+    "valid": false
+  },
+  {
+    "name": "runtime-cannot-grant-lease",
+    "sender": "runtime",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 8,
+      "method": "lease.renew",
+      "params": { "token": 8, "expiresAtMs": 144800 }
+    },
+    "valid": false
+  },
+  {
+    "name": "renew-requires-request-id",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "lease.renew",
+      "params": { "token": 8, "expiresAtMs": 144800 }
+    },
+    "valid": false
+  },
+  {
+    "name": "unsafe-token",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"lease.renew\",\"params\":{\"token\":9007199254740992,\"expiresAtMs\":144800}}",
+    "valid": false
+  },
+  {
+    "name": "unsafe-token-rounded-by-js",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"lease.renew\",\"params\":{\"token\":9007199254740993,\"expiresAtMs\":144800}}",
+    "valid": false
+  },
+  {
+    "name": "zero-has-no-sign",
+    "sender": "bellis",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"input.stop\",\"params\":{\"throughToken\":-0,\"reason\":\"safe stop\"}}",
+    "valid": false
+  },
+  {
+    "name": "milliseconds-must-fit-u64-nanoseconds",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "method": "lease.renew",
+      "params": { "token": 8, "expiresAtMs": 18446744073710 }
+    },
+    "valid": false
+  },
+  {
+    "name": "zero-is-not-a-lease-token",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "method": "lease.renew",
+      "params": { "token": 0, "expiresAtMs": 144800 }
+    },
+    "valid": false
+  },
+  {
+    "name": "token-must-not-be-a-string",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 12,
+      "method": "lease.renew",
+      "params": { "token": "8", "expiresAtMs": 144800 }
+    },
+    "valid": false
+  },
+  {
+    "name": "unexpected-control-field",
+    "sender": "runtime",
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": {
+        "atMs": 144355,
+        "leaseState": "revoked",
+        "frameAgeMs": null,
+        "queueDepth": 0,
+        "goal": "extra"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "release-requires-verification",
+    "sender": "runtime",
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "input.released",
+      "params": { "token": null, "atMs": 144350, "reason": "core_start" }
+    },
+    "valid": false
+  },
+  {
+    "name": "nullable-fields-are-required",
+    "sender": "runtime",
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": { "atMs": 144355, "leaseState": "revoked", "queueDepth": 0 }
+    },
+    "valid": false
+  }
+]
