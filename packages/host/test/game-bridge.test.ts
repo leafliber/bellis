@@ -440,6 +440,9 @@ async function realtime(h: Harness, run = 'run') {
     get held() {
       return held;
     },
+    get actualLease() {
+      return lease;
+    },
     setVerification(value: GameInputReleased['verification']) {
       verification = value;
     },
@@ -873,6 +876,15 @@ for (const { ballots, outcome, withdrawn = false } of [
       for (let elapsed = 0; elapsed < 10_000; elapsed += 200) {
         core.clock.advance(200);
         h.clock.advance(200);
+        const lease = h.safety.leases.current(GAME_INPUT);
+        assert.ok(lease, h.game.status().reason ?? '宿主游戏输入许可失效');
+        const expiresAtMs = h.wireNowMs() + Math.floor(lease.expiresAt - h.clock.now());
+        await until(
+          () =>
+            core.actualLease?.token === lease.token && core.actualLease.expiresAtMs === expiresAtMs,
+          `等待实时核应用许可 ${lease.token}，到期时刻 ${expiresAtMs}`,
+        );
+        // 实时核处理器同步应用续约，RPC 应答先于随后同一连接上的健康上报。
         semantic.health({ decisionPointId: withdrawn ? null : 'd-vote' });
         core.health();
         await until(
@@ -880,6 +892,8 @@ for (const { ballots, outcome, withdrawn = false } of [
             h.game.status().health?.atMs === h.wireNowMs() &&
             h.game.status().realtimeHealth?.atMs === h.wireNowMs(),
         );
+        const status = h.game.status();
+        assert.ok(status.inputPermitted, status.reason ?? '宿主未确认本轮游戏输入许可');
       }
       const ended = h.store.events().find((e) => e.type === 'vote.ended');
       assert.equal((ended?.data as { outcome?: string } | undefined)?.outcome, outcome);
