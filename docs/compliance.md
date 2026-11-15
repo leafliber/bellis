@@ -33,6 +33,17 @@
 
 决策模型接收游戏内容时须满足 Game Runtime 的[合规 C-2](https://github.com/leafliber/bellis-game-runtime/blob/main/docs/compliance.md#c-2-的依据与条件)。2026-11-16 维护者确认现用方舟账号未参加协作奖励计划，Agent Plan 套餐无数据授权，经 `/api/plan/v3` 调用的 R-17 GLM 接入点已启用安全沙箱。
 
+在本机 profile 的 `llm-openai.config.gameContentPermissions` 登记对应 `ark` 凭据、套餐与接入点的确认。每项缺省为 `false`。切换账号、套餐或接入点时重新核对确认。
+
+| 确认字段 | 需满足的条件 |
+| --- | --- |
+| `noAccountDataAuthorization` | 账号未签署《数据授权使用协议》 |
+| `noCollaborationRewards` | 账号未参加协作奖励计划，含奖励资源包 |
+| `noAgentPlanDataAuthorization` | 当前 Agent Plan 套餐条款无数据授权 |
+| `securitySandboxEnabled` | 当前 GLM 接入点启用了安全沙箱 |
+
+云端客户端接收游戏内容须四项均为 `true`，厂商为 `volcengine.ark`，并使用已核准组合 `https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions` 和 `glm-5-3-flash-260828`。
+
 ## 素材与数据
 
 | 事项 | 要点 | 门禁 |

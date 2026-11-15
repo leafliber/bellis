@@ -93,7 +93,7 @@
   | `vote.aborted` | `voteId`、`decisionPoint`、`cause`、`reason` |
   | `vote.rejected` | `voteId`、`reason` |
 
-- **游戏决策点**：投票只用于没有计时的决策点（D-07）：绑定决策点编号，时长由决策模型设定并在开始时冻结，Game Runtime 在该决策点等待结果。有计时的决策点不开投票，由决策模型自选。P2 只把决策点编号原样带上、记进事实，与 Game Runtime 的对接在 P3。
+- **游戏决策点**。只有无计时的决策点可以绑定投票（D-07）。决策插件按当前决策实例的选项编号取得口播文字，经游戏桥提交 `waiting_vote` 目标后发起投票。投票持久化 `decisionPoint` 及 `game`（Runtime 会话号 `runtimeId` 和与投票编号同序的 `optionIds`），在授权后实际开票前再次核对决策点。正常结束时带同一映射通知决策插件，由它核对当前会话和决策点后[处理结果](director.md#游戏决策)。
 
 ## 验收
 
