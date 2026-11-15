@@ -6,12 +6,18 @@
 import type { VoteStatus } from '@bellis/audience';
 import type { RpcPeer } from '@bellis/channel';
 import { type ConsoleRoute, InvalidParams } from '@bellis/console';
+import type { Game, GameControlResult, GameStatus } from '@bellis/game-bridge';
 import type { EntrySnapshot } from '@bellis/kernel';
 import { tombstoneFact } from '@bellis/memory';
 import {
+  GameBridgeMethod,
+  GameBridgeRole,
+  GameMainHealth,
+  GameSituationObserved,
   type OperatorConsoleLoginResult,
   OperatorEmergencyParams,
   OperatorForgetParams,
+  OperatorGameControlParams,
   OperatorMethod,
   OperatorModeParams,
   OperatorPreflightParams,
@@ -70,6 +76,27 @@ export interface PreflightRecord {
   by: 'preflight' | 'mode';
 }
 
+export interface OperatorGameStatus
+  extends Pick<
+    GameStatus,
+    'state' | 'reason' | 'mainConnected' | 'coreConnected' | 'runtimeId' | 'inputPermitted'
+  > {
+  mode: GameMainHealth['mode'] | null;
+  goalId: GameMainHealth['goalId'];
+  decision: {
+    decisionPointId: string;
+    timing: {
+      resolveByMs: number;
+      deadlineMs: number;
+      resolveRemainingMs: number;
+      remainingMs: number;
+    } | null;
+  } | null;
+  lastRejection: GameMainHealth['lastRejection'];
+  riskScore: number | null;
+  riskLimitExceeded: boolean | null;
+}
+
 export interface OperatorStatus {
   mode: Mode;
   maintenance: boolean;
@@ -96,6 +123,8 @@ export interface OperatorStatus {
   memory: MemoryStatusReport | null;
   /** 决策插件此刻用的人设的来源（`iris` 或 `profile`）与版本，不含正文；profile 中没有启用决策插件时为 null。 */
   persona: PersonaReport | null;
+  /** 游戏桥不在场时为 null。 */
+  game: OperatorGameStatus | null;
   /** 结果未知的意图（目标被隔离）；读不出状态存储时为 null。 */
   unresolved: UnresolvedIntent[] | null;
   preflight: PreflightRecord | null;
@@ -129,6 +158,11 @@ export interface OperatorDeps {
   memory?(): MemoryStatusReport | null;
   /** 人设的来源与版本；不给时状态里总是 null。 */
   persona?(): PersonaReport | null;
+  game?: {
+    current(): Pick<Game, 'status' | 'wireNowMs'> | undefined;
+    takeOver(): GameControlResult;
+    returnControl(): GameControlResult;
+  };
   /** 开播预检；withSafety 时先列出安全核的前置条件（见 preflight.ts）。 */
   preflight(target: Target, withSafety: boolean): Promise<string[]>;
   /** 操作台的一次性登录令牌；操作台没有启动时为 undefined。 */
@@ -147,6 +181,8 @@ export interface OperatorApi {
   /** 确认在场（M2 的前提）。 */
   presence(): { ok: true };
   emergencyStop(params: OperatorEmergencyParams): Promise<EmergencyReport>;
+  gameTakeover(): GameControlResult;
+  gameReturn(): GameControlResult;
   veto(params: OperatorVetoParams): { ok: true; vetoed: string[] };
   release(params: OperatorReleaseParams): { ok: true; released: string[] };
   preflight(params: OperatorPreflightParams): Promise<{ target: Target; failures: string[] }>;
@@ -205,6 +241,53 @@ const ALERTS: Record<string, (data: Record<string, unknown>) => string | undefin
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const isSituation = Compile(GameSituationObserved);
+const isMainHealth = Compile(GameMainHealth);
+const gameUnavailable = { ok: false, reason: '游戏桥尚未启用' } as const;
+
+function gameStatus(
+  game: Pick<Game, 'status' | 'wireNowMs'> | undefined,
+): OperatorGameStatus | null {
+  if (!game) return null;
+  const {
+    state,
+    reason,
+    mainConnected,
+    coreConnected,
+    runtimeId,
+    inputPermitted,
+    health,
+    decision,
+  } = game.status();
+  const timing = decision?.timing;
+  const now = game.wireNowMs();
+  return {
+    state,
+    reason,
+    mainConnected,
+    coreConnected,
+    runtimeId,
+    inputPermitted,
+    mode: health?.mode ?? null,
+    goalId: health?.goalId ?? null,
+    decision: decision
+      ? {
+          decisionPointId: decision.decisionPointId,
+          timing: timing
+            ? {
+                ...timing,
+                resolveRemainingMs: Math.max(0, timing.resolveByMs - now),
+                remainingMs: Math.max(0, timing.deadlineMs - now),
+              }
+            : null,
+        }
+      : null,
+    lastRejection: health?.lastRejection ?? null,
+    riskScore: health?.riskScore ?? null,
+    riskLimitExceeded: health?.riskLimitExceeded ?? null,
+  };
+}
+
 /** 宿主装配的操作员动作：订阅状态存储，跟踪等待放行的句子与近期告警。 */
 export function createOperator(deps: OperatorDeps): OperatorApi {
   const { core } = deps;
@@ -213,6 +296,32 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
   const held = new Map<string, { entry: Omit<HeldEntry, 'heldAt' | 'waitedMs'>; at: number }>();
   const alerts: Alert[] = [];
   let lastPreflight: PreflightRecord | null = null;
+  let gameNotice:
+    | { runtimeId: string; situationAtMs: number; stuck: boolean; rejectedAtMs: number }
+    | undefined;
+
+  // 卡住只在进入时提示。健康心跳可能重复携带同一次拒绝。
+  const gameAlert = (type: string, data: Record<string, unknown>): string | undefined => {
+    if (type !== GameBridgeMethod.SituationObserved && type !== GameBridgeMethod.HealthReported)
+      return;
+    const { role, runtimeId, payload } = data;
+    if (role !== GameBridgeRole.Main || typeof runtimeId !== 'string') return;
+    if (gameNotice?.runtimeId !== runtimeId)
+      gameNotice = { runtimeId, situationAtMs: -1, stuck: false, rejectedAtMs: -1 };
+    if (type === GameBridgeMethod.SituationObserved) {
+      if (!isSituation.Check(payload) || payload.atMs < gameNotice.situationAtMs) return;
+      const stuck = payload.screenType === '卡住';
+      const entered = stuck && !gameNotice.stuck;
+      gameNotice.situationAtMs = payload.atMs;
+      gameNotice.stuck = stuck;
+      return entered ? 'Game Runtime 报告卡住' : undefined;
+    }
+    if (!isMainHealth.Check(payload)) return;
+    const rejection = payload.lastRejection;
+    if (!rejection || rejection.atMs <= gameNotice.rejectedAtMs) return;
+    gameNotice.rejectedAtMs = rejection.atMs;
+    return `游戏动作被拒绝（${rejection.code}）：${rejection.summary}`;
+  };
 
   const unsubscribe = deps.subscribe((event) => {
     const data = isRecord(event.data) ? event.data : {};
@@ -227,7 +336,7 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
     ) {
       held.delete(data.key);
     }
-    const text = ALERTS[event.type]?.(data);
+    const text = ALERTS[event.type]?.(data) ?? gameAlert(event.type, data);
     if (text !== undefined) {
       alerts.push({
         seq: event.seq,
@@ -290,6 +399,7 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
         llm: deps.llm?.() ?? null,
         memory: deps.memory?.() ?? null,
         persona: deps.persona?.() ?? null,
+        game: gameStatus(deps.game?.current()),
         unresolved: unresolved(),
         preflight: lastPreflight,
         plugins: deps.plugins().map((e) => ({
@@ -324,6 +434,12 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
     },
     emergencyStop({ reason }) {
       return core.emergencyStop(reason ?? '操作员急停');
+    },
+    gameTakeover() {
+      return deps.game?.takeOver() ?? gameUnavailable;
+    },
+    gameReturn() {
+      return deps.game?.returnControl() ?? gameUnavailable;
     },
     veto({ key }) {
       return { ok: true, vetoed: settled(key, () => core.veto(key)) };
@@ -386,6 +502,7 @@ const releaseParams = checked<OperatorReleaseParams>(OperatorReleaseParams);
 const preflightParams = checked<OperatorPreflightParams>(OperatorPreflightParams);
 const forgetParams = checked<OperatorForgetParams>(OperatorForgetParams);
 const resolveParams = checked<OperatorResolveParams>(OperatorResolveParams);
+const gameControlParams = checked(OperatorGameControlParams);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
 
 /**
@@ -399,6 +516,14 @@ export function operatorActions(api: OperatorApi): Record<Method, (params: unkno
     [OperatorMethod.Presence]: () => api.presence(),
     [OperatorMethod.EmergencyStop]: (params) =>
       api.emergencyStop(isEmergencyParams.Check(params) ? params : {}),
+    [OperatorMethod.GameTakeover]: (params) => {
+      gameControlParams(params);
+      return api.gameTakeover();
+    },
+    [OperatorMethod.GameReturn]: (params) => {
+      gameControlParams(params);
+      return api.gameReturn();
+    },
     [OperatorMethod.Veto]: (params) => api.veto(vetoParams(params)),
     [OperatorMethod.Release]: (params) => api.release(releaseParams(params)),
     [OperatorMethod.Preflight]: (params) => api.preflight(preflightParams(params)),
@@ -431,6 +556,8 @@ export function consoleRoutes(api: OperatorApi): Record<string, ConsoleRoute> {
     '/api/mode': post(OperatorMethod.Mode),
     '/api/presence': post(OperatorMethod.Presence),
     '/api/emergency-stop': post(OperatorMethod.EmergencyStop),
+    '/api/game-takeover': post(OperatorMethod.GameTakeover),
+    '/api/game-return': post(OperatorMethod.GameReturn),
     '/api/veto': post(OperatorMethod.Veto),
     '/api/release': post(OperatorMethod.Release),
     '/api/preflight': post(OperatorMethod.Preflight),

@@ -104,6 +104,22 @@ test('release：经本机通道调 operator.release，把结果原样打印成 J
   assert.deepEqual(JSON.parse(f.printed.join('\n')), { ok: true, released: ['u1#0'] });
 });
 
+test('接管和交还只接受无参数命令，原样返回宿主的结果', async () => {
+  for (const [command, method] of [
+    ['game-takeover', OperatorMethod.GameTakeover],
+    ['game-return', OperatorMethod.GameReturn],
+  ] as const) {
+    const result = { ok: false, reason: '游戏桥尚未启用' };
+    const f = fake({ reply: result });
+    assert.equal(await runOperatorCommand([command, '多余参数'], f.io), 2);
+    assert.deepEqual(f.requests, []);
+    assert.match(OPERATOR_USAGE, new RegExp(command));
+    assert.equal(await runOperatorCommand([command], f.io), 0);
+    assert.deepEqual(f.requests, [[method, {}]]);
+    assert.deepEqual(JSON.parse(f.printed.at(-1) ?? ''), result);
+  }
+});
+
 test('用法不对时打印用法，退出码 2，不连宿主', async () => {
   const f = fake();
   assert.equal(await runOperatorCommand(['release', 'a', 'b'], f.io), 2);

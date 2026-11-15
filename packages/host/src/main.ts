@@ -244,6 +244,11 @@ const operator = createOperator({
       : null,
   // 决策插件用的人设：启用了决策插件才给出来源与版本（不含正文）。
   persona: () => (directorEnabled() ? personaReport(memoryService()) : null),
+  game: {
+    current: currentGame,
+    takeOver: () => gameRuntime.takeOver(),
+    returnControl: () => gameRuntime.returnControl(),
+  },
   preflight: runPreflight,
   consoleLogin: () => consoleServer?.issueLogin(),
 });
@@ -344,14 +349,14 @@ function runPreflight(target: Target, withSafety: boolean): Promise<string[]> {
     danmaku: danmakuEnabled() ? currentDanmaku() : undefined,
     llm: directorEnabled() ? currentLlm() : undefined,
     memory: memoryEnabled() ? currentMemory() : undefined,
-    ...(enabledProvider(GameService.ref) ? { game: currentGame } : {}),
+    ...(enabledProvider(GameService.ref) ? { game: () => currentGame()?.status() } : {}),
     inspectObs: () => emergency.inspect(config.safety.emergency),
   });
 }
 
-function currentGame() {
+function currentGame(): Game | undefined {
   const found = host.services.resolve(GameService.name, GameService.major);
-  return 'missing' in found ? undefined : (found.impl as Game).status();
+  return 'missing' in found ? undefined : (found.impl as Game);
 }
 
 /** 结果未知的意图（目标被隔离）；读不出状态存储时由安全核的前置条件报出，这里列为空。 */
