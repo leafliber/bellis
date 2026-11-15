@@ -1,3 +1,4 @@
+import type { GameStatus } from '@bellis/game-bridge';
 import type { EntrySnapshot } from '@bellis/kernel';
 import type { SidecarQos } from '@bellis/protocol';
 import {
@@ -66,6 +67,8 @@ export interface PreflightInputs {
     | undefined;
   /** OBS 应急目标的只读核对，返回未通过的项。 */
   inspectObs(): Promise<string[]>;
+  /** 仅启用游戏桥的 profile 核对。返回值在完成异步探测后重新读取。 */
+  game?(): GameStatus | undefined;
 }
 
 /**
@@ -174,6 +177,12 @@ export async function preflight(inputs: PreflightInputs): Promise<string[]> {
     failures.push(...(await inputs.inspectObs()));
   } catch (error) {
     failures.push(`OBS 预检失败：${(error as Error).message}`);
+  }
+  if (inputs.game) {
+    const game = inputs.game();
+    if (game?.state !== 'READY') {
+      failures.push(`Game Runtime 未就绪：${game?.reason ?? 'game@1 不在场'}`);
+    }
   }
   return failures;
 }

@@ -187,6 +187,18 @@
       ]
     },
     {
+      "name": "game",
+      "entries": [
+        {
+          "id": "game",
+          "plugin": "game-bridge",
+          "disabled": true,
+          "grant": ["game.goal", "game.input"],
+          "config": { "adapterId": "adapter-example", "adapterVersion": "0.0.0" }
+        }
+      ]
+    },
+    {
       "name": "memory",
       "entries": [
         {

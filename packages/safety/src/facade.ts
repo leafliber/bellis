@@ -1,5 +1,11 @@
 import { defineService } from '@bellis/kernel';
-import { executeIntent, type Intent, type Outcome, type Projection } from '@bellis/store';
+import {
+  executeIntent,
+  type Intent,
+  type Outcome,
+  type Projection,
+  type StoredEvent,
+} from '@bellis/store';
 import type { ControlSignal } from './control.ts';
 import type { Decision, IntentRequest, LeaseResult, SafetyCore } from './core.ts';
 import type { Lease, LeaseUpdate } from './leases.ts';
@@ -29,8 +35,10 @@ export interface SafetyFacade {
   isValid(resource: string, token: number): boolean;
   onLease(listener: (update: LeaseUpdate) => void): () => void;
   onControl(listener: (signal: ControlSignal) => void): () => void;
-  /** 记录一条事实（`对象.过去式`）；写不进只记日志，不影响调用方。 */
-  record(type: string, data: Record<string, unknown>): void;
+  /** 记录一条事实，成功时返回已提交的事件，失败只记日志。 */
+  record(type: string, data: Record<string, unknown>): StoredEvent | undefined;
+  /** 目标被未知意图隔离，或无法读回目标状态。 */
+  isIsolated(target: string): boolean;
   /** 读取宿主注册的投影（由事实归约出的当前状态，重启时从事件重建）；没有注册时抛错。 */
   view<S>(projection: Projection<S>): S;
   /** 本实例能对账的、结果未知的意图（按类型）：没有时效，且所需能力本实例全都有。 */
@@ -83,6 +91,13 @@ export function safetyFacade(
     onLease: (listener) => core.leases.subscribe(listener),
     onControl: (listener) => core.control.subscribe(listener),
     record: (type, data) => core.record(type, data),
+    isIsolated: (target) => {
+      try {
+        return !core.store.healthy || core.store.isolatedBy(target) !== undefined;
+      } catch {
+        return true;
+      }
+    },
     view: (projection) => core.store.view(projection),
     unresolved: (type) => core.unresolved(type, granted()),
     reconcile: (intent, outcome) => core.reconcile(intent.id, outcome, granted()),

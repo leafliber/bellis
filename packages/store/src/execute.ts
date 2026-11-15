@@ -1,6 +1,9 @@
 import { payloadHash } from './payload.ts';
 import type { Intent, IntentInput, StateStore } from './store.ts';
 
+/** 命令可能已经执行，无法确定结果。调用方不可重发。 */
+export class IntentOutcomeUnknown extends Error {}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -24,6 +27,7 @@ export async function executeIntent<P>(
   try {
     result = await effect(payload, intent);
   } catch (error) {
+    if (error instanceof IntentOutcomeUnknown) return store.markUnknown(intent.id, error.message);
     return store.fail(intent.id, message(error));
   }
   store.checkpoint('effect:after');

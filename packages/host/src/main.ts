@@ -18,6 +18,12 @@ import {
 import { ConsoleServer } from '@bellis/console';
 import { director, type Llm, LlmService } from '@bellis/director';
 import {
+  type Game,
+  GameRuntimeHost,
+  GameRuntimePortService,
+  GameService,
+} from '@bellis/game-bridge';
+import {
   ChannelHub,
   ClockService,
   DataDirService,
@@ -179,7 +185,13 @@ const host = new Kernel({
 });
 kernel = host;
 const hub = new ChannelHub();
+const gameRuntime = new GameRuntimeHost({
+  emergencyStop: (reason) => {
+    void core.emergencyStop(reason);
+  },
+});
 host.provideCore(SidecarHostService, { credentials, hub });
+host.provideCore(GameRuntimePortService, gameRuntime.port);
 host.provideCore(ClockService, clock);
 host.provideCore(RandomService, systemRandom());
 // 状态存储所在目录：遥测在它下面的子目录里写 JSONL（见运维“观测”）。
@@ -243,6 +255,7 @@ let stopping = false;
 const server = await listen(credentials.path, {
   key: credentials.key,
   onConnection(connection) {
+    if (gameRuntime.accept(connection)) return;
     const known: string[] = [Role.Launcher, Role.Watchdog, Role.Operator];
     if (!known.includes(connection.role)) {
       if (!hub.accept(connection))
@@ -331,8 +344,14 @@ function runPreflight(target: Target, withSafety: boolean): Promise<string[]> {
     danmaku: danmakuEnabled() ? currentDanmaku() : undefined,
     llm: directorEnabled() ? currentLlm() : undefined,
     memory: memoryEnabled() ? currentMemory() : undefined,
+    ...(enabledProvider(GameService.ref) ? { game: currentGame } : {}),
     inspectObs: () => emergency.inspect(config.safety.emergency),
   });
+}
+
+function currentGame() {
+  const found = host.services.resolve(GameService.name, GameService.major);
+  return 'missing' in found ? undefined : (found.impl as Game).status();
 }
 
 /** 结果未知的意图（目标被隔离）；读不出状态存储时由安全核的前置条件报出，这里列为空。 */

@@ -11,6 +11,7 @@
     "@bellis/avatar": "workspace:*",
     "@bellis/bilibili": "workspace:*",
     "@bellis/director": "workspace:*",
+    "@bellis/game-bridge": "workspace:*",
     "@bellis/iris": "workspace:*",
     "@bellis/kernel": "workspace:*",
     "@bellis/llm": "workspace:*",
