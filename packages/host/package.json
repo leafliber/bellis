@@ -13,6 +13,7 @@
     "@bellis/config": "workspace:*",
     "@bellis/console": "workspace:*",
     "@bellis/director": "workspace:*",
+    "@bellis/game-bridge": "workspace:*",
     "@bellis/kernel": "workspace:*",
     "@bellis/memory": "workspace:*",
     "@bellis/obs": "workspace:*",

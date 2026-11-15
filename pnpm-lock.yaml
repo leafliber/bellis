@@ -348,6 +348,27 @@ importers:
         specifier: 4.10.2
         version: 4.10.2
 
+  packages/game-bridge:
+    dependencies:
+      '@bellis/channel':
+        specifier: workspace:*
+        version: link:../channel
+      '@bellis/kernel':
+        specifier: workspace:*
+        version: link:../kernel
+      '@bellis/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@bellis/safety':
+        specifier: workspace:*
+        version: link:../safety
+      '@bellis/store':
+        specifier: workspace:*
+        version: link:../store
+      typebox:
+        specifier: 1.3.37
+        version: 1.3.37
+
   packages/host:
     dependencies:
       '@bellis/audience':
@@ -368,6 +389,9 @@ importers:
       '@bellis/director':
         specifier: workspace:*
         version: link:../director
+      '@bellis/game-bridge':
+        specifier: workspace:*
+        version: link:../game-bridge
       '@bellis/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -563,6 +587,9 @@ importers:
       '@bellis/director':
         specifier: workspace:*
         version: link:../director
+      '@bellis/game-bridge':
+        specifier: workspace:*
+        version: link:../game-bridge
       '@bellis/iris':
         specifier: workspace:*
         version: link:../iris

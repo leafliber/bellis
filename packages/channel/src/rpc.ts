@@ -42,6 +42,8 @@ export interface RpcPeerOptions {
   timeoutMs: number;
   /** 同时处理的对端请求上限，默认 64；超出时以 ServerBusy 拒绝。 */
   maxInflight?: number;
+  /** 可由连接所属的应用协议在分发前核对消息。 */
+  acceptIncoming?(message: unknown): boolean;
 }
 
 const DEFAULT_MAX_INFLIGHT = 64;
@@ -80,7 +82,13 @@ export class RpcPeer {
     this.connection = connection;
     this.#timeoutMs = options.timeoutMs;
     this.#maxInflight = options.maxInflight ?? DEFAULT_MAX_INFLIGHT;
-    connection.on('message', (message) => this.#receive(message));
+    connection.on('message', (message) => {
+      if (options.acceptIncoming && !options.acceptIncoming(message)) {
+        connection.destroy(new ChannelError('protocol-error', '消息违反连接的应用协议'));
+        return;
+      }
+      this.#receive(message);
+    });
     connection.on('close', () => this.#onClose());
   }
 

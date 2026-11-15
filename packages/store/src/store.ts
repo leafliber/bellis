@@ -303,14 +303,8 @@ export class StateStore {
       if (!sameRequest(existing, input)) throw new Error(`幂等键 ${input.key} 已用于不同的意图`);
       return { intent: existing, duplicate: true };
     }
-    const isolated = this.#read(() =>
-      this.#db
-        .prepare(
-          "SELECT key FROM intents WHERE state = 'unknown' AND target = ? ORDER BY id LIMIT 1",
-        )
-        .get(input.target),
-    );
-    if (isolated) throw new ResourceIsolated(input.target, String(isolated.key));
+    const isolated = this.isolatedBy(input.target);
+    if (isolated !== undefined) throw new ResourceIsolated(input.target, isolated);
     const intent = this.transaction((tx) => {
       const now = this.#now();
       const row = this.#db
@@ -355,6 +349,22 @@ export class StateStore {
 
   fail(id: number, error: string): Intent {
     return this.#move(id, 'failed', 'intent.failed', { error }, 'complete');
+  }
+
+  markUnknown(id: number, error: string): Intent {
+    return this.#move(id, 'unknown', 'intent.unknown', { error }, 'complete');
+  }
+
+  /** 返回隔离该目标的最早意图键。 */
+  isolatedBy(target: string): string | undefined {
+    const row = this.#read(() =>
+      this.#db
+        .prepare(
+          "SELECT key FROM intents WHERE state = 'unknown' AND target = ? ORDER BY id LIMIT 1",
+        )
+        .get(target),
+    );
+    return row ? String(row.key) : undefined;
   }
 
   /** 对账或人工结案：结果未知的意图补记结果。有时效的意图只能由操作员结案。 */

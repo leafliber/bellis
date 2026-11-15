@@ -1,0 +1,17 @@
+{
+  "name": "@bellis/game-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@bellis/channel": "workspace:*",
+    "@bellis/kernel": "workspace:*",
+    "@bellis/protocol": "workspace:*",
+    "@bellis/safety": "workspace:*",
+    "@bellis/store": "workspace:*",
+    "typebox": "1.3.37"
+  }
+}

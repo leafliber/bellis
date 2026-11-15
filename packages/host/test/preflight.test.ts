@@ -41,6 +41,22 @@ test('开播预检：全部就绪时没有未通过项', async () => {
   assert.deepEqual(await preflight(ready), []);
 });
 
+test('开播预检：启用游戏桥时在异步探测之后检查它的就绪状态', async () => {
+  let inspected = false;
+  const failures = await preflight({
+    ...ready,
+    async inspectObs() {
+      inspected = true;
+      return [];
+    },
+    game() {
+      assert.ok(inspected);
+      return undefined;
+    },
+  });
+  assert.deepEqual(failures, ['Game Runtime 未就绪：game@1 不在场']);
+});
+
 test('开播预检：形象在场但未就绪时列出状态；profile 不含形象时不作要求', async () => {
   assert.deepEqual(
     await preflight({

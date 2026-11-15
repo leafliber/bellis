@@ -257,7 +257,7 @@ export class SafetyCore {
       const forbidden = request.capabilities.filter((c) => UNTRUSTED_FORBIDDEN.has(c));
       if (forbidden.length > 0) return `含不可信输入的意图不能申请 ${forbidden.join(', ')}`;
     }
-    if (this.#store.intentsIn('unknown').some((intent) => intent.target === request.target)) {
+    if (this.#store.isolatedBy(request.target) !== undefined) {
       return `目标 ${request.target} 有结果未知的意图，已隔离`;
     }
     const over = this.#rate.take(request.capabilities);
@@ -613,13 +613,13 @@ export class SafetyCore {
   }
 
   /** 尽力写入事件：写不进只记日志，不影响调用方。 */
-  record(type: string, data: Record<string, unknown>): void {
-    this.#record(type, data);
+  record(type: string, data: Record<string, unknown>) {
+    return this.#record(type, data);
   }
 
-  #record(type: string, data: Record<string, unknown>): void {
+  #record(type: string, data: Record<string, unknown>) {
     try {
-      this.#store.append(type, data, { source: 'safety' });
+      return this.#store.append(type, data, { source: 'safety' });
     } catch (error) {
       this.#log('safety.record-failed', { type, error: message(error) });
     }
