@@ -109,7 +109,9 @@ export class DirectorGame {
       return;
     }
     if (fact.method === 'decision_point.opened') {
+      const update = state.point?.data.decisionPointId === fact.payload.decisionPointId;
       state.point = { seq: fact.seq, data: fact.payload };
+      if (update) return;
       delete state.endedVoteId;
       if (status.state !== 'READY') return;
       if (fact.payload.timing && state.game.wireNowMs() >= fact.payload.timing.resolveByMs) {

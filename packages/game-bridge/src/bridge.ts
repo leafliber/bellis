@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { ChannelError, type Connection, RpcError, RpcPeer } from '@bellis/channel';
 import type { Clock, PluginContext, TimerHandle } from '@bellis/kernel';
 import {
@@ -88,6 +89,12 @@ interface Link {
   lastSent: number;
 }
 
+interface OpenDecision {
+  latest: GameDecisionPointOpened;
+  observationsAtLatestMs: GameDecisionPointOpened[];
+  resolveSent: boolean;
+}
+
 interface Permit {
   link: Link;
   lease: Lease;
@@ -116,9 +123,10 @@ export class GameBridge implements Game {
   readonly #target: string;
   readonly #links = new Map<Role, Link>();
   readonly #listeners = new Set<(fact: GameFact) => void>();
-  readonly #seen = new Set<string>();
+  readonly #seenActions = new Set<string>();
+  readonly #seenDecisions = new Set<string>();
   #seenRun: string | undefined;
-  #decision: GameDecisionPointOpened | undefined;
+  #decision: OpenDecision | undefined;
   #manual: string | undefined;
   #permit: Permit | undefined;
   #release: Stopping | undefined;
@@ -244,11 +252,6 @@ export class GameBridge implements Game {
         ) {
           throw new Error('Game Runtime 的适配包编号或版本与 profile 不符');
         }
-        // 同一 Runtime 在主连接重连后可能重复送达一条事实。
-        if (this.#seenRun !== description.runtimeId) {
-          this.#seen.clear();
-          this.#seenRun = description.runtimeId;
-        }
       }
       link.description = description;
       if (link.earlyHealth) {
@@ -332,7 +335,7 @@ export class GameBridge implements Game {
       adapter: (main?.description as GameMainDescription | undefined)?.adapter ?? null,
       health: (main?.health as GameMainHealth | undefined) ?? null,
       realtimeHealth: (core?.health as GameCoreHealth | undefined) ?? null,
-      decision: this.#decision ?? null,
+      decision: this.#decision?.latest ?? null,
       inputPermitted: availability.ready && !!this.#permit && this.#usable(this.#permit),
     };
     return structuredClone(status);
@@ -446,6 +449,35 @@ export class GameBridge implements Game {
     return ok;
   }
 
+  #projectDecision(point: GameDecisionPointOpened): OpenDecision | undefined {
+    const current = this.#decision;
+    if (current?.latest.decisionPointId !== point.decisionPointId) {
+      if (this.#seenDecisions.has(point.decisionPointId)) return;
+      return { latest: point, observationsAtLatestMs: [point], resolveSent: false };
+    }
+    const previous = current.latest;
+    if (
+      current.resolveSent ||
+      point.atMs < previous.atMs ||
+      point.prompt !== previous.prompt ||
+      point.traceparent !== previous.traceparent ||
+      !isDeepStrictEqual(point.options, previous.options) ||
+      (point.timing === null) !== (previous.timing === null)
+    )
+      return;
+    if (
+      point.timing &&
+      previous.timing &&
+      (point.timing.resolveByMs > previous.timing.resolveByMs ||
+        point.timing.deadlineMs > previous.timing.deadlineMs)
+    )
+      return;
+    // 同一毫秒内可以有多个不同的候选快照，按送达顺序记录每个快照一次。
+    const observations = point.atMs === previous.atMs ? current.observationsAtLatestMs : [];
+    if (observations.some((observed) => isDeepStrictEqual(observed, point))) return;
+    return { latest: point, observationsAtLatestMs: [...observations, point], resolveSent: false };
+  }
+
   #received(link: Link, method: GameEvent['method'], params: RpcParams): void {
     if (!this.#active(link) || !checkGameBridgeParams(link.role, 'runtime', method, params)) return;
     if (!link.description) {
@@ -464,6 +496,12 @@ export class GameBridge implements Game {
     )
       return;
 
+    // 只有两条连接配对后才切换去重记录，覆盖同会话主连接重连后的重复送达。
+    if (currentRun && this.#seenRun !== currentRun) {
+      this.#seenActions.clear();
+      this.#seenDecisions.clear();
+      this.#seenRun = currentRun;
+    }
     const event = { method, payload } as GameEvent;
     if (event.method === Method.HealthReported) {
       if (link.health && event.payload.atMs < link.health.atMs) return;
@@ -478,13 +516,13 @@ export class GameBridge implements Game {
       if (event.payload.token !== null && event.payload.token !== link.lastSent) return;
       this.#handleRelease(link, event.payload);
     }
-    const id =
-      event.method === Method.ActionCommitted
-        ? JSON.stringify([event.method, event.payload.actionId])
-        : event.method === Method.DecisionPointOpened
-          ? JSON.stringify([event.method, event.payload.decisionPointId])
-          : undefined;
-    if (id !== undefined && this.#seen.has(id)) return;
+    const actionId = event.method === Method.ActionCommitted ? event.payload.actionId : undefined;
+    if (actionId !== undefined && this.#seenActions.has(actionId)) return;
+    const decision =
+      event.method === Method.DecisionPointOpened
+        ? this.#projectDecision(event.payload)
+        : undefined;
+    if (event.method === Method.DecisionPointOpened && !decision) return;
 
     const runtimeId = link.description.runtimeId;
     const committed = this.#safety.record(method, { runtimeId, role: link.role, payload });
@@ -492,24 +530,25 @@ export class GameBridge implements Game {
       this.#stopInput('游戏事实无法持久化');
       return;
     }
-    if (id !== undefined) this.#seen.add(id);
+    if (actionId !== undefined) this.#seenActions.add(actionId);
     if (event.method === Method.HealthReported) {
       link.health = event.payload;
+      const point = this.#decision?.latest;
       if (
         link.role === Role.Main &&
-        this.#decision &&
-        event.payload.atMs > this.#decision.atMs &&
-        (event.payload as GameMainHealth).decisionPointId !== this.#decision.decisionPointId
+        point &&
+        event.payload.atMs > point.atMs &&
+        (event.payload as GameMainHealth).decisionPointId !== point.decisionPointId
       ) {
         this.#decision = undefined;
       }
-    } else if (event.method === Method.DecisionPointOpened) {
-      this.#decision = event.payload;
-    } else if (
-      event.method === Method.ActionCommitted &&
-      event.payload.selection?.decisionPointId === this.#decision?.decisionPointId
-    ) {
-      this.#decision = undefined;
+    } else if (decision) {
+      this.#seenDecisions.add(decision.latest.decisionPointId);
+      this.#decision = decision;
+    } else if (event.method === Method.ActionCommitted && event.payload.selection) {
+      const { decisionPointId } = event.payload.selection;
+      this.#seenDecisions.add(decisionPointId);
+      if (this.#decision?.latest.decisionPointId === decisionPointId) this.#decision = undefined;
     }
     for (const listener of [...this.#listeners]) {
       try {
@@ -728,7 +767,7 @@ export class GameBridge implements Game {
 
   #commandBlocker(command: Command): string | undefined {
     const now = this.#port.wireNowMs();
-    const point = this.#decision;
+    const point = this.#decision?.latest;
     if (command.method === Method.GoalSubmit) {
       if (command.payload.mode === 'manual') return '人工接管只能由操作员执行';
       if (command.payload.expiresAtMs <= now) return '游戏目标已过期';
@@ -803,9 +842,12 @@ export class GameBridge implements Game {
         if (changed) throw new Error(changed);
         if (stillValid && !stillValid()) throw new Error('发起命令时的游戏局面已失效');
         try {
-          const reply = await main.rpc.request(command.method, payload, {
+          const pending = main.rpc.request(command.method, payload, {
             signal: controller.signal,
           });
+          if (checked.method === Method.DecisionResolve && this.#decision)
+            this.#decision.resolveSent = true;
+          const reply = await pending;
           if (!checkGameBridgeResult(Role.Main, command.method, reply))
             throw new Error('游戏命令回执无效');
           return { accepted: true };

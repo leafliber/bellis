@@ -1148,6 +1148,61 @@ test('计时决策不打断已开口的调用，过了余量线就不再调用�
   }
 });
 
+for (const completesBeforeAbort of [false, true]) {
+  const scenario = completesBeforeAbort
+    ? '模型与收紧后的余量线同轮完成仍记超时'
+    : '同实例收紧余量线时在途模型按新截止结束且不再调用';
+  test(scenario, async () => {
+    const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+    const { model } = h;
+    assert.ok(model);
+    try {
+      const { semantic } = await pair(h);
+      await h.mode();
+      await until(() => h.game.status().inputPermitted);
+      const now = h.wireNowMs();
+      const opened = syntheticPoint(now, 'd-shorter', {
+        resolveByMs: now + 100,
+        deadlineMs: now + 150,
+      });
+      semantic.rpc.notify(Method.DecisionPointOpened, opened);
+      await until(() => model.calls.length === 1);
+      const [call] = model.calls;
+      assert.ok(call);
+
+      semantic.rpc.notify(Method.DecisionPointOpened, {
+        ...opened,
+        timing: { resolveByMs: now + 30, deadlineMs: now + 55 },
+      });
+      semantic.health({ decisionPointId: opened.decisionPointId });
+      await until(() => h.game.status().health?.decisionPointId === opened.decisionPointId);
+      assert.equal(model.calls.length, 1);
+      assert.equal(call.signal.aborted, false);
+      h.clock.advance(29);
+      assert.equal(call.signal.aborted, false);
+      if (completesBeforeAbort) {
+        call.resolve(choice(opened.decisionPointId));
+        // 让模型先赢过取消的 Promise.race，在外层 await 恢复前触发收紧后的余量线。
+        await Promise.resolve();
+      }
+      h.clock.advance(1);
+      await flush();
+      assert.ok(call.signal.reason instanceof DeadlineError);
+      const failureKinds = h.store
+        .events()
+        .filter((event) => event.type === 'director.game-decision-failed')
+        .map((event) => (event.data as { kind: string }).kind);
+      assert.deepEqual(failureKinds, ['timeout']);
+      if (!completesBeforeAbort) call.resolve(choice(opened.decisionPointId));
+      await flush();
+      assert.equal(model.calls.length, 1);
+      assert.deepEqual(semantic.submissions, []);
+    } finally {
+      await h.close();
+    }
+  });
+}
+
 test('新实例替换旧决策，真实闸门只发当前选择，动作解说等待持久确认', async () => {
   const h = await setup({ director: {}, simulation: true, simulatedPort: true });
   const { model } = h;
@@ -1266,7 +1321,9 @@ for (const { ballots, outcome, withdrawn = false } of [
 ]) {
   const scenario = withdrawn
     ? '决策点撤回时丢弃投票结果'
-    : `绑定投票的 ${outcome} 结果只在结束后用于当前决策点`;
+    : outcome === 'tie'
+      ? '候选更新保留绑定投票及平票后的唯一一次自选'
+      : `绑定投票的 ${outcome} 结果只在结束后用于当前决策点`;
   test(scenario, async () => {
     const h = await setup({ director: {}, simulation: true, simulatedPort: true });
     const { model } = h;
@@ -1275,7 +1332,8 @@ for (const { ballots, outcome, withdrawn = false } of [
       const { semantic, core } = await pair(h);
       await h.mode();
       await until(() => h.game.status().inputPermitted);
-      semantic.rpc.notify(Method.DecisionPointOpened, syntheticPoint(h.wireNowMs(), 'd-vote'));
+      const opened = syntheticPoint(h.wireNowMs(), 'd-vote');
+      semantic.rpc.notify(Method.DecisionPointOpened, opened);
       await until(() => model.calls.length === 1);
       model.calls[0]?.resolve(
         JSON.stringify({
@@ -1297,6 +1355,17 @@ for (const { ballots, outcome, withdrawn = false } of [
       assert.equal((semantic.commands[0] as GameGoalSubmitParams).mode, 'waiting_vote');
       assert.equal((semantic.commands[0] as GameGoalSubmitParams).decisionPointId, 'd-vote');
       assert.deepEqual(semantic.submissions, [Method.GoalSubmit]);
+      const revisedCandidates = opened.candidates.slice(0, 1);
+      if (outcome === 'tie') {
+        semantic.rpc.notify(Method.DecisionPointOpened, {
+          ...opened,
+          candidates: revisedCandidates,
+        });
+        semantic.health({ decisionPointId: opened.decisionPointId });
+        await until(() => h.game.status().health?.decisionPointId === opened.decisionPointId);
+        assert.deepEqual(h.game.status().decision?.candidates, revisedCandidates);
+        assert.equal(model.calls.length, 1);
+      }
       for (const ballot of ballots) {
         const before = model.calls.length;
         model.send(ballot);
@@ -1353,8 +1422,23 @@ for (const { ballots, outcome, withdrawn = false } of [
         const fallback = model.calls[afterBallots];
         assert.deepEqual(fallback?.request.context.triggers, ['game-vote-ended']);
         assert.equal(fallback?.request.context.endedVote?.outcome, outcome);
+        if (outcome === 'tie') {
+          assert.deepEqual(fallback?.request.context.game?.decision?.candidates, revisedCandidates);
+          semantic.rpc.notify(Method.DecisionPointOpened, {
+            ...opened,
+            atMs: h.wireNowMs(),
+            candidates: [],
+          });
+          await until(() => h.game.status().decision?.candidates.length === 0);
+          assert.equal(fallback?.signal.aborted, false);
+        }
         fallback?.resolve(choice('d-vote'));
         await until(() => semantic.commands.length === 2);
+      }
+      if (outcome === 'tie') {
+        await flush();
+        assert.equal(model.calls.length, afterBallots + 1);
+        assert.equal(h.store.events().filter((event) => event.type === 'vote.started').length, 1);
       }
       assert.deepEqual(semantic.commands[1], {
         decisionPointId: 'd-vote',
@@ -1849,21 +1933,150 @@ test('意图经安全核授权，RPC 应答与动作事实分离，旧连接的�
     semantic.connection.close();
     await stopped;
     await until(() => !h.game.status().mainConnected && core.stops.length === 1);
+    const unpaired = await main(h, 'unpaired-run');
+    unpaired.health();
+    await until(() => h.game.status().reason?.includes('Runtime 会话不一致') === true);
+    unpaired.connection.close();
+    await until(() => !h.game.status().mainConnected);
     const replacement = await main(h);
     replacement.health();
     core.health();
     await until(() => h.game.status().inputPermitted);
-    replacement.rpc.notify(Method.ActionCommitted, committed);
+    replacement.rpc.notify(Method.ActionCommitted, { ...committed, atMs: h.wireNowMs() });
     replacement.rpc.notify(Method.ActionCommitted, { ...committed, actionId: 'late-old-time' });
+    replacement.rpc.notify(Method.DecisionPointOpened, point(h));
     replacement.rpc.notify(Method.DecisionPointOpened, point(h, 'd-new'));
     await until(() => h.game.status().decision?.decisionPointId === 'd-new');
     assert.equal(factSeq.length, 1);
+    assert.equal(
+      h.store.events().filter((event) => event.type === Method.DecisionPointOpened).length,
+      2,
+    );
     const late = await h.game.resolveDecision(
       { decisionPointId: 'd-1', optionId: 'a', source: 'director', traceparent: null },
       SOURCE,
     );
     assert.equal(late.ok, false);
     unsubscribe();
+  } finally {
+    await h.close();
+  }
+});
+
+test('同实例接受同毫秒的新候选和收紧的计时，忽略重复与旧观测', async () => {
+  const h = await setup();
+  try {
+    const { semantic } = await pair(h);
+    const observed: GameDecisionPointOpened[] = [];
+    h.game.subscribe((fact) => {
+      if (fact.method === Method.DecisionPointOpened) observed.push(fact.payload);
+    });
+    const now = h.wireNowMs();
+    const opened = syntheticPoint(now, 'd-update', {
+      resolveByMs: now + 100,
+      deadlineMs: now + 200,
+    });
+    const revised = { ...opened, candidates: opened.candidates.slice(0, 1) };
+    semantic.rpc.notify(Method.DecisionPointOpened, opened);
+    semantic.rpc.notify(Method.DecisionPointOpened, revised);
+    semantic.rpc.notify(Method.DecisionPointOpened, opened);
+    semantic.health({ decisionPointId: opened.decisionPointId });
+    await until(() => h.game.status().health?.decisionPointId === opened.decisionPointId);
+    assert.deepEqual(observed, [opened, revised]);
+
+    h.clock.advance(1);
+    const shortened = {
+      ...revised,
+      atMs: h.wireNowMs(),
+      timing: { resolveByMs: now + 60, deadlineMs: now + 150 },
+    };
+    for (const snapshot of [
+      shortened,
+      shortened,
+      { ...shortened, atMs: now, candidates: opened.candidates },
+      { ...shortened, prompt: '另一道题' },
+      { ...shortened, options: [...opened.options].reverse() },
+      { ...shortened, traceparent: '00-11111111111111111111111111111111-1234567890abcdef-01' },
+      { ...shortened, timing: null },
+      { ...shortened, timing: { ...shortened.timing, resolveByMs: now + 70 } },
+      { ...shortened, timing: { ...shortened.timing, deadlineMs: now + 160 } },
+    ]) {
+      semantic.rpc.notify(Method.DecisionPointOpened, snapshot);
+    }
+    semantic.health({ decisionPointId: opened.decisionPointId });
+    await until(() => h.game.status().health?.atMs === h.wireNowMs());
+    assert.deepEqual(h.game.status().decision, shortened);
+    assert.deepEqual(observed, [opened, revised, shortened]);
+    assert.equal(
+      h.store.events().filter((event) => event.type === Method.DecisionPointOpened).length,
+      3,
+    );
+  } finally {
+    await h.close();
+  }
+});
+
+test('决定实际发出或实例撤回后忽略同实例的候选重发', async () => {
+  const h = await setup();
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const opened = syntheticPoint(h.wireNowMs(), 'd-sent');
+    semantic.rpc.notify(Method.DecisionPointOpened, opened);
+    await until(() => h.game.status().decision?.decisionPointId === opened.decisionPointId);
+    const checking = Promise.withResolvers<void>();
+    const allow = Promise.withResolvers<undefined>();
+    const ack = Promise.withResolvers<unknown>();
+    h.safety.addGuard((request) => {
+      if (request.type !== Method.DecisionResolve) return;
+      checking.resolve();
+      return allow.promise;
+    });
+    semantic.answerWith(() => ack.promise);
+    const applying = h.game.resolveDecision(
+      {
+        decisionPointId: opened.decisionPointId,
+        optionId: 'desk',
+        source: 'director',
+        traceparent: null,
+      },
+      SOURCE,
+    );
+    await checking.promise;
+    const revised = { ...opened, candidates: opened.candidates.slice(0, 1) };
+    semantic.rpc.notify(Method.DecisionPointOpened, revised);
+    semantic.health({ decisionPointId: opened.decisionPointId });
+    await until(() => h.game.status().health?.decisionPointId === opened.decisionPointId);
+    allow.resolve(undefined);
+    assert.deepEqual(h.game.status().decision, revised);
+    await until(() => semantic.submissions.length === 1);
+
+    h.clock.advance(1);
+    semantic.rpc.notify(Method.DecisionPointOpened, { ...opened, atMs: h.wireNowMs() });
+    semantic.health({ decisionPointId: opened.decisionPointId });
+    await until(() => h.game.status().health?.atMs === h.wireNowMs());
+    ack.resolve({});
+    assert.deepEqual(h.game.status().decision, revised);
+    assert.equal((await applying).ok, true);
+
+    const withdrawn = syntheticPoint(h.wireNowMs(), 'd-withdrawn');
+    semantic.rpc.notify(Method.DecisionPointOpened, withdrawn);
+    await until(() => h.game.status().decision?.decisionPointId === withdrawn.decisionPointId);
+    h.clock.advance(1);
+    semantic.health();
+    await until(() => h.game.status().decision === null);
+    for (const closed of [opened, withdrawn]) {
+      semantic.rpc.notify(Method.DecisionPointOpened, { ...closed, atMs: h.wireNowMs() });
+    }
+    semantic.health({ goalId: 'health-after-replay' });
+    await until(() => h.game.status().health?.goalId === 'health-after-replay');
+    assert.equal(h.game.status().decision, null);
+    assert.deepEqual(semantic.submissions, [Method.DecisionResolve]);
+    assert.equal(
+      h.store.events().filter((event) => event.type === Method.DecisionPointOpened).length,
+      3,
+    );
   } finally {
     await h.close();
   }
