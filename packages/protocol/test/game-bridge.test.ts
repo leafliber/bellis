@@ -102,7 +102,9 @@ test('错误编号用整数字面量，JSON-RPC 的错误详情可以带小数',
   const wire =
     '{"jsonrpc":"2.0","id":1,"error":{"code":-32004,"message":"lease refused","data":{"rank":7.0}}}';
   assert.deepEqual(parseGameBridgeJson(wire), JSON.parse(wire));
-  assert.throws(() => parseGameBridgeJson(wire.replace('-32004', '-32004.0')), SyntaxError);
+  for (const invalidCode of ['-32004.0', '-32004e0', '-0', '9007199254740993']) {
+    assert.throws(() => parseGameBridgeJson(wire.replace('-32004', invalidCode)), SyntaxError);
+  }
 });
 
 test('语义握手读取适配包扩展与前置条件，控制握手拒绝语义字段', () => {

@@ -1,6 +1,7 @@
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
 import {
+  GAME_BRIDGE_INTEGER_FIELDS,
   GAME_BRIDGE_MAJOR,
   type GameActionCommitted,
   GameBridgeMethod,
@@ -30,23 +31,7 @@ const failure = Compile(RpcFailure);
 const descriptionVersion = Compile(GameDescribeVersion);
 const genericScreenTypes = new Set<string>(GameScreenType.enum);
 
-/** v1 的整数字段。riskScore 是数值字段，保留 JSON 的小数与指数写法。 */
-const integerFields = new Set([
-  'id',
-  'code',
-  'major',
-  'nowMs',
-  'atMs',
-  'expiresAtMs',
-  'resolveByMs',
-  'deadlineMs',
-  'token',
-  'throughToken',
-  'rank',
-  'firstActionMs',
-  'frameAgeMs',
-  'queueDepth',
-]);
+const integerFields = new Set<string>(GAME_BRIDGE_INTEGER_FIELDS);
 const integerLiteral = /^(?:0|-?[1-9][0-9]*)$/;
 
 /** 先读握手的公共主版本字段。只在收到所请求的 game.describe 应答时使用。 */
