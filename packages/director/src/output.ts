@@ -64,6 +64,18 @@ export const SpeakAction = Type.Object(
   { ...closed, description: '说话' },
 );
 
+const GameSpeakAction = Type.Object(
+  {
+    ...SpeakAction.properties,
+    commentary: Type.Optional(
+      Type.Boolean({
+        description: '这段发言明确在解说当前游戏时填 true，普通回应或闲聊省略',
+      }),
+    ),
+  },
+  { ...closed, description: '说话' },
+);
+
 /** 发起投票：范围与投票插件冻结规则时核对的一致（VOTE_LIMITS）。 */
 export const VoteAction = Type.Object(
   {
@@ -156,7 +168,9 @@ const AskOperatorAction = Type.Object(
 
 export const AUDIENCE_ACTIONS = [SpeakAction, VoteAction, SilenceAction] as const;
 const ACTIONS = [
-  ...AUDIENCE_ACTIONS,
+  GameSpeakAction,
+  VoteAction,
+  SilenceAction,
   ChooseAction,
   GameGoalAction,
   GameVoteAction,

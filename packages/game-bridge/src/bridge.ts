@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ChannelError, type Connection, RpcError, RpcPeer } from '@bellis/channel';
 import type { Clock, PluginContext, TimerHandle } from '@bellis/kernel';
 import {
@@ -13,6 +14,9 @@ import {
   type GameInputReleased,
   type GameMainDescription,
   type GameMainHealth,
+  type GamePacingHoldParams,
+  type GamePacingReleaseParams,
+  type GameSituationObserved,
   GameBridgeMethod as Method,
   GameBridgeRole as Role,
   RpcCancel,
@@ -35,6 +39,8 @@ import {
   GameControlFact,
   type GameEvent,
   type GameFact,
+  type GamePacing,
+  type GamePacingHold,
   type GameStatus,
   gameControlLedger,
 } from './service.ts';
@@ -73,10 +79,12 @@ type Command =
 interface Link {
   role: Role;
   rpc: RpcPeer;
+  closed: AbortController;
   description?: Description;
   reason?: string;
   health?: Health;
   earlyHealth?: Health;
+  voice?: Pick<GameSituationObserved, 'atMs' | 'voiceActivity'>;
   lastSent: number;
 }
 
@@ -116,6 +124,7 @@ export class GameBridge implements Game {
   #release: Stopping | undefined;
   #timer: TimerHandle | undefined;
   #command: AbortController | undefined;
+  #nextHold = 0;
   #disposed = false;
 
   constructor(
@@ -136,6 +145,15 @@ export class GameBridge implements Game {
     const { signal } = this.#ctx;
     this.#ctx.register(() => this.dispose());
     this.#ctx.register(this.#port.register(this));
+    this.#ctx.register(
+      this.subscribe((fact) => {
+        if (fact.method !== Method.SituationObserved) return;
+        const main = this.#links.get(Role.Main);
+        if (!main || main.description?.runtimeId !== fact.runtimeId) return;
+        const { atMs, voiceActivity } = fact.payload;
+        if (!main.voice || atMs >= main.voice.atMs) main.voice = { atMs, voiceActivity };
+      }),
+    );
     this.#ctx.register(
       this.#safety.onLease(({ resource, lease }) => {
         if (resource === GAME_INPUT && !lease) this.#stopInput('安全核吊销游戏输入许可');
@@ -160,6 +178,7 @@ export class GameBridge implements Game {
     const link: Link = {
       role,
       lastSent: 0,
+      closed: new AbortController(),
       rpc: new RpcPeer(connection, {
         timeoutMs: RPC_MS,
         acceptIncoming: (message) => {
@@ -176,6 +195,7 @@ export class GameBridge implements Game {
     };
     this.#links.set(role, link);
     connection.once('close', () => {
+      link.closed.abort();
       if (this.#links.get(role) !== link) return;
       this.#links.delete(role);
       if (role === Role.Main) this.#decision = undefined;
@@ -325,6 +345,105 @@ export class GameBridge implements Game {
   subscribe(listener: (fact: GameFact) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  pacing(expectedRuntime?: string): GamePacing | undefined {
+    const main = this.#links.get(Role.Main);
+    const runtimeId = main?.description?.runtimeId;
+    if (
+      !main ||
+      !runtimeId ||
+      !this.#active(main) ||
+      (expectedRuntime !== undefined && runtimeId !== expectedRuntime)
+    )
+      return undefined;
+    const signal = AbortSignal.any([main.closed.signal, this.#ctx.signal]);
+    if (signal.aborted) return undefined;
+    return {
+      signal,
+      voiceActivity: () => {
+        const voice = main.voice;
+        return !signal.aborted &&
+          voice &&
+          this.wireNowMs() - voice.atMs < (this.#ctx.config.healthTimeoutMs ?? DEFAULT_HEALTH_MS)
+          ? voice.voiceActivity
+          : 'unknown';
+      },
+      subscribeVoice: (listener) =>
+        this.subscribe((fact) => {
+          if (
+            !signal.aborted &&
+            fact.runtimeId === runtimeId &&
+            fact.method === Method.SituationObserved
+          )
+            listener();
+        }),
+      hold: (ttlMs, traceparent) =>
+        signal.aborted ? undefined : this.#holdPacing(main, runtimeId, ttlMs, traceparent),
+    };
+  }
+
+  #holdPacing(
+    main: Link,
+    runtimeId: string,
+    ttlMs: number,
+    traceparent: string | null,
+  ): GamePacingHold | undefined {
+    const now = this.wireNowMs();
+    const holdId = createHash('sha256')
+      .update(JSON.stringify([this.#ctx.instanceId, runtimeId, now, ++this.#nextHold]))
+      .digest('hex');
+    const expiresAtMs = now + ttlMs;
+    const params = { holdId, expiresAtMs, traceparent, reason: '正在播出游戏解说' };
+    if (
+      expiresAtMs <= now ||
+      !this.#active(main) ||
+      !checkGameBridgeParams(Role.Main, 'bellis', Method.PacingHold, params)
+    )
+      return undefined;
+    let settled = false;
+    let released = false;
+    const accepted = this.#pacingRequest(main, runtimeId, Method.PacingHold, params).then((ok) => {
+      settled = true;
+      return ok;
+    });
+    return {
+      accepted,
+      remainingMs: () => expiresAtMs - this.wireNowMs(),
+      release: () => {
+        if (released) return;
+        released = true;
+        const send = () =>
+          this.#pacingRequest(main, runtimeId, Method.PacingRelease, { holdId, traceparent });
+        // 等在途的 hold 确认或超时后清理，发声可以立即取消。
+        if (settled) void send();
+        else void accepted.then(send);
+      },
+    };
+  }
+
+  async #pacingRequest(
+    main: Link,
+    runtimeId: string,
+    method: typeof Method.PacingHold | typeof Method.PacingRelease,
+    params: GamePacingHoldParams | GamePacingReleaseParams,
+  ): Promise<boolean> {
+    let ok = false;
+    if (this.#active(main)) {
+      try {
+        const reply = await main.rpc.request(method, params);
+        ok = checkGameBridgeResult(Role.Main, method, reply);
+      } catch {
+        // 未知结果由 Runtime 的绝对到期时间兜底。
+      }
+    }
+    const fact = ok
+      ? method === Method.PacingHold
+        ? 'pacing.held'
+        : 'pacing.released'
+      : 'pacing.unconfirmed';
+    this.#safety.record(fact, { runtimeId, method, ...params });
+    return ok;
   }
 
   #received(link: Link, method: GameEvent['method'], params: RpcParams): void {

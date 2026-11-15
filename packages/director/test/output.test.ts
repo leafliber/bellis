@@ -94,6 +94,7 @@ test('严格 schema：根是对象，字段全部必填、可选字段可为 nul
     'replyTo',
     'text',
     'memories',
+    'commentary',
     'question',
     'options',
     'durationSec',
@@ -170,7 +171,13 @@ const memories = fc.array(
 
 const actionArbitrary: fc.Arbitrary<DirectorAction> = fc.oneof(
   fc.record(
-    { action: fc.constant('speak' as const), replyTo: id, text: text(1, 200), memories },
+    {
+      action: fc.constant('speak' as const),
+      replyTo: id,
+      text: text(1, 200),
+      memories,
+      commentary: fc.boolean(),
+    },
     { requiredKeys: ['action', 'text'] },
   ),
   fc.record(

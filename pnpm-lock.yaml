@@ -711,6 +711,9 @@ importers:
 
   packages/speech:
     dependencies:
+      '@bellis/game-bridge':
+        specifier: workspace:*
+        version: link:../game-bridge
       '@bellis/kernel':
         specifier: workspace:*
         version: link:../kernel
