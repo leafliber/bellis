@@ -1,6 +1,7 @@
 """用锁定给 Runtime 的同一组控制消息核对生成的 Python 模型。"""
 
 import json
+import math
 from pathlib import Path
 from typing import NotRequired, TypedDict, cast
 
@@ -8,7 +9,7 @@ import game_bridge
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from bellis_sidecar.protocol import RpcNotification, RpcRequest, RpcSuccess
+from bellis_sidecar.protocol import RpcNotification, RpcRequest
 
 _HERE = Path(__file__).parent
 
@@ -31,17 +32,19 @@ class _Method(TypedDict):
 _Schema = TypedDict('_Schema', {'x-methods': dict[str, dict[str, _Method]]})
 
 
-def _parse_int(raw: str) -> int | float:
-    # serde_json 保留负零为浮点。Python 也保留到严格整数校验，避免把 -0 变成有效的 0。
-    return -0.0 if raw == '-0' else int(raw)
-
-
 def _matches(case: _ControlCase, methods: dict[str, _Method]) -> bool:
     if 'rawJson' in case:
-        message = cast(dict[str, object], json.loads(case['rawJson'], parse_int=_parse_int))
+        raw = case['rawJson']
     else:
         assert 'message' in case
-        message = case['message']
+        raw = json.dumps(case['message'])
+    try:
+        value = game_bridge.parse_game_bridge_json(raw)
+    except ValueError:
+        return False
+    if not isinstance(value, dict):
+        return False
+    message = cast('dict[str, object]', value)
     response_to = case.get('responseTo')
     method = response_to if response_to is not None else message.get('method')
     spec = methods.get(method) if isinstance(method, str) else None
@@ -60,7 +63,12 @@ def _matches(case: _ControlCase, methods: dict[str, _Method]) -> bool:
             model_name = spec['result']
             if model_name is None or case['sender'] == spec['sender']:
                 return False
-            payload = RpcSuccess.model_validate(message).result
+            payload = game_bridge.RpcSuccess.model_validate(message).result
+            if (
+                response_to == 'game.describe'
+                and game_bridge.read_game_bridge_major(payload) != game_bridge.GAME_BRIDGE_MAJOR
+            ):
+                return False
 
         model = getattr(game_bridge, model_name)
         assert isinstance(model, type) and issubclass(model, BaseModel)
@@ -89,9 +97,62 @@ def test_control_fixtures_match_generated_models() -> None:
 
 
 def test_read_major_before_applying_version_specific_model() -> None:
-    raw = '{"major":2,"nowMs":1.5,"newField":{"id":7e0}}'
-    assert game_bridge.GameDescribeVersion.model_validate_json(raw).major == 2
+    raw = (
+        b'{"jsonrpc":"2.0","id":1,'
+        b'"result":{"major":2,"nowMs":1.5,"newField":{"id":7e0,"throughToken":-0}}}'
+    )
+    envelope = game_bridge.RpcSuccess.model_validate(game_bridge.parse_game_bridge_json(raw))
+    assert game_bridge.read_game_bridge_major(envelope.result) == 2
+
+    current = raw.replace(b'"major":2', b'"major":1').replace(
+        b'"nowMs":1.5,"newField":{"id":7e0,"throughToken":-0}',
+        b'"runtimeId":"run-01","nowMs":1,"newField":true',
+    )
+    envelope = game_bridge.RpcSuccess.model_validate(game_bridge.parse_game_bridge_json(current))
+    assert game_bridge.read_game_bridge_major(envelope.result) == game_bridge.GAME_BRIDGE_MAJOR
     with pytest.raises(ValidationError):
-        game_bridge.GameCoreDescription.model_validate_json(raw)
-    with pytest.raises(ValidationError):
-        game_bridge.GameDescribeVersion.model_validate_json('{"major":2.0}')
+        game_bridge.GameCoreDescription.model_validate(envelope.result)
+
+    for malformed in (
+        raw.replace(b'"major":2', b'"major":2.0'),
+        raw.replace(b'"id":1', b'"id":1e0'),
+    ):
+        with pytest.raises(ValueError, match='整数字段'):
+            game_bridge.parse_game_bridge_json(malformed)
+
+
+def test_error_code_has_wire_integer_limits_but_error_data_keeps_numbers() -> None:
+    raw = (
+        '{"jsonrpc":"2.0","id":1,"error":{"code":-32004,"message":"lease refused",'
+        '"data":{"token":7.0,"rank":7e0,"throughToken":-0,"id":9007199254740993}}}'
+    )
+    failure = game_bridge.RpcFailure.model_validate(game_bridge.parse_game_bridge_json(raw))
+    data = cast('dict[str, object]', failure.error.data)
+    assert type(data['token']) is float
+    assert type(data['rank']) is float
+    zero = data['throughToken']
+    assert isinstance(zero, float) and math.copysign(1.0, zero) == -1.0
+    assert data['id'] == 9007199254740993
+
+    for code in ('-32004.0', '-32004e0', '-0', '9007199254740993'):
+        with pytest.raises(ValueError, match='整数字段'):
+            game_bridge.parse_game_bridge_json(raw.replace('-32004', code))
+
+
+@pytest.mark.parametrize('spelling', ['0.7', '7e-1', '-0'])
+def test_risk_score_remains_a_json_number(spelling: str) -> None:
+    raw = (
+        '{"jsonrpc":"2.0","method":"health.reported","params":{"atMs":1,"ready":true,'
+        '"mode":"paused","goalId":null,"decisionPointId":null,"prerequisites":[],'
+        '"firstActionMs":null,"frameAgeMs":0,"queueDepth":0,"riskScore":RISK,'
+        '"riskLimitExceeded":false,"lastRejection":null}}'
+    ).replace('RISK', spelling)
+    envelope = RpcNotification.model_validate(game_bridge.parse_game_bridge_json(raw))
+    health = game_bridge.GameMainHealth.model_validate(envelope.params)
+    assert health.riskScore == float(spelling)
+    assert math.copysign(1.0, health.riskScore) == math.copysign(1.0, float(spelling))
+
+
+def test_decoder_rejects_non_json_number_literals() -> None:
+    with pytest.raises(ValueError, match='NaN'):
+        game_bridge.parse_game_bridge_json('{"riskScore":NaN}')

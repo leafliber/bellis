@@ -15,6 +15,24 @@ const monotonicMs = Type.Integer({ minimum: 0, maximum: 18_446_744_073_709 });
 
 export const GAME_BRIDGE_MAJOR = 1;
 
+/** v1 在线上须使用整数字面量的字段，包含 JSON-RPC 的请求编号和错误码。 */
+export const GAME_BRIDGE_INTEGER_FIELDS = [
+  'id',
+  'code',
+  'major',
+  'nowMs',
+  'atMs',
+  'expiresAtMs',
+  'resolveByMs',
+  'deadlineMs',
+  'token',
+  'throughToken',
+  'rank',
+  'firstActionMs',
+  'frameAgeMs',
+  'queueDepth',
+] as const;
+
 export const GameBridgeRole = {
   Main: 'game-runtime.main',
   Core: 'game-runtime.core',

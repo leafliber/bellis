@@ -15,6 +15,7 @@ import {
   ChannelAccept,
   ChannelChallenge,
   ChannelHello,
+  GAME_BRIDGE_INTEGER_FIELDS,
   GAME_BRIDGE_MAJOR,
   GameBridgeMethods,
   gameBridgeSchemas,
@@ -72,7 +73,7 @@ const pythonModules = [
   {
     name: 'game-bridge',
     path: 'packages/protocol/models/game_bridge.py',
-    defs: gameBridgeSchemas,
+    defs: { ...gameBridgeSchemas, RpcFailure, RpcSuccess },
     options: ['--strict-types', 'str', 'int', 'bool', 'float', '--enum-field-as-literal', 'all'],
   },
 ];
@@ -146,9 +147,25 @@ function renderPython(
   const fixed = uvRun(
     // 长的字面量枚举由下面的 format 换行，再由完整 lint 检查。
     ['ruff', 'check', '--fix', '--extend-ignore', 'E501', '--quiet', '--stdin-filename', path, '-'],
-    generated,
+    name === 'game-bridge' ? withGameBridgeDecoder(generated) : generated,
   );
   return uvRun(['ruff', 'format', '--quiet', '--stdin-filename', path, '-'], fixed);
+}
+
+function withGameBridgeDecoder(generated: string): string {
+  const models = generated.replace(
+    'from __future__ import annotations\n',
+    'from __future__ import annotations\n\nimport json\nfrom typing import cast\nfrom pydantic import ValidationError\n',
+  );
+  const template = readFileSync(new URL('./game-bridge-decoder.py.in', import.meta.url), 'utf8');
+  return [
+    models,
+    `GAME_BRIDGE_MAJOR = ${GAME_BRIDGE_MAJOR}`,
+    `_MAX_SAFE_INTEGER = ${Number.MAX_SAFE_INTEGER}`,
+    `_INTEGER_FIELDS = frozenset(${JSON.stringify(GAME_BRIDGE_INTEGER_FIELDS)})`,
+    '',
+    template,
+  ].join('\n');
 }
 
 const stale: string[] = [];

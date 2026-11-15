@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import json
+from typing import Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+)
 
 
 class Adapter(BaseModel):
@@ -37,6 +47,15 @@ type CurrentLine = Annotated[StrictStr, Field(max_length=240, min_length=1)]
 
 
 type DecisionPointId = Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+
+
+class Error(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    code: StrictInt
+    message: StrictStr
+    data: Any | None = None
 
 
 class Failure(BaseModel):
@@ -267,6 +286,18 @@ class GameSituationObserved(BaseModel):
 type GoalId = DecisionPointId
 
 
+type Id = Annotated[StrictStr, Field(max_length=128, min_length=1)]
+
+
+type Id1 = Annotated[StrictInt, Field(ge=-9007199254740991, le=9007199254740991)]
+
+
+type Id2 = Id
+
+
+type Id3 = Id1
+
+
 type Interactable = Constraint
 
 
@@ -309,6 +340,24 @@ class Prerequisite(BaseModel):
 
 class PreviousFailure(Failure):
     pass
+
+
+class RpcFailure(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    jsonrpc: Literal['2.0']
+    id: Id | Id1 | None
+    error: Error
+
+
+class RpcSuccess(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    jsonrpc: Literal['2.0']
+    id: Id2 | Id3
+    result: Any
 
 
 class ScreenType(BaseModel):
@@ -359,3 +408,95 @@ type Token = Annotated[StrictInt, Field(ge=1, le=9007199254740991)]
 
 
 type Traceparent = Annotated[StrictStr, Field(pattern='^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$')]
+
+GAME_BRIDGE_MAJOR = 1
+_MAX_SAFE_INTEGER = 9007199254740991
+_INTEGER_FIELDS = frozenset(
+    [
+        'id',
+        'code',
+        'major',
+        'nowMs',
+        'atMs',
+        'expiresAtMs',
+        'resolveByMs',
+        'deadlineMs',
+        'token',
+        'throughToken',
+        'rank',
+        'firstActionMs',
+        'frameAgeMs',
+        'queueDepth',
+    ]
+)
+
+
+def read_game_bridge_major(description: object) -> int | None:
+    """从已关联的 game.describe 应答正文读取公共主版本。"""
+    try:
+        return GameDescribeVersion.model_validate(description).major
+    except ValidationError:
+        return None
+
+
+def parse_game_bridge_json(raw: str | bytes) -> object:
+    """解码认证游戏连接的原始 JSON。信封和载荷的类型仍由相应模型校验。"""
+    message: object = json.loads(
+        raw.decode('utf-8') if isinstance(raw, bytes) else raw,
+        parse_int=_parse_integer,
+        parse_constant=_reject_json_constant,
+    )
+    if _has_version_independent_body(message):
+        return message
+
+    pending: list[object] = [message]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            for name, item in cast('dict[str, object]', value).items():
+                if name in _INTEGER_FIELDS:
+                    _require_integer_literal(item)
+                pending.append(item)
+        elif isinstance(value, list):
+            pending.extend(cast('list[object]', value))
+    return message
+
+
+def _parse_integer(raw: str) -> int | float:
+    # 默认的浮点解析保留带小数点或指数的写法。把有符号零也保留为浮点。
+    return -0.0 if raw == '-0' else int(raw)
+
+
+def _reject_json_constant(_: str) -> None:
+    raise ValueError('游戏桥 JSON 不允许 NaN 或 Infinity 字面量')
+
+
+def _require_integer_literal(value: object) -> None:
+    if isinstance(value, float) or (type(value) is int and abs(value) > _MAX_SAFE_INTEGER):
+        raise ValueError('游戏桥整数字段须使用安全范围内的十进制 JSON 整数字面量')
+
+
+def _has_version_independent_body(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    message = cast('dict[str, object]', value)
+    if 'error' in message:
+        try:
+            failure = RpcFailure.model_validate(message)
+        except ValidationError:
+            return False
+        # 错误详情是任意 JSON。信封模型已核对 id 的类型和安全整数范围。
+        _require_integer_literal(failure.error.code)
+        return True
+
+    if 'result' not in message:
+        return False
+    major = read_game_bridge_major(message['result'])
+    if major is None or major == GAME_BRIDGE_MAJOR:
+        return False
+    try:
+        RpcSuccess.model_validate(message)
+    except ValidationError:
+        return False
+    # 未知版本只检查共同的信封和主版本。正文留给握手报告版本不兼容。
+    return True
