@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { createServer } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 import { test } from 'node:test';
+import { GameBridgeRole } from '@bellis/protocol';
 import {
   ChannelError,
   type ChannelErrorCode,
-  type Connection,
+  Connection,
   connect,
   createSessionKey,
   encodeFrame,
@@ -51,6 +52,35 @@ test('双向认证后收发 JSON 与二进制', async () => {
     assert.deepEqual(await closed, [undefined]);
   } finally {
     await pair.close();
+  }
+});
+
+test('游戏角色在分发前检查数字原文，其余角色仍可收到 JSON 数值', async () => {
+  const s = await serve();
+  try {
+    const wire =
+      '{"jsonrpc":"2.0","id":1,"method":"lease.renew","params":{"token":7e0,"expiresAtMs":100}}';
+    const game = createConnection(s.path);
+    await Connection.open(game, GameBridgeRole.Core, { key: s.key });
+    const gamePeer = s.accepted[0];
+    assert.ok(gamePeer);
+    const accepted = once(gamePeer, 'message');
+    game.write(encodeFrame(FrameKind.Json, Buffer.from(wire.replace('7e0', '7'))));
+    assert.deepEqual((await accepted)[0], JSON.parse(wire));
+    const closed = once(gamePeer, 'close');
+    gamePeer.on('message', () => assert.fail('不合法的整数字面量进入了应用'));
+    game.write(encodeFrame(FrameKind.Json, Buffer.from(wire)));
+    assert.ok(hasCode('protocol-error')((await closed)[0]));
+
+    const ordinary = createConnection(s.path);
+    await Connection.open(ordinary, 'test.client', { key: s.key });
+    const ordinaryPeer = s.accepted[1];
+    assert.ok(ordinaryPeer);
+    const received = once(ordinaryPeer, 'message');
+    ordinary.write(encodeFrame(FrameKind.Json, Buffer.from(wire)));
+    assert.deepEqual((await received)[0], JSON.parse(wire));
+  } finally {
+    await s.server.close();
   }
 });
 

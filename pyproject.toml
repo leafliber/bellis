@@ -54,13 +54,13 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 quote-style = "single"
 
 [tool.pyright]
-include = ["spikes/python", "python", "sidecars"]
-extraPaths = ["python/bellis_sidecar/src", "sidecars/tts_local/src"]
+include = ["spikes/python", "python", "sidecars", "packages/protocol/models", "packages/protocol/test"]
+extraPaths = ["python/bellis_sidecar/src", "sidecars/tts_local/src", "packages/protocol/models"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
-testpaths = ["spikes/python", "python", "sidecars"]
-pythonpath = ["python/bellis_sidecar/src", "sidecars/tts_local/src"]
+testpaths = ["spikes/python", "python", "sidecars", "packages/protocol/test"]
+pythonpath = ["python/bellis_sidecar/src", "sidecars/tts_local/src", "packages/protocol/models"]

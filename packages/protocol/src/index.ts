@@ -1,5 +1,6 @@
 import { ChannelAccept, ChannelChallenge, ChannelHello, ChannelProof } from './channel.ts';
 import { HostConfig, ObsSecret } from './config.ts';
+import { gameBridgeSchemas } from './game-bridge.ts';
 import {
   RpcCancelParams,
   RpcErrorObject,
@@ -44,6 +45,8 @@ import {
 
 export * from './channel.ts';
 export * from './config.ts';
+export * from './game-bridge.ts';
+export * from './game-bridge-validation.ts';
 export * from './jsonrpc.ts';
 export * from './plugin.ts';
 export * from './process.ts';
@@ -57,6 +60,7 @@ export * from './tts.ts';
 export const schemaModules = {
   config: { HostConfig, ObsSecret },
   channel: { ChannelHello, ChannelChallenge, ChannelProof, ChannelAccept },
+  'game-bridge': gameBridgeSchemas,
   jsonrpc: {
     RpcRequest,
     RpcNotification,
