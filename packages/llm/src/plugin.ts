@@ -30,6 +30,10 @@ export const ARK_SECRET = 'ark';
  */
 export const ARK_PROVIDER = 'volcengine.ark';
 
+/** 已按 docs/compliance.md 确认账号条款与安全沙箱的游戏内容接入点。 */
+const GAME_CONTENT_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions';
+const GAME_CONTENT_MODEL = 'glm-5-3-flash-260828';
+
 /** 本机回环地址：只有这些主机可以不加密（本机测试用）。 */
 const LOOPBACK = new Set(['127.0.0.1', '[::1]', 'localhost']);
 
@@ -48,6 +52,16 @@ export const LlmOpenAiConfig = Type.Object({
     pattern: '^[!-~]+$',
     default: ARK_PROVIDER,
   }),
+  /** 由维护者确认 `ark` 凭据所在账号、所用套餐和接入点满足游戏内容外发条件。 */
+  gameContentPermissions: Type.Object(
+    {
+      noAccountDataAuthorization: Type.Boolean({ default: false }),
+      noCollaborationRewards: Type.Boolean({ default: false }),
+      noAgentPlanDataAuthorization: Type.Boolean({ default: false }),
+      securitySandboxEnabled: Type.Boolean({ default: false }),
+    },
+    { default: {}, additionalProperties: false },
+  ),
   /**
    * 意图的输出方式：`json_schema`（严格的结构化输出）、`json_object`、`tool`（单个函数，`tool_choice` 指定它）、
    * `prompt`（只在提示词里要求 JSON）。缺省 `json_object`：S-11 实测它合法率最高、热启动最快（见决策模型“模型接入”）。
@@ -258,9 +272,21 @@ export const llmOpenAi = definePlugin({
       }
     };
 
+    const gameContent = config.gameContentPermissions;
+    const acceptsGameContent =
+      config.provider === ARK_PROVIDER &&
+      config.endpoint === GAME_CONTENT_ENDPOINT &&
+      config.model === GAME_CONTENT_MODEL &&
+      gameContent.noAccountDataAuthorization &&
+      gameContent.noCollaborationRewards &&
+      gameContent.noAgentPlanDataAuthorization &&
+      gameContent.securitySandboxEnabled;
     const llm: Llm = {
       model: { provider: config.provider, name: config.model },
+      acceptsGameContent,
       async complete(request, signal, options) {
+        if ((request.gameContent || request.context.game) && !acceptsGameContent)
+          throw new LlmError('request', '当前接入点未获准接收游戏内容');
         try {
           const result = await client.complete(
             { messages: request.messages, output: request.output },

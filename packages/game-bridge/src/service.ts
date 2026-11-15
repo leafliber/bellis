@@ -1,4 +1,4 @@
-import { defineService } from '@bellis/kernel';
+import { defineExtension, defineService } from '@bellis/kernel';
 import type {
   GameActionCommitted,
   GameBridgeRole,
@@ -64,6 +64,12 @@ export type GameFact = GameEvent & {
   runtimeId: string;
 };
 
+/** 与 game@1 的订阅同源，供可选依赖在桥晚于自己加载或热替换时继续观察。 */
+export const GameFactObserved = defineExtension<'observe', GameFact>(
+  'game.fact-observed',
+  'observe',
+);
+
 export type GameCommandResult =
   | { ok: true; intent: Intent; duplicate: boolean }
   | { ok: false; reason: string; intent?: Intent };
@@ -74,10 +80,16 @@ export interface Game {
   wireNowMs(): number;
   /** 回调只接收已经写入状态存储的事实。 */
   subscribe(listener: (fact: GameFact) => void): () => void;
-  submitGoal(params: GameGoalSubmitParams, source: IntentSource): Promise<GameCommandResult>;
+  /** 可在发送前追加本机判断。闸门仍独立授权，判断失败时不发命令。 */
+  submitGoal(
+    params: GameGoalSubmitParams,
+    source: IntentSource,
+    stillValid?: () => boolean,
+  ): Promise<GameCommandResult>;
   resolveDecision(
     params: GameDecisionResolveParams,
     source: IntentSource,
+    stillValid?: () => boolean,
   ): Promise<GameCommandResult>;
 }
 

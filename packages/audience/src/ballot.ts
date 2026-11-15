@@ -13,6 +13,12 @@ export const VOTE_LIMITS = {
   maxDurationSec: 300,
 } as const;
 
+/** 观众投的编号按顺序映射到当前 Runtime 决策实例的选项。 */
+export interface GameVoteBinding {
+  runtimeId: string;
+  optionIds: readonly string[];
+}
+
 /**
  * 开票时冻结的规则，原样写进 `vote.started`。
  * - `ballot`：弹幕正文规范化后恰好是选项编号（1 起），或与某个选项的文本规范化后相同，才算一票；
@@ -25,8 +31,10 @@ export interface VoteRules {
   options: string[];
   /** 倒计时的时长：开票说明完整播出后才开始计时。 */
   durationMs: number;
-  /** 游戏决策点编号（P3 用）；P2 原样带上、记进事实。 */
+  /** 游戏决策点编号。 */
   decisionPoint: string | null;
+  game?: GameVoteBinding;
+  gameContent?: boolean;
   ballot: 'number-or-text';
   perViewer: 'first';
   tie: 'no-winner';
@@ -89,6 +97,8 @@ export interface VoteDraft {
   options: readonly string[];
   durationSec: number;
   decisionPoint?: string | undefined;
+  game?: GameVoteBinding | undefined;
+  gameContent?: boolean | undefined;
 }
 
 /** 冻结规则：净化题目与选项（去掉不可见字符、合并空白），核对范围与投法冲突。不合法时返回原因。 */
@@ -118,6 +128,15 @@ export function freezeRules(
       reason: `时长要在 ${VOTE_LIMITS.minDurationSec}–${VOTE_LIMITS.maxDurationSec} 秒之间`,
     };
   }
+  const game = draft.game;
+  if (
+    game &&
+    (!draft.decisionPoint ||
+      game.optionIds.length !== options.length ||
+      new Set(game.optionIds).size !== options.length)
+  ) {
+    return { ok: false, reason: '游戏投票的决策点和选项映射不完整' };
+  }
   return {
     ok: true,
     rules: {
@@ -126,6 +145,8 @@ export function freezeRules(
       options,
       durationMs: durationSec * 1000,
       decisionPoint: draft.decisionPoint ?? null,
+      ...(game ? { game: { runtimeId: game.runtimeId, optionIds: [...game.optionIds] } } : {}),
+      ...(game || draft.gameContent ? { gameContent: true } : {}),
       ballot: 'number-or-text',
       perViewer: 'first',
       tie: 'no-winner',

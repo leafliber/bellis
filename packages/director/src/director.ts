@@ -1,10 +1,12 @@
 import {
   type Candidate,
   CandidatesService,
+  freezeRules,
   VoteEnded,
   type VoteEndedNotice,
   VoteService,
 } from '@bellis/audience';
+import { GameFactObserved, GameService } from '@bellis/game-bridge';
 import {
   ClockService,
   DeadlineError,
@@ -29,15 +31,16 @@ import {
 } from '@bellis/telemetry';
 import Type, { type Static } from 'typebox';
 import { DEFAULT_DRIFT_PHRASES, type DriftSignal, driftSignals } from './drift.ts';
+import { DirectorGame, type GameTrigger, type GameTurn } from './game.ts';
 import { type Llm, LlmError, type LlmModel, type LlmRequest, LlmService } from './llm.ts';
-import { MAX_SPEAK_TEXT, parseIntent, type VoteAction } from './output.ts';
+import { type DirectorAction, MAX_SPEAK_TEXT, parseIntent, type VoteAction } from './output.ts';
 import { choosePersona } from './persona.ts';
 import {
   buildMessages,
   type DecisionTrigger,
   type DirectorContext,
   type EndedVoteContext,
-  INTENT_OUTPUT,
+  intentOutput,
   type VoteContext,
 } from './prompt.ts';
 import { IntentScanner, type ScanEvent, TextQueue } from './stream.ts';
@@ -45,7 +48,19 @@ import { IntentScanner, type ScanEvent, TextQueue } from './stream.ts';
 const UNKNOWN_MODEL: LlmModel = { provider: 'unknown', name: 'unknown' };
 
 /** 决策时机的先后（合并后按这个顺序写进上下文）。 */
-const TRIGGER_ORDER: readonly DecisionTrigger[] = ['vote-ended', 'candidates', 'idle'];
+const TRIGGER_ORDER: readonly DecisionTrigger[] = [
+  'game-timed',
+  'game-vote-ended',
+  'game-decision',
+  'game-failure',
+  'game-lookpoint',
+  'vote-ended',
+  'candidates',
+  'idle',
+];
+
+const isGameTrigger = (trigger: DecisionTrigger): trigger is GameTrigger =>
+  trigger.startsWith('game-');
 
 export const DirectorConfig = Type.Object({
   /** 人设与核心价值（操作员管理），放进提示词的系统部分。 */
@@ -71,6 +86,9 @@ export const DirectorConfig = Type.Object({
   idleMs: Type.Integer({ minimum: 0, default: 0 }),
   /** 连续失败（超时、出错、非法输出）每满这么多次：告警并请求安全核降级。 */
   alarmAfter: Type.Integer({ minimum: 1, default: 3 }),
+  lookpointMinIntervalMs: Type.Integer({ minimum: 1, maximum: 60_000 * 60, default: 15_000 }),
+  lookpointMaxAgeMs: Type.Integer({ minimum: 1, maximum: 60_000 * 60, default: 60_000 }),
+  gameGoalTtlMs: Type.Integer({ minimum: 1, maximum: 60_000 * 60, default: 120_000 }),
   /** 固定过渡语：模型超时或出错、而这次有观众在等回应时播一句（每串连续失败至多一句，轮流取用）。 */
   fallback: Type.Object(
     {
@@ -108,6 +126,9 @@ function message(error: unknown): string {
 
 const lastOf = <T>(list: readonly T[], n: number): T[] => (n <= 0 ? [] : list.slice(-n));
 
+const gameSpeech = (utterance: UtteranceOutcome): boolean =>
+  utterance.gameContent === true || utterance.source === 'game-reaction';
+
 /** 被取消的调用（更高优先级的时机到来，或插件停用）。 */
 class Cancelled extends Error {}
 
@@ -135,7 +156,7 @@ interface OpenedSpeech {
  *   模型出错、超时或插件停用时文本流同样以错误结束。投票与沉默不提前开口。
  * - 失败：超时或出错时放弃本次时机，有观众在等回应、且还没开口时可播一句固定过渡语；连续失败每满 `alarmAfter`
  *   次告警（事实 `director.alarmed`）并请求安全核降级。人设漂移信号连续命中同样处理。
- * - 发起投票交给投票插件（可选依赖，不在场时只记日志）；游戏目标在后续阶段接入。
+ * - 游戏事件经持久事实触发。计时时机优先且只做选择，目标和选择交给游戏桥授权，投票交给投票插件。
  * - 记忆插件（`memory@1`，可选依赖）在场时，调用模型之前召回，截止时间 `recallTimeoutMs`，到点、出错都不带记忆
  *   继续；记忆只放进不可信数据区。决策后回报使用反馈：意图里写的、这次召回给出的编号，没有用到就是空集。
  *
@@ -159,6 +180,7 @@ export const director = definePlugin({
       ClockService.ref,
       SafetyService.ref,
       `${VoteService.ref}?`,
+      `${GameService.ref}?`,
       `${MemoryService.ref}?`,
       `${TelemetryService.ref}?`,
     ],
@@ -174,13 +196,25 @@ export const director = definePlugin({
     const safety = ctx.service(SafetyService);
     const tracer = useTracer(ctx, 'director');
     const config = ctx.config;
+    const game = new DirectorGame(ctx, safety, config);
 
     /** 排队的决策时机：在途调用结束后合并成一次调用。 */
     const pending = new Set<DecisionTrigger>();
     /** 刚结束、还没交给模型的投票。 */
     let endedVote: EndedVoteContext | undefined;
+    let endedGameVote:
+      | { turn: GameTurn; notice: VoteEndedNotice; context: EndedVoteContext }
+      | undefined;
+    let startingGameVote: GameTurn | undefined;
     /** 在途的调用：还没开口的闲聊调用可以被新到的候选或投票结束取消。 */
-    let inflight: { cancellable: boolean; cancel(by: string): void } | undefined;
+    let inflight:
+      | {
+          idle: boolean;
+          opened: boolean;
+          game: GameTurn | undefined;
+          cancel(by: string): void;
+        }
+      | undefined;
     let running = false;
     let failures = 0;
     /** 这一串连续失败里是否已播过过渡语。 */
@@ -206,6 +240,8 @@ export const director = definePlugin({
     const voteContext = (): VoteContext | null => {
       const status = ctx.optional(VoteService)?.current();
       if (!status) return null;
+      const gameContent = status.gameContent === true || !!status.game;
+      if (gameContent && !llm.acceptsGameContent) return null;
       return {
         phase: status.phase,
         question: status.question,
@@ -215,6 +251,7 @@ export const director = definePlugin({
           votes: status.counts[i] ?? 0,
         })),
         remainingSec: status.remainingMs === null ? null : Math.ceil(status.remainingMs / 1000),
+        ...(gameContent ? { gameContent: true } : {}),
       };
     };
 
@@ -240,31 +277,70 @@ export const director = definePlugin({
       taken: Candidate[],
       ended: EndedVoteContext | undefined,
       recall: MemoryRecall | undefined,
-    ): DirectorContext => {
-      const chosen = persona();
-      return {
-        persona: chosen.text,
-        ...(chosen.source === 'iris'
+      turn: GameTurn | undefined,
+      timed: boolean,
+    ): { value: DirectorContext; gameContent: boolean } => {
+      const chosen = timed ? undefined : persona();
+      const vote = timed ? null : voteContext();
+      const heard = timed
+        ? []
+        : lastOf(
+            speech
+              .heard()
+              .filter(
+                (utterance) =>
+                  utterance.heard !== '' && (llm.acceptsGameContent || !gameSpeech(utterance)),
+              ),
+            config.heardLimit,
+          );
+      const gameContent =
+        !!turn ||
+        heard.some(gameSpeech) ||
+        vote?.gameContent === true ||
+        ended?.gameContent === true;
+      const value: DirectorContext = {
+        persona: chosen?.text ?? '',
+        ...(chosen?.source === 'iris'
           ? { personaSource: { from: 'iris' as const, version: chosen.version } }
           : {}),
         triggers,
-        heard: lastOf(
-          speech
-            .heard()
-            .map((utterance) => utterance.heard)
-            .filter((text) => text !== ''),
-          config.heardLimit,
-        ),
+        heard: heard.map((utterance) => utterance.heard),
         candidates: taken.map((c) => ({ id: c.id, name: c.name, text: c.text, count: c.count })),
-        vote: voteContext(),
+        vote,
         endedVote: ended ?? null,
         memories: (recall?.memories ?? []).map((m) => ({ ...m })),
+        ...(turn
+          ? {
+              game: timed
+                ? {
+                    situation: turn.context.situation
+                      ? { summary: turn.context.situation.summary }
+                      : null,
+                    decision: turn.context.decision,
+                    lookpoint: null,
+                    committed: [],
+                  }
+                : turn.context,
+              gameVoting:
+                !timed &&
+                !!turn.point &&
+                turn.point.timing === null &&
+                !vote &&
+                !startingGameVote &&
+                !!ctx.optional(VoteService) &&
+                !voteInProgress(turn),
+            }
+          : {}),
       };
+      return { value, gameContent };
     };
 
     /** 召回的查询提示：候选弹幕的净化文本与刚结束的投票题目；都没有（冷场）时省略，由 Iris 自己构造。 */
     const recallQuery = (taken: Candidate[], ended: EndedVoteContext | undefined) => {
-      const parts = [...taken.map((c) => c.text), ...(ended ? [ended.question] : [])];
+      const parts = [
+        ...taken.map((c) => c.text),
+        ...(ended && !ended.gameContent ? [ended.question] : []),
+      ];
       const text = [...parts.join('\n')].slice(0, config.recallQueryChars).join('');
       return text === '' ? undefined : text;
     };
@@ -424,20 +500,182 @@ export const director = definePlugin({
       target: Candidate | undefined,
       call: Span,
       untrusted: boolean,
+      origin?: {
+        gameContent: boolean;
+        gameReaction?: boolean;
+        turn?: GameTurn | undefined;
+        actionId?: string;
+      },
     ): Promise<UtteranceOutcome> => {
       calls += 1;
       const trace = speechTrace(call, target);
       return speech.request({
-        id: `director:${ctx.instanceId}:${calls}`,
-        source: target ? 'danmaku-reply' : 'chatter',
+        id:
+          origin?.turn && origin.actionId
+            ? `game:${origin.turn.runtimeId}:${origin.actionId}:comment`
+            : `director:${ctx.instanceId}:${calls}`,
+        source: target ? 'danmaku-reply' : origin?.gameReaction ? 'game-reaction' : 'chatter',
         text,
         expiresAt: clock.now() + config.replyTtlMs,
         // 回应观众时在句边界才能被抢占；自主闲聊可以立即让位。
-        preempt: target ? 'sentence' : 'immediate',
-        inputs: target ? target.sources : [],
+        preempt: target || origin?.gameReaction ? 'sentence' : 'immediate',
+        inputs: [...(target?.sources ?? []), ...(origin?.turn?.inputs ?? [])],
         untrusted,
+        ...(origin?.gameContent ? { gameContent: true } : {}),
         ...(trace ? { trace } : {}),
       });
+    };
+
+    const voteInProgress = (turn: GameTurn): boolean => {
+      const vote = ctx.optional(VoteService)?.current();
+      const pointId = turn.point?.decisionPointId;
+      return (
+        pointId !== undefined &&
+        ((startingGameVote?.runtimeId === turn.runtimeId &&
+          startingGameVote.point?.decisionPointId === pointId) ||
+          (vote?.game?.runtimeId === turn.runtimeId && vote.decisionPoint === pointId))
+      );
+    };
+
+    const startGameVote = async (
+      action: Extract<DirectorAction, { action: 'game_vote' }>,
+      turn: GameTurn,
+      trace: TraceRef | undefined,
+      inputs: readonly string[],
+    ) => {
+      const decisionPoint = action.decisionPoint;
+      const reject = (kind: string) => game.failed(turn.runtimeId, decisionPoint, kind);
+      const votes = ctx.optional(VoteService);
+      const point = turn.point;
+      if (
+        !votes ||
+        votes.current() ||
+        startingGameVote ||
+        !point ||
+        point.timing ||
+        !game.isCurrent(turn) ||
+        game.attempted(turn) ||
+        point.decisionPointId !== decisionPoint
+      ) {
+        reject('vote_unavailable');
+        return;
+      }
+      const labels = action.optionIds.map(
+        (id) => point.options.find((option) => option.id === id)?.label,
+      );
+      if (labels.some((label) => label === undefined)) {
+        reject('invalid_option');
+        return;
+      }
+      calls += 1;
+      const draft = {
+        voteId: `director:${ctx.instanceId}:${calls}`,
+        question: action.question,
+        options: labels.filter((label): label is string => label !== undefined),
+        durationSec: action.durationSec,
+        decisionPoint,
+        game: { runtimeId: turn.runtimeId, optionIds: action.optionIds },
+      };
+      const frozen = freezeRules(draft);
+      if (!frozen.ok) {
+        reject('invalid_ballot');
+        return;
+      }
+      const stillValid = () =>
+        game.isCurrent(turn) && !game.attempted(turn) && ctx.optional(VoteService) === votes;
+      startingGameVote = turn;
+      try {
+        const waiting = await game.goal(
+          turn,
+          {
+            objective: '在当前决策点等待观众投票结果',
+            constraints: [],
+            mode: 'waiting_vote',
+            decisionPointId: decisionPoint,
+          },
+          config.gameGoalTtlMs + frozen.rules.durationMs,
+          trace?.traceparent ?? null,
+          inputs,
+        );
+        if (!waiting) return;
+        if (!stillValid()) {
+          reject('stale_vote');
+          return;
+        }
+        const result = await votes.start({
+          id: draft.voteId,
+          question: frozen.rules.question,
+          options: frozen.rules.options,
+          durationSec: draft.durationSec,
+          decisionPoint,
+          game: draft.game,
+          stillValid,
+          inputs: [...turn.inputs, ...inputs],
+          untrusted: true,
+          ...(trace ? { trace } : {}),
+        });
+        if (!result.ok) reject('vote_rejected');
+      } catch {
+        reject('vote_failed');
+      } finally {
+        startingGameVote = undefined;
+      }
+    };
+
+    let recovering: GameTurn | undefined;
+    const recoverOrSubmit = async (
+      action: Extract<DirectorAction, { action: 'game_goal' }>,
+      turn: GameTurn,
+      call: Span,
+      inputs: readonly string[],
+    ) => {
+      const pointId = turn.point?.decisionPointId ?? null;
+      if (
+        recovering?.runtimeId === turn.runtimeId &&
+        recovering.failure?.seq === turn.failure?.seq
+      ) {
+        game.failed(turn.runtimeId, pointId, 'recovery_in_progress');
+        return;
+      }
+      if (action.recoveryComment !== undefined) {
+        recovering = turn;
+        try {
+          const comment = action.recoveryComment;
+          noteDrift(driftSignals(comment, recentTexts(), config.drift), call);
+          remember(comment);
+          const outcome = await say(comment, undefined, call, true, {
+            turn,
+            gameContent: true,
+            gameReaction: true,
+          });
+          if (
+            outcome.end !== 'complete' ||
+            outcome.skipped.length > 0 ||
+            outcome.interruptedMidSentence ||
+            outcome.heard.trim() === ''
+          ) {
+            game.failed(turn.runtimeId, pointId, 'comment_incomplete');
+            return;
+          }
+        } catch {
+          game.failed(turn.runtimeId, pointId, 'comment_failed');
+          return;
+        } finally {
+          if (recovering === turn) recovering = undefined;
+        }
+      }
+      await game.goal(
+        turn,
+        {
+          objective: action.objective,
+          constraints: action.constraints,
+          mode: action.mode,
+          decisionPointId: null,
+        },
+        config.gameGoalTtlMs,
+        call.traceparent ?? null,
+        inputs,
+      );
     };
 
     /**
@@ -450,6 +688,7 @@ export const director = definePlugin({
       id: string,
       trace: TraceRef | undefined,
       untrusted: boolean,
+      gameContent: boolean,
       started: (ok: boolean) => void,
     ) => {
       const votes = ctx.optional(VoteService);
@@ -467,6 +706,7 @@ export const director = definePlugin({
           ...(action.decisionPoint === undefined ? {} : { decisionPoint: action.decisionPoint }),
           inputs: taken.flatMap((c) => c.sources),
           untrusted,
+          ...(gameContent ? { gameContent: true } : {}),
           ...(trace ? { trace } : {}),
         })
         .then((result) => {
@@ -478,20 +718,40 @@ export const director = definePlugin({
 
     /** 一次决策：取候选、组装上下文、调用模型（可被取消）、解析并交出意图。 */
     const decide = async (triggers: DecisionTrigger[]) => {
-      const taken = candidates.take(config.maxCandidates);
-      const ended = endedVote;
-      endedVote = undefined;
+      const timed = triggers.includes('game-timed');
+      const tie = triggers.includes('game-vote-ended') ? endedGameVote : undefined;
+      if (triggers.includes('game-vote-ended') && !tie) return;
+      if (triggers.includes('game-vote-ended')) endedGameVote = undefined;
+      const choiceOnly = timed || tie !== undefined;
+      const gameTriggers = triggers.filter(isGameTrigger);
+      const turn = llm.acceptsGameContent ? game.capture(gameTriggers) : undefined;
+      if (tie && (!turn || !game.isCurrent(tie.turn))) {
+        game.failed(tie.turn.runtimeId, tie.notice.decisionPoint, 'stale_vote');
+        return;
+      }
+      if (!turn?.triggers.length && gameTriggers.length === triggers.length) return;
+      const waitingForBallot = !!turn && voteInProgress(turn);
+      const taken = choiceOnly ? [] : candidates.take(config.maxCandidates);
+      const ended = tie?.context ?? (timed ? undefined : endedVote);
+      if (!choiceOnly) endedVote = undefined;
       // 写进上下文的时机只留实际带来了数据的；都没有时按冷场。
       const effective = triggers.filter(
         (t) =>
-          (t !== 'candidates' || taken.length > 0) && (t !== 'vote-ended' || ended !== undefined),
+          (t !== 'candidates' || taken.length > 0) &&
+          (t !== 'vote-ended' || ended !== undefined) &&
+          (!isGameTrigger(t) || turn?.triggers.includes(t)),
       );
       const reasons: DecisionTrigger[] = effective.length > 0 ? effective : ['idle'];
+      const gameDriven = !!turn && reasons.some(isGameTrigger);
+      const gameInputs = [
+        ...taken.flatMap((candidate) => candidate.sources),
+        ...(tie ? [`vote:${tie.notice.voteId}`] : []),
+      ];
       const model = llm.model ?? UNKNOWN_MODEL;
       const call = tracer.startSpan(`chat ${model.name}`, {
         kind: 'client',
-        parent: taken[0]?.trace,
-        links: taken.slice(1).map((c) => c.trace),
+        parent: gameDriven ? (turn.parent ?? taken[0]?.trace) : taken[0]?.trace,
+        links: taken.slice(gameDriven && turn.parent ? 0 : 1).map((c) => c.trace),
         attributes: {
           [GenAi.OperationName]: 'chat',
           [GenAi.ProviderName]: model.provider,
@@ -516,8 +776,9 @@ export const director = definePlugin({
       );
       cancelled.catch(() => {});
       const current = {
-        // 不带候选与投票结果的调用（闲聊）可以被新到的候选或投票结束取消，开口之后不再可以。
-        cancellable: taken.length === 0 && ended === undefined,
+        idle: taken.length === 0 && ended === undefined && !gameDriven,
+        opened: false,
+        game: gameDriven ? turn : undefined,
         cancel: (by: string) => {
           cancelledBy ??= by;
           controller.abort();
@@ -527,22 +788,35 @@ export const director = definePlugin({
       // 召回记忆（记忆插件在场时）：有截止时间，到点就不带记忆继续；被取消时这次时机结束。
       let recalled: { recall: MemoryRecall; memory: Memory } | undefined;
       try {
-        recalled = await recallMemories(
-          recallQuery(taken, ended),
-          call,
-          controller.signal,
-          cancelled,
-        );
+        if (!choiceOnly) {
+          recalled = await recallMemories(
+            recallQuery(taken, ended),
+            call,
+            controller.signal,
+            cancelled,
+          );
+        }
+        if (controller.signal.aborted) throw new Cancelled();
       } catch (error) {
         if (!(error instanceof Cancelled)) throw error;
         inflight = undefined;
         endCall('cancelled');
         ctx.log('director.cancelled', { by: cancelledBy });
+        if (gameDriven && cancelledBy === 'game-stale')
+          game.failed(turn.runtimeId, turn.point?.decisionPointId ?? null, 'stale');
         return;
       }
       const recall = recalled?.recall;
-      // 上下文里有弹幕或记忆，输出就受不可信输入影响。
-      const untrusted = taken.length > 0 || (recall?.memories.length ?? 0) > 0;
+      const { value: contextValue, gameContent } = context(
+        reasons,
+        taken,
+        ended,
+        recall,
+        turn,
+        timed,
+      );
+      const untrusted = gameContent || taken.length > 0 || (recall?.memories.length ?? 0) > 0;
+      const speechOrigin = { turn, gameContent, gameReaction: gameDriven };
       /**
        * 使用反馈：每次召回恰好回报一次。说话等发言结果（观众一个字也没听到就回报空集），发起投票等开票结果；
        * 失败、取消、沉默与非法输出（含开口之后最终校验不通过）回报空集。
@@ -577,7 +851,7 @@ export const director = definePlugin({
           call,
         );
       /** 增量解析（`streamOutput` 时）：扫描流式客户端报来的正文增量。 */
-      const scanner = config.streamOutput ? new IntentScanner() : undefined;
+      const scanner = config.streamOutput && !turn ? new IntentScanner() : undefined;
       /**
        * 说话的文本开始时决定是否开口：动作已确定为说话，回应对象已在文本之前出现（字符串或 null），是字符串时
        * 在本次上下文里。任一不满足就不提前开口，留给整段解析（判定与现在相同）。
@@ -589,7 +863,7 @@ export const director = definePlugin({
           replyTo.kind === 'string' ? taken.find((c) => c.id === replyTo.value) : undefined;
         if (replyTo.kind === 'string' && !target) return;
         // 观众开始听到这段话之后，这次调用不再被新的时机取消。
-        current.cancellable = false;
+        current.opened = true;
         call.addEvent('bellis.director.speech_started');
         const queue = new TextQueue();
         opened = {
@@ -597,7 +871,7 @@ export const director = definePlugin({
           replyTo: target?.id,
           text: '',
           chars: 0,
-          outcome: say(queue, target, call, untrusted),
+          outcome: say(queue, target, call, untrusted, speechOrigin),
         };
       };
       /** 文本的增量：记下并送进文本流；超过说话文本的上限时文本流以错误结束（最终校验也不会通过）。 */
@@ -611,21 +885,32 @@ export const director = definePlugin({
         }
       };
       const onOutput = (delta: string) => {
-        if (settled || !scanner) return;
+        if (settled || controller.signal.aborted || ctx.signal.aborted || !scanner) return;
         for (const event of scanner.push(delta)) {
           if (event.type === 'text-start') open(event);
           else if (event.type === 'text' && opened) feed(opened, event.delta);
         }
       };
-      const contextValue = context(reasons, taken, ended, recall);
       const request: LlmRequest = {
         messages: buildMessages(contextValue),
-        output: INTENT_OUTPUT,
+        output: intentOutput(contextValue),
         context: contextValue,
+        ...(gameContent ? { gameContent: true } : {}),
         ...(call.traceparent ? { traceparent: call.traceparent } : {}),
       };
+      const resolveByMs = timed ? turn?.point?.timing?.resolveByMs : undefined;
+      const remaining = () =>
+        resolveByMs === undefined || !turn
+          ? config.callTimeoutMs
+          : Math.min(config.callTimeoutMs, resolveByMs - turn.game.wireNowMs());
       let output: string;
       try {
+        if (gameDriven && !game.isCurrent(turn)) {
+          current.cancel('game-stale');
+          throw new Cancelled();
+        }
+        const timeout = remaining();
+        if (timeout <= 0) throw new DeadlineError('已到游戏决定余量线');
         output = await withDeadline(
           clock,
           Promise.race([
@@ -664,9 +949,13 @@ export const director = definePlugin({
             }),
             cancelled,
           ]),
-          config.callTimeoutMs,
+          timeout,
           '决策模型调用',
         );
+        if (controller.signal.aborted) throw new Cancelled();
+        if (timed && (remaining() <= 0 || clock.now() - startedAt >= timeout)) {
+          throw new DeadlineError('已到游戏决定截止时间');
+        }
       } catch (error) {
         settled = true;
         inflight = undefined;
@@ -680,10 +969,13 @@ export const director = definePlugin({
           recordDuration('cancelled');
           endCall('cancelled');
           ctx.log('director.cancelled', { by: cancelledBy });
+          if (gameDriven && cancelledBy === 'game-stale')
+            game.failed(turn.runtimeId, turn.point?.decisionPointId ?? null, 'stale');
           return;
         }
         recordDuration(kind);
         endCall(kind);
+        if (gameDriven) game.failed(turn.runtimeId, turn.point?.decisionPointId ?? null, kind);
         // 已经开口时不播过渡语：观众已经听到了这次回应的开头。
         failed(kind, message(error), call, taken.length > 0 && opened === undefined);
         return;
@@ -691,6 +983,12 @@ export const director = definePlugin({
       settled = true;
       inflight = undefined;
       recordDuration();
+      if (gameDriven && !game.isCurrent(turn)) {
+        report([]);
+        endCall('cancelled');
+        game.failed(turn.runtimeId, turn.point?.decisionPointId ?? null, 'stale');
+        return;
+      }
       const parsed = parseIntent(output);
       if (opened) {
         // 开口之后的最终校验：整段合法、仍是说话、回应对象与文本都与已交给发声的完全相同，文本流才正常结束。
@@ -722,14 +1020,34 @@ export const director = definePlugin({
         void opened.outcome.then((outcome) => report(outcome.heard === '' ? [] : used));
         return;
       }
-      if (!parsed.ok) {
+      const dropIntent = (reason: string) => {
         report([]);
         endCall('invalid_output');
-        failed('invalid_output', parsed.reason, call, taken.length > 0);
+        if (gameDriven)
+          game.failed(turn.runtimeId, turn.point?.decisionPointId ?? null, 'invalid_output');
+        failed('invalid_output', reason, call, taken.length > 0);
+      };
+      if (!parsed.ok) {
+        dropIntent(parsed.reason);
         return;
       }
       const action = parsed.action;
       call.setAttributes({ 'bellis.director.action': action.action });
+      if (choiceOnly && action.action !== 'choose') {
+        dropIntent('该决策时机只接收自选意图');
+        return;
+      }
+      if (
+        reasons.includes('game-decision') &&
+        turn &&
+        !voteInProgress(turn) &&
+        action.action !== 'choose' &&
+        action.action !== 'game_vote' &&
+        action.action !== 'ask_operator'
+      ) {
+        dropIntent('当前游戏决策点须自选或发起绑定投票');
+        return;
+      }
       if (action.action === 'speak') {
         const target =
           action.replyTo === undefined ? undefined : taken.find((c) => c.id === action.replyTo);
@@ -749,10 +1067,14 @@ export const director = definePlugin({
         endCall();
         succeeded();
         remember(action.text);
-        void say(action.text, target, call, untrusted)
+        void say(action.text, target, call, untrusted, speechOrigin)
           // 观众一个字也没听到：记忆没有用上。
           .then((outcome) => report(outcome.heard === '' ? [] : used));
       } else if (action.action === 'vote') {
+        if (action.decisionPoint !== undefined) {
+          dropIntent('绑定游戏决策点须使用 game_vote');
+          return;
+        }
         // 题目与选项也要说出口：查出戏用语与格式（各段分别查，不查重复）。
         const signals = new Set<DriftSignal>();
         for (const piece of [action.question, ...action.options]) {
@@ -769,23 +1091,110 @@ export const director = definePlugin({
           `director:${ctx.instanceId}:${calls}`,
           traceRef(call),
           untrusted,
+          gameContent,
           (ok) => report(ok ? used : []),
         );
-      } else {
+      } else if (action.action === 'silence') {
         report([]);
         endCall();
         succeeded();
-        ctx.log('director.silence', { ...action });
+        ctx.log('director.silence', turn ? {} : { ...action });
+      } else {
+        if (!turn || !game.isCurrent(turn)) {
+          dropIntent('没有有效的当前游戏局面');
+          return;
+        }
+        const point = turn.point;
+        switch (action.action) {
+          case 'choose':
+            if (
+              !point ||
+              point.decisionPointId !== action.decisionPoint ||
+              (!timed && !!point.timing) ||
+              waitingForBallot ||
+              voteInProgress(turn) ||
+              !point.options.some(({ id }) => id === action.optionId)
+            ) {
+              dropIntent('选择不属于当前可决定的游戏选项');
+              return;
+            }
+            void game.choose(
+              turn,
+              action.optionId,
+              'director',
+              call.traceparent ?? null,
+              gameInputs,
+            );
+            break;
+          case 'game_vote':
+            if (!contextValue.gameVoting || point?.decisionPointId !== action.decisionPoint) {
+              dropIntent('只可对当前无计时的决策点发起绑定投票');
+              return;
+            }
+            void startGameVote(action, turn, traceRef(call), gameInputs);
+            break;
+          case 'game_goal': {
+            const badEnding = turn.failure?.screen === '坏结局';
+            if (
+              point?.timing ||
+              waitingForBallot ||
+              voteInProgress(turn) ||
+              (!badEnding && action.recoveryComment !== undefined) ||
+              (badEnding && action.mode === 'autonomous' && !action.recoveryComment)
+            ) {
+              dropIntent('游戏目标与当前决策点或恢复状态不符');
+              return;
+            }
+            void recoverOrSubmit(action, turn, call, gameInputs);
+            break;
+          }
+          case 'game_comment': {
+            const fact = turn.context.committed.find(
+              ({ actionId }) => actionId === action.actionId,
+            );
+            if (!fact || point?.timing) {
+              dropIntent('这次上下文没有可播报的已确认动作');
+              return;
+            }
+            const prefix =
+              fact.selection?.source === 'default' ? '时间到了，游戏执行了默认选项。' : '';
+            const text = [...(prefix + fact.summary)].slice(0, MAX_SPEAK_TEXT).join('');
+            void say(text, undefined, call, true, {
+              turn,
+              gameContent: true,
+              gameReaction: true,
+              actionId: fact.actionId,
+            });
+            break;
+          }
+          case 'ask_operator':
+            if (turn.failure?.screen !== '卡住') {
+              dropIntent('游戏卡住时才可请求操作员处理');
+              return;
+            }
+            safety.record('director.game-assistance-requested', {
+              runtimeId: turn.runtimeId,
+              factSeq: turn.failure.seq,
+              decisionPoint: point?.decisionPointId ?? null,
+            });
+            break;
+        }
+        report([]);
+        endCall();
+        succeeded();
       }
     };
 
-    /** 依次处理排队的时机，每轮把排队的全部合并成一次调用。 */
+    /** 计时与投票后自选各处理一次，其余时机合并。 */
     const run = async () => {
       running = true;
       try {
         while (pending.size > 0 && !ctx.signal.aborted) {
-          const triggers = TRIGGER_ORDER.filter((t) => pending.has(t));
-          pending.clear();
+          const triggers: DecisionTrigger[] = pending.delete('game-timed')
+            ? ['game-timed']
+            : pending.delete('game-vote-ended')
+              ? ['game-vote-ended']
+              : TRIGGER_ORDER.filter((t) => pending.delete(t));
           try {
             await decide(triggers);
           } catch (error) {
@@ -808,7 +1217,8 @@ export const director = definePlugin({
       if (inflight) {
         if (t === 'idle') return;
         pending.add(t);
-        if (inflight.cancellable) inflight.cancel(t);
+        if (!inflight.opened && (t === 'game-timed' || (inflight.idle && !isGameTrigger(t))))
+          inflight.cancel(t);
         return;
       }
       pending.add(t);
@@ -824,7 +1234,8 @@ export const director = definePlugin({
     };
 
     const onVoteEnded = (notice: VoteEndedNotice) => {
-      endedVote = {
+      const gameContent = notice.gameContent === true || !!notice.game;
+      const result: EndedVoteContext = {
         question: notice.question,
         options: notice.options.map((text, i) => ({
           number: i + 1,
@@ -833,12 +1244,45 @@ export const director = definePlugin({
         })),
         outcome: notice.outcome,
         winners: [...notice.winners],
+        ...(gameContent ? { gameContent: true } : {}),
       };
+      if (notice.decisionPoint !== null) {
+        const turn = game.voteEnded(notice);
+        if (!turn || !notice.game) return;
+        if (notice.outcome === 'winner') {
+          const [winner] = notice.winners;
+          const optionId = winner === undefined ? undefined : notice.game.optionIds[winner - 1];
+          if (!optionId || notice.winners.length !== 1) {
+            game.failed(turn.runtimeId, notice.decisionPoint, 'invalid_ballot');
+            return;
+          }
+          void game.choose(turn, optionId, 'vote', turn.parent ?? null, [`vote:${notice.voteId}`]);
+        } else if (llm.acceptsGameContent) {
+          endedGameVote = { turn, notice, context: result };
+          trigger('game-vote-ended');
+        } else {
+          game.failed(turn.runtimeId, notice.decisionPoint, 'model_unavailable');
+        }
+        return;
+      }
+      if (gameContent && !llm.acceptsGameContent) return;
+      endedVote = result;
       trigger('vote-ended');
     };
 
     ctx.register(candidates.onAvailable(() => trigger('candidates')));
     ctx.on(VoteEnded, onVoteEnded);
+    ctx.on(GameFactObserved, (fact) => {
+      if (!llm.acceptsGameContent) {
+        if (fact.method === 'decision_point.opened')
+          game.failed(fact.runtimeId, fact.payload.decisionPointId, 'model_unavailable');
+        return;
+      }
+      const t = game.observe(fact);
+      if (t) trigger(t);
+      if (inflight?.game && !inflight.opened && !game.isCurrent(inflight.game))
+        inflight.cancel('game-stale');
+    });
     ctx.register(() => {
       if (idleTimer) clock.clearTimeout(idleTimer);
       inflight?.cancel('unload');
@@ -994,6 +1438,7 @@ export const replayLlm = definePlugin({
       model: { provider: 'bellis.replay', name: 'replay' },
       // 回放没有要连接的端点：恒为就绪。
       ready: true,
+      acceptsGameContent: true,
       status: '回放',
       requests,
       complete(request, signal, options) {

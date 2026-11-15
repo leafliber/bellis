@@ -3,7 +3,7 @@ import { SafetyService } from '@bellis/safety';
 import Type from 'typebox';
 import { GameBridge, type GameBridgeConfig } from './bridge.ts';
 import { GameRuntimePortService } from './host.ts';
-import { GAME_GOAL, GAME_INPUT, GameService } from './service.ts';
+import { GAME_GOAL, GAME_INPUT, GameFactObserved, GameService } from './service.ts';
 
 export * from './host.ts';
 export * from './service.ts';
@@ -40,12 +40,14 @@ export const gameBridge = definePlugin({
       instances.delete(ctx);
     });
     bridge.start();
+    ctx.register(bridge.subscribe((fact) => ctx.extensions.observe(GameFactObserved, fact)));
     ctx.provide(GameService, {
       status: () => bridge.status(),
       wireNowMs: () => bridge.wireNowMs(),
       subscribe: (listener) => bridge.subscribe(listener),
-      submitGoal: (params, source) => bridge.submitGoal(params, source),
-      resolveDecision: (params, source) => bridge.resolveDecision(params, source),
+      submitGoal: (params, source, stillValid) => bridge.submitGoal(params, source, stillValid),
+      resolveDecision: (params, source, stillValid) =>
+        bridge.resolveDecision(params, source, stillValid),
     });
   },
   quiesce(ctx) {

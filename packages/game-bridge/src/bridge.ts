@@ -591,15 +591,20 @@ export class GameBridge implements Game {
     return { ok: true };
   }
 
-  submitGoal(payload: GameGoalSubmitParams, source: IntentSource): Promise<GameCommandResult> {
-    return this.#execute({ method: Method.GoalSubmit, payload }, source);
+  submitGoal(
+    payload: GameGoalSubmitParams,
+    source: IntentSource,
+    stillValid?: () => boolean,
+  ): Promise<GameCommandResult> {
+    return this.#execute({ method: Method.GoalSubmit, payload }, source, stillValid);
   }
 
   resolveDecision(
     payload: GameDecisionResolveParams,
     source: IntentSource,
+    stillValid?: () => boolean,
   ): Promise<GameCommandResult> {
-    return this.#execute({ method: Method.DecisionResolve, payload }, source);
+    return this.#execute({ method: Method.DecisionResolve, payload }, source, stillValid);
   }
 
   #commandBlocker(command: Command): string | undefined {
@@ -619,7 +624,11 @@ export class GameBridge implements Game {
     return undefined;
   }
 
-  async #execute(command: Command, source: IntentSource): Promise<GameCommandResult> {
+  async #execute(
+    command: Command,
+    source: IntentSource,
+    stillValid?: () => boolean,
+  ): Promise<GameCommandResult> {
     const availability = this.#availability();
     const permit = this.#permit;
     if (!availability.ready) return { ok: false, reason: availability.reason };
@@ -673,6 +682,7 @@ export class GameBridge implements Game {
         }
         const changed = this.#commandBlocker(checked);
         if (changed) throw new Error(changed);
+        if (stillValid && !stillValid()) throw new Error('发起命令时的游戏局面已失效');
         try {
           const reply = await main.rpc.request(command.method, payload, {
             signal: controller.signal,

@@ -169,6 +169,12 @@
             "endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
             "model": "glm-5-3-flash-260828",
             "provider": "volcengine.ark",
+            "gameContentPermissions": {
+              "noAccountDataAuthorization": false,
+              "noCollaborationRewards": false,
+              "noAgentPlanDataAuthorization": false,
+              "securitySandboxEnabled": false
+            },
             "reasoningEffort": "low",
             "outputMode": "json_object",
             "probeOnPreflight": false

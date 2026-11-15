@@ -135,6 +135,71 @@ const request = {
 
 const base = { endpoint: '', model: ARK_MODEL, outputMode: 'json_schema', reasoningEffort: 'low' };
 
+test('游戏内容必须同时满足接入点、型号和维护者的逐项确认', async () => {
+  const confirmed = {
+    noAccountDataAuthorization: true,
+    noCollaborationRewards: true,
+    noAgentPlanDataAuthorization: true,
+    securitySandboxEnabled: true,
+  };
+  const w = await world({ ...base, endpoint: fake.url, gameContentPermissions: confirmed });
+  try {
+    const llm = w.llm();
+    assert.equal(llm.acceptsGameContent, false);
+    const before = fake.requests.length;
+    await assert.rejects(
+      llm.complete(
+        {
+          ...request,
+          context: {
+            ...request.context,
+            game: {
+              situation: { summary: '合成游戏内容' },
+              decision: null,
+              lookpoint: null,
+              committed: [],
+            },
+          },
+        },
+        new AbortController().signal,
+      ),
+      /未获准接收游戏内容/u,
+    );
+    await assert.rejects(
+      llm.complete({ ...request, gameContent: true }, new AbortController().signal),
+      /未获准接收游戏内容/u,
+    );
+    assert.equal(fake.requests.length, before);
+    assert.equal(llm.ready, true);
+  } finally {
+    await w.close();
+  }
+  const allowed = {
+    ...base,
+    endpoint: 'https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions',
+  };
+  const cases = [
+    { config: allowed, accepts: false },
+    {
+      config: { ...allowed, gameContentPermissions: confirmed, model: 'other-model' },
+      accepts: false,
+    },
+    ...Object.keys(confirmed).map((key) => ({
+      config: { ...allowed, gameContentPermissions: { ...confirmed, [key]: false } },
+      accepts: false,
+    })),
+    { config: { ...allowed, gameContentPermissions: confirmed }, accepts: true },
+  ];
+  for (const { config, accepts } of cases) {
+    const instance = await world(config);
+    try {
+      assert.equal(instance.llm().acceptsGameContent, accepts, JSON.stringify(config));
+    } finally {
+      await instance.close();
+    }
+  }
+});
+
 test('提供 llm@1：型号与厂商来自配置；返回正文；traceparent 与上下文不发给模型服务', async () => {
   fake.script = respond(arkReasoningStream());
   const w = await world({ ...base, endpoint: fake.url });

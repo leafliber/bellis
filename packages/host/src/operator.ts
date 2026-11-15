@@ -188,6 +188,7 @@ const ALERTS: Record<string, (data: Record<string, unknown>) => string | undefin
     `弹幕缺口结束：${d.platform}，${d.recovered === true ? '已恢复' : '未恢复'}，持续 ${d.durationMs}ms`,
   'vote.aborted': (d) => `投票中止：${d.voteId}（${d.reason}）`,
   'game.control-taken': (d) => `游戏进入人工模式：${d.reason}`,
+  'director.game-assistance-requested': () => '游戏卡住，决策模型请求操作员处理',
   'intent.unknown': (d) => `意图 ${d.id} 结果未知，目标已隔离`,
   // 只说登记了，不写观众的平台身份。
   'memory.tombstoned': () => '已登记一名观众的本地墓碑（记忆）',

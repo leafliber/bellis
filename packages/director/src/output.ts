@@ -1,4 +1,9 @@
 import { VOTE_LIMITS } from '@bellis/audience';
+import {
+  GameActionCommitted,
+  GameDecisionResolveParams,
+  GameGoalSubmitParams,
+} from '@bellis/protocol';
 import Type, { type Static, type TObject, type TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
 
@@ -26,6 +31,22 @@ const UsedMemories = Type.Optional(
   }),
 );
 
+const VoteQuestion = Type.String({
+  minLength: 1,
+  maxLength: VOTE_LIMITS.maxQuestionLength,
+  description: '投票题目',
+});
+const VoteDuration = Type.Integer({
+  minimum: VOTE_LIMITS.minDurationSec,
+  maximum: VOTE_LIMITS.maxDurationSec,
+  description: '投票时长（秒）',
+});
+const DecisionPoint = Type.String({
+  ...GameDecisionResolveParams.properties.decisionPointId,
+  description: '本次游戏决策点编号',
+});
+const OptionId = GameDecisionResolveParams.properties.optionId;
+
 export const SpeakAction = Type.Object(
   {
     action: Type.Literal('speak'),
@@ -47,28 +68,14 @@ export const SpeakAction = Type.Object(
 export const VoteAction = Type.Object(
   {
     action: Type.Literal('vote'),
-    question: Type.String({
-      minLength: 1,
-      maxLength: VOTE_LIMITS.maxQuestionLength,
-      description: '投票题目',
-    }),
+    question: VoteQuestion,
     options: Type.Array(Type.String({ minLength: 1, maxLength: VOTE_LIMITS.maxOptionLength }), {
       minItems: VOTE_LIMITS.minOptions,
       maxItems: VOTE_LIMITS.maxOptions,
       description: '选项',
     }),
-    durationSec: Type.Integer({
-      minimum: VOTE_LIMITS.minDurationSec,
-      maximum: VOTE_LIMITS.maxDurationSec,
-      description: '投票时长（秒）',
-    }),
-    decisionPoint: Type.Optional(
-      Type.String({
-        minLength: 1,
-        maxLength: 64,
-        description: '游戏决策点编号；没有游戏决策点时为 null',
-      }),
-    ),
+    durationSec: VoteDuration,
+    decisionPoint: Type.Optional(DecisionPoint),
     memories: UsedMemories,
   },
   { ...closed, description: '发起投票' },
@@ -83,11 +90,84 @@ export const SilenceAction = Type.Object(
   { ...closed, description: '保持沉默' },
 );
 
-export const DirectorAction = Type.Union([SpeakAction, VoteAction, SilenceAction]);
+export const ChooseAction = Type.Object(
+  {
+    action: Type.Literal('choose'),
+    decisionPoint: DecisionPoint,
+    optionId: Type.String({ ...OptionId, description: '本次决策点中要选择的选项编号' }),
+  },
+  { ...closed, description: '自行选择游戏选项' },
+);
+
+export const GameGoalAction = Type.Object(
+  {
+    action: Type.Literal('game_goal'),
+    mode: Type.Enum(['autonomous', 'paused'], { description: '自主推进或暂停' }),
+    objective: Type.String({
+      ...GameGoalSubmitParams.properties.objective,
+      description: '当前局面下的语言目标',
+    }),
+    constraints: Type.Array(GameGoalSubmitParams.properties.constraints.items, {
+      ...GameGoalSubmitParams.properties.constraints,
+      description: '目标约束',
+    }),
+    recoveryComment: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_SPEAK_TEXT,
+        description: '坏结局后的简短解说，只在坏结局时填写',
+      }),
+    ),
+  },
+  { ...closed, description: '提交游戏目标' },
+);
+
+export const GameVoteAction = Type.Object(
+  {
+    action: Type.Literal('game_vote'),
+    decisionPoint: DecisionPoint,
+    question: VoteQuestion,
+    optionIds: Type.Array(OptionId, {
+      minItems: VOTE_LIMITS.minOptions,
+      maxItems: VOTE_LIMITS.maxOptions,
+      uniqueItems: true,
+      description: '按投票顺序列出不同的游戏选项编号，口播使用对应的游戏选项文字',
+    }),
+    durationSec: VoteDuration,
+  },
+  { ...closed, description: '为无计时游戏决策点发起投票' },
+);
+
+const GameCommentAction = Type.Object(
+  {
+    action: Type.Literal('game_comment'),
+    actionId: Type.String({
+      ...GameActionCommitted.properties.actionId,
+      description: '已确认的游戏动作编号，由系统播报这条事实',
+    }),
+  },
+  { ...closed, description: '播报已确认的游戏动作' },
+);
+
+const AskOperatorAction = Type.Object(
+  { action: Type.Literal('ask_operator') },
+  { ...closed, description: '卡住时通知操作员' },
+);
+
+export const AUDIENCE_ACTIONS = [SpeakAction, VoteAction, SilenceAction] as const;
+const ACTIONS = [
+  ...AUDIENCE_ACTIONS,
+  ChooseAction,
+  GameGoalAction,
+  GameVoteAction,
+  GameCommentAction,
+  AskOperatorAction,
+] as const;
+export const DirectorAction = Type.Union([...ACTIONS]);
 export type DirectorAction = Static<typeof DirectorAction>;
 
 /** 意图的各个变体（按 {@link DirectorAction} 的顺序）。 */
-export const ACTION_VARIANTS: readonly TObject[] = [SpeakAction, VoteAction, SilenceAction];
+export const ACTION_VARIANTS: readonly TObject[] = ACTIONS;
 
 const isAction = Compile(DirectorAction);
 
@@ -159,6 +239,7 @@ const lengthWord = (min: unknown, max: unknown, unit: string): string | undefine
 export function limitsOf(schema: TSchema): string[] {
   const s = schema as unknown as JsonSchema;
   const out: string[] = [];
+  if (Array.isArray(s.enum)) out.push(`取值 ${s.enum.join('、')}`);
   if (s.type === 'string') {
     const length = lengthWord(s.minLength, s.maxLength, '字');
     if (length) out.push(length);
@@ -184,12 +265,17 @@ export function limitsOf(schema: TSchema): string[] {
 /** 把一个字段的 TypeBox schema 换成严格 schema（只用 {@link STRICT_KEYWORDS}），约束写进说明。 */
 function strictField(schema: TSchema, nullable: boolean): JsonSchema {
   const s = schema as unknown as JsonSchema;
-  const type = s.type;
+  const type =
+    s.type ??
+    (Array.isArray(s.enum) && s.enum.every((value) => typeof value === 'string')
+      ? 'string'
+      : undefined);
   if (type !== 'string' && type !== 'integer' && type !== 'number' && type !== 'boolean') {
     if (type !== 'array') throw new Error(`严格 schema 不支持这种字段：${JSON.stringify(s)}`);
   }
   const out: JsonSchema = { type: nullable ? [type, 'null'] : type };
   if (type === 'array') out.items = strictField(s.items as TSchema, false);
+  if (Array.isArray(s.enum)) out.enum = nullable ? [...s.enum, null] : s.enum;
   const words = [
     ...(typeof s.description === 'string' ? [s.description] : []),
     ...limitsOf(schema),
@@ -206,10 +292,10 @@ function strictField(schema: TSchema, nullable: boolean): JsonSchema {
  *
  * 它比原 schema 宽：解析时先把 null 视为省略，再按原 schema 校验（{@link parseIntent}），不合法就丢弃。
  */
-export function strictIntentSchema(): JsonSchema {
+export function strictIntentSchema(variants: readonly TObject[] = ACTION_VARIANTS): JsonSchema {
   const actions: string[] = [];
   const fields = new Map<string, { schema: TSchema; usedBy: string[] }>();
-  for (const variant of ACTION_VARIANTS) {
+  for (const variant of variants) {
     const props = variant.properties as Record<string, TSchema>;
     const action = (props.action as unknown as JsonSchema).const;
     if (typeof action !== 'string') throw new Error('意图变体缺少 action 字面量');

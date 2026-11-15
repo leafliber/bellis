@@ -14,6 +14,7 @@ import {
   ballotKeys,
   decide,
   freezeRules,
+  type GameVoteBinding,
   matchBallot,
   openingText,
   resultText,
@@ -61,6 +62,10 @@ export interface VoteRequest {
   options: readonly string[];
   durationSec: number;
   decisionPoint?: string;
+  game?: GameVoteBinding;
+  gameContent?: boolean;
+  /** 经过异步授权后，开票前再核对游戏决策点仍然有效。 */
+  stillValid?: () => boolean;
   /** 产生这次发起的输入（例如候选弹幕编号），记进意图来源。 */
   inputs: readonly string[];
   /** 发起方的上下文里是否有不可信输入：题目与选项来自模型，开票说明据此标记。 */
@@ -84,6 +89,8 @@ export interface VoteStatus {
   /** 倒计时剩余；还没开始时为 null。 */
   remainingMs: number | null;
   decisionPoint: string | null;
+  game?: GameVoteBinding;
+  gameContent?: boolean;
   /** 此刻弹幕接收是否在缺口中。 */
   gap: boolean;
 }
@@ -109,6 +116,8 @@ export interface VoteEndedNotice {
   /** 胜出（或并列最多）的选项编号，从 1 起。 */
   winners: number[];
   decisionPoint: string | null;
+  game?: GameVoteBinding;
+  gameContent?: boolean;
 }
 
 /**
@@ -272,9 +281,11 @@ export const vote = definePlugin({
       const valid = counts.reduce((sum, n) => sum + n, 0);
       const { outcome, winners } = decide(counts);
       const gaps = gapSummary(current, current.deadlineAt ?? clock.now());
-      safety.record(VoteFact.Ended, {
+      const recorded = safety.record(VoteFact.Ended, {
         voteId: rules.voteId,
         decisionPoint: rules.decisionPoint,
+        ...(rules.game ? { game: rules.game } : {}),
+        ...(rules.gameContent ? { gameContent: true } : {}),
         counts: [...counts],
         valid,
         ignored: { ...current.ignored },
@@ -283,6 +294,7 @@ export const vote = definePlugin({
         winners: winners.map((index) => index + 1),
         gaps,
       });
+      if (!recorded) return;
       ctx.log('vote.ended', { voteId: rules.voteId, valid, outcome, gaps: gaps.count });
       ctx.extensions.observe(VoteEnded, {
         voteId: rules.voteId,
@@ -293,6 +305,8 @@ export const vote = definePlugin({
         outcome,
         winners: winners.map((index) => index + 1),
         decisionPoint: rules.decisionPoint,
+        ...(rules.game ? { game: structuredClone(rules.game) } : {}),
+        ...(rules.gameContent ? { gameContent: true } : {}),
       });
       // 先记结果再播报：重启后账本上没有进行中的投票，不会再播一次。
       void speech
@@ -305,6 +319,7 @@ export const vote = definePlugin({
           inputs: [voteIntentKey(rules.voteId)],
           // 选项文本来自模型，票来自弹幕。
           untrusted: true,
+          ...(rules.gameContent ? { gameContent: true } : {}),
         })
         .then((played) => ctx.log('vote.result-played', { voteId: rules.voteId, end: played.end }));
     };
@@ -338,7 +353,10 @@ export const vote = definePlugin({
       const gap = source.gap?.();
       if (gap) current.gaps.push({ start: startedAt, end: undefined, reason: gap.reason });
       running = current;
-      safety.record(VoteFact.Started, { ...rules });
+      if (!safety.record(VoteFact.Started, { ...rules })) {
+        running = undefined;
+        throw new Error('无法记录冻结的投票规则');
+      }
       ctx.log('vote.started', {
         voteId: rules.voteId,
         options: rules.options.length,
@@ -354,6 +372,7 @@ export const vote = definePlugin({
           preempt: 'sentence',
           inputs: [...request.inputs],
           untrusted: request.untrusted,
+          ...(rules.gameContent ? { gameContent: true } : {}),
           ...(request.trace ? { trace: request.trace } : {}),
         })
         .then((outcome) => announced(current, outcome));
@@ -422,6 +441,8 @@ export const vote = definePlugin({
           options: request.options,
           durationSec: request.durationSec,
           decisionPoint: request.decisionPoint,
+          game: request.game,
+          gameContent: request.gameContent,
         });
         if (!frozen.ok) return reject(request, `参数不合法：${frozen.reason}`);
         const rules = frozen.rules;
@@ -444,6 +465,7 @@ export const vote = definePlugin({
           const intent = await safety.execute(decision.intent, rules, async (payload) => {
             if (ctx.signal.aborted) throw new Error('投票插件停用');
             if (safety.mode === 'safe-stop') throw new Error('安全停止中');
+            if (request.stillValid && !request.stillValid()) throw new Error('游戏决策点已失效');
             opened = open(payload, request);
             return { voteId: payload.voteId };
           });
@@ -471,6 +493,8 @@ export const vote = definePlugin({
           durationMs: rules.durationMs,
           remainingMs: deadlineAt === undefined ? null : Math.max(0, deadlineAt - clock.now()),
           decisionPoint: rules.decisionPoint,
+          ...(rules.game ? { game: structuredClone(rules.game) } : {}),
+          ...(rules.gameContent ? { gameContent: true } : {}),
           gap: source.gap?.() !== undefined,
         };
       },

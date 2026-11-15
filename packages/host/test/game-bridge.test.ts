@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setImmediate as flush } from 'node:timers/promises';
+import { type Danmaku, DanmakuService, triage, vote, voteLedger } from '@bellis/audience';
 import {
   type Connection,
   connect,
@@ -15,6 +16,7 @@ import {
   RpcError,
   RpcPeer,
 } from '@bellis/channel';
+import { director, LlmService } from '@bellis/director';
 import {
   GAME_GOAL,
   GAME_INPUT,
@@ -25,7 +27,15 @@ import {
   gameBridge,
   gameControlLedger,
 } from '@bellis/game-bridge';
-import { ClockService, catalog, Kernel, ManualClock } from '@bellis/kernel';
+import {
+  ClockService,
+  catalog,
+  DeadlineError,
+  definePlugin,
+  Kernel,
+  ManualClock,
+} from '@bellis/kernel';
+import { MemoryService } from '@bellis/memory';
 import {
   GAME_LEASE_REFUSED,
   type GameCoreHealth,
@@ -40,9 +50,17 @@ import {
   RpcErrorCode,
 } from '@bellis/protocol';
 import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
+import { type SpeechRequest, SpeechService, type UtteranceOutcome } from '@bellis/speech';
 import { SimulatedCrash, StateStore } from '@bellis/store';
+import Type from 'typebox';
+import type { PendingCall } from '../../director/test/helpers.ts';
 import { MemoryObs } from '../../sim/src/memory-obs.ts';
 import { createOperator } from '../src/operator.ts';
+import {
+  SYNTHETIC_INJECTION,
+  syntheticPoint,
+  syntheticSituation,
+} from './fixtures/game-director.ts';
 
 const WIRE_EPOCH = 100_000;
 const ADAPTER = { id: 'synthetic-game', version: '1', screenTypes: [] };
@@ -62,14 +80,145 @@ type SetupOptions = {
   simulatedPort?: boolean;
   storePath?: string;
   fault?: (point: string) => void;
+  director?: Record<string, unknown>;
 };
+
+function addDirector(kernel: Kernel, config: Record<string, unknown>) {
+  const calls: PendingCall[] = [];
+  const spoken: SpeechRequest[] = [];
+  const heard: UtteranceOutcome[] = [];
+  const listeners = new Set<(message: Danmaku) => void>();
+  let recalls = 0;
+  let messageId = 0;
+  let speaking: ((outcome: UtteranceOutcome) => Promise<UtteranceOutcome>) | undefined;
+  const modelPlugin = (acceptsGameContent: boolean) =>
+    definePlugin({
+      manifest: {
+        id: 'test-llm',
+        version: '0.0.0',
+        tier: 'ordinary',
+        process: 'in-process',
+        provides: [LlmService.ref],
+        inject: [],
+        permissions: [],
+        config: Type.Object({}),
+      },
+      activate(ctx) {
+        ctx.provide(LlmService, {
+          acceptsGameContent,
+          complete(request, signal, options) {
+            const { promise, resolve, reject } = Promise.withResolvers<string>();
+            calls.push({ request, signal, options, resolve, reject });
+            return promise;
+          },
+        });
+      },
+    });
+  kernel.provideCore(SpeechService, {
+    async request(request) {
+      spoken.push(request);
+      const outcome: UtteranceOutcome = {
+        id: request.id,
+        source: request.source,
+        ...(request.gameContent ? { gameContent: true } : {}),
+        heard: typeof request.text === 'string' ? request.text : '',
+        interruptedMidSentence: false,
+        end: 'complete',
+        skipped: [],
+      };
+      const result = speaking ? await speaking(outcome) : outcome;
+      if (result.heard) heard.push(result);
+      return result;
+    },
+    heard: () => heard,
+    softStop() {},
+  });
+  kernel.provideCore(DanmakuService, {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  });
+  kernel.provideCore(MemoryService, {
+    async recall() {
+      recalls += 1;
+      return { ok: true, recall: { recallId: 'r', memories: [] } };
+    },
+    feedback() {},
+    async check() {},
+    persona: undefined,
+    async currentPersona() {
+      return undefined;
+    },
+    report: { ready: true, status: '测试', pending: 0, written: 0, dropped: 0, tombstones: 0 },
+  });
+  kernel.add(
+    [
+      {
+        id: 'test-llm',
+        plugin: 'test-llm',
+        config: {},
+        disabled: false,
+        explicitSwitch: false,
+        grant: [],
+      },
+      {
+        id: 'director',
+        plugin: 'director',
+        config,
+        disabled: false,
+        explicitSwitch: false,
+        grant: [],
+      },
+      {
+        id: 'vote',
+        plugin: 'audience-vote',
+        config: {},
+        disabled: false,
+        explicitSwitch: false,
+        grant: ['vote.start'],
+      },
+      {
+        id: 'triage',
+        plugin: 'audience-triage',
+        config: {},
+        disabled: false,
+        explicitSwitch: false,
+        grant: [],
+      },
+    ],
+    catalog(modelPlugin(true), director, vote, triage),
+  );
+  return {
+    calls,
+    spoken,
+    get recalls() {
+      return recalls;
+    },
+    async replaceModel(acceptsGameContent: boolean) {
+      assert.deepEqual(await kernel.replace('test-llm', modelPlugin(acceptsGameContent)), {
+        ok: true,
+      });
+      await kernel.settled();
+    },
+    holdSpeech(hold: typeof speaking) {
+      speaking = hold;
+    },
+    send(text: string) {
+      const id = String(++messageId);
+      for (const listener of listeners) listener({ id, viewer: id, nickname: '观众', text });
+    },
+  };
+}
 
 async function setup(options: SetupOptions = {}) {
   const clock = new ManualClock();
   const wireNowMs = () => WIRE_EPOCH + Math.floor(clock.now());
   const store = StateStore.open({
     path: options.storePath ?? ':memory:',
-    projections: [gameControlLedger],
+    projections: [gameControlLedger, voteLedger],
     ...(options.fault ? { fault: options.fault } : {}),
   });
   store.recover();
@@ -106,6 +255,7 @@ async function setup(options: SetupOptions = {}) {
   kernel.provideScoped(SafetyService, ({ instanceId, permissions }) =>
     safetyFacade(safety, instanceId, permissions),
   );
+  const model = options.director ? addDirector(kernel, options.director) : undefined;
   kernel.add(
     [
       {
@@ -156,6 +306,7 @@ async function setup(options: SetupOptions = {}) {
     safety,
     store,
     operator,
+    model,
     async mode() {
       safety.confirmPresence();
       assert.deepEqual(safety.requestMode(options.simulation ? 'M0' : 'M2'), { ok: true });
@@ -193,16 +344,19 @@ async function main(h: Harness, run = 'run', describe?: () => object) {
       })),
   );
   const submissions: string[] = [];
+  const commands: unknown[] = [];
   let answer: () => unknown = () => ({});
   for (const method of [Method.GoalSubmit, Method.DecisionResolve]) {
-    p.rpc.handle(method, () => {
+    p.rpc.handle(method, (params) => {
       submissions.push(method);
+      commands.push(params);
       return answer();
     });
   }
   return {
     ...p,
     submissions,
+    commands,
     answerWith(handle: () => unknown) {
       answer = handle;
     },
@@ -338,6 +492,600 @@ function point(h: Harness, id = 'd-1'): GameDecisionPointOpened {
     timing: null,
     traceparent: null,
   };
+}
+
+const choice = (decisionPoint: string, optionId = 'desk') =>
+  JSON.stringify({ action: 'choose', decisionPoint, optionId });
+const quiet = JSON.stringify({ action: 'silence', reason: '' });
+
+test('模型热替换后用发言来源移除直接及间接包含游戏数据的近期发言', async () => {
+  const h = await setup({
+    director: { streamOutput: false },
+    simulation: true,
+    simulatedPort: true,
+  });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const say = async (n: number, text: string) => {
+      model.send(`观众消息 ${n}`);
+      await until(() => model.calls.length === n + 1);
+      const call = model.calls[n];
+      assert.ok(call);
+      const replyTo = call.request.context.candidates[0]?.id;
+      assert.ok(replyTo);
+      call.resolve(JSON.stringify({ action: 'speak', replyTo, text }));
+      await until(() => model.spoken.length === n + 1);
+      await flush();
+      return call.request;
+    };
+    await say(0, '普通问候。');
+    const original = '合成游戏来源甲';
+    const indirect = '由近期发言得到的游戏线索乙';
+    semantic.rpc.notify(
+      Method.SituationObserved,
+      syntheticSituation(h.wireNowMs(), { summary: original }),
+    );
+    await until(() => h.store.events().some((e) => e.type === Method.SituationObserved));
+    const first = await say(1, original);
+    assert.deepEqual(first.context.triggers, ['candidates']);
+    assert.equal(first.context.game?.situation?.summary, original);
+    assert.equal(model.spoken[1]?.source, 'danmaku-reply');
+    const closed = once(semantic.connection, 'close');
+    semantic.connection.close();
+    await closed;
+    await until(() => !h.game.status().mainConnected);
+    const second = await say(2, indirect);
+    assert.equal(second.context.game, undefined);
+    assert.ok(second.context.heard.includes(original));
+
+    await model.replaceModel(false);
+    model.send('换成未经批准的模型');
+    await until(() => model.calls.length === 4);
+    const latest = model.calls[3]?.request;
+    assert.deepEqual(latest?.context.heard, ['普通问候。']);
+    assert.ok(
+      !latest?.messages.some(
+        ({ content }) => content.includes(original) || content.includes(indirect),
+      ),
+    );
+    assert.equal(model.spoken[1]?.gameContent, true);
+    assert.equal(model.spoken[2]?.gameContent, true);
+  } finally {
+    await h.close();
+  }
+});
+
+test('含游戏数据的普通投票及其开票口播也受模型外发限制', async () => {
+  const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const summary = '合成游戏线索';
+    semantic.rpc.notify(Method.SituationObserved, syntheticSituation(h.wireNowMs(), { summary }));
+    await until(() => h.store.events().some((e) => e.type === Method.SituationObserved));
+    model.send('现在开投票吗？');
+    await until(() => model.calls.length === 1);
+    model.calls[0]?.resolve(
+      JSON.stringify({
+        action: 'vote',
+        question: summary,
+        options: ['继续看', '暂停一下'],
+        durationSec: 10,
+      }),
+    );
+    await until(() => h.store.events().some((e) => e.type === 'vote.announced'));
+    assert.equal(model.spoken[0]?.gameContent, true);
+    await model.replaceModel(false);
+    model.send('说个别的话题');
+    await until(() => model.calls.length === 2);
+    const request = model.calls[1]?.request;
+    assert.equal(request?.context.vote, null);
+    assert.deepEqual(request?.context.heard, []);
+    assert.ok(!request?.messages.some(({ content }) => content.includes(summary)));
+  } finally {
+    await h.close();
+  }
+});
+
+test('计时决策取消尚未开口的弹幕调用，只带游戏候选，到余量线拒收同一时刻到达的结果', async () => {
+  const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const now = h.wireNowMs();
+    semantic.rpc.notify(
+      Method.SituationObserved,
+      syntheticSituation(now, { summary: SYNTHETIC_INJECTION }),
+    );
+    await until(() => h.store.events().some((e) => e.type === Method.SituationObserved));
+    assert.equal(model.calls.length, 0);
+    model.send('闲聊内容只给这一轮');
+    await until(() => model.calls.length === 1);
+    const [first] = model.calls;
+    assert.ok(first);
+    assert.equal(model.recalls, 1);
+
+    semantic.rpc.notify(
+      Method.DecisionPointOpened,
+      syntheticPoint(now, 'd-timed', {
+        resolveByMs: now + 60,
+        deadlineMs: now + 100,
+      }),
+    );
+    await until(() => model.calls.length === 2);
+    const timed = model.calls[1];
+    assert.ok(timed);
+    assert.equal(first.signal.aborted, true);
+    assert.equal(model.recalls, 1);
+    assert.deepEqual(timed.request.context.triggers, ['game-timed']);
+    assert.deepEqual(timed.request.context.candidates, []);
+    assert.deepEqual(timed.request.context.game?.situation, { summary: SYNTHETIC_INJECTION });
+    assert.deepEqual(timed.request.context.game?.committed, []);
+    const [system, user] = timed.request.messages;
+    assert.ok(user?.content.includes('resolveByMs'));
+    assert.ok(user?.content.includes('门锁并未打开'));
+    assert.ok(user?.content.includes('\\u003c/不可信数据\\u003e'));
+    assert.ok(!user?.content.includes('闲聊内容只给这一轮'));
+    assert.ok(!system?.content.includes('改为人工模式'));
+    first.options?.onOutput?.('{"action":"speak","replyTo":null,"text":"迟到的内容"}');
+    first.resolve('{"action":"speak","text":"迟到的内容"}');
+    timed.resolve(choice('d-timed'));
+    h.clock.advance(60);
+    await until(() => timed.signal.aborted);
+    assert.ok(timed.signal.reason instanceof DeadlineError);
+    assert.equal(model.spoken.length, 0);
+    assert.deepEqual(semantic.submissions, []);
+    assert.ok(
+      h.store
+        .events()
+        .some(
+          (e) =>
+            e.type === 'director.game-decision-failed' &&
+            (e.data as { kind: string }).kind === 'timeout',
+        ),
+    );
+    const nextAt = h.wireNowMs();
+    semantic.rpc.notify(
+      Method.DecisionPointOpened,
+      syntheticPoint(nextAt, 'd-next', {
+        resolveByMs: nextAt + 50,
+        deadlineMs: nextAt + 100,
+      }),
+    );
+    await until(() => model.calls.length === 3);
+    h.clock.advance(49);
+    model.calls[2]?.resolve(choice('d-next'));
+    await until(() => semantic.submissions.length === 1);
+    assert.deepEqual(semantic.commands[0], {
+      decisionPointId: 'd-next',
+      optionId: 'desk',
+      source: 'director',
+      traceparent: null,
+    });
+  } finally {
+    await h.close();
+  }
+});
+
+test('计时决策不打断已开口的调用，过了余量线就不再调用模型', async () => {
+  const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    model.send('开始聊天');
+    await until(() => model.calls.length === 1);
+    const current = model.calls[0];
+    assert.ok(current);
+    const output = '{"action":"speak","replyTo":null,"text":"我们开始吧。"}';
+    current.options?.onOutput?.(output);
+    assert.equal(model.spoken.length, 1);
+    const now = h.wireNowMs();
+    semantic.rpc.notify(
+      Method.DecisionPointOpened,
+      syntheticPoint(now, 'd-expiring', {
+        resolveByMs: now + 50,
+        deadlineMs: now + 100,
+      }),
+    );
+    await until(() => h.game.status().decision?.decisionPointId === 'd-expiring');
+    assert.equal(current.signal.aborted, false);
+    h.clock.advance(50);
+    current.resolve(output);
+    await until(() => h.store.events().some((e) => e.type === 'director.game-decision-failed'));
+    assert.equal(model.calls.length, 1);
+    assert.deepEqual(semantic.submissions, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test('新实例替换旧决策，真实闸门只发当前选择，动作解说等待持久确认', async () => {
+  const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    semantic.rpc.notify(Method.DecisionPointOpened, syntheticPoint(h.wireNowMs(), 'old'));
+    await until(() => model.calls.length === 1);
+    semantic.rpc.notify(Method.DecisionPointOpened, syntheticPoint(h.wireNowMs(), 'current'));
+    await until(() => model.calls.length === 2);
+    assert.equal(model.calls[0]?.signal.aborted, true);
+    model.calls[0]?.resolve(choice('old'));
+    model.calls[1]?.resolve(choice('current'));
+    const key = JSON.stringify(['game', Method.DecisionResolve, 'run', 'current']);
+    await until(() => h.store.intentByKey(key)?.state === 'succeeded');
+    assert.equal(h.store.intentByKey(key)?.source.untrusted, true);
+    assert.deepEqual(semantic.commands, [
+      {
+        decisionPointId: 'current',
+        optionId: 'desk',
+        source: 'director',
+        traceparent: null,
+      },
+    ]);
+
+    const commentary = '{"action":"game_comment","actionId":"committed-1"}';
+    model.send('刚选了什么？');
+    await until(() => model.calls.length === 3);
+    model.calls[2]?.resolve(commentary);
+    await flush();
+    assert.equal(model.spoken.length, 0);
+
+    semantic.rpc.notify(Method.ActionCommitted, {
+      actionId: 'committed-1',
+      atMs: h.wireNowMs(),
+      goalId: null,
+      category: 'select',
+      summary: '实际选择了检查书桌。',
+      selection: { decisionPointId: 'current', optionId: 'desk', source: 'director' },
+      traceparent: null,
+    });
+    await until(() => h.store.events().some((e) => e.type === Method.ActionCommitted));
+    assert.equal(model.calls.length, 3);
+    model.send('现在选了什么？');
+    await until(() => model.calls.length === 4);
+    model.calls[3]?.resolve(commentary);
+    await until(() => model.spoken.length === 1);
+    assert.equal(model.spoken[0]?.text, '实际选择了检查书桌。');
+    assert.equal(model.spoken[0]?.untrusted, true);
+  } finally {
+    await h.close();
+  }
+});
+
+test('看点按编号、时效与间隔限频，人工模式意图无法转成游戏命令', async () => {
+  const h = await setup({
+    director: { lookpointMinIntervalMs: 100, lookpointMaxAgeMs: 200 },
+    simulation: true,
+    simulatedPort: true,
+  });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    let facts = 0;
+    const observe = async (id: string, atMs = h.wireNowMs()) => {
+      facts += 1;
+      semantic.rpc.notify(
+        Method.SituationObserved,
+        syntheticSituation(h.wireNowMs(), {
+          lookpoints: [
+            { id, kind: 'clue', atMs, importance: 'high', summary: SYNTHETIC_INJECTION },
+          ],
+        }),
+      );
+      await until(
+        () => h.store.events().filter((e) => e.type === Method.SituationObserved).length === facts,
+      );
+    };
+    await observe('expired', h.wireNowMs() - 201);
+    assert.equal(model.calls.length, 0);
+    const seenAt = h.wireNowMs();
+    await observe('seen', seenAt);
+    await until(() => model.calls.length === 1);
+    model.calls[0]?.resolve(
+      '{"action":"game_goal","mode":"manual","objective":"执行","constraints":[]}',
+    );
+    await until(() => h.store.events().some((e) => e.type === 'director.game-decision-failed'));
+    assert.deepEqual(semantic.submissions, []);
+    assert.equal(h.game.status().state, 'READY');
+    await observe('too-close');
+    h.clock.advance(100);
+    await observe('seen', seenAt);
+    await observe('too-close', seenAt);
+    assert.equal(model.calls.length, 1);
+    await observe('next');
+    await until(() => model.calls.length === 2);
+    model.calls[1]?.resolve('{"action":"speak","text":"这里发现了一条线索。"}');
+    await until(() => model.spoken.length === 1);
+    assert.equal(model.spoken[0]?.source, 'game-reaction');
+    assert.equal(model.spoken[0]?.untrusted, true);
+  } finally {
+    await h.close();
+  }
+});
+
+for (const { ballots, outcome, withdrawn = false } of [
+  { ballots: ['1'], outcome: 'winner' },
+  { ballots: ['1', '2'], outcome: 'tie' },
+  { ballots: [], outcome: 'none' },
+  { ballots: ['1'], outcome: 'winner', withdrawn: true },
+]) {
+  const scenario = withdrawn
+    ? '决策点撤回时丢弃投票结果'
+    : `绑定投票的 ${outcome} 结果只在结束后用于当前决策点`;
+  test(scenario, async () => {
+    const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+    const { model } = h;
+    assert.ok(model);
+    try {
+      const { semantic, core } = await pair(h);
+      await h.mode();
+      await until(() => h.game.status().inputPermitted);
+      semantic.rpc.notify(Method.DecisionPointOpened, syntheticPoint(h.wireNowMs(), 'd-vote'));
+      await until(() => model.calls.length === 1);
+      model.calls[0]?.resolve(
+        JSON.stringify({
+          action: 'game_vote',
+          decisionPoint: 'd-vote',
+          question: '先检查哪里',
+          optionIds: ['door', 'desk'],
+          durationSec: 10,
+        }),
+      );
+      await until(() => h.store.events().some((e) => e.type === 'vote.announced'));
+      const started = h.store.events().find((e) => e.type === 'vote.started');
+      assert.ok(started);
+      assert.deepEqual((started.data as { game: unknown }).game, {
+        runtimeId: 'run',
+        optionIds: ['door', 'desk'],
+      });
+      assert.deepEqual((started.data as { options: unknown }).options, ['查看门锁', '检查书桌']);
+      assert.equal((semantic.commands[0] as GameGoalSubmitParams).mode, 'waiting_vote');
+      assert.equal((semantic.commands[0] as GameGoalSubmitParams).decisionPointId, 'd-vote');
+      assert.deepEqual(semantic.submissions, [Method.GoalSubmit]);
+      for (const ballot of ballots) {
+        const before = model.calls.length;
+        model.send(ballot);
+        await flush();
+        for (const ordinary of model.calls.slice(before)) ordinary.resolve(quiet);
+        await flush();
+      }
+      assert.deepEqual(semantic.submissions, [Method.GoalSubmit]);
+      const afterBallots = model.calls.length;
+      for (let elapsed = 0; elapsed < 10_000; elapsed += 200) {
+        core.clock.advance(200);
+        h.clock.advance(200);
+        semantic.health({ decisionPointId: withdrawn ? null : 'd-vote' });
+        core.health();
+        await until(
+          () =>
+            h.game.status().health?.atMs === h.wireNowMs() &&
+            h.game.status().realtimeHealth?.atMs === h.wireNowMs(),
+        );
+      }
+      const ended = h.store.events().find((e) => e.type === 'vote.ended');
+      assert.equal((ended?.data as { outcome?: string } | undefined)?.outcome, outcome);
+      if (withdrawn) {
+        assert.equal(h.game.status().decision, null);
+        assert.deepEqual(semantic.submissions, [Method.GoalSubmit]);
+        assert.equal(model.calls.length, afterBallots);
+        assert.ok(
+          h.store
+            .events()
+            .some(
+              (e) =>
+                e.type === 'director.game-decision-failed' &&
+                (e.data as { kind: string }).kind === 'stale_vote',
+            ),
+        );
+        return;
+      }
+      if (outcome === 'winner') {
+        await until(() => semantic.commands.length === 2);
+        assert.equal(model.calls.length, afterBallots);
+      } else {
+        await until(() => model.calls.length === afterBallots + 1);
+        const fallback = model.calls[afterBallots];
+        assert.deepEqual(fallback?.request.context.triggers, ['game-vote-ended']);
+        assert.equal(fallback?.request.context.endedVote?.outcome, outcome);
+        fallback?.resolve(choice('d-vote'));
+        await until(() => semantic.commands.length === 2);
+      }
+      assert.deepEqual(semantic.commands[1], {
+        decisionPointId: 'd-vote',
+        optionId: outcome === 'winner' ? 'door' : 'desk',
+        source: outcome === 'winner' ? 'vote' : 'director',
+        traceparent: null,
+      });
+    } finally {
+      await h.close();
+    }
+  });
+}
+
+test('坏结局解说完成后才提交恢复目标，重复失败观测合并，卡住只告警', async () => {
+  const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const spoken = Promise.withResolvers<void>();
+    model.holdSpeech(async (outcome) => {
+      await spoken.promise;
+      return outcome;
+    });
+    const bad = syntheticSituation(h.wireNowMs(), {
+      screenType: '坏结局',
+      failure: { source: 'default', summary: '时间到了，默认选项没有打开门。' },
+      rereading: true,
+      lookpoints: [
+        {
+          id: 'fail-mark',
+          kind: 'failure',
+          summary: '调查失败',
+          atMs: h.wireNowMs(),
+          importance: 'high',
+        },
+      ],
+    });
+    semantic.rpc.notify(Method.SituationObserved, bad);
+    await until(() => model.calls.length === 1);
+    assert.equal(model.calls[0]?.request.context.game?.situation?.failure?.source, 'default');
+    assert.equal(model.calls[0]?.request.context.game?.situation?.rereading, true);
+    model.calls[0]?.resolve(
+      JSON.stringify({
+        action: 'game_goal',
+        mode: 'autonomous',
+        objective: '使用游戏提供的重试入口重新调查',
+        constraints: ['保留已有线索'],
+        recoveryComment: '门没打开，换一种办法试试。',
+      }),
+    );
+    await until(() => model.spoken.length === 1);
+    assert.deepEqual(semantic.submissions, []);
+    semantic.rpc.notify(Method.SituationObserved, bad);
+    await until(
+      () => h.store.events().filter((e) => e.type === Method.SituationObserved).length === 2,
+    );
+    assert.equal(model.calls.length, 1);
+    spoken.resolve();
+    await until(() => semantic.commands.length === 1);
+    assert.equal((semantic.commands[0] as GameGoalSubmitParams).mode, 'autonomous');
+    assert.equal(
+      (semantic.commands[0] as GameGoalSubmitParams).objective,
+      '使用游戏提供的重试入口重新调查',
+    );
+    semantic.rpc.notify(
+      Method.SituationObserved,
+      syntheticSituation(h.wireNowMs(), { screenType: '卡住' }),
+    );
+    await until(() => model.calls.length === 2);
+    model.calls[1]?.resolve('{"action":"ask_operator"}');
+    await until(() =>
+      h.store.events().some((e) => e.type === 'director.game-assistance-requested'),
+    );
+    assert.equal(semantic.submissions.length, 1);
+    assert.equal(h.game.status().state, 'READY');
+  } finally {
+    await h.close();
+  }
+});
+
+test('恢复目标授权期间离开失败局面，发送前重新核对并丢弃目标', async () => {
+  const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+  const { model } = h;
+  assert.ok(model);
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    let requested = false;
+    const guard = Promise.withResolvers<undefined>();
+    const remove = h.safety.addGuard(async (intent) => {
+      if (intent.type !== Method.GoalSubmit) return undefined;
+      requested = true;
+      return guard.promise;
+    });
+    const at = h.wireNowMs();
+    semantic.rpc.notify(Method.SituationObserved, syntheticSituation(at, { screenType: '坏结局' }));
+    await until(() => model.calls.length === 1);
+    model.calls[0]?.resolve(
+      JSON.stringify({
+        action: 'game_goal',
+        mode: 'autonomous',
+        objective: '重试',
+        constraints: [],
+        recoveryComment: '我再试一次。',
+      }),
+    );
+    await until(() => requested);
+    semantic.rpc.notify(Method.SituationObserved, syntheticSituation(at));
+    await until(
+      () => h.store.events().filter((e) => e.type === Method.SituationObserved).length === 2,
+    );
+    guard.resolve(undefined);
+    await until(() =>
+      h.store
+        .events()
+        .some(
+          (e) =>
+            e.type === 'director.game-decision-failed' &&
+            (e.data as { kind: string }).kind === 'command_rejected',
+        ),
+    );
+    remove();
+    assert.deepEqual(semantic.submissions, []);
+  } finally {
+    await h.close();
+  }
+});
+
+for (const speechFailure of ['stopped', 'skipped', 'throw']) {
+  test(`坏结局解说 ${speechFailure} 时记录失败并保持停住`, async () => {
+    const h = await setup({ director: {}, simulation: true, simulatedPort: true });
+    const { model } = h;
+    assert.ok(model);
+    try {
+      const { semantic } = await pair(h);
+      await h.mode();
+      await until(() => h.game.status().inputPermitted);
+      model.holdSpeech(async (outcome) => {
+        if (speechFailure === 'throw') throw new Error('合成发声错误');
+        if (speechFailure === 'skipped')
+          return { ...outcome, heard: '', skipped: [{ index: 1, reason: '审核' }] };
+        return { ...outcome, heard: '说到一半', end: 'stopped' };
+      });
+      semantic.rpc.notify(
+        Method.SituationObserved,
+        syntheticSituation(h.wireNowMs(), { screenType: '坏结局' }),
+      );
+      await until(() => model.calls.length === 1);
+      model.calls[0]?.resolve(
+        JSON.stringify({
+          action: 'game_goal',
+          mode: 'autonomous',
+          objective: '重试',
+          constraints: [],
+          recoveryComment: '这个办法走不通。我再试一次。',
+        }),
+      );
+      const expected = speechFailure === 'throw' ? 'comment_failed' : 'comment_incomplete';
+      const failed = () =>
+        h.store
+          .events()
+          .some(
+            (event) =>
+              event.type === 'director.game-decision-failed' &&
+              (event.data as { kind: string }).kind === expected,
+          );
+      await until(() => failed() || semantic.submissions.length > 0);
+      await flush();
+      assert.deepEqual(semantic.submissions, []);
+      assert.ok(failed());
+    } finally {
+      await h.close();
+    }
+  });
 }
 
 test('命名管道或 UDS 需要认证、每角色一个槽位，未来主版本进入 WAITING', async () => {

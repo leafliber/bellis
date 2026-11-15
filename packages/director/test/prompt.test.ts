@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { VOTE_LIMITS } from '@bellis/audience';
 import {
+  AUDIENCE_ACTIONS,
   buildMessages,
   type DirectorContext,
   INTENT_OUTPUT,
@@ -159,7 +160,7 @@ test('同样的上下文得到同样的消息；没有候选与投票时数据�
 
 test('意图的输出格式：严格 schema 由意图定义派生，名字可作函数名', () => {
   assert.match(INTENT_OUTPUT.name, /^[a-zA-Z0-9_-]{1,64}$/);
-  assert.deepEqual(INTENT_OUTPUT.schema, strictIntentSchema());
+  assert.deepEqual(INTENT_OUTPUT.schema, strictIntentSchema(AUDIENCE_ACTIONS));
 });
 
 test('交给模型的上下文不含 Rule of Two 排除的内容：观众身份、原始弹幕编号以外的来源、凭据与控制能力', async () => {

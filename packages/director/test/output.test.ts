@@ -99,10 +99,26 @@ test('严格 schema：根是对象，字段全部必填、可选字段可为 nul
     'durationSec',
     'decisionPoint',
     'reason',
+    'optionId',
+    'mode',
+    'objective',
+    'constraints',
+    'recoveryComment',
+    'optionIds',
+    'actionId',
   ]);
   assert.deepEqual(properties.action, {
     type: 'string',
-    enum: ['speak', 'vote', 'silence'],
+    enum: [
+      'speak',
+      'vote',
+      'silence',
+      'choose',
+      'game_goal',
+      'game_vote',
+      'game_comment',
+      'ask_operator',
+    ],
     description: '意图类型',
   });
   for (const node of nodes(schema)) {
@@ -133,6 +149,7 @@ test('严格 schema：根是对象，字段全部必填、可选字段可为 nul
     new RegExp(`整数 ${VOTE_LIMITS.minDurationSec}–${VOTE_LIMITS.maxDurationSec}`),
   );
   assert.deepEqual(properties.options?.items, { type: 'string', description: '1–20 字' });
+  assert.deepEqual(properties.mode?.enum, ['autonomous', 'paused', null]);
   // 用到的记忆编号：说话与发起投票共用，个数上限写进说明。
   assert.match(String(properties.memories?.description), /至多 8 项；每项 1–16 字/);
   assert.match(String(properties.memories?.description), /仅用于 action 为 speak、vote 时/);
@@ -142,7 +159,7 @@ const chars = fc.constantFrom('a', 'Z', '好', '的', '？', ' ', '1');
 const text = (min: number, max: number) =>
   fc.string({ unit: chars, minLength: min, maxLength: max });
 const id = fc.string({
-  unit: fc.constantFrom('c', '-', 'd', '1', '9'),
+  unit: fc.constantFrom('c', 'd', '1', '9'),
   minLength: 1,
   maxLength: 64,
 });
@@ -174,6 +191,26 @@ const actionArbitrary: fc.Arbitrary<DirectorAction> = fc.oneof(
     { requiredKeys: ['action', 'question', 'options', 'durationSec'] },
   ),
   fc.record({ action: fc.constant('silence' as const), reason: text(0, 100) }),
+  fc.record({ action: fc.constant('choose' as const), decisionPoint: id, optionId: id }),
+  fc.record(
+    {
+      action: fc.constant('game_goal' as const),
+      mode: fc.constantFrom('autonomous' as const, 'paused' as const),
+      objective: text(1, 600),
+      constraints: fc.array(text(1, 160), { maxLength: 16 }),
+      recoveryComment: text(1, 200),
+    },
+    { requiredKeys: ['action', 'mode', 'objective', 'constraints'] },
+  ),
+  fc.record({
+    action: fc.constant('game_vote' as const),
+    decisionPoint: id,
+    optionIds: fc.uniqueArray(id, { minLength: 2, maxLength: 4 }),
+    question: text(1, 60),
+    durationSec: fc.integer({ min: 10, max: 300 }),
+  }),
+  fc.record({ action: fc.constant('game_comment' as const), actionId: id }),
+  fc.constant({ action: 'ask_operator' as const }),
 );
 
 test('严格 schema 与 parseAction 一致：每个合法意图都有严格写法，换回来原样通过校验', () => {
@@ -198,13 +235,7 @@ test('严格 schema 与 parseAction 一致：每个合法意图都有严格写�
 test('严格 schema 比原 schema 宽：它接受、parseIntent 却拒绝的输出照样丢弃', () => {
   const strict = Compile(strictIntentSchema());
   const nulls = {
-    replyTo: null,
-    text: null,
-    memories: null,
-    question: null,
-    options: null,
-    durationSec: null,
-    decisionPoint: null,
+    ...toStrictIntent({ action: 'silence', reason: '' }),
     reason: null,
   };
   for (const value of [
@@ -221,6 +252,14 @@ test('严格 schema 比原 schema 宽：它接受、parseIntent 却拒绝的输�
     { ...nulls, action: 'vote', question: 'q', options: ['a'], durationSec: 30 },
     { ...nulls, action: 'vote', question: 'q', options: ['a', 'b'], durationSec: 5 },
     { ...nulls, action: 'silence' },
+    {
+      ...nulls,
+      action: 'game_vote',
+      decisionPoint: 'd-1',
+      optionIds: ['a', 'a'],
+      question: 'q',
+      durationSec: 30,
+    },
   ]) {
     assert.ok(strict.Check(value), JSON.stringify(value));
     assert.equal(parseIntent(JSON.stringify(value)).ok, false, JSON.stringify(value));

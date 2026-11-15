@@ -29,6 +29,8 @@ export interface LlmRequest {
   messages: readonly LlmMessage[];
   /** 意图的输出格式。 */
   output: LlmOutputFormat;
+  /** 消息含游戏数据或从游戏数据派生的发言或投票，仅供客户端在本机核对外发许可。 */
+  gameContent?: boolean;
   /**
    * 组装消息用的结构化上下文：`messages` 数据部分的原形。模型客户端不发送它，回放模型记下它以便测试核对
    * 上下文里有什么、没有什么。
@@ -85,6 +87,8 @@ export interface LlmFailures {
 export interface Llm {
   /** 模型标识（遥测用）；不提供时按 `unknown` 记。 */
   readonly model?: LlmModel;
+  /** 当前接入点可接收游戏内容，缺省为 false。 */
+  readonly acceptsGameContent?: boolean;
   /**
    * 调用一次模型，返回正文（函数调用方式下是函数参数）的字符串，由决策插件解析。不做隐式重试；
    * `signal` 中止即断开连接，以 {@link LlmError}（`aborted`）结束。调用方因截止时间到点而中止时以
