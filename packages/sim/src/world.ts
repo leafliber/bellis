@@ -1,3 +1,4 @@
+import { GAME_INPUT, GameRuntimeHost, GameRuntimePortService } from '@bellis/game-bridge';
 import {
   ClockService,
   Kernel,
@@ -46,6 +47,7 @@ export interface WorldOptions {
   bootId?: string;
   /** 模拟 Iris 的数据：代表进程外的服务，由仿真在各次启动之间保留。 */
   iris?: SimIrisBackend;
+  game?: boolean;
 }
 
 /** 追踪中的一条记录：各部分按发生顺序写入，时间为手动时钟的时刻。 */
@@ -71,6 +73,13 @@ const TRACED_FACTS: ReadonlySet<string> = new Set([
   'safety.obs-external',
 ]);
 
+const GAME_FACTS: ReadonlySet<string> = new Set([
+  'action.committed',
+  'input.released',
+  'situation.observed',
+  'decision_point.opened',
+]);
+
 /**
  * 进程内的完整世界：状态存储、安全核、插件内核与核心服务，全部由同一个手动时钟与种子驱动。
  * 用于全模拟链路测试与确定性仿真（R-07）。
@@ -84,6 +93,8 @@ export class World {
   readonly safety: SafetyCore;
   readonly kernel: Kernel;
   readonly logs: LogEntry[] = [];
+  readonly gameHost: GameRuntimeHost | undefined;
+  #crashed = false;
 
   constructor(options: WorldOptions) {
     const epoch = options.epochMs ?? Date.UTC(2026, 9, 14);
@@ -104,14 +115,22 @@ export class World {
     // 与宿主相同：停在执行中的 Stage 发言当场结案，其余结果未知的意图等所有者对账或操作员结案。
     this.store.recover({ interrupt: interruptedSpeech });
     // 发言结果与投票的事实同时写进追踪，与 Stage 的回报、送出的弹幕排在同一条时间线上。
+    const gameIntents = new Set<number>();
     this.store.subscribe((event) => {
       if (event.type === 'utterance.played')
         this.record('fact.utterance', { ...(event.data as object) });
-      else if (event.type.startsWith('vote.'))
-        this.record(`fact.${event.type}`, { ...(event.data as object) });
-      else if (event.type.startsWith('memory.'))
+      else if (
+        event.type.startsWith('vote.') ||
+        event.type.startsWith('memory.') ||
+        GAME_FACTS.has(event.type)
+      )
         this.record(`fact.${event.type}`, { factSeq: event.seq, ...(event.data as object) });
-      else if (TRACED_FACTS.has(event.type))
+      else if (options.game && event.type.startsWith('intent.')) {
+        const { id, target } = event.data as { id?: number; target?: string };
+        if (id === undefined) return;
+        if (event.type === 'intent.authorized' && target?.startsWith('game:')) gameIntents.add(id);
+        if (gameIntents.has(id)) this.record(`fact.${event.type}`, { factSeq: event.seq });
+      } else if (TRACED_FACTS.has(event.type))
         this.record(`fact.${event.type}`, { ...(event.data as object) });
     });
     let kernel: Kernel | undefined;
@@ -140,6 +159,25 @@ export class World {
     this.kernel.provideCore(ClockService, this.clock);
     this.kernel.provideCore(RandomService, random);
     this.kernel.provideCore(TraceService, { record: (kind, data) => this.record(kind, data) });
+    if (options.game) {
+      this.gameHost = new GameRuntimeHost({
+        simulated: true,
+        wireNowMs: () => Math.floor(this.clock.now()),
+        emergencyStop: (reason) => {
+          void this.safety.emergencyStop(reason);
+        },
+      });
+      this.kernel.provideCore(GameRuntimePortService, this.gameHost.port);
+      this.safety.leases.subscribe(({ resource, lease }) => {
+        if (resource === GAME_INPUT) {
+          this.record('game.host-lease', {
+            token: lease?.token ?? null,
+            expiresAtMs: lease?.expiresAt ?? null,
+            ttlMs: lease?.ttlMs ?? null,
+          });
+        }
+      });
+    }
     this.kernel.provideScoped(SafetyService, ({ instanceId, permissions }) =>
       safetyFacade(this.safety, instanceId, permissions),
     );
@@ -156,11 +194,16 @@ export class World {
     this.trace.push({ seq: this.trace.length, at: this.clock.now(), kind, data });
   }
 
+  get crashed(): boolean {
+    return this.#crashed;
+  }
+
   /**
    * 模拟进程崩溃：不做任何收尾，直接放弃这个世界（旧时钟不再推进，旧插件不再运行）。
    * 返回在同一个状态存储上重启所需的信息。
    */
   crash(): { storePath: string; now: number } {
+    this.#crashed = true;
     this.store.close();
     return { storePath: this.storePath, now: this.clock.now() };
   }

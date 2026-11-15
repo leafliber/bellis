@@ -109,14 +109,75 @@ export function checkTelemetry(history: History): string[] {
 
   // 意图来源：句键 → 来源与输入。
   const sources = new Map<string, { origin: string; inputs: string[] }>();
+  type GameVote = { runtimeId: string; decisionPoint: string; seq: number; recordedAt: number };
+  const gameOpenings = new Map<string, GameVote>();
+  const gameDecisions = new Map<string, GameVote>();
+  const openingDecisions = new Map<string, GameVote>();
+  const gameFactOrder = new Map<number, { boot: number; index: number }>();
+  let boot = 0;
+  for (const [index, entry] of history.trace.entries()) {
+    if (entry.kind === 'world.start') boot = index;
+    if (entry.kind === 'fact.decision_point.opened' || entry.kind === 'fact.vote.started')
+      gameFactOrder.set(Number(entry.data.factSeq), { boot, index });
+  }
   for (const event of history.events) {
+    if (event.type === 'vote.started') {
+      const vote = event.data as {
+        voteId: string;
+        decisionPoint: string;
+        game?: { runtimeId: string };
+      };
+      if (vote.game)
+        gameOpenings.set(`vote:${vote.voteId}:opening`, {
+          runtimeId: vote.game.runtimeId,
+          decisionPoint: vote.decisionPoint,
+          seq: event.seq,
+          recordedAt: event.recordedAt,
+        });
+    } else if (event.type === 'decision_point.opened') {
+      const fact = event.data as { runtimeId: string; payload: { decisionPointId: string } };
+      gameDecisions.set(`game:${event.seq}`, {
+        runtimeId: fact.runtimeId,
+        decisionPoint: fact.payload.decisionPointId,
+        seq: event.seq,
+        recordedAt: event.recordedAt,
+      });
+    }
     if (event.type !== 'intent.authorized') continue;
     const data = event.data as {
       key: string;
       type: string;
       source: { origin: string; inputs: string[] };
     };
-    if (data.type === 'speech.play') sources.set(data.key, data.source);
+    if (data.type !== 'speech.play') continue;
+    sources.set(data.key, data.source);
+    const vote = gameOpenings.get(data.key.replace(/#\d+$/u, ''));
+    if (!vote) continue;
+    const voteTrace = gameFactOrder.get(vote.seq);
+    const point = data.source.inputs
+      .map((input) => gameDecisions.get(input))
+      .find((decision) => {
+        if (
+          !decision ||
+          decision.runtimeId !== vote.runtimeId ||
+          decision.decisionPoint !== vote.decisionPoint
+        )
+          return false;
+        const pointTrace = gameFactOrder.get(decision.seq);
+        return (
+          decision.seq < vote.seq &&
+          vote.seq < event.seq &&
+          pointTrace !== undefined &&
+          voteTrace !== undefined &&
+          pointTrace.boot === voteTrace.boot &&
+          pointTrace.index < voteTrace.index
+        );
+      });
+    if (!point || data.source.origin !== 'danmaku-reply') {
+      violations.push(`游戏投票开场没有关联持久决策点 ${data.key}`);
+      continue;
+    }
+    openingDecisions.set(data.key, point);
   }
   const sentenceSpans = new Map<string, OtlpSpan>();
   for (const span of spans.values()) {
@@ -145,10 +206,10 @@ export function checkTelemetry(history: History): string[] {
     for (const key of segment.started) {
       const utterance = key.replace(/#\d+$/u, '');
       const source = sources.get(key);
+      const gameVote = gameOpenings.get(utterance);
       if (
         !segment.written.has(utterance) ||
-        source?.origin !== 'danmaku-reply' ||
-        source.inputs.length === 0
+        (!gameVote && (source?.origin !== 'danmaku-reply' || source.inputs.length === 0))
       ) {
         continue;
       }
@@ -175,8 +236,27 @@ export function checkTelemetry(history: History): string[] {
       }
       if (broken) continue;
       const root = chain.at(-1) as OtlpSpan;
-      const expected = source.inputs[0];
-      if (root.name !== 'danmaku.receive' || attribute(root, 'bellis.danmaku.id') !== expected) {
+      const expected = source?.inputs[0];
+      if (gameVote) {
+        const point = openingDecisions.get(key);
+        const director = chain.find(
+          (span) =>
+            span.name === 'chat replay' &&
+            attribute(span, 'bellis.director.action') === 'game_vote',
+        );
+        if (
+          !point ||
+          !director ||
+          BigInt(director.startTimeUnixNano) < BigInt(point.recordedAt) * 1_000_000n ||
+          BigInt(director.startTimeUnixNano) > BigInt(gameVote.recordedAt) * 1_000_000n
+        ) {
+          violations.push(`游戏投票开场没有关联持久决策点和模型决策链路 ${key}`);
+          continue;
+        }
+      } else if (
+        root.name !== 'danmaku.receive' ||
+        attribute(root, 'bellis.danmaku.id') !== expected
+      ) {
         violations.push(
           `句子 ${key} 追到的根是 ${root.name}（${String(attribute(root, 'bellis.danmaku.id'))}），不是弹幕 ${expected} 的接入`,
         );
@@ -187,9 +267,10 @@ export function checkTelemetry(history: History): string[] {
       if (seen.has(utterance)) continue;
       seen.add(utterance);
       const utteranceSpan = spans.get(sentence.parentSpanId as string);
-      const reply = utteranceSpan?.parentSpanId
-        ? spans.get(utteranceSpan.parentSpanId)?.name === 'triage.candidate'
-        : false;
+      const reply =
+        !gameVote && utteranceSpan?.parentSpanId
+          ? spans.get(utteranceSpan.parentSpanId)?.name === 'triage.candidate'
+          : false;
       const samples = firstAudio.filter((sample) => sample.spanId === sentence.spanId);
       if (!reply || !startedEvent) {
         if (samples.length > 0) violations.push(`句子 ${key} 不该记“弹幕到首音”`);

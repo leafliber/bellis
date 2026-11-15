@@ -284,14 +284,20 @@ test('模型调用的 GenAI span 与推理指标：型号、用量、耗时与�
   }
 });
 
-test('遥测只是观察：同一场景启用与不启用遥测，仿真追踪与事件完全相同', async () => {
+test('同一场景切换遥测后，除游戏链路关联字段外，仿真追踪与事件完全相同', async () => {
   await fc.assert(
     fc.asyncProperty(scenarioArbitrary(10_000), async (scenario: Scenario) => {
       const without = await simulate(scenario, { drainMs: 5_000, telemetry: false });
       const withTelemetry = await simulate(scenario, { drainMs: 5_000 });
       assert.deepEqual(withTelemetry.violations, []);
-      assert.deepEqual(withTelemetry.history.trace, without.history.trace);
-      assert.deepEqual(withTelemetry.history.events, without.history.events);
+      const behavior = (value: unknown) =>
+        scenario.game
+          ? JSON.parse(
+              JSON.stringify(value, (key, field) => (key === 'traceparent' ? undefined : field)),
+            )
+          : value;
+      assert.deepEqual(behavior(withTelemetry.history.trace), behavior(without.history.trace));
+      assert.deepEqual(behavior(withTelemetry.history.events), behavior(without.history.events));
       assert.equal(without.history.telemetry, undefined);
       assert.ok((withTelemetry.history.telemetry?.length ?? 0) > 0);
     }),

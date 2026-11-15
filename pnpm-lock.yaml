@@ -674,9 +674,15 @@ importers:
       '@bellis/audience':
         specifier: workspace:*
         version: link:../audience
+      '@bellis/channel':
+        specifier: workspace:*
+        version: link:../channel
       '@bellis/director':
         specifier: workspace:*
         version: link:../director
+      '@bellis/game-bridge':
+        specifier: workspace:*
+        version: link:../game-bridge
       '@bellis/kernel':
         specifier: workspace:*
         version: link:../kernel
@@ -689,6 +695,9 @@ importers:
       '@bellis/plugins':
         specifier: workspace:*
         version: link:../plugins
+      '@bellis/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@bellis/safety':
         specifier: workspace:*
         version: link:../safety

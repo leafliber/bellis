@@ -1,7 +1,8 @@
-import { TEST_PERSONA } from '@bellis/director';
+import { type DirectorAction, TEST_PERSONA } from '@bellis/director';
 import type { ResolvedEntry } from '@bellis/kernel';
 import type { SimWriteFault } from '@bellis/memory';
 import fc from 'fast-check';
+import { GAME_ADAPTER, type GameCue } from './game-runtime.ts';
 
 /** 模拟 TTS 每个朗读码点的采样数；不变量据此从播出的采样数推出观众听到了什么。 */
 export const SAMPLES_PER_CHAR = 1600;
@@ -105,6 +106,13 @@ export type StreamEnd =
 
 export type OperatorAction = 'estop' | 'upgrade' | 'restart' | 'resolve' | 'obs-scene' | 'obs-mute';
 
+type GameIntent = Extract<
+  DirectorAction,
+  {
+    action: 'choose' | 'game_vote' | 'game_goal' | 'game_comment' | 'ask_operator';
+  }
+>;
+
 export interface Scenario {
   seed: number;
   moderation: { enabled: boolean; onError: 'skip' | 'pass'; delayMs: number };
@@ -123,6 +131,7 @@ export interface Scenario {
     | { kind: 'chatter'; sentences: number[] }
     | { kind: 'invalid' }
     | { kind: 'silence' }
+    | { kind: 'game'; intent: GameIntent }
     | { kind: 'vote'; question: number; options: number; durationSec: number }
     | { kind: 'timeout'; ignoreAbort: boolean }
     | { kind: 'error'; error: (typeof LLM_FAILURES)[number] }
@@ -161,6 +170,7 @@ export interface Scenario {
     writeFaults: SimWriteFault[];
     forget: Array<{ atMs: number; viewer: number }>;
   };
+  game?: { cues: GameCue[]; loseRelease?: boolean; idleMs?: number; goalTtlMs?: number };
   durationMs: number;
 }
 
@@ -169,7 +179,7 @@ const sentences = fc.array(fc.nat(SENTENCES.length - 1), { minLength: 1, maxLeng
 
 /** 生成仿真场景：输入、故障与操作员动作都由 fast-check 生成并可收缩。 */
 export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario> {
-  return fc.record({
+  const speech = fc.record({
     seed: fc.nat(),
     moderation: fc.record({
       enabled: fc.boolean(),
@@ -270,6 +280,162 @@ export function scenarioArbitrary(maxDurationMs = 20_000): fc.Arbitrary<Scenario
     }),
     durationMs: fc.constant(maxDurationMs),
   });
+  const cases = GAME_CASES.filter((kind) => gameScenario(kind, 0, 80).durationMs <= maxDurationMs);
+  if (cases.length === 0) return speech;
+  const game = fc
+    .record({
+      seed: fc.nat(),
+      kind: fc.constantFrom(...cases),
+      offset: fc.nat(8).map((n) => n * 10),
+    })
+    .map(({ seed, kind, offset }) => gameScenario(kind, seed, offset));
+  return fc.oneof({ arbitrary: speech, weight: 3 }, { arbitrary: game, weight: 1 });
+}
+
+export const GAME_CASES = [
+  'timed',
+  'timed-default',
+  'timed-default-updated',
+  'vote',
+  'bad-ending',
+  'stuck',
+  'takeover',
+  'estop',
+  'disconnect',
+  'expire',
+  'restart-waiting',
+  'restart-active',
+  'unknown',
+  'pacing',
+  'idle-goals',
+] as const;
+
+export function gameScenario(
+  kind: (typeof GAME_CASES)[number],
+  seed: number,
+  offset = 0,
+): Scenario {
+  const cues: GameCue[] = [];
+  const fixture: NonNullable<Scenario['game']> = { cues, loseRelease: kind === 'pacing' };
+  const at = (ms: number) => ms + offset;
+  const scenario: Scenario = {
+    seed,
+    moderation: { enabled: false, onError: 'skip', delayMs: 0 },
+    ttsSlow: false,
+    danmaku: [],
+    outputs: [],
+    announcements: [],
+    operator: [],
+    durationMs: at(2_000),
+    game: fixture,
+  };
+  const model = (intent: GameIntent) => scenario.outputs.push({ kind: 'game', intent });
+  const choose = () => model({ action: 'choose', decisionPoint: 'd1', optionId: 'b' });
+  const goal = (ms: number, id: string) => cues.push({ atMs: at(ms), action: 'goal', id });
+  const advance = (ms: number) => cues.push({ atMs: at(ms), action: 'advance' });
+  if (['timed', 'timed-default', 'timed-default-updated', 'vote', 'restart-waiting'].includes(kind))
+    goal(40, 'before-decision');
+  switch (kind) {
+    case 'timed':
+    case 'timed-default':
+    case 'timed-default-updated':
+      cues.push({ atMs: at(100), action: 'decision', id: 'd1', timingMs: 700 });
+      if (kind === 'timed-default-updated')
+        cues.push({
+          atMs: at(400),
+          action: 'decision-candidates',
+          id: 'd1',
+          rankedOptions: ['b', 'a'],
+        });
+      if (kind === 'timed') choose();
+      else scenario.outputs.push({ kind: 'timeout', ignoreAbort: true });
+      break;
+    case 'vote':
+      cues.push({ atMs: at(100), action: 'decision', id: 'd1' });
+      model({
+        action: 'game_vote',
+        decisionPoint: 'd1',
+        question: '先调查哪处？',
+        optionIds: ['b', 'a'],
+        durationSec: 10,
+      });
+      scenario.danmaku.push({ atMs: at(7_000), viewer: 0, nickname: 0, text: FIRST_BALLOT });
+      advance(16_000);
+      scenario.durationMs = at(17_000);
+      break;
+    case 'bad-ending':
+      cues.push({ atMs: at(100), action: 'situation', screen: '坏结局' });
+      model({
+        action: 'game_goal',
+        mode: 'autonomous',
+        objective: '重新调查线索',
+        constraints: [],
+        recoveryComment: '重新调查吧。',
+      });
+      advance(1800);
+      break;
+    case 'stuck':
+      cues.push({ atMs: at(100), action: 'situation', screen: '卡住' });
+      model({ action: 'ask_operator' });
+      break;
+    case 'idle-goals':
+      fixture.idleMs = 400;
+      fixture.goalTtlMs = 350;
+      cues.push({ atMs: at(100), action: 'situation', screen: '对话' });
+      model({ action: 'game_goal', mode: 'autonomous', objective: '查看书桌', constraints: [] });
+      model({ action: 'game_goal', mode: 'autonomous', objective: '查看门锁', constraints: [] });
+      advance(250);
+      advance(760);
+      advance(1_100);
+      advance(1_350);
+      break;
+    case 'restart-waiting':
+      cues.push({ atMs: at(100), action: 'decision', id: 'd1' });
+      choose();
+      choose();
+      scenario.operator.push({ atMs: at(180), action: 'restart' });
+      goal(220, 'after-restart');
+      break;
+    case 'unknown':
+      cues.push({ atMs: at(100), action: 'hold-reply' });
+      goal(120, 'uncertain');
+      scenario.operator.push(
+        { atMs: at(600), action: 'restart' },
+        { atMs: at(1_000), action: 'resolve' },
+        { atMs: at(1_100), action: 'upgrade' },
+      );
+      goal(800, 'isolated');
+      goal(850, 'uncertain');
+      goal(1200, 'after-resolution');
+      advance(1300);
+      break;
+    case 'pacing':
+      cues.push(
+        { atMs: at(100), action: 'situation', screen: '对话', lookpoint: 'before' },
+        { atMs: at(800), action: 'situation', screen: '对话', lookpoint: 'after' },
+      );
+      model({ action: 'game_comment', actionId: 'a1' });
+      model({ action: 'game_comment', actionId: 'a1' });
+      goal(500, 'pacing-goal');
+      advance(600);
+      advance(1_300);
+      scenario.durationMs = at(8_000);
+      break;
+    default:
+      goal(100, 'first');
+      advance(200);
+      if (kind === 'restart-active') {
+        scenario.operator.push({ atMs: at(600), action: 'restart' });
+        goal(750, 'after-restart');
+        advance(850);
+      } else {
+        if (kind === 'estop') scenario.operator.push({ atMs: at(600), action: 'estop' });
+        else cues.push({ atMs: at(600), action: kind === 'expire' ? 'stall' : kind });
+        goal(1_300, 'after-stop');
+        advance(1_400);
+      }
+  }
+  return scenario;
 }
 
 const text = (indices: readonly number[]) => indices.map((i) => SENTENCES[i] ?? '').join('');
@@ -337,6 +503,8 @@ function output(item: Scenario['outputs'][number]): ReplayItem {
       return '{"action":"speak","text":';
     case 'silence':
       return JSON.stringify({ action: 'silence', reason: '仿真' });
+    case 'game':
+      return JSON.stringify(item.intent);
     case 'vote':
       return JSON.stringify({
         action: 'vote',
@@ -377,7 +545,10 @@ export function scenarioEntries(
         rpm: scenario.ttsRpm ?? 0,
       },
     }),
-    entry('speech', 'speech-arbiter', { grant: ['speech.output'] }),
+    entry('speech', 'speech-arbiter', {
+      grant: ['speech.output'],
+      ...(scenario.game ? { config: { gamePacing: { holdMs: 3_000 } } } : {}),
+    }),
     entry('moderation-model', 'moderation-model-sim', {
       config: { blocked: [BLOCKED], failOn: [FAILING], delayMs: scenario.moderation.delayMs },
     }),
@@ -409,13 +580,25 @@ export function scenarioEntries(
     }),
     entry('triage', 'audience-triage'),
     entry('vote', 'audience-vote', { grant: ['vote.start'] }),
+    ...(scenario.game
+      ? [
+          entry('game', 'game-bridge', {
+            grant: ['game.goal', 'game.input'],
+            config: { adapterId: GAME_ADAPTER.id, adapterVersion: GAME_ADAPTER.version },
+          }),
+        ]
+      : []),
     entry('llm', 'llm-replay', {
       config: { outputs: scenario.outputs.slice(outputsUsed).map(output), latencyMs: 200 },
     }),
     entry('director', 'director', {
       config: {
         persona: TEST_PERSONA,
-        idleMs: 4000,
+        idleMs: scenario.game ? (scenario.game.idleMs ?? 0) : 4000,
+        ...(scenario.game ? { lookpointMinIntervalMs: 100 } : {}),
+        ...(scenario.game?.goalTtlMs === undefined
+          ? {}
+          : { gameGoalTtlMs: scenario.game.goalTtlMs }),
         recallTimeoutMs: 1000,
         callTimeoutMs: CALL_TIMEOUT_MS,
         alarmAfter: ALARM_AFTER,
