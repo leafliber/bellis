@@ -23,7 +23,7 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 
 每条连接的首个应用请求是 Bellis 发出的 `game.describe`，带契约主版本 `major`。两边应答各自的 `major`、运行会话号 `runtimeId` 和当前单调时刻 `nowMs`。主进程还返回适配包 `adapter`（`id`、`version`、`screenTypes`）和操作员前置条件 `prerequisites`（`id`、`text`、`confirmed`）。`runtimeId` 由 Runtime 每次启动新建，实时核重启仍属于同一次 Runtime 会话。两条连接的 `runtimeId` 必须相同。
 
-收到和请求编号匹配的 `game.describe` 应答后，先用开放的 `GameDescribeVersion` 读取公共的 `major`。Bellis 的入口是 `readGameBridgeMajor`。主版本相同才对所用角色的正文做闭合校验。后续主版本可以更换正文结构，仍用同一 JSON-RPC 信封和公共 `major` 字段表示版本。
+收到和请求编号匹配的 `game.describe` 应答后，先用开放的 `GameDescribeVersion` 读取公共的 `major`。Bellis 使用 `readGameBridgeMajor`，Python 使用生成模块的 `read_game_bridge_major`。主版本与 `GAME_BRIDGE_MAJOR` 相同才对所用角色的正文做闭合校验。后续主版本可以更换正文结构，仍用同一 JSON-RPC 信封和公共 `major` 字段表示版本。
 
 P3 宿主接入时负责设置 WAITING 和展示原因。遇到不兼容的主版本应同时报告本端支持的版本与对端版本。握手不合法、两条连接不齐、会话号不一致或适配包不匹配 profile 时也停在 WAITING。进入真实输出模式前还须确认 `health.reported` 表示就绪、适配包声明的前置条件全部已确认且游戏目标未被隔离。健康上报的条件编号与文本须和握手一致，确认状态以当前会话为准。连接断开、健康失效或确认撤回时停止下发目标、决定和许可。控制连接失去后实时核自行释放输入。实时核重连后重新握手，满足运行条件后从更大的令牌开始。
 
@@ -35,7 +35,7 @@ P3 宿主接入时负责设置 WAITING 和展示原因。遇到不兼容的主�
 
 ### 时间与标识
 
-- v1 的整数在线上用十进制 JSON 整数字面量。零写成 `0`，非零整数可带负号，数值须在 JS 安全整数和各字段的范围内。拒绝小数点、指数、`-0`、布尔和数字字符串。风险分是普通 JSON 数值，保留小数和指数写法。Node 在认证后的游戏连接解码原始帧时核对数字写法，随后按 Schema 核对字段类型和范围。Python 和 Rust 应保留原解析结果的数字类型再做严格校验。Python 用 `json.loads` 时可让 `parse_int` 将 `-0` 留作浮点负零，交给严格整数校验拒绝。
+- v1 的整数在线上用十进制 JSON 整数字面量。零写成 `0`，非零整数可带负号，数值须在 JS 安全整数和各字段的范围内。拒绝小数点、指数、`-0`、布尔和数字字符串。风险分是普通 JSON 数值，保留小数和指数写法。Node 在认证后的游戏连接解码原始帧时核对数字写法，随后按 Schema 核对字段类型和范围。Python 对原始游戏帧统一调用生成模块的 `parse_game_bridge_json(raw)`，再用相应 Pydantic 模型的 `model_validate` 校验信封与载荷。解码器核对公共信封的整数字段，错误详情仍为任意 JSON，未知版本的正文交给版本握手处理。Rust 保留原解析结果的数字类型再做严格校验。
 - `atMs`、`nowMs`、`expiresAtMs`、`resolveByMs` 和 `deadlineMs` 是同机系统单调时钟的整毫秒。在 Windows 用 QPC，在 Linux 用 `CLOCK_MONOTONIC`。Bellis 以 `process.hrtime.bigint()` 读该时钟，将进程内截止时间换到这个时钟域并向下取整。Runtime 按帧环同一时钟核对。到期时间从发送方设置的绝对截止计算，传输延迟会消耗预算。时刻范围为 `0..18446744073709`，换算为纳秒时仍在 Rust `u64` 范围内。帧龄和首动作耗时用非负整数毫秒表示。
 - Bellis 的 `goalId`、`holdId` 以及 Runtime 的 `decisionPointId`、`actionId` 在各自的命名空间和同一 `runtimeId` 下唯一。重新进入同一画面产生新的决策点实例。一次决策点的 `optionId` 在打开到结束期间稳定。标识连同 `runtimeId` 用于去重和关联。旧会话或旧连接的回执丢弃。同一会话中的动作按编号记一次事实，迟到回执不得重新打开决策点。
 - 许可令牌在同一安全核的资源计数器内递增，范围为 `1..9007199254740991`。停止指令的 `throughToken` 可为 0，表示尚未发过许可。
