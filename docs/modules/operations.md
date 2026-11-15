@@ -203,6 +203,7 @@
 
 ### 跨进程
 
+- 游戏桥以首个 `decision_point.opened` 的 `traceparent` 为 `game.decision` 的父，以发往 Runtime 的 `traceparent` 为 `game.command` 的父。记录发送、接纳与匹配的 `action.committed`，用 link 关联指令 span 与 Runtime 返回的动作上下文。Runtime 真机的跨进程 span 仍待联调。
 - 宿主调用 sidecar 的 JSON-RPC 在参数里带 W3C `traceparent`（版本 00），sidecar 以它为父写自己的 span，与宿主在同一个 trace 里；本地 TTS 的 `tts.synthesize` 带的是这一句合成的 span（协议见 `packages/protocol` 的 tts.ts）。代理插件只转发解析合格的值，并统一成版本 00。
 - 目录与轮转规则经环境变量 `BELLIS_TELEMETRY`（`SidecarTelemetry` 的 JSON）在拉起时交给 sidecar（见[插件内核](plugin-kernel.md#sidecar-代理)），sidecar 写进同一目录里自己的文件，格式与准入规则相同。没有这个变量、不合格或没有通道角色时，sidecar 不写遥测，其余照常；遥测插件晚于代理插件激活时，这个 sidecar 进程不写遥测，下次重启补上。
 - Python 运行时（`bellis_sidecar.telemetry`）在守护线程里写：有界队列满了丢弃最旧的，按间隔分批写，写失败丢弃并计数、只记一次日志；进程退出前在截止时间内尽量写完。
@@ -224,8 +225,12 @@
 | `gen_ai.client.inference.time_to_first_chunk` | 流式推理调用从发出到收到第一块：模型客户端收到第一块时经调用选项 `onFirstChunk` 报给决策插件，属性同上。只对流式调用记；回放模型只在按块回放时有样本 |
 | `bellis.llm.time_to_first_output` | 流式推理调用从发出到第一个正文块：模型客户端收到第一段非空的正文（函数调用方式下为第一段函数参数）时经调用选项 `onFirstOutput` 报给决策插件；思考内容不算，所以与首块之差约等于思考的耗时。属性同上 |
 | `bellis.memory.recall.duration` | 记忆召回：记忆插件发出召回准备到拿到结果（含超时、出错与取消），按 `bellis.memory.outcome` 分；不含过滤。决策插件到截止时间就不等它（见[记忆的召回](memory.md#召回)） |
+| `bellis.game.decision.duration` | 决策耗时。首个已持久化的 `decision_point.opened.atMs` 到宿主实际发送 `decision.resolve`，用成功回执确认送达后写出。同实例候选更新保留原起点，动作执行结果独立核对。 |
+| `bellis.game.time_to_first_action` | 游戏首动作。宿主实际发送 `goal.submit` 或 `decision.resolve` 到首个匹配且持久化的 `action.committed.atMs`，等待有效接纳和动作证据齐备后写出。按 `bellis.game.command` 分组。 |
 
-游戏首动作时间在 P3 加入。
+两项耗时都用握手核对过的同域单调毫秒换算为秒。首动作按 Runtime 会话与目标编号或决策点实例关联，选择还须匹配选项与来源。动作的执行时刻须在命令发送之后或同一毫秒，并早于目标到期或计时选择截止。截止前执行的动作可以在其后 2 秒内送达核验。无计时选择在发送后最多等 30 秒。这些等候时间只用于遥测。
+
+Runtime 兜底记为 `runtime_default`，只有 Bellis 实际发送并获接纳的决定才进入决策直方图。断链、替换、过期、重复、结果未知以及未收到动作证据等通过 span 的 `error.type` 查看。已尝试发送的决定在 span 留 `bellis.game.decision_ms` 和 `bellis.game.outcome`，拒绝或未知回执据此核对。两项成功样本均去重，属性只带方法和枚举等结构信息。
 
 ### 查看
 
