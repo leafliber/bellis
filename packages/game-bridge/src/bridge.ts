@@ -7,6 +7,8 @@ import {
   checkGameBridgeParams,
   checkGameBridgeResult,
   GAME_BRIDGE_MAJOR,
+  GAME_BRIDGE_SEMANTIC_V2,
+  type GameBridgeMajor,
   type GameCoreDescription,
   type GameCoreHealth,
   type GameDecisionPointOpened,
@@ -14,7 +16,9 @@ import {
   type GameGoalSubmitParams,
   type GameInputReleased,
   type GameMainDescription,
+  type GameMainDescriptionV2,
   type GameMainHealth,
+  type GameMainHealthV2,
   type GamePacingHoldParams,
   type GamePacingReleaseParams,
   type GameSituationObserved,
@@ -52,6 +56,7 @@ import { GameTelemetry } from './telemetry.ts';
 export interface GameBridgeConfig {
   adapterId: string;
   adapterVersion: string;
+  controlTargetId?: string;
   healthTimeoutMs?: number;
 }
 
@@ -74,10 +79,11 @@ const refusedBeforeExecution = new Set<number>([
   RpcErrorCode.ServerBusy,
 ]);
 
-type Health = GameMainHealth | GameCoreHealth;
-type Description = GameMainDescription | GameCoreDescription;
+type Health = GameMainHealth | GameMainHealthV2 | GameCoreHealth;
+type Description = GameMainDescription | GameMainDescriptionV2 | GameCoreDescription;
 interface Link {
   role: Role;
+  major: GameBridgeMajor;
   rpc: RpcPeer;
   closed: AbortController;
   description?: Description;
@@ -191,6 +197,10 @@ export class GameBridge implements Game {
     }
     const link: Link = {
       role,
+      major:
+        role === Role.Main && this.#ctx.config.controlTargetId !== undefined
+          ? GAME_BRIDGE_SEMANTIC_V2
+          : GAME_BRIDGE_MAJOR,
       lastSent: 0,
       closed: new AbortController(),
       rpc: new RpcPeer(connection, {
@@ -198,11 +208,11 @@ export class GameBridge implements Game {
         acceptIncoming: (message) => {
           if (isSuccess.Check(message) || isFailure.Check(message)) return true;
           if (!isNotification.Check(message)) return false;
-          // 握手正文核对前只暂存一条已按 v1 核对的健康消息。
+          // 握手正文核对前只暂存一条已按所请求版本核对的健康消息。
           return (
             !link.description ||
             message.method === RpcCancel ||
-            checkGameBridgeMessage(role, 'runtime', message)
+            checkGameBridgeMessage(role, 'runtime', message, link.major)
           );
         },
       }),
@@ -236,14 +246,14 @@ export class GameBridge implements Game {
   async #describe(link: Link): Promise<void> {
     const requestedAt = this.#port.wireNowMs();
     try {
-      const reply = await link.rpc.request(Method.Describe, { major: GAME_BRIDGE_MAJOR });
+      const reply = await link.rpc.request(Method.Describe, { major: link.major });
       if (!this.#active(link)) return;
       const major = readGameBridgeMajor(reply);
       if (major === undefined) throw new Error('握手缺少合法的主版本');
-      if (major !== GAME_BRIDGE_MAJOR) {
-        throw new Error(`主版本不兼容（Bellis ${GAME_BRIDGE_MAJOR}，Game Runtime ${major}）`);
+      if (major !== link.major) {
+        throw new Error(`主版本不兼容（Bellis ${link.major}，Game Runtime ${major}）`);
       }
-      if (!checkGameBridgeResult(link.role, Method.Describe, reply)) {
+      if (!checkGameBridgeResult(link.role, Method.Describe, reply, major)) {
         throw new Error('握手正文无效');
       }
       const description = reply as Description;
@@ -258,6 +268,13 @@ export class GameBridge implements Game {
           adapter.version !== this.#ctx.config.adapterVersion
         ) {
           throw new Error('Game Runtime 的适配包编号或版本与 profile 不符');
+        }
+        if (
+          major === GAME_BRIDGE_SEMANTIC_V2 &&
+          (description as GameMainDescriptionV2).controlTargetId !==
+            this.#ctx.config.controlTargetId
+        ) {
+          throw new Error('Game Runtime 的被控槽位与 profile 不符');
         }
       }
       link.description = description;
@@ -300,6 +317,9 @@ export class GameBridge implements Game {
     }
     const run = this.#pairedRun();
     if (run === undefined) return { ready: false, reason: '两条连接的 Runtime 会话不一致' };
+    if (main.major === GAME_BRIDGE_SEMANTIC_V2) {
+      return { ready: false, reason: '等待语义 v2 的任务与未决状态授权' };
+    }
     if (this.#safety.isIsolated(this.#target)) {
       return { ready: false, reason: '游戏目标已隔离或状态存储不可用' };
     }
@@ -442,7 +462,7 @@ export class GameBridge implements Game {
     if (this.#active(main)) {
       try {
         const reply = await main.rpc.request(method, params);
-        ok = checkGameBridgeResult(Role.Main, method, reply);
+        ok = checkGameBridgeResult(Role.Main, method, reply, main.major);
       } catch {
         // 未知结果由 Runtime 的绝对到期时间兜底。
       }
@@ -486,7 +506,11 @@ export class GameBridge implements Game {
   }
 
   #received(link: Link, method: GameEvent['method'], params: RpcParams): void {
-    if (!this.#active(link) || !checkGameBridgeParams(link.role, 'runtime', method, params)) return;
+    if (
+      !this.#active(link) ||
+      !checkGameBridgeParams(link.role, 'runtime', method, params, link.major)
+    )
+      return;
     if (!link.description) {
       if (method === Method.HealthReported && !link.reason)
         link.earlyHealth = params as unknown as Health;

@@ -1,11 +1,13 @@
-"""用锁定给 Runtime 的同一组控制消息核对生成的 Python 模型。"""
+"""用锁定给 Runtime 的夹具核对生成的 Python 模型。"""
 
 import json
 import math
 from pathlib import Path
+from types import ModuleType
 from typing import NotRequired, TypedDict, cast
 
 import game_bridge
+import game_bridge_v2
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -14,7 +16,7 @@ from bellis_sidecar.protocol import RpcNotification, RpcRequest
 _HERE = Path(__file__).parent
 
 
-class _ControlCase(TypedDict):
+class _WireCase(TypedDict):
     name: str
     sender: str
     message: NotRequired[dict[str, object]]
@@ -32,14 +34,14 @@ class _Method(TypedDict):
 _Schema = TypedDict('_Schema', {'x-methods': dict[str, dict[str, _Method]]})
 
 
-def _matches(case: _ControlCase, methods: dict[str, _Method]) -> bool:
+def _matches(case: _WireCase, methods: dict[str, _Method], bridge: ModuleType) -> bool:
     if 'rawJson' in case:
         raw = case['rawJson']
     else:
         assert 'message' in case
         raw = json.dumps(case['message'])
     try:
-        value = game_bridge.parse_game_bridge_json(raw)
+        value: object = bridge.parse_game_bridge_json(raw)
     except ValueError:
         return False
     if not isinstance(value, dict):
@@ -63,14 +65,14 @@ def _matches(case: _ControlCase, methods: dict[str, _Method]) -> bool:
             model_name = spec['result']
             if model_name is None or case['sender'] == spec['sender']:
                 return False
-            payload = game_bridge.RpcSuccess.model_validate(message).result
+            payload = bridge.RpcSuccess.model_validate(message).result
             if (
                 response_to == 'game.describe'
-                and game_bridge.read_game_bridge_major(payload) != game_bridge.GAME_BRIDGE_MAJOR
+                and bridge.read_game_bridge_major(payload) != bridge.GAME_BRIDGE_MAJOR
             ):
                 return False
 
-        model = getattr(game_bridge, model_name)
+        model = getattr(bridge, model_name)
         assert isinstance(model, type) and issubclass(model, BaseModel)
         decoded = model.model_validate(payload)
         assert json.loads(decoded.model_dump_json()) == payload, case['name']
@@ -79,21 +81,30 @@ def _matches(case: _ControlCase, methods: dict[str, _Method]) -> bool:
     return True
 
 
-def test_control_fixtures_match_generated_models() -> None:
+@pytest.mark.parametrize(
+    ('fixture', 'schema_name', 'role', 'bridge'),
+    [
+        ('game-control', 'game-bridge', 'game-runtime.core', game_bridge),
+        ('game-main-v2', 'game-bridge-v2', 'game-runtime.main', game_bridge_v2),
+    ],
+)
+def test_fixtures_match_generated_models(
+    fixture: str, schema_name: str, role: str, bridge: ModuleType
+) -> None:
     fixtures = cast(
-        list[_ControlCase],
-        json.loads((_HERE / 'fixtures' / 'game-control.json').read_text(encoding='utf-8')),
+        list[_WireCase],
+        json.loads((_HERE / 'fixtures' / f'{fixture}.json').read_text(encoding='utf-8')),
     )
     schema = cast(
         _Schema,
         json.loads(
-            (_HERE.parent / 'schemas' / 'game-bridge.schema.json').read_text(encoding='utf-8')
+            (_HERE.parent / 'schemas' / f'{schema_name}.schema.json').read_text(encoding='utf-8')
         ),
     )
-    methods = schema['x-methods']['game-runtime.core']
+    methods = schema['x-methods'][role]
     for case in fixtures:
         assert ('message' in case) != ('rawJson' in case), case['name']
-        assert _matches(case, methods) == case['valid'], case['name']
+        assert _matches(case, methods, bridge) == case['valid'], case['name']
 
 
 def test_read_major_before_applying_version_specific_model() -> None:

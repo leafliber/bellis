@@ -5,6 +5,7 @@ import {
   checkGameBridgeMessage,
   checkGameBridgeParams,
   checkGameBridgeSuccess,
+  GAME_BRIDGE_SEMANTIC_V2,
   type GameBridgeSender,
   type GameDecisionPointOpened,
   type GameMainDescription,
@@ -15,7 +16,7 @@ import {
   readGameBridgeMajor,
 } from '../src/index.ts';
 
-interface ControlFixture {
+interface WireFixture {
   name: string;
   sender: GameBridgeSender;
   message?: unknown;
@@ -26,7 +27,31 @@ interface ControlFixture {
 
 const controlFixtures = JSON.parse(
   readFileSync(new URL('./fixtures/game-control.json', import.meta.url), 'utf8'),
-) as ControlFixture[];
+) as WireFixture[];
+
+test('语义 v2 夹具独立于旧语义和控制角色', () => {
+  const fixtures = JSON.parse(
+    readFileSync(new URL('./fixtures/game-main-v2.json', import.meta.url), 'utf8'),
+  ) as WireFixture[];
+  const major = GAME_BRIDGE_SEMANTIC_V2;
+  for (const { name, sender, message: fixture, rawJson, valid, responseTo } of fixtures) {
+    assert.notEqual(rawJson !== undefined, fixture !== undefined, name);
+    let message: unknown;
+    try {
+      message = parseGameBridgeJson(rawJson ?? JSON.stringify(fixture), major);
+    } catch (error) {
+      assert.ok(error instanceof SyntaxError, name);
+      assert.equal(valid, false, name);
+      continue;
+    }
+    const checked = responseTo
+      ? sender === 'runtime' && checkGameBridgeSuccess(Role.Main, responseTo, message, major)
+      : checkGameBridgeMessage(Role.Main, sender, message, major);
+    assert.equal(checked, valid, name);
+    assert.equal(checkGameBridgeMessage(Role.Core, sender, message, major), false, name);
+  }
+  assert.equal(checkGameBridgeParams(Role.Main, 'bellis', Method.TaskOpen, {}), false);
+});
 
 test('控制连接夹具按角色、方向和 JSON-RPC 类型校验', () => {
   for (const { name, sender, message: fixture, rawJson, valid, responseTo } of controlFixtures) {
