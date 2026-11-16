@@ -2,6 +2,7 @@ import { ballotKeys, decide, matchBallot } from '@bellis/audience';
 import { speakable } from '@bellis/speech';
 import type { StoredEvent } from '@bellis/store';
 import { checkDirector } from './director-check.ts';
+import { checkGame } from './game-check.ts';
 import { checkMemory } from './memory-check.ts';
 import { checkRecovery } from './recovery-check.ts';
 import { BLOCKED, SAMPLE_RATE, SAMPLES_PER_CHAR } from './scenario.ts';
@@ -189,6 +190,7 @@ export function checkHistory(history: History): string[] {
   violations.push(...checkDirector(history));
   violations.push(...checkSupervision(history));
   violations.push(...checkRecovery(history));
+  violations.push(...checkGame(history));
   return violations;
 }
 

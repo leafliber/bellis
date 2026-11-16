@@ -35,10 +35,18 @@ function streamedText(raw: string): string {
 }
 
 /** 模型给出了输出：按决策插件的规则（整段解析、回应对象须在本次上下文里）推出结局。 */
-function classify(output: string, candidates: readonly string[]): Outcome {
+function classify(output: string, candidates: readonly string[], badEnding: boolean): Outcome {
   const parsed = parseIntent(output);
   if (!parsed.ok) return { kind: 'failure', failure: 'invalid_output', callFailed: false };
   const action = parsed.action;
+  if (action.action === 'game_goal') {
+    if (
+      (action.recoveryComment !== undefined && !badEnding) ||
+      (badEnding && action.mode === 'autonomous' && !action.recoveryComment)
+    )
+      return { kind: 'failure', failure: 'invalid_output', callFailed: false };
+    return { kind: 'success', speech: action.recoveryComment };
+  }
   if (action.action !== 'speak') return { kind: 'success', speech: undefined };
   if (action.replyTo !== undefined && !candidates.includes(action.replyTo))
     return { kind: 'failure', failure: 'unknown_target', callFailed: false };
@@ -80,6 +88,8 @@ function classifyOpened(output: string, replyTo: string | null): Outcome {
 export function checkDirector(history: History): string[] {
   const violations: string[] = [];
   let candidates = new Map<number, readonly string[]>();
+  let recoveryCalls = new Set<number>();
+  let badEnding = false;
   let decided = new Set<number>();
   let streak = 0;
   let fallbackUsed = false;
@@ -204,6 +214,8 @@ export function checkDirector(history: History): string[] {
       case 'world.start':
         settle();
         candidates = new Map();
+        recoveryCalls = new Set();
+        badEnding = false;
         decided = new Set();
         streak = 0;
         fallbackUsed = false;
@@ -227,6 +239,10 @@ export function checkDirector(history: History): string[] {
       case 'llm.request':
         settle();
         candidates.set(call, (entry.data.candidates as string[] | undefined) ?? []);
+        if (badEnding) recoveryCalls.add(call);
+        break;
+      case 'fact.situation.observed':
+        badEnding = (entry.data.payload as { screenType: string }).screenType === '坏结局';
         break;
       case 'llm.chunk': {
         const before = raw.get(call) ?? '';
@@ -265,7 +281,7 @@ export function checkDirector(history: History): string[] {
           call,
           stream
             ? classifyOpened(output, stream.replyTo)
-            : classify(output, candidates.get(call) ?? []),
+            : classify(output, candidates.get(call) ?? [], recoveryCalls.has(call)),
         );
         break;
       }

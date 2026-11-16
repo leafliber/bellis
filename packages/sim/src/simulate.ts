@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { VoteService, type Votes } from '@bellis/audience';
 import { ReplayLlmService } from '@bellis/director';
+import { GAME_INPUT, GameService } from '@bellis/game-bridge';
 import { SimIrisBackend, tombstoneFact } from '@bellis/memory';
 import type { ObsChange } from '@bellis/safety';
 import { type TelemetryMemory, TelemetryMemoryService } from '@bellis/telemetry';
+import { SimGameRuntime } from './game-runtime.ts';
 import { checkHistory, type History } from './invariants.ts';
 import { type Scenario, scenarioEntries } from './scenario.ts';
 import { simSafety, type TraceEntry, World } from './world.ts';
@@ -53,6 +55,10 @@ export async function simulate(
   let outputsUsed = 0;
   /** 模拟 Iris 是进程外的服务：宿主崩溃重启，它的数据还在。 */
   const iris = new SimIrisBackend();
+  const runtime = scenario.game
+    ? new SimGameRuntime(scenario.game.loseRelease ?? false)
+    : undefined;
+  const resources = runtime ? ['stage.audio', GAME_INPUT] : ['stage.audio'];
 
   const target = scenario.mode ?? 'M0';
   /**
@@ -78,13 +84,18 @@ export async function simulate(
       startAt,
       bootId: `b${restarts}`,
       iris,
+      game: runtime !== undefined,
       // 真实输出模式的场景：安全核按非仿真配置，只允许 M1–M3（设备仍是模拟的）。
       ...(target === 'M2' ? { safety: { simulation: false } } : {}),
     });
-    world.record('world.start', { restarts });
+    world.record('world.start', {
+      restarts,
+      ...(runtime ? { factSeq: world.store.events().at(-1)?.seq ?? 0 } : {}),
+    });
     await world.kernel.settled();
     const mode = enter(world);
     if (!mode.ok) violations.push(`启动后无法进入 ${target}：${mode.reason}`);
+    await runtime?.attach(world);
     return world;
   };
   const collect = (world: World) => {
@@ -103,8 +114,15 @@ export async function simulate(
   let next = 0;
   const forgets = [...(scenario.memory?.forget ?? [])].sort((a, b) => a.atMs - b.atMs);
   let nextForget = 0;
+  const gameCues = [...(scenario.game?.cues ?? [])].sort((a, b) => a.atMs - b.atMs);
+  let nextGame = 0;
   try {
-    for (let elapsed = 0; elapsed < scenario.durationMs + drainMs; elapsed += stepMs) {
+    for (
+      let elapsed = 0, advance = stepMs;
+      elapsed < scenario.durationMs + drainMs;
+      elapsed += advance
+    ) {
+      advance = stepMs;
       while (
         elapsed < scenario.durationMs &&
         (operations[next]?.atMs ?? Number.POSITIVE_INFINITY) <= elapsed
@@ -139,6 +157,8 @@ export async function simulate(
           enter(world);
         } else if (operation.action === 'restart') {
           outputsUsed += world.service(ReplayLlmService).requests.length;
+          // 设备获知宿主消失。关闭旧存储之前不运行断链回调或在途命令的续体。
+          runtime?.hostLost();
           collect(world);
           const { now } = world.crash();
           restarts += 1;
@@ -154,13 +174,81 @@ export async function simulate(
         const fact = forget ? tombstoneFact(`v${forget.viewer}`) : undefined;
         if (fact) world.safety.record(fact.type, fact.data);
       }
-      world.clock.advance(stepMs);
+      while (
+        runtime &&
+        elapsed < scenario.durationMs &&
+        (gameCues[nextGame]?.atMs ?? Number.POSITIVE_INFINITY) <= elapsed
+      ) {
+        const cue = gameCues[nextGame++];
+        if (!cue) break;
+        switch (cue.action) {
+          case 'decision':
+            runtime.openDecision(cue.id, cue.timingMs, cue.rankedOptions);
+            break;
+          case 'decision-candidates':
+            runtime.updateCandidates(cue.id, cue.rankedOptions);
+            break;
+          case 'situation':
+            runtime.situation(cue.screen, cue.lookpoint);
+            break;
+          case 'advance':
+            world.record('game.advance-requested', {});
+            runtime.advance();
+            break;
+          case 'takeover':
+            runtime.takeOver();
+            break;
+          case 'disconnect':
+            runtime.disconnect();
+            break;
+          case 'hold-reply':
+            runtime.holdReply();
+            break;
+          case 'stall':
+            // 宿主 I/O 在这一步结束才排空，模拟续约在上一张许可到期前送不到。
+            advance = Math.max(advance, runtime.remainingLease);
+            break;
+          case 'goal': {
+            const current = world;
+            const game = current.service(GameService);
+            void game
+              .submitGoal(
+                {
+                  goalId: cue.id,
+                  objective: '推进模拟调查',
+                  constraints: [],
+                  mode: 'autonomous',
+                  decisionPointId: null,
+                  expiresAtMs: game.wireNowMs() + 30_000,
+                  traceparent: null,
+                },
+                { origin: 'director', inputs: [], untrusted: true },
+              )
+              .then(
+                (result) => {
+                  if (!current.crashed)
+                    current.record('game.goal-result', {
+                      id: cue.id,
+                      ok: result.ok,
+                      reason: result.ok ? null : result.reason,
+                    });
+                },
+                (error: unknown) => {
+                  if (!current.crashed) violations.push(`仿真游戏目标 ${cue.id} 执行失败 ${error}`);
+                },
+              );
+            break;
+          }
+        }
+      }
+      world.clock.advance(advance);
+      runtime?.report();
       await world.flush();
 
       const holders = world.safety.leases.holders().map((lease) => lease.resource);
       if (new Set(holders).size !== holders.length)
         violations.push(`同一资源出现多个许可持有者：${holders.join(',')}`);
-      for (const resource of ['stage.audio']) {
+      for (const resource of resources) {
         const token = world.store.token(resource);
         if (token < (tokens.get(resource) ?? 0))
           violations.push(`${resource} 的令牌回退到 ${token}`);
@@ -184,6 +272,7 @@ export async function simulate(
       waited += stepMs
     ) {
       world.clock.advance(stepMs);
+      runtime?.report();
       await world.flush();
     }
     const stuck = inflight();
@@ -199,6 +288,7 @@ export async function simulate(
         `排空后仍有插件处在过渡状态：${busy.map((e) => `${e.id}:${e.state}`).join(', ')}`,
       );
 
+    if (runtime) world.record('game.end', {});
     collect(world);
     const history: History = {
       trace,
@@ -210,6 +300,7 @@ export async function simulate(
     return { violations, history, restarts };
   } finally {
     await world.close();
+    runtime?.dispose();
     rmSync(dir, { recursive: true, force: true });
   }
 }

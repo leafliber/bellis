@@ -23,7 +23,9 @@ test('同一场景与种子两次运行得到完全相同的追踪、事件与�
     fc.asyncProperty(scenarioArbitrary(10_000), async (scenario) => {
       const first = await simulate(scenario, { drainMs: 5_000 });
       const second = await simulate(scenario, { drainMs: 5_000 });
-      assert.ok((first.history.telemetry?.length ?? 0) > 0, '遥测有输出');
+      assert.ok(first.history.telemetry, '遥测已启用');
+      // 有些游戏场景只有控制消息，无模型调用或播出。
+      if (!scenario.game) assert.ok(first.history.telemetry.length > 0, '遥测有输出');
       assert.deepEqual(second.history, first.history);
     }),
     { seed: 7, numRuns: 5 },

@@ -66,12 +66,14 @@ export function checkRecovery(history: History): string[] {
           );
         break;
       }
+      case 'intent.unknown':
       case 'intent.orphaned': {
-        const target = String(data.target);
+        const target = intents.get(id)?.target;
+        if (target === undefined) break;
         const set = unknown.get(target) ?? new Set<number>();
         set.add(id);
         unknown.set(target, set);
-        if (isSpeech(intents.get(id))) orphanedSpeech.add(id);
+        if (event.type === 'intent.orphaned' && isSpeech(intents.get(id))) orphanedSpeech.add(id);
         break;
       }
       case 'intent.interrupted':
