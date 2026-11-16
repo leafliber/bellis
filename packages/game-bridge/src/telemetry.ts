@@ -5,7 +5,15 @@ import {
   type GameDecisionResolveParams,
   GameBridgeMethod as Method,
 } from '@bellis/protocol';
-import { Metric, NOOP_SPAN, type Span, type SpanOptions, type Tracer } from '@bellis/telemetry';
+import {
+  Metric,
+  NOOP_SPAN,
+  parseTraceparent,
+  type Span,
+  type SpanOptions,
+  type Tracer,
+  traceparentOf,
+} from '@bellis/telemetry';
 import type { GameCommand } from './service.ts';
 
 // 无计时选择没有执行截止线，限制的只是遥测等候动作证据的时间。
@@ -42,6 +50,12 @@ interface Opening {
   firstAtMs: number;
   resolveByMs: number | undefined;
   span: Span;
+}
+
+interface CommandTrace {
+  span: Span;
+  opening: Opening | undefined;
+  traceparent: string | null;
 }
 
 interface Attempt {
@@ -140,12 +154,8 @@ export class GameTelemetry {
     this.#refresh();
   }
 
-  sent(
-    run: string,
-    command: GameCommand,
-    sentAtMs: number,
-    timing: DecisionTiming | undefined,
-  ): ((outcome: CommandOutcome) => void) | undefined {
+  /** 发送前取得命令 span 的上下文。派发时刻仍由实际 RPC 调用记下。 */
+  prepare(run: string, command: GameCommand): CommandTrace {
     const { method, payload } = command;
     const point = this.#opening;
     const opening =
@@ -154,11 +164,41 @@ export class GameTelemetry {
       point.id === command.payload.decisionPointId
         ? point
         : undefined;
+    const parent = payload.traceparent ?? opening?.span;
     const span = this.#start('game.command', {
-      parent: payload.traceparent ?? opening?.span,
+      parent,
       kind: 'client',
       attributes: { 'bellis.game.command': method },
     });
+    let traceparent = payload.traceparent;
+    emit(() => {
+      const context = span.traceparent;
+      const current = parseTraceparent(context);
+      const upstream = parseTraceparent(traceparentOf(parent));
+      if (
+        context?.startsWith('00-') &&
+        current &&
+        (!upstream || current.traceId === upstream.traceId)
+      )
+        traceparent = context;
+    });
+    return { span, opening, traceparent };
+  }
+
+  unsent({ span }: CommandTrace, failure: 'expired' | 'stale'): void {
+    end(span, failure);
+  }
+
+  sent(
+    run: string,
+    command: GameCommand,
+    prepared: CommandTrace,
+    sentAtMs: number,
+    timing: DecisionTiming | undefined,
+  ): ((outcome: CommandOutcome) => void) | undefined {
+    const { method, payload } = command;
+    const { span } = prepared;
+    const opening = this.#opening === prepared.opening ? prepared.opening : undefined;
     if (opening) {
       this.#opening = undefined;
       if (span === NOOP_SPAN) {

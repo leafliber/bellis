@@ -71,8 +71,10 @@ import { MemoryObs } from '../../sim/src/memory-obs.ts';
 import {
   MemoryWriter,
   Metric,
+  NOOP_SPAN,
   type OtlpMetrics,
   type OtlpTraces,
+  parseTraceparent,
   TelemetryCore,
   TelemetryService,
 } from '../../telemetry/src/index.ts';
@@ -103,7 +105,7 @@ type SetupOptions = {
   fault?: (point: string) => void;
   director?: Record<string, unknown>;
   gamePacing?: { holdMs?: number; voiceWaitMs?: number };
-  telemetry?: 'memory' | 'broken';
+  telemetry?: 'memory' | 'broken' | 'broken-start';
 };
 
 function addSpeech(
@@ -351,20 +353,25 @@ async function setup(options: SetupOptions = {}) {
         })
       : undefined;
   if (telemetry) kernel.provideCore(TelemetryService, telemetry);
-  if (options.telemetry === 'broken') {
+  if (options.telemetry === 'broken' || options.telemetry === 'broken-start') {
     const fail = () => {
       throw new Error('合成遥测故障');
     };
     kernel.provideCore(TelemetryService, {
       tracer: () => ({
-        startSpan: () => ({
-          traceparent: undefined,
-          setAttributes: fail,
-          addEvent: fail,
-          addLink: fail,
-          fail,
-          end: fail,
-        }),
+        startSpan:
+          options.telemetry === 'broken-start'
+            ? fail
+            : () => ({
+                get traceparent() {
+                  return fail();
+                },
+                setAttributes: fail,
+                addEvent: fail,
+                addLink: fail,
+                fail,
+                end: fail,
+              }),
         record: fail,
       }),
       sidecarEnv: () => ({}),
@@ -427,6 +434,7 @@ async function setup(options: SetupOptions = {}) {
     store,
     operator,
     telemetryLines: writer.lines,
+    runtimeTracer: telemetry?.tracer('game-runtime-test'),
     model,
     stage,
     async mode() {
@@ -467,7 +475,7 @@ async function main(h: Harness, run = 'run', describe?: () => object) {
       })),
   );
   const submissions: string[] = [];
-  const commands: unknown[] = [];
+  const commands: Array<RpcParams & { traceparent?: unknown }> = [];
   const pacing: Array<{
     method: typeof Method.PacingHold | typeof Method.PacingRelease;
     params: RpcParams;
@@ -652,11 +660,11 @@ function samples(h: Harness, name: string) {
     .flatMap((point) => point.exemplars);
 }
 
-function gameSpans(h: Harness) {
+function gameSpans(h: Harness, instrumentationScope = 'game-bridge') {
   return h.telemetryLines
     .flatMap((line) => (JSON.parse(line) as Partial<OtlpTraces>).resourceSpans ?? [])
     .flatMap((resource) => resource.scopeSpans)
-    .filter(({ scope }) => scope.name === 'game-bridge')
+    .filter(({ scope }) => scope.name === instrumentationScope)
     .flatMap(({ spans }) => spans);
 }
 
@@ -2053,7 +2061,157 @@ test('意图经安全核授权，RPC 应答与动作事实分离，旧连接的�
 const GAME_TRACE_ID = '13131313131313131313131313131313';
 const OPENED_TRACE = `00-${GAME_TRACE_ID}-1111111111111111-01`;
 const RESOLVE_TRACE = `00-${GAME_TRACE_ID}-2222222222222222-01`;
-const ACTION_TRACE = `00-${GAME_TRACE_ID}-3333333333333333-01`;
+
+function runtimeActionContext(h: Harness, wireParent: unknown): string {
+  const span = h.runtimeTracer?.startSpan('game.runtime.action', {
+    parent: typeof wireParent === 'string' ? wireParent : undefined,
+    kind: 'server',
+  });
+  assert.ok(span?.traceparent);
+  span.end();
+  return span.traceparent;
+}
+
+test('无上游上下文时，目标和决定都把实际命令 span 交给 Runtime', async () => {
+  const h = await setup({ telemetry: 'memory' });
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+
+    const goalParams = goal(h);
+    assert.equal((await h.game.submitGoal(goalParams, SOURCE)).ok, true);
+    const wireGoal = semantic.commands[0];
+    const goalActionTrace = runtimeActionContext(h, wireGoal?.traceparent);
+    semantic.rpc.notify(
+      Method.ActionCommitted,
+      observedAction(h, 'goal-action', { goalId: goalParams.goalId, traceparent: goalActionTrace }),
+    );
+    await until(() => samples(h, Metric.GameFirstAction).length === 1);
+
+    semantic.rpc.notify(Method.DecisionPointOpened, point(h));
+    await until(() => h.game.status().decision !== null);
+    const selection = { decisionPointId: 'd-1', optionId: 'a', source: 'director' as const };
+    const resolveParams = { ...selection, traceparent: null };
+    assert.equal((await h.game.resolveDecision(resolveParams, SOURCE)).ok, true);
+    const wireResolve = semantic.commands[1];
+    const resolveActionTrace = runtimeActionContext(h, wireResolve?.traceparent);
+    semantic.rpc.notify(
+      Method.ActionCommitted,
+      observedAction(h, 'resolve-action', {
+        category: 'select',
+        selection,
+        traceparent: resolveActionTrace,
+      }),
+    );
+    await until(() => samples(h, Metric.GameFirstAction).length === 2);
+    assert.deepEqual(semantic.submissions, [Method.GoalSubmit, Method.DecisionResolve]);
+    assert.deepEqual(
+      h.store
+        .events()
+        .filter((event) => event.type === Method.ActionCommitted)
+        .map((event) => (event.data as { payload: GameActionCommitted }).payload.traceparent),
+      [goalActionTrace, resolveActionTrace],
+    );
+
+    const exported = gameSpans(h);
+    const opening = exported.find((span) => span.name === 'game.decision');
+    assert.ok(opening);
+    const cases = [
+      [wireGoal, goalParams, goalActionTrace, undefined],
+      [wireResolve, resolveParams, resolveActionTrace, opening.spanId],
+    ] as const;
+    for (const [received, submitted, actionTrace, parentSpanId] of cases) {
+      const action = parseTraceparent(actionTrace);
+      assert.ok(action);
+      const command = exported.find(
+        (span) =>
+          span.name === 'game.command' && span.links?.some((link) => link.spanId === action.spanId),
+      );
+      assert.ok(command);
+      const expected = `00-${command.traceId}-${command.spanId}-01`;
+      assert.deepEqual(received, { ...submitted, traceparent: expected });
+      assert.equal(command.parentSpanId, parentSpanId);
+      const child = gameSpans(h, 'game-runtime-test').find((span) => span.spanId === action.spanId);
+      assert.equal(child?.parentSpanId, command.spanId);
+      assert.equal(child?.traceId, command.traceId);
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('没有 Tracer 或 Tracer 失效时保留原目标与决定的追踪字段', async () => {
+  for (const telemetry of [undefined, 'broken-start', 'broken'] as const) {
+    const h = await setup(telemetry === undefined ? {} : { telemetry });
+    try {
+      const { semantic } = await pair(h);
+      await h.mode();
+      await until(() => h.game.status().inputPermitted);
+      const target = goal(h);
+      const submitted = await h.game.submitGoal(target, SOURCE);
+      assert.ok(submitted.ok);
+      assert.equal(submitted.intent.state, 'succeeded');
+      semantic.rpc.notify(Method.DecisionPointOpened, point(h));
+      await until(() => h.game.status().decision !== null);
+      const choice = {
+        decisionPointId: 'd-1',
+        optionId: 'a',
+        source: 'director' as const,
+        traceparent: RESOLVE_TRACE,
+      };
+      const resolved = await h.game.resolveDecision(choice, SOURCE);
+      assert.ok(resolved.ok);
+      assert.equal(resolved.intent.state, 'succeeded');
+      assert.deepEqual(semantic.commands, [target, choice]);
+      assert.deepEqual(gameSpans(h), []);
+      assert.equal(h.game.status().inputPermitted, true);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test('准备追踪上下文时到达余量线，计时选择仍被发送前检查拒绝', async () => {
+  const h = await setup();
+  h.kernel.provideCore(TelemetryService, {
+    tracer: () => ({
+      startSpan(name) {
+        if (name === 'game.command') h.clock.advance(20);
+        return NOOP_SPAN;
+      },
+      record() {},
+    }),
+    sidecarEnv: () => ({}),
+  });
+  try {
+    const { semantic } = await pair(h);
+    await h.mode();
+    await until(() => h.game.status().inputPermitted);
+    const now = h.wireNowMs();
+    const point = syntheticPoint(now, 'd-trace-deadline', {
+      resolveByMs: now + 20,
+      deadlineMs: now + 60,
+    });
+    semantic.rpc.notify(Method.DecisionPointOpened, point);
+    await until(() => h.game.status().decision !== null);
+    const result = await h.game.resolveDecision(
+      {
+        decisionPointId: point.decisionPointId,
+        optionId: 'desk',
+        source: 'director',
+        traceparent: null,
+      },
+      SOURCE,
+    );
+    assert.ok(!result.ok);
+    assert.match(result.reason, /余量线/u);
+    assert.equal(result.intent?.state, 'failed');
+    assert.deepEqual(semantic.commands, []);
+  } finally {
+    await h.close();
+  }
+});
 
 test('游戏首动作从发送到持久化动作的 wire 时刻，等回执且只计一次', async () => {
   const h = await setup({ telemetry: 'memory' });
@@ -2076,7 +2234,6 @@ test('游戏首动作从发送到持久化动作的 wire 时刻，等回执且�
     h.clock.advance(20);
     guard.resolve(undefined);
     await until(() => semantic.submissions.length === 1);
-    assert.deepEqual(semantic.commands[0], params);
     const sentAt = h.wireNowMs();
 
     h.clock.advance(45);
@@ -2091,7 +2248,7 @@ test('游戏首动作从发送到持久化动作的 wire 时刻，等回执且�
     const action = observedAction(h, 'first', {
       goalId: params.goalId,
       atMs: sentAt + 31,
-      traceparent: ACTION_TRACE,
+      traceparent: runtimeActionContext(h, semantic.commands[0]?.traceparent),
     });
     semantic.rpc.notify(Method.ActionCommitted, action);
     await until(
@@ -2116,12 +2273,18 @@ test('游戏首动作从发送到持久化动作的 wire 时刻，等回执且�
     );
     assert.deepEqual(samples(h, Metric.GameDecisionDuration), []);
     const command = gameSpans(h).find((span) => span.spanId === first[0]?.spanId);
-    assert.equal(command?.traceId, GAME_TRACE_ID);
-    assert.equal(command?.parentSpanId, '2222222222222222');
+    const child = gameSpans(h, 'game-runtime-test')[0];
+    assert.ok(command && child);
+    assert.deepEqual(semantic.commands[0], {
+      ...params,
+      traceparent: `00-${command.traceId}-${command.spanId}-01`,
+    });
+    assert.equal(command.traceId, GAME_TRACE_ID);
+    assert.equal(command.parentSpanId, '2222222222222222');
+    assert.equal(child.traceId, command.traceId);
+    assert.equal(child.parentSpanId, command.spanId);
     assert.ok(
-      command?.links?.some(
-        (link) => link.traceId === GAME_TRACE_ID && link.spanId === '3333333333333333',
-      ),
+      command.links?.some((link) => link.traceId === child.traceId && link.spanId === child.spanId),
     );
     for (const reason of ['duplicate', 'invalid_time', 'unmatched_action'])
       assert.ok(gameErrors(h).includes(reason), reason);
@@ -2160,7 +2323,6 @@ test('决策耗时在接纳时记录，候选更新沿用首次打开，截止�
     const selection = { decisionPointId: 'd-trace', optionId: 'desk', source: 'director' as const };
     const params = { ...selection, traceparent: RESOLVE_TRACE };
     assert.equal((await h.game.resolveDecision(params, SOURCE)).ok, true);
-    assert.deepEqual(semantic.commands[0], params);
     await flush();
     const decision = samples(h, Metric.GameDecisionDuration);
     assert.deepEqual(
@@ -2189,7 +2351,7 @@ test('决策耗时在接纳时记录，候选更新沿用首次打开，截止�
         atMs: firstAtMs + 85,
         category: 'select',
         selection,
-        traceparent: ACTION_TRACE,
+        traceparent: runtimeActionContext(h, semantic.commands[0]?.traceparent),
       }),
     );
     await until(() => samples(h, Metric.GameFirstAction).length === 1);
@@ -2198,6 +2360,20 @@ test('决策耗时在接纳时记录，候选更新沿用首次打开，截止�
       [0.048],
     );
     assert.equal(samples(h, Metric.GameDecisionDuration).length, 1);
+    const command = gameSpans(h).find((span) => span.name === 'game.command');
+    const child = gameSpans(h, 'game-runtime-test')[0];
+    assert.ok(command && child);
+    assert.deepEqual(semantic.commands[0], {
+      ...params,
+      traceparent: `00-${command.traceId}-${command.spanId}-01`,
+    });
+    assert.equal(command.traceId, GAME_TRACE_ID);
+    assert.equal(command.parentSpanId, '2222222222222222');
+    assert.equal(child.traceId, command.traceId);
+    assert.equal(child.parentSpanId, command.spanId);
+    assert.ok(
+      command.links?.some((link) => link.traceId === child.traceId && link.spanId === child.spanId),
+    );
   } finally {
     await h.close();
   }
@@ -2259,8 +2435,8 @@ test('过期、替换、选项不符及 Runtime 兜底只结束各自的测量',
   }
 });
 
-test('动作先到也不能把明确拒绝或未知回执计为成功，决策耗时留在失败 span', async () => {
-  for (const failure of ['refused', 'unknown']) {
+test('动作先到也不能把拒绝、未知回执或超时计为成功，决策耗时留在失败 span', async () => {
+  for (const failure of ['refused', 'unknown', 'timeout'] as const) {
     const h = await setup({ telemetry: 'memory' });
     try {
       const { semantic } = await pair(h);
@@ -2282,14 +2458,25 @@ test('动作先到也不能把明确拒绝或未知回执计为成功，决策�
       await until(() => h.game.status().decision === null);
       if (failure === 'refused')
         reply.reject(new RpcError(RpcErrorCode.InvalidParams, 'synthetic'));
-      else reply.resolve({ invalid: 'synthetic-private-response' });
+      else if (failure === 'unknown') reply.resolve({ invalid: 'synthetic-private-response' });
       const result = await resolving;
+      reply.resolve({});
       assert.equal(result.intent?.state, failure === 'refused' ? 'failed' : 'unknown');
       await flush();
       assert.deepEqual(samples(h, Metric.GameDecisionDuration), []);
       assert.deepEqual(samples(h, Metric.GameFirstAction), []);
-      assert.ok(gameErrors(h).includes(failure), failure);
+      assert.ok(gameErrors(h).includes(failure === 'refused' ? 'refused' : 'unknown'), failure);
       const measurement = gameSpans(h).find((span) => span.name === 'game.decision');
+      const wire = parseTraceparent(semantic.commands[0]?.traceparent);
+      assert.ok(wire);
+      assert.ok(
+        gameSpans(h).some(
+          (span) =>
+            span.name === 'game.command' &&
+            span.traceId === wire.traceId &&
+            span.spanId === wire.spanId,
+        ),
+      );
       assert.ok(
         measurement?.attributes?.some(
           ({ key, value }) =>
