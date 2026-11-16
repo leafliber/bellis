@@ -29,6 +29,18 @@
 
 两个游戏动作均不带参数，操作台提供相同按钮。接管应答表示宿主已受理，输入释放以实时核核验为准。交还被拒时返回原因并保留人工锁存。交还成功后按当前监督模式与现有许可条件恢复。
 
+### 游戏授权任务与动作结案
+
+语义 v2 在 `status` 的 `game.authority` 显示已配置的槽位、持久任务状态、Runtime 当前任务回读与仍隔离的物理尝试。操作台显示槽位、授权任务编号与每个未决的原会话和尝试编号。
+
+| 命令（`pnpm operator`） | 用途 |
+| --- | --- |
+| `game-task-open 槽位 时长毫秒 "根目标" [终局条件JSON]` | 建立任务授权，省略终局条件时使用 `null`。在 `status` 核对 Runtime 回读和任务编号 |
+| `game-task-open 槽位 --retry 任务编号` | 在原授权截止前，同一宿主与 Runtime 会话中回读原开任务请求 |
+| `game-outcome-resolve 槽位 原会话编号 尝试编号 结案结果 --reviewed` | 核对现场状态及输入释放后结案。应答无法确认时重送同一组参数 |
+
+结案结果为 `confirmed_executed`、`confirmed_not_executed` 或 `reconciled_unknown`。只有匹配的 Runtime 回执能解除物理未决，普通 `resolve` 管理宿主的意图记录。授权前置、终局格式和释放核验见[游戏桥](game-bridge.md#语义-v2-的授权任务与未决结案)。
+
 操作台是宿主在 `127.0.0.1` 上另开的随机端口（`node:http`），与 Stage 不同源；宿主启动时开启（在加载插件之前），停止时关闭。页面写法与 Stage 相同（带 JSDoc 的 JS，单独的 tsconfig 以 `checkJs` 检查，不用前端框架），宿主按原样提供，不从外部加载任何东西，页面本身不含数据。
 
 - **登录**：`pnpm operator console` 经本机通道向宿主要一次性登录令牌（256 位随机，只存在宿主内存里，60 秒内有效，只能用一次），用系统自带的方式打开 `地址#令牌`，不经 shell：Windows 用 `rundll32 url.dll,FileProtocolHandler`（成功时退出码为 0；`explorer.exe` 成功时也返回 1，判断不了成败），macOS 用 `open`，其余用 `xdg-open`。令牌放在 URL 片段里，不随请求发出、不进 Referer。打不开浏览器时把带令牌的地址打印出来，并提示它只能用一次、很快过期。页面读出令牌后立即用 `history.replaceState` 抹掉，以 `POST /api/login` 换取会话。
@@ -40,7 +52,7 @@
   - 任何一项不符一律拒绝，响应体为空，原因只写宿主日志（`console.refused`）。
 - **响应头**：CSP 为 `default-src 'none'`，脚本、样式、连接只许 `'self'`，`frame-ancestors 'none'`、`base-uri 'none'`、`form-action 'none'`；另有 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`。
 - **接口**：`GET /api/status` 与 `pnpm operator status` 的内容相同，另加近期告警；`POST /api/mode`、`/api/presence`、`/api/emergency-stop`、`/api/game-takeover`、`/api/game-return`、`/api/veto`、`/api/release`、`/api/preflight` 与命令行的同名命令调同一个动作；`POST /api/login`、`GET /api/session`、`POST /api/logout` 管理会话。
-- **近期告警**：宿主订阅状态存储，环形保存最近 50 条重要事实：模式变化与拒绝、急停请求与完成、OBS 外部变化、看门狗动作、否决与等待放行超时、审核开关变化、TTS 换引擎与降级、弹幕缺口、投票中止、游戏接管、Runtime 卡住与动作拒绝、决策模型请求人工或报告连续失败与漂移、登记了墓碑（不写平台身份）、操作员结案。每次进入卡住状态记一次，健康上报重复携带同一次拒绝时只记一次。宿主重启后从空开始。
+- **近期告警**：宿主订阅状态存储，环形保存最近 50 条重要事实：模式变化与拒绝、急停请求与完成、OBS 外部变化、看门狗动作、否决与等待放行超时、审核开关变化、TTS 换引擎与降级、弹幕缺口、投票中止、游戏接管、Runtime 卡住、物理动作未决与动作拒绝、决策模型请求人工或报告连续失败与漂移、登记了墓碑（不写平台身份）、操作员结案。每次进入卡住状态记一次，健康上报重复携带同一次拒绝时只记一次。宿主重启后从空开始。
 - **页面**：每秒轮询状态，显示人设的来源与版本；连不上宿主或会话失效时醒目提示，并把状态清成未知，不把过期的数据当作当前状态。顶部常显审核状态：审核插件关闭时为“审核已关闭”，未显式设置时为“审核状态未设置”。结果未知的意图只读列出（编号、类型、目标、能否对账、意图键与起始时刻），并提示用命令行结案。来自宿主的文本（句子可能受弹幕影响）只用 `textContent` 渲染。
 - **操作**：急停（一键，不二次确认）；确认在场（页面在线不算在场，必须操作员主动点）；切换监督模式（升级到 M1–M3 要再点一次确认）；只跑开播预检；M1 中逐句放行、否决与全部否决；注销。
 
