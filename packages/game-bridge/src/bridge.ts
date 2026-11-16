@@ -807,7 +807,7 @@ export class GameBridge implements Game {
     return undefined;
   }
 
-  #observeBlocked(command: GameCommand): void {
+  #blockedReason(command: GameCommand): 'expired' | 'stale' {
     const now = this.wireNowMs();
     const point = this.#decision?.latest;
     const expired =
@@ -816,11 +816,7 @@ export class GameBridge implements Game {
         : point?.decisionPointId === command.payload.decisionPointId &&
           point.timing !== null &&
           point.timing.resolveByMs <= now;
-    this.#telemetry.discarded(
-      'game.command',
-      command.payload.traceparent,
-      expired ? 'expired' : 'stale',
-    );
+    return expired ? 'expired' : 'stale';
   }
 
   async #execute(
@@ -840,7 +836,7 @@ export class GameBridge implements Game {
     const checked = { ...command, payload } as GameCommand;
     const blocker = this.#commandBlocker(checked);
     if (blocker) {
-      this.#observeBlocked(checked);
+      this.#telemetry.discarded('game.command', payload.traceparent, this.#blockedReason(checked));
       return { ok: false, reason: blocker };
     }
     if (this.#command) return { ok: false, reason: '已有在途游戏命令' };
@@ -853,6 +849,8 @@ export class GameBridge implements Game {
         : checked.payload.decisionPointId;
     const key = JSON.stringify(['game', command.method, run, id]);
     let observeResult: ReturnType<GameTelemetry['sent']>;
+    let prepared: ReturnType<GameTelemetry['prepare']> | undefined;
+    let unsentReason: 'expired' | 'stale' = 'stale';
     let outcome: 'accepted' | 'refused' | 'unknown' = 'unknown';
     try {
       const decision = await this.#safety.authorize({
@@ -875,7 +873,8 @@ export class GameBridge implements Game {
               reason: `游戏意图已有记录（${decision.intent.state}）`,
             };
       }
-      const intent = await this.#safety.execute(decision.intent, payload, async () => {
+      const intent = await this.#safety.execute(decision.intent, payload, async (authorized) => {
+        prepared = this.#telemetry.prepare(run, checked);
         const current = this.#availability();
         if (
           !current.ready ||
@@ -887,22 +886,27 @@ export class GameBridge implements Game {
         }
         const changed = this.#commandBlocker(checked);
         if (changed) {
-          this.#observeBlocked(checked);
+          unsentReason = this.#blockedReason(checked);
           throw new Error(changed);
         }
         if (stillValid && !stillValid()) throw new Error('发起命令时的游戏局面已失效');
         try {
-          const pending = main.rpc.request(command.method, payload, {
-            signal: controller.signal,
-          });
+          // 执行闸门核对过语义载荷。发送时只替换本次 RPC 的追踪上下文。
+          const pending = main.rpc.request(
+            command.method,
+            { ...authorized, traceparent: prepared.traceparent },
+            { signal: controller.signal },
+          );
           if (checked.method === Method.DecisionResolve && this.#decision)
             this.#decision.resolveSent = true;
           observeResult = this.#telemetry.sent(
             run,
             checked,
+            prepared,
             this.wireNowMs(),
             checked.method === Method.DecisionResolve ? this.#decision?.latest.timing : undefined,
           );
+          prepared = undefined;
           const reply = await pending;
           if (!checkGameBridgeResult(Role.Main, command.method, reply))
             throw new Error('游戏命令回执无效');
@@ -925,6 +929,7 @@ export class GameBridge implements Game {
         ? { ok: true, intent, duplicate: false }
         : { ok: false, reason: intent.error ?? '游戏意图未完成', intent };
     } finally {
+      if (prepared) this.#telemetry.unsent(prepared, unsentReason);
       observeResult?.(outcome);
       this.#command = undefined;
       this.#recheck();
