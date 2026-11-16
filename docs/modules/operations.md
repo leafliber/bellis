@@ -203,7 +203,7 @@
 
 ### 跨进程
 
-- 游戏桥以首个 `decision_point.opened` 的 `traceparent` 为 `game.decision` 的父，以发往 Runtime 的 `traceparent` 为 `game.command` 的父。记录发送、接纳与匹配的 `action.committed`，用 link 关联指令 span 与 Runtime 返回的动作上下文。Runtime 真机的跨进程 span 仍待联调。
+- 游戏桥以首个 `decision_point.opened` 的 `traceparent` 为 `game.decision` 的父。`game.command` 优先以命令的上游上下文为父。缺省时，选择命令以同实例可用的 `game.decision` 为父，其余情况建立本地根 span。发给 Runtime 的 `traceparent` 取实际命令 span 的上下文，取不到时沿用入参。记录发送、接纳与匹配的 `action.committed`，用 link 关联命令 span 与 Runtime 返回的动作上下文。Runtime 真机的跨进程 span 仍待联调。
 - 宿主调用 sidecar 的 JSON-RPC 在参数里带 W3C `traceparent`（版本 00），sidecar 以它为父写自己的 span，与宿主在同一个 trace 里；本地 TTS 的 `tts.synthesize` 带的是这一句合成的 span（协议见 `packages/protocol` 的 tts.ts）。代理插件只转发解析合格的值，并统一成版本 00。
 - 目录与轮转规则经环境变量 `BELLIS_TELEMETRY`（`SidecarTelemetry` 的 JSON）在拉起时交给 sidecar（见[插件内核](plugin-kernel.md#sidecar-代理)），sidecar 写进同一目录里自己的文件，格式与准入规则相同。没有这个变量、不合格或没有通道角色时，sidecar 不写遥测，其余照常；遥测插件晚于代理插件激活时，这个 sidecar 进程不写遥测，下次重启补上。
 - Python 运行时（`bellis_sidecar.telemetry`）在守护线程里写：有界队列满了丢弃最旧的，按间隔分批写，写失败丢弃并计数、只记一次日志；进程退出前在截止时间内尽量写完。
