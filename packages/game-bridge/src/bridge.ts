@@ -59,6 +59,7 @@ import {
   GameAuthorityFact,
   gameAuthorityLedger,
   sameAttempt,
+  settledOutcome,
 } from './authority.ts';
 import type { GameControlResult, GameRuntimeHost } from './host.ts';
 import {
@@ -409,6 +410,9 @@ export class GameBridge implements Game {
     const bindings = Object.entries(this.#safety.view(gameAuthorityLedger)).filter(
       ([, slot]) => slot.adapterId === this.#ctx.config.adapterId,
     );
+    if (bindings.some(([, slot]) => slot.pending.some(({ conflict }) => conflict))) {
+      return '物理动作尝试的身份冲突，保持隔离';
+    }
     if (bindings.some(([, slot]) => slot.pending.length > 0)) {
       return '物理动作结果未决，等待操作员结案';
     }
@@ -1051,6 +1055,21 @@ export class GameBridge implements Game {
     }
     const connected = this.#authorityConnection(controlTargetId);
     if (!connected.ready) return Promise.resolve({ ok: false, reason: connected.reason });
+    const settled = settledOutcome(connected.slot, payload.attemptId);
+    if (settled) {
+      if (
+        connected.slot.pending.some(({ outcome }) => outcome.attemptId === payload.attemptId) ||
+        (connected.health.pendingActionOutcome?.attemptId === payload.attemptId &&
+          !sameAttempt(settled.outcome, connected.health.pendingActionOutcome))
+      ) {
+        return Promise.resolve({ ok: false, reason: '该物理尝试的原始身份冲突' });
+      }
+      return Promise.resolve(
+        settled.outcome.sessionId === payload.sessionId && settled.resolution === payload.resolution
+          ? { ok: true }
+          : { ok: false, reason: '结案参数与持久回执不一致' },
+      );
+    }
     return this.#executeAuthority(controlTargetId, connected, {
       method: Method.ActionResolveOutcome,
       payload,
@@ -1066,10 +1085,15 @@ export class GameBridge implements Game {
     if (command.method === Method.ActionResolveOutcome) {
       const { attemptId, sessionId, resolution } = command.payload;
       const pending = slot.pending.find(({ outcome }) => outcome.attemptId === attemptId);
-      if (!pending || pending.conflict || pending.outcome.sessionId !== sessionId) {
+      if (pending?.conflict) return '该物理尝试的原始身份冲突';
+      if (!pending || pending.outcome.sessionId !== sessionId) {
         return '没有可核对的对应物理尝试';
       }
-      if (pending.resolution && pending.resolution.request.resolution !== resolution) {
+      if (
+        pending.resolution &&
+        (pending.resolution.request.resolution !== resolution ||
+          !sameAttempt(pending.outcome, pending.resolution.outcome))
+      ) {
         return '原结案结果待回读，只能精确重送原参数';
       }
       if (current ? !sameAttempt(current, pending.outcome) : !pending.resolution) {
@@ -1172,6 +1196,12 @@ export class GameBridge implements Game {
     }
     const blocker = this.#authorityBlocker(initial, command);
     if (blocker) return { ok: false, reason: blocker };
+    const originalAttempt =
+      command.method === Method.ActionResolveOutcome
+        ? initial.slot.pending.find(
+            ({ outcome }) => outcome.attemptId === command.payload.attemptId,
+          )?.outcome
+        : undefined;
 
     const controller = new AbortController();
     this.#authorityCommand = controller;
@@ -1234,9 +1264,13 @@ export class GameBridge implements Game {
             }
           }
         } else {
-          previous =
-            slot.pending.find(({ outcome }) => outcome.attemptId === command.payload.attemptId)
-              ?.resolution?.dispatches ?? [];
+          const pending = slot.pending.find(
+            ({ outcome }) => outcome.attemptId === command.payload.attemptId,
+          );
+          if (!pending || !originalAttempt || !sameAttempt(pending.outcome, originalAttempt)) {
+            throw new Error('发送前物理尝试的原始身份改变');
+          }
+          previous = pending.resolution?.dispatches ?? [];
         }
         if (
           !this.#safety.record(
@@ -1262,6 +1296,11 @@ export class GameBridge implements Game {
           throw new IntentOutcomeUnknown('游戏授权回执未知，等待原请求回读');
         }
         const result = reply as Record<string, unknown>;
+        const pending =
+          originalAttempt &&
+          this.#authoritySlot(controlTargetId)?.pending.find(
+            ({ outcome }) => outcome.attemptId === originalAttempt.attemptId,
+          );
         if (
           !this.#active(main) ||
           signal.aborted ||
@@ -1270,9 +1309,11 @@ export class GameBridge implements Game {
             ? result.taskId !== command.payload.taskId
             : result.attemptId !== command.payload.attemptId ||
               result.resolution !== command.payload.resolution ||
-              this.#authoritySlot(controlTargetId)?.pending.some(
-                ({ outcome, conflict }) => outcome.attemptId === result.attemptId && conflict,
-              ))
+              !originalAttempt ||
+              !pending ||
+              pending.conflict ||
+              !sameAttempt(pending.outcome, originalAttempt) ||
+              pending.resolution?.dispatches.at(-1) !== authorizedIntent.id)
         )
           throw new IntentOutcomeUnknown('游戏授权回执无法与原请求核对');
         const receipt = { method, controlTargetId, ...result };
@@ -1283,12 +1324,19 @@ export class GameBridge implements Game {
         }
         return receipt;
       });
-      return intent.state === 'succeeded'
-        ? { ok: true }
-        : {
-            ok: false,
-            reason: intent.error ?? '游戏授权命令未完成',
-          };
+      if (intent.state !== 'succeeded') {
+        return { ok: false, reason: intent.error ?? '游戏授权命令未完成' };
+      }
+      if (originalAttempt) {
+        const slot = this.#authoritySlot(controlTargetId);
+        if (
+          !slot ||
+          !settledOutcome(slot, originalAttempt.attemptId) ||
+          slot.pending.some(({ outcome }) => outcome.attemptId === originalAttempt.attemptId)
+        )
+          return { ok: false, reason: '无法持久确认原尝试结案，保持隔离' };
+      }
+      return { ok: true };
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : '游戏授权命令失败' };
     } finally {
