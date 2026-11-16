@@ -1,7 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { ChannelError, type Connection, RpcError, RpcPeer } from '@bellis/channel';
-import { type Clock, type PluginContext, type TimerHandle, withDeadline } from '@bellis/kernel';
+import {
+  type Clock,
+  type PluginContext,
+  sleepUnlessAborted,
+  type TimerHandle,
+  withDeadline,
+} from '@bellis/kernel';
 import {
   checkGameBridgeMessage,
   checkGameBridgeParams,
@@ -110,6 +116,7 @@ interface Link {
   earlyHealth?: Health;
   voice?: Pick<GameSituationObserved, 'atMs' | 'voiceActivity'>;
   release?: GameInputReleased;
+  stopAck?: Promise<number | undefined>;
   lastSent: number;
 }
 
@@ -398,11 +405,24 @@ export class GameBridge implements Game {
     );
   }
 
-  #isolated(): boolean {
-    return (
-      this.#safety.isIsolated(this.#target) ||
-      (this.#target !== this.#legacyTarget && this.#safety.isIsolated(this.#legacyTarget))
+  #isolationBlocker(controlTargetId: string | undefined): string | undefined {
+    const bindings = Object.entries(this.#safety.view(gameAuthorityLedger)).filter(
+      ([, slot]) => slot.adapterId === this.#ctx.config.adapterId,
     );
+    if (bindings.some(([, slot]) => slot.pending.length > 0)) {
+      return '物理动作结果未决，等待操作员结案';
+    }
+    // v1 按适配包寻址。保留此适配包所有持久绑定的槽位目标，覆盖切换版本和重载配置。
+    const targets = new Set([this.#legacyTarget, this.#target]);
+    for (const [key] of bindings) targets.add(`game:${key}`);
+    for (const target of targets) {
+      if (this.#safety.isIsolated(target)) return '游戏目标已隔离或状态存储不可用';
+    }
+    const current = controlTargetId === undefined ? undefined : authoritySlotKey(controlTargetId);
+    if (bindings.some(([key, slot]) => key !== current && slot.task?.dispatches.length)) {
+      return '被控槽位有待回读的开任务请求';
+    }
+    return undefined;
   }
 
   #prerequisitesMet({ main, health }: Connected): boolean {
@@ -424,13 +444,15 @@ export class GameBridge implements Game {
     if (this.#authorityCommand) return { ready: false, reason: '等待游戏授权命令完成' };
     if (this.#release) return { ready: false, reason: '等待实时核核验输入释放' };
     const controlTargetId = this.#ctx.config.controlTargetId;
+    const isolation = this.#isolationBlocker(controlTargetId);
+    if (isolation) return { ready: false, reason: isolation };
     let task: GameTaskOpenParams | undefined;
     if (controlTargetId) {
       const slot = this.#authoritySlot(controlTargetId);
       if (!slot || !('pendingActionOutcome' in health)) {
         return { ready: false, reason: '未核对被控槽位的完整持久回读' };
       }
-      if (slot.pending.length > 0 || health.pendingActionOutcome) {
+      if (health.pendingActionOutcome) {
         return { ready: false, reason: '物理动作结果未决，等待操作员结案' };
       }
       if (
@@ -447,15 +469,6 @@ export class GameBridge implements Game {
         return { ready: false, reason: '等待操作员授权任务和 Runtime 回读当前任务' };
       }
       task = slot.task.request;
-    } else if (
-      Object.values(this.#safety.view(gameAuthorityLedger)).some(
-        (slot) => slot.adapterId === this.#ctx.config.adapterId && slot.pending.length > 0,
-      )
-    ) {
-      return { ready: false, reason: '该适配包有关联槽位存在未决动作，须恢复语义 v2 回读' };
-    }
-    if (this.#isolated()) {
-      return { ready: false, reason: '游戏目标已隔离或状态存储不可用' };
     }
     if (!health.ready || health.riskLimitExceeded || realtime.leaseState === 'source_lost') {
       return { ready: false, reason: 'Game Runtime 尚未就绪或报告了安全风险' };
@@ -901,6 +914,22 @@ export class GameBridge implements Game {
     this.#timer = undefined;
   }
 
+  #requestStop(link: Link, token: number, reason: string, signal?: AbortSignal) {
+    const ack = link.rpc
+      .request(
+        Method.InputStop,
+        { throughToken: token, reason: reason.slice(0, 200) },
+        signal ? { signal } : undefined,
+      )
+      .then(
+        (result) =>
+          checkGameBridgeResult(Role.Core, Method.InputStop, result) ? this.wireNowMs() : undefined,
+        () => undefined,
+      );
+    link.stopAck = ack;
+    return ack;
+  }
+
   #stopInput(reason: string): void {
     this.#clearTimer();
     const permit = this.#permit;
@@ -920,12 +949,9 @@ export class GameBridge implements Game {
     this.#release = release;
     if (this.#active(link)) {
       // 即使前一条续约尚未应答，也直接用同一控制连接吊销已发出的令牌。
-      const unconfirmed = () => this.#ctx.log('game.stop-unconfirmed', {});
-      void link.rpc
-        .request(Method.InputStop, { throughToken: token, reason: reason.slice(0, 200) })
-        .then((result) => {
-          if (!checkGameBridgeResult(Role.Core, Method.InputStop, result)) unconfirmed();
-        }, unconfirmed);
+      void this.#requestStop(link, token, reason).then((atMs) => {
+        if (atMs === undefined) this.#ctx.log('game.stop-unconfirmed', {});
+      });
     } else {
       release.settled.resolve(false);
       this.#release = undefined;
@@ -1052,9 +1078,9 @@ export class GameBridge implements Game {
       return undefined;
     }
 
-    if (slot.pending.length || current || this.#isolated()) {
-      return '游戏目标存在未决状态或状态存储不可用';
-    }
+    const isolation = this.#isolationBlocker(this.#ctx.config.controlTargetId);
+    if (isolation) return isolation;
+    if (current) return '游戏目标存在未决状态';
     if (health.riskLimitExceeded || !this.#prerequisitesMet(connection)) {
       return '游戏未满足风险或操作员前置条件';
     }
@@ -1078,33 +1104,43 @@ export class GameBridge implements Game {
   }
 
   async #verifyRelease(link: Link, signal: AbortSignal): Promise<Stopping> {
+    const previousStop = link.stopAck;
+    const previousAckAt = await previousStop;
+    if (previousStop && previousAckAt === undefined) {
+      throw new Error('先前停止请求的回执无法核对，需重新连接实时核');
+    }
+    // 控制 v1 用令牌和毫秒而非释放编号。先前停止的回执先于新请求，旧释放最迟在该回执前发生。
+    // 保留握手允许的一毫秒舍入，再越过已收到的释放时刻，才发同一令牌的下一次停止。
+    const watermark = () =>
+      Math.max((previousAckAt ?? -Infinity) + 1, link.release?.atMs ?? -Infinity);
+    let atMs = this.wireNowMs();
+    while (atMs <= watermark()) {
+      if (!(await sleepUnlessAborted(this.#clock, watermark() - atMs + 1, signal))) {
+        throw new Error('等待新输入释放核验时连接已失效');
+      }
+      atMs = this.wireNowMs();
+    }
+    signal.throwIfAborted();
     const probe: Stopping = {
       link,
       token: link.lastSent,
-      atMs: this.wireNowMs(),
+      atMs,
       probe: true,
       settled: Promise.withResolvers<boolean>(),
     };
     this.#release?.settled.resolve(false);
     this.#release = probe;
     try {
-      const [ack, verified] = await withDeadline(
+      const [ackAtMs, verified] = await withDeadline(
         this.#clock,
         Promise.all([
-          link.rpc.request(
-            Method.InputStop,
-            {
-              throughToken: probe.token,
-              reason: '操作员核对游戏授权前释放输入',
-            },
-            { signal },
-          ),
+          this.#requestStop(link, probe.token, '操作员核对游戏授权前释放输入', signal),
           probe.settled.promise,
         ]),
         RPC_MS,
         '实时核输入释放核验',
       );
-      if (!verified || !checkGameBridgeResult(Role.Core, Method.InputStop, ack)) {
+      if (!verified || ackAtMs === undefined) {
         throw new Error('实时核未核验输入已释放');
       }
       return probe;
