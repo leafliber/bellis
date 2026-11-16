@@ -18,12 +18,14 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 
 | 角色 | 对端 | 承载 |
 | --- | --- | --- |
-| `game-runtime.main` | Game Runtime 主进程 | 语义握手、目标、决定、暂缓推进、局面、决策点、已发生的动作与语义健康 |
+| `game-runtime.main` | Game Runtime 主进程 | 语义握手、目标、决定、暂缓推进、局面、决策点、已发生的动作与语义健康。v2 另有开任务与动作结案 |
 | `game-runtime.core` | Game Runtime 实时核 | 控制握手、许可续约、停止、输入释放与实时核健康 |
 
 每条连接的首个应用请求是 Bellis 发出的 `game.describe`，带契约主版本 `major`。两边应答各自的 `major`、运行会话号 `runtimeId` 和当前单调时刻 `nowMs`。主进程还返回适配包 `adapter`（`id`、`version`、`screenTypes`）和操作员前置条件 `prerequisites`（`id`、`text`、`confirmed`）。`runtimeId` 由 Runtime 每次启动新建，实时核重启仍属于同一次 Runtime 会话。两条连接的 `runtimeId` 必须相同。
 
-收到和请求编号匹配的 `game.describe` 应答后，先用开放的 `GameDescribeVersion` 读取公共的 `major`。Bellis 使用 `readGameBridgeMajor`，Python 使用生成模块的 `read_game_bridge_major`。主版本与 `GAME_BRIDGE_MAJOR` 相同才对所用角色的正文做闭合校验。后续主版本可以更换正文结构，仍用同一 JSON-RPC 信封和公共 `major` 字段表示版本。
+收到和请求编号匹配的 `game.describe` 应答后，先用开放的 `GameDescribeVersion` 读取公共的 `major`。Bellis 使用 `readGameBridgeMajor`，Python 使用生成模块的 `read_game_bridge_major`。主版本与所请求版本相同才对所用角色的正文做闭合校验。后续主版本可以更换正文结构，仍用同一 JSON-RPC 信封和公共 `major` 字段表示版本。
+
+可信 profile 的 `controlTargetId` 启用语义 v2，未配置时请求语义 v1。实时核始终请求控制 v1。语义 v2 的描述必报 `controlTargetId`，核对两端各自的可信配置，两个配置须绑定同一游戏槽位、适配包和窗口选择规则。槽位标识跨进程和连接保持稳定。槽位缺失、匹配冲突、声明不一致或版本不兼容时保持 WAITING。启用 v2 后，拒绝回退到 v1。
 
 游戏桥的 WAITING 状态包含原因。主版本不兼容时报告本端支持与对端上报的版本。握手不合法、两条连接不齐、会话号不一致或适配包不匹配 profile 时停在 WAITING。进入真实输出模式前还须确认两条连接的健康未过期、适配包声明的前置条件全部已确认且游戏目标未被隔离。健康上报的条件编号与文本须和握手一致，确认状态以当前会话为准。连接断开、健康失效或确认撤回时停止下发目标、决定和许可。控制连接失去后实时核自行释放输入。实时核重连后重新握手，满足运行条件后从更大的令牌开始。
 
@@ -37,13 +39,20 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 
 ## 契约
 
-主版本为 **1**。源是 [TypeBox 定义](../../packages/protocol/src/game-bridge.ts)，由 `pnpm run gen` 生成 [JSON Schema](../../packages/protocol/schemas/game-bridge.schema.json) 和独立的 [Pydantic 模型](../../packages/protocol/models/game_bridge.py)。Game Runtime 锁定同一提交的生成物和[控制连接夹具](../../packages/protocol/test/fixtures/game-control.json)，核对 Rust 解码与编码（GD-03）。Schema 的 `x-methods` 按角色列出 `sender` 和载荷在 `$defs` 下的名字。`result: null` 表示通知。追加可选字段后，双方更新所锁定的定义再发送新字段。删除、重命名和变更既有字段含义须升主版本。
+源是 [TypeBox 定义](../../packages/protocol/src/game-bridge.ts)。Game Runtime 锁定同一提交的生成物和夹具。
 
-应用消息走 JSON-RPC 2.0，参数都是对象。严格核对角色、方向、请求或通知类型及载荷，未知字段一律拒绝。当前版本的可空字段显式写 `null`。请求成功以 `{}` 应答，握手应答为描述对象。语义动作及相关事件用 R-21 的 `traceparent` 串起链路，无追踪上下文时值为 `null`。
+| 使用范围 | JSON Schema | Pydantic | 夹具 |
+| --- | --- | --- | --- |
+| 语义 v1 与控制 v1 | [game-bridge.schema.json](../../packages/protocol/schemas/game-bridge.schema.json) | [game_bridge.py](../../packages/protocol/models/game_bridge.py) | [game-control.json](../../packages/protocol/test/fixtures/game-control.json) |
+| 语义 v2 | [game-bridge-v2.schema.json](../../packages/protocol/schemas/game-bridge-v2.schema.json) | [game_bridge_v2.py](../../packages/protocol/models/game_bridge_v2.py) | [game-main-v2.json](../../packages/protocol/test/fixtures/game-main-v2.json) |
+
+`pnpm run gen` 生成 Schema 和独立的 Python 模型。Schema 的 `x-methods` 按角色列出 `sender` 和载荷在 `$defs` 下的名字。`result: null` 表示通知。追加可选字段后，双方更新所锁定的定义再发送新字段。删除、重命名和变更既有字段含义须升主版本。
+
+应用消息走 JSON-RPC 2.0，参数都是对象。严格核对角色、方向、请求或通知类型及载荷，未知字段一律拒绝。可空字段显式写 `null`。常规命令成功以 `{}` 应答，握手、开任务与结案返回各自的结果对象。语义动作及相关事件用 R-21 的 `traceparent` 串起链路，无追踪上下文时值为 `null`。
 
 ### 时间与标识
 
-- v1 的整数在线上用十进制 JSON 整数字面量。零写成 `0`，非零整数可带负号，数值须在 JS 安全整数和各字段的范围内。拒绝小数点、指数、`-0`、布尔和数字字符串。风险分是普通 JSON 数值，保留小数和指数写法。Node 在认证后的游戏连接解码原始帧时核对数字写法，随后按 Schema 核对字段类型和范围。Python 对原始游戏帧统一调用生成模块的 `parse_game_bridge_json(raw)`，再用相应 Pydantic 模型的 `model_validate` 校验信封与载荷。解码器核对公共信封的整数字段，错误详情仍为任意 JSON，未知版本的正文交给版本握手处理。Rust 保留原解析结果的数字类型再做严格校验。
+- 整数在线上用十进制 JSON 整数字面量。零写成 `0`，非零整数可带负号，数值须在 JS 安全整数和各字段的范围内。拒绝小数点、指数、`-0`、布尔和数字字符串。风险分是普通 JSON 数值，保留小数和指数写法。Node 在认证后的游戏连接解码原始帧时核对数字写法，随后按 Schema 核对字段类型和范围。Python 对原始游戏帧调用对应版本生成模块的 `parse_game_bridge_json(raw)`，再用相应 Pydantic 模型的 `model_validate` 校验信封与载荷。解码器核对公共信封的整数字段，错误详情仍为任意 JSON，未知版本的正文交给版本握手处理。Rust 保留原解析结果的数字类型再做严格校验。
 - `atMs`、`nowMs`、`expiresAtMs`、`resolveByMs` 和 `deadlineMs` 是同机系统单调时钟的整毫秒。在 Windows 用 QPC，在 Linux 用 `CLOCK_MONOTONIC`。Bellis 以 `process.hrtime.bigint()` 读该时钟，将进程内截止时间换到这个时钟域并向下取整。Runtime 按帧环同一时钟核对。到期时间从发送方设置的绝对截止计算，传输延迟会消耗预算。时刻范围为 `0..18446744073709`，换算为纳秒时仍在 Rust `u64` 范围内。帧龄和首动作耗时用非负整数毫秒表示。
 - Bellis 的 `goalId`、`holdId` 以及 Runtime 的 `decisionPointId`、`actionId` 在各自的命名空间和同一 `runtimeId` 下唯一。重新进入同一画面产生新的决策点实例。一次决策点的 `optionId` 在打开到结束期间稳定。标识连同 `runtimeId` 用于去重和关联。旧会话或旧连接的回执丢弃。同一会话中的动作按编号记一次事实，迟到回执不得重新打开决策点。
 - 许可令牌在同一安全核的资源计数器内递增，范围为 `1..9007199254740991`。停止指令的 `throughToken` 可为 0，表示尚未发过许可。
@@ -64,6 +73,18 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 
 通用画面类型直接使用 Runtime [画面状态](https://github.com/leafliber/bellis-game-runtime/blob/main/docs/modules/perception.md#画面状态) 的标识。扩展画面类型依适配包声明的 `name`、`base` 映射。观测中的 `screenType` 仍为通用类型，`screenTypeExtension` 为扩展名或 `null`，使用扩展时须与握手中的声明一致。卡住与未知由运行时报告。局面、候选、看点和拒绝原因中的文本按不可信游戏输入处理。剧情日志、图像、潜向量和输入坐标留在 Runtime。写入 Iris 的游戏事实只用摘要。
 
+### 语义 v2 的授权任务与未决结案
+
+状态回读用语义 v2 的 `health.reported`。握手后 Runtime 及时发送完整、当前的健康上报，必报 `pendingActionOutcome` 和 `activeTaskId`，无对应记录时显式为 `null`。每次新连接须读到这条连接的有效健康，核对槽位和持久任务绑定后才可发目标或取得输入许可。待回读、记录不可信或双方绑定不符时保持拒绝。
+
+- `pendingActionOutcome` 对象包含唯一 `attemptId`、执行时的 `runtimeId`、源游戏会话的 `sessionId`、`goalId`、`actionId`、可空 `decisionPointId` 和原因 `reason`（1–200 字符）。它可来自已结束的进程或会话。存在未决时 `ready=false`。Bellis 按槽位持久记录并隔离，普通 P-04 卡住仍走原来的恢复规则。空字段、重连和提交新目标均不解除已记录隔离。
+- `action.resolve_outcome` 由 Bellis 在操作员核对外部状态和输入释放后，经已认证的操作员入口与执行闸门发往 `game-runtime.main`。请求为 `{sessionId, attemptId, resolution}`，取值为 `confirmed_executed`、`confirmed_not_executed` 或 `reconciled_unknown`。Runtime 核对原尝试、持久结案后回复 `{attemptId, resolution}`。原参数精确重送时返回同一结果，冲突或不匹配时拒绝。Bellis 在持久记录匹配的应答后解除该尝试的隔离。结案是独立事实，`action.committed` 仍由执行回执与效果核验产生。
+- `task.open` 同样由已认证的操作员入口经执行闸门发出。请求为 `{taskId, objective, expiresAtMs, overallCompletion}`，由宿主分配新 `taskId`，`expiresAtMs` 是授权终止的绝对单调时刻。Runtime 用可信本地配置冻结同一任务的调用、物理输入和无进展预算，持久接纳后回复 `{taskId}`。原参数精确重送时返回同一结果，参数冲突时拒绝，任务终止后保留原结果供回读。开新任务前，旧任务已结束或撤权，且原尝试已结清、输入释放已核验。开任务只建立可执行范围，输入仍须原有许可。
+- `overallCompletion` 可为 `null`，或取 `{kind:"signature", signature}`、`{kind:"screen", screenType}`、`{kind:"text-appeared", text, roi}`、`{kind:"text-disappeared", text, roi}`。签名最多 120 字符、文字最多 240 字符、ROI 名最多 80 字符，均为非空字符串。`screenType` 为通用画面类型。Runtime 依据适配包核对签名与已标定区域，从有效新证据判定完成。
+- 语义 v2 的 `goal.submit` 必报 `taskId`。Bellis 从同槽位已持久接纳且与当前健康读回一致的绑定注入该字段，并将目标截止限制在任务到期以内。投票、暂停、重连或 P-04 恢复均沿用原任务的根目标、终局与预算。任务到期、Runtime 主进程重启或缺少可信预算账目时，旧任务终止，`activeTaskId` 上报 `null`。
+
+命令因参数冲突或前置条件不满足而拒绝时，可返回 `-32602`，此时未提交该命令。写入后无法证实结果时保留歧义，由相同命令的幂等回读处理。v2 语义消息的标识沿用实例 ID 格式，长度为 1–64，以 ASCII 字母或数字开头，其余字符可包含 `_.:-`。真实自主 GR-38 的双端验收为 PENDING。
+
 ### 控制消息
 
 | 方向 | 消息 | 含义 |
@@ -73,7 +94,7 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 | 实时核 → Bellis | `input.released` | 释放时刻、相关令牌、触发原因、核验状态。仅 `verified` 计为确认无残留。回应 `input.stop` 的核验用其 `throughToken` 关联，即使此前已经释放也报告 |
 | 实时核 → Bellis | `health.reported` | 许可状态、帧龄与队列深度 |
 
-夹具是 JSON 数组。每项包含 `name`、`sender`、`valid`，以及 `message` 或 `rawJson`。`message` 是完整 JSON-RPC 对象，`rawJson` 是须原样送入解码器的 JSON 文本。`responseTo` 只用于成功应答样本，指出应答所关联的请求方法。有效样本须按控制角色从 JSON 解码并编码回等价 JSON，无效样本须拒绝。时效、授权和游戏状态另由两端核对。
+夹具是 JSON 数组。每项包含 `name`、`sender`、`valid`，以及 `message` 或 `rawJson`。`message` 是完整 JSON-RPC 对象，`rawJson` 是须原样送入解码器的 JSON 文本。`responseTo` 只用于成功应答样本，指出应答所关联的请求方法。有效样本须按各自角色与版本从 JSON 解码并编码回等价 JSON，无效样本须拒绝。时效、授权和游戏状态另由两端核对。
 
 ## 决策点与恢复
 
