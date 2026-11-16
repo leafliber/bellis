@@ -3,6 +3,7 @@ import { Compile } from 'typebox/compile';
 import {
   GAME_BRIDGE_INTEGER_FIELDS,
   GAME_BRIDGE_MAJOR,
+  GAME_BRIDGE_SEMANTIC_V2,
   type GameActionCommitted,
   type GameBridgeMajor,
   GameBridgeMethod,
@@ -98,12 +99,12 @@ const mainV2Methods: Readonly<Record<string, GameBridgeMethodSpec>> =
 function methodSpec(
   role: GameBridgeRole,
   method: string,
-  major: GameBridgeMajor,
+  major: number,
 ): GameBridgeMethodSpec | undefined {
   const registered =
     major === GAME_BRIDGE_MAJOR
       ? methods[role]
-      : role === GameBridgeRole.Main
+      : major === GAME_BRIDGE_SEMANTIC_V2 && role === GameBridgeRole.Main
         ? mainV2Methods
         : undefined;
   return registered && Object.hasOwn(registered, method) ? registered[method] : undefined;
@@ -183,7 +184,7 @@ export function checkGameBridgeParams(
   sender: GameBridgeSender,
   method: string,
   params: unknown,
-  major: GameBridgeMajor = GAME_BRIDGE_MAJOR,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
   const spec = methodSpec(role, method, major);
   return spec?.sender === sender && checkPayload(spec.params, params);
@@ -194,7 +195,7 @@ export function checkGameBridgeMessage(
   role: GameBridgeRole,
   sender: GameBridgeSender,
   message: unknown,
-  major: GameBridgeMajor = GAME_BRIDGE_MAJOR,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
   if (request.Check(message)) {
     const spec = methodSpec(role, message.method, major);
@@ -216,7 +217,7 @@ export function checkGameBridgeResult(
   role: GameBridgeRole,
   method: string,
   result: unknown,
-  major: GameBridgeMajor = GAME_BRIDGE_MAJOR,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
   const spec = methodSpec(role, method, major);
   if (method === GameBridgeMethod.Describe && readGameBridgeMajor(result) !== major) {
@@ -229,7 +230,7 @@ export function checkGameBridgeSuccess(
   role: GameBridgeRole,
   method: string,
   response: unknown,
-  major: GameBridgeMajor = GAME_BRIDGE_MAJOR,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
   return success.Check(response) && checkGameBridgeResult(role, method, response.result, major);
 }

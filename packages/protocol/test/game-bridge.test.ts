@@ -49,6 +49,13 @@ test('语义 v2 夹具独立于旧语义和控制角色', () => {
       : checkGameBridgeMessage(Role.Main, sender, message, major);
     assert.equal(checked, valid, name);
     assert.equal(checkGameBridgeMessage(Role.Core, sender, message, major), false, name);
+    assert.equal(
+      responseTo
+        ? checkGameBridgeSuccess(Role.Main, responseTo, message, 3)
+        : checkGameBridgeMessage(Role.Main, sender, message, 3),
+      false,
+      name,
+    );
   }
   assert.equal(checkGameBridgeParams(Role.Main, 'bellis', Method.TaskOpen, {}), false);
 });

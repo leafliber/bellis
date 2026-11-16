@@ -7,6 +7,7 @@ import { GameBridge, type GameBridgeConfig } from './bridge.ts';
 import { GameRuntimePortService } from './host.ts';
 import { GAME_GOAL, GAME_INPUT, GameFactObserved, GameService } from './service.ts';
 
+export { gameAuthorityLedger } from './authority.ts';
 export * from './host.ts';
 export * from './service.ts';
 

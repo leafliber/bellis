@@ -248,6 +248,8 @@ const operator = createOperator({
     current: currentGame,
     takeOver: () => gameRuntime.takeOver(),
     returnControl: () => gameRuntime.returnControl(),
+    openTask: (params) => gameRuntime.openTask(params),
+    resolveOutcome: (params) => gameRuntime.resolveOutcome(params),
   },
   preflight: runPreflight,
   consoleLogin: () => consoleServer?.issueLogin(),

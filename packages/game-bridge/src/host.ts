@@ -1,6 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { ChannelError, type Connection } from '@bellis/channel';
 import { defineService } from '@bellis/kernel';
-import { GameBridgeRole } from '@bellis/protocol';
+import {
+  GameBridgeRole,
+  type OperatorGameOutcomeResolveParams,
+  type OperatorGameTaskOpenParams,
+} from '@bellis/protocol';
 
 export type GameControlResult = { ok: true } | { ok: false; reason: string };
 
@@ -8,11 +13,14 @@ interface Endpoint {
   connect(role: GameBridgeRole, connection: Connection): void;
   takeOver(reason: string): void;
   returnControl(): GameControlResult;
+  openTask?(params: OperatorGameTaskOpenParams): Promise<GameControlResult>;
+  resolveOutcome?(params: OperatorGameOutcomeResolveParams): Promise<GameControlResult>;
 }
 
 /** 宿主交给插件的本机会话入口。操作员动作和认证密钥均留在宿主。 */
 interface GameRuntimePort {
   readonly simulated: boolean;
+  readonly sessionId: string;
   wireNowMs(): number;
   register(endpoint: Endpoint): () => void;
   emergencyStop(reason: string): void;
@@ -32,6 +40,7 @@ export class GameRuntimeHost {
   }) {
     this.port = {
       simulated: options.simulated ?? false,
+      sessionId: randomUUID(),
       wireNowMs: options.wireNowMs ?? (() => Number(process.hrtime.bigint() / 1_000_000n)),
       emergencyStop: options.emergencyStop,
       register: (endpoint) => {
@@ -64,5 +73,15 @@ export class GameRuntimeHost {
 
   returnControl(): GameControlResult {
     return this.#endpoint?.returnControl() ?? { ok: false, reason: '游戏桥尚未启用' };
+  }
+
+  async openTask(params: OperatorGameTaskOpenParams): Promise<GameControlResult> {
+    return this.#endpoint?.openTask?.(params) ?? { ok: false, reason: '游戏桥尚未启用任务入口' };
+  }
+
+  async resolveOutcome(params: OperatorGameOutcomeResolveParams): Promise<GameControlResult> {
+    return (
+      this.#endpoint?.resolveOutcome?.(params) ?? { ok: false, reason: '游戏桥尚未启用结案入口' }
+    );
   }
 }

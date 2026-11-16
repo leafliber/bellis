@@ -11,7 +11,8 @@ const token = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const traceparent = nullable(Traceparent);
 
 /** 系统单调时钟的整毫秒；上界乘 1_000_000 后仍是 Rust u64 纳秒。 */
-const monotonicMs = Type.Integer({ minimum: 0, maximum: 18_446_744_073_709 });
+export const GAME_BRIDGE_MAX_MONOTONIC_MS = 18_446_744_073_709;
+const monotonicMs = Type.Integer({ minimum: 0, maximum: GAME_BRIDGE_MAX_MONOTONIC_MS });
 
 export const GAME_BRIDGE_MAJOR = 1;
 export const GAME_BRIDGE_SEMANTIC_V2 = 2;

@@ -13,11 +13,14 @@ import {
   GameBridgeMethod,
   GameBridgeRole,
   GameMainHealth,
+  GameMainHealthV2,
   GameSituationObserved,
   type OperatorConsoleLoginResult,
   OperatorEmergencyParams,
   OperatorForgetParams,
   OperatorGameControlParams,
+  OperatorGameOutcomeResolveParams,
+  OperatorGameTaskOpenParams,
   OperatorMethod,
   OperatorModeParams,
   OperatorPreflightParams,
@@ -79,7 +82,13 @@ export interface PreflightRecord {
 export interface OperatorGameStatus
   extends Pick<
     GameStatus,
-    'state' | 'reason' | 'mainConnected' | 'coreConnected' | 'runtimeId' | 'inputPermitted'
+    | 'state'
+    | 'reason'
+    | 'mainConnected'
+    | 'coreConnected'
+    | 'runtimeId'
+    | 'inputPermitted'
+    | 'authority'
   > {
   mode: GameMainHealth['mode'] | null;
   goalId: GameMainHealth['goalId'];
@@ -162,6 +171,8 @@ export interface OperatorDeps {
     current(): Pick<Game, 'status' | 'wireNowMs'> | undefined;
     takeOver(): GameControlResult;
     returnControl(): GameControlResult;
+    openTask?(params: OperatorGameTaskOpenParams): Promise<GameControlResult>;
+    resolveOutcome?(params: OperatorGameOutcomeResolveParams): Promise<GameControlResult>;
   };
   /** 开播预检；withSafety 时先列出安全核的前置条件（见 preflight.ts）。 */
   preflight(target: Target, withSafety: boolean): Promise<string[]>;
@@ -183,6 +194,8 @@ export interface OperatorApi {
   emergencyStop(params: OperatorEmergencyParams): Promise<EmergencyReport>;
   gameTakeover(): GameControlResult;
   gameReturn(): GameControlResult;
+  gameTaskOpen(params: OperatorGameTaskOpenParams): Promise<GameControlResult>;
+  gameOutcomeResolve(params: OperatorGameOutcomeResolveParams): Promise<GameControlResult>;
   veto(params: OperatorVetoParams): { ok: true; vetoed: string[] };
   release(params: OperatorReleaseParams): { ok: true; released: string[] };
   preflight(params: OperatorPreflightParams): Promise<{ target: Target; failures: string[] }>;
@@ -243,6 +256,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isSituation = Compile(GameSituationObserved);
 const isMainHealth = Compile(GameMainHealth);
+const isMainHealthV2 = Compile(GameMainHealthV2);
 const gameUnavailable = { ok: false, reason: '游戏桥尚未启用' } as const;
 
 function gameStatus(
@@ -256,6 +270,7 @@ function gameStatus(
     coreConnected,
     runtimeId,
     inputPermitted,
+    authority,
     health,
     decision,
   } = game.status();
@@ -268,6 +283,7 @@ function gameStatus(
     coreConnected,
     runtimeId,
     inputPermitted,
+    ...(authority ? { authority } : {}),
     mode: health?.mode ?? null,
     goalId: health?.goalId ?? null,
     decision: decision
@@ -297,7 +313,13 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
   const alerts: Alert[] = [];
   let lastPreflight: PreflightRecord | null = null;
   let gameNotice:
-    | { runtimeId: string; situationAtMs: number; stuck: boolean; rejectedAtMs: number }
+    | {
+        runtimeId: string;
+        situationAtMs: number;
+        stuck: boolean;
+        rejectedAtMs: number;
+        pendingAttemptId?: string;
+      }
     | undefined;
 
   // 卡住只在进入时提示。健康心跳可能重复携带同一次拒绝。
@@ -310,13 +332,21 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
       gameNotice = { runtimeId, situationAtMs: -1, stuck: false, rejectedAtMs: -1 };
     if (type === GameBridgeMethod.SituationObserved) {
       if (!isSituation.Check(payload) || payload.atMs < gameNotice.situationAtMs) return;
+      if (deps.game?.current()?.status().authority?.pending.length) return;
       const stuck = payload.screenType === '卡住';
       const entered = stuck && !gameNotice.stuck;
       gameNotice.situationAtMs = payload.atMs;
       gameNotice.stuck = stuck;
       return entered ? 'Game Runtime 报告卡住' : undefined;
     }
-    if (!isMainHealth.Check(payload)) return;
+    if (isMainHealthV2.Check(payload)) {
+      const pending = payload.pendingActionOutcome;
+      if (pending && pending.attemptId !== gameNotice.pendingAttemptId) {
+        gameNotice.pendingAttemptId = pending.attemptId;
+        gameNotice.stuck = false;
+        return `物理动作结果未决（${pending.attemptId}），等待操作员核对结案`;
+      }
+    } else if (!isMainHealth.Check(payload)) return;
     const rejection = payload.lastRejection;
     if (!rejection || rejection.atMs <= gameNotice.rejectedAtMs) return;
     gameNotice.rejectedAtMs = rejection.atMs;
@@ -441,6 +471,12 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
     gameReturn() {
       return deps.game?.returnControl() ?? gameUnavailable;
     },
+    async gameTaskOpen(params) {
+      return deps.game?.openTask?.(params) ?? gameUnavailable;
+    },
+    async gameOutcomeResolve(params) {
+      return deps.game?.resolveOutcome?.(params) ?? gameUnavailable;
+    },
     veto({ key }) {
       return { ok: true, vetoed: settled(key, () => core.veto(key)) };
     },
@@ -503,6 +539,10 @@ const preflightParams = checked<OperatorPreflightParams>(OperatorPreflightParams
 const forgetParams = checked<OperatorForgetParams>(OperatorForgetParams);
 const resolveParams = checked<OperatorResolveParams>(OperatorResolveParams);
 const gameControlParams = checked(OperatorGameControlParams);
+const gameTaskOpenParams = checked<OperatorGameTaskOpenParams>(OperatorGameTaskOpenParams);
+const gameOutcomeResolveParams = checked<OperatorGameOutcomeResolveParams>(
+  OperatorGameOutcomeResolveParams,
+);
 const isEmergencyParams = Compile(OperatorEmergencyParams);
 
 /**
@@ -524,6 +564,9 @@ export function operatorActions(api: OperatorApi): Record<Method, (params: unkno
       gameControlParams(params);
       return api.gameReturn();
     },
+    [OperatorMethod.GameTaskOpen]: (params) => api.gameTaskOpen(gameTaskOpenParams(params)),
+    [OperatorMethod.GameOutcomeResolve]: (params) =>
+      api.gameOutcomeResolve(gameOutcomeResolveParams(params)),
     [OperatorMethod.Veto]: (params) => api.veto(vetoParams(params)),
     [OperatorMethod.Release]: (params) => api.release(releaseParams(params)),
     [OperatorMethod.Preflight]: (params) => api.preflight(preflightParams(params)),
@@ -558,6 +601,8 @@ export function consoleRoutes(api: OperatorApi): Record<string, ConsoleRoute> {
     '/api/emergency-stop': post(OperatorMethod.EmergencyStop),
     '/api/game-takeover': post(OperatorMethod.GameTakeover),
     '/api/game-return': post(OperatorMethod.GameReturn),
+    '/api/game-task-open': post(OperatorMethod.GameTaskOpen),
+    '/api/game-outcome-resolve': post(OperatorMethod.GameOutcomeResolve),
     '/api/veto': post(OperatorMethod.Veto),
     '/api/release': post(OperatorMethod.Release),
     '/api/preflight': post(OperatorMethod.Preflight),

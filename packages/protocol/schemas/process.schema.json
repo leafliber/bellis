@@ -158,6 +158,182 @@
       "properties": {},
       "additionalProperties": false
     },
+    "OperatorGameOutcomeResolveParams": {
+      "type": "object",
+      "required": [
+        "controlTargetId",
+        "sessionId",
+        "attemptId",
+        "resolution",
+        "reviewed"
+      ],
+      "properties": {
+        "controlTargetId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "attemptId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "resolution": {
+          "enum": [
+            "confirmed_executed",
+            "confirmed_not_executed",
+            "reconciled_unknown"
+          ]
+        },
+        "reviewed": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorGameTaskOpenParams": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "controlTargetId",
+            "objective",
+            "durationMs",
+            "overallCompletion"
+          ],
+          "properties": {
+            "controlTargetId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "objective": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 600
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709
+            },
+            "overallCompletion": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "signature"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "signature"
+                          ]
+                        },
+                        "signature": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "screenType"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "screen"
+                          ]
+                        },
+                        "screenType": {
+                          "enum": [
+                            "对话",
+                            "选择",
+                            "计时选择",
+                            "菜单",
+                            "设置",
+                            "存读档",
+                            "商店",
+                            "加载",
+                            "过场",
+                            "即时玩法",
+                            "地图",
+                            "背包",
+                            "坏结局",
+                            "卡住",
+                            "未知"
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "text",
+                        "roi"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "text-appeared",
+                            "text-disappeared"
+                          ]
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "roi": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "controlTargetId",
+            "retryTaskId"
+          ],
+          "properties": {
+            "controlTargetId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "retryTaskId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "OperatorVetoParams": {
       "type": "object",
       "properties": {
