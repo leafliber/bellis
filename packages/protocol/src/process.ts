@@ -1,5 +1,11 @@
 import Type, { type Static } from 'typebox';
 import { ChannelBytes32 } from './channel.ts';
+import {
+  GAME_BRIDGE_MAX_MONOTONIC_MS,
+  GameActionResolveOutcomeParams,
+  GameControlTargetId,
+  GameTaskOpenParams,
+} from './game-bridge.ts';
 
 /**
  * 进程启动与连接信息分发（R-06、R-23）。
@@ -109,6 +115,8 @@ export const OperatorMethod = {
   EmergencyStop: 'operator.emergency_stop',
   GameTakeover: 'operator.game_takeover',
   GameReturn: 'operator.game_return',
+  GameTaskOpen: 'operator.game_task_open',
+  GameOutcomeResolve: 'operator.game_outcome_resolve',
   /** M1 中否决等待放行的句子。 */
   Veto: 'operator.veto',
   /** M1 中放行等待中的句子（逐句放行，或提前结束固定延迟）。 */
@@ -146,6 +154,36 @@ export type OperatorEmergencyParams = Static<typeof OperatorEmergencyParams>;
 
 /** 游戏接管和交还只操作当前游戏桥，均不接受参数。 */
 export const OperatorGameControlParams = Type.Object({}, closed);
+
+export const OperatorGameTaskOpenParams = Type.Union([
+  Type.Object(
+    {
+      controlTargetId: GameControlTargetId,
+      objective: GameTaskOpenParams.properties.objective,
+      durationMs: Type.Integer({
+        minimum: 1,
+        maximum: GAME_BRIDGE_MAX_MONOTONIC_MS,
+      }),
+      overallCompletion: GameTaskOpenParams.properties.overallCompletion,
+    },
+    closed,
+  ),
+  Type.Object(
+    { controlTargetId: GameControlTargetId, retryTaskId: GameTaskOpenParams.properties.taskId },
+    closed,
+  ),
+]);
+export type OperatorGameTaskOpenParams = Static<typeof OperatorGameTaskOpenParams>;
+
+export const OperatorGameOutcomeResolveParams = Type.Object(
+  {
+    controlTargetId: GameControlTargetId,
+    ...GameActionResolveOutcomeParams.properties,
+    reviewed: Type.Literal(true),
+  },
+  closed,
+);
+export type OperatorGameOutcomeResolveParams = Static<typeof OperatorGameOutcomeResolveParams>;
 
 /** 否决指定的句子（`发言编号#句序号`）；不给 key 时否决全部等待中的句子。 */
 export const OperatorVetoParams = Type.Object(

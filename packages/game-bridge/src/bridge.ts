@@ -1,12 +1,15 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { ChannelError, type Connection, RpcError, RpcPeer } from '@bellis/channel';
-import type { Clock, PluginContext, TimerHandle } from '@bellis/kernel';
+import { type Clock, type PluginContext, type TimerHandle, withDeadline } from '@bellis/kernel';
 import {
   checkGameBridgeMessage,
   checkGameBridgeParams,
   checkGameBridgeResult,
   GAME_BRIDGE_MAJOR,
+  GAME_BRIDGE_SEMANTIC_V2,
+  type GameActionResolveOutcomeParams,
+  type GameBridgeMajor,
   type GameCoreDescription,
   type GameCoreHealth,
   type GameDecisionPointOpened,
@@ -14,11 +17,16 @@ import {
   type GameGoalSubmitParams,
   type GameInputReleased,
   type GameMainDescription,
+  type GameMainDescriptionV2,
   type GameMainHealth,
+  type GameMainHealthV2,
   type GamePacingHoldParams,
   type GamePacingReleaseParams,
   type GameSituationObserved,
+  type GameTaskOpenParams,
   GameBridgeMethod as Method,
+  type OperatorGameOutcomeResolveParams,
+  type OperatorGameTaskOpenParams,
   GameBridgeRole as Role,
   RpcCancel,
   RpcErrorCode,
@@ -28,10 +36,24 @@ import {
   RpcSuccess,
   readGameBridgeMajor,
 } from '@bellis/protocol';
-import { isRealOutput, type Lease, type SafetyFacade } from '@bellis/safety';
-import { IntentOutcomeUnknown, type IntentSource } from '@bellis/store';
+import {
+  GAME_RESOLVE_OUTCOME,
+  GAME_TASK_OPEN,
+  isRealOutput,
+  type Lease,
+  type SafetyFacade,
+} from '@bellis/safety';
+import { IntentOutcomeUnknown, type IntentSource, type Outcome } from '@bellis/store';
 import { useTracer } from '@bellis/telemetry';
 import { Compile } from 'typebox/compile';
+import {
+  type AuthoritySlot,
+  type AuthorityTask,
+  authoritySlotKey,
+  GameAuthorityFact,
+  gameAuthorityLedger,
+  sameAttempt,
+} from './authority.ts';
 import type { GameControlResult, GameRuntimeHost } from './host.ts';
 import {
   GAME_GOAL,
@@ -52,6 +74,7 @@ import { GameTelemetry } from './telemetry.ts';
 export interface GameBridgeConfig {
   adapterId: string;
   adapterVersion: string;
+  controlTargetId?: string;
   healthTimeoutMs?: number;
 }
 
@@ -74,10 +97,11 @@ const refusedBeforeExecution = new Set<number>([
   RpcErrorCode.ServerBusy,
 ]);
 
-type Health = GameMainHealth | GameCoreHealth;
-type Description = GameMainDescription | GameCoreDescription;
+type Health = GameMainHealth | GameMainHealthV2 | GameCoreHealth;
+type Description = GameMainDescription | GameMainDescriptionV2 | GameCoreDescription;
 interface Link {
   role: Role;
+  major: GameBridgeMajor;
   rpc: RpcPeer;
   closed: AbortController;
   description?: Description;
@@ -85,6 +109,7 @@ interface Link {
   health?: Health;
   earlyHealth?: Health;
   voice?: Pick<GameSituationObserved, 'atMs' | 'voiceActivity'>;
+  release?: GameInputReleased;
   lastSent: number;
 }
 
@@ -107,11 +132,25 @@ interface Stopping {
   token: number;
   atMs: number;
   settled: PromiseWithResolvers<boolean>;
+  probe?: true;
 }
 
-type Availability =
-  | { ready: false; reason: string }
-  | { ready: true; main: Link; core: Link; run: string; healthFor: number };
+type Waiting = { ready: false; reason: string };
+type Connected = {
+  ready: true;
+  main: Link;
+  core: Link;
+  run: string;
+  healthFor: number;
+  health: GameMainHealth | GameMainHealthV2;
+  realtime: GameCoreHealth;
+};
+type Availability = Waiting | (Connected & { task?: GameTaskOpenParams });
+
+type AuthorityCommand =
+  | { method: typeof Method.TaskOpen; payload: GameTaskOpenParams }
+  | { method: typeof Method.ActionResolveOutcome; payload: GameActionResolveOutcomeParams };
+type AuthorityConnection = Connected & { slot: AuthoritySlot; health: GameMainHealthV2 };
 
 /** 单个插件实例拥有两个会话槽位、在途命令和输入许可。 */
 export class GameBridge implements Game {
@@ -121,6 +160,7 @@ export class GameBridge implements Game {
   readonly #safety: SafetyFacade;
   readonly #telemetry: GameTelemetry;
   readonly #target: string;
+  readonly #legacyTarget: string;
   readonly #links = new Map<Role, Link>();
   readonly #listeners = new Set<(fact: GameFact) => void>();
   readonly #seenActions = new Set<string>();
@@ -132,6 +172,7 @@ export class GameBridge implements Game {
   #release: Stopping | undefined;
   #timer: TimerHandle | undefined;
   #command: AbortController | undefined;
+  #authorityCommand: AbortController | undefined;
   #nextHold = 0;
   #disposed = false;
 
@@ -146,8 +187,11 @@ export class GameBridge implements Game {
     this.#clock = clock;
     this.#safety = safety;
     this.#telemetry = new GameTelemetry(useTracer(ctx, 'game-bridge'), clock, port.wireNowMs);
-    this.#target = `game:${ctx.config.adapterId}`;
-    this.#manual = safety.view(gameControlLedger)[this.#target];
+    this.#legacyTarget = `game:${ctx.config.adapterId}`;
+    this.#target = ctx.config.controlTargetId
+      ? `game:${authoritySlotKey(ctx.config.controlTargetId)}`
+      : this.#legacyTarget;
+    this.#manual = safety.view(gameControlLedger)[this.#legacyTarget];
   }
 
   start(): void {
@@ -171,12 +215,14 @@ export class GameBridge implements Game {
     this.#ctx.register(
       this.#safety.onControl((event) => {
         if (event.kind === 'stop') {
+          this.#authorityCommand?.abort();
           this.#stopInput(event.reason);
           this.#telemetry.reset('stopped');
         } else if (event.kind === 'mode') this.#recheck();
       }),
     );
     const onQuiesce = () => {
+      this.#authorityCommand?.abort();
       this.#stopInput('游戏桥静止中');
       this.#telemetry.reset('unloaded');
     };
@@ -191,6 +237,10 @@ export class GameBridge implements Game {
     }
     const link: Link = {
       role,
+      major:
+        role === Role.Main && this.#ctx.config.controlTargetId !== undefined
+          ? GAME_BRIDGE_SEMANTIC_V2
+          : GAME_BRIDGE_MAJOR,
       lastSent: 0,
       closed: new AbortController(),
       rpc: new RpcPeer(connection, {
@@ -198,11 +248,11 @@ export class GameBridge implements Game {
         acceptIncoming: (message) => {
           if (isSuccess.Check(message) || isFailure.Check(message)) return true;
           if (!isNotification.Check(message)) return false;
-          // 握手正文核对前只暂存一条已按 v1 核对的健康消息。
+          // 握手正文核对前只暂存一条已按所请求版本核对的健康消息。
           return (
             !link.description ||
             message.method === RpcCancel ||
-            checkGameBridgeMessage(role, 'runtime', message)
+            checkGameBridgeMessage(role, 'runtime', message, link.major)
           );
         },
       }),
@@ -212,6 +262,7 @@ export class GameBridge implements Game {
       link.closed.abort();
       if (this.#links.get(role) !== link) return;
       this.#links.delete(role);
+      this.#authorityCommand?.abort();
       if (role === Role.Main) this.#decision = undefined;
       this.#recheck();
       if (this.#release?.link === link) {
@@ -236,14 +287,14 @@ export class GameBridge implements Game {
   async #describe(link: Link): Promise<void> {
     const requestedAt = this.#port.wireNowMs();
     try {
-      const reply = await link.rpc.request(Method.Describe, { major: GAME_BRIDGE_MAJOR });
+      const reply = await link.rpc.request(Method.Describe, { major: link.major });
       if (!this.#active(link)) return;
       const major = readGameBridgeMajor(reply);
       if (major === undefined) throw new Error('握手缺少合法的主版本');
-      if (major !== GAME_BRIDGE_MAJOR) {
-        throw new Error(`主版本不兼容（Bellis ${GAME_BRIDGE_MAJOR}，Game Runtime ${major}）`);
+      if (major !== link.major) {
+        throw new Error(`主版本不兼容（Bellis ${link.major}，Game Runtime ${major}）`);
       }
-      if (!checkGameBridgeResult(link.role, Method.Describe, reply)) {
+      if (!checkGameBridgeResult(link.role, Method.Describe, reply, major)) {
         throw new Error('握手正文无效');
       }
       const description = reply as Description;
@@ -258,6 +309,29 @@ export class GameBridge implements Game {
           adapter.version !== this.#ctx.config.adapterVersion
         ) {
           throw new Error('Game Runtime 的适配包编号或版本与 profile 不符');
+        }
+        if (
+          major === GAME_BRIDGE_SEMANTIC_V2 &&
+          (description as GameMainDescriptionV2).controlTargetId !==
+            this.#ctx.config.controlTargetId
+        ) {
+          throw new Error('Game Runtime 的被控槽位与 profile 不符');
+        }
+        if (major === GAME_BRIDGE_SEMANTIC_V2) {
+          const { controlTargetId } = description as GameMainDescriptionV2;
+          const slot = this.#authoritySlot(controlTargetId);
+          if (slot && slot.adapterId !== adapter.id) {
+            throw new Error('被控槽位的持久适配包绑定不符');
+          }
+          if (
+            !slot &&
+            !this.#safety.record(GameAuthorityFact.Bound, {
+              controlTargetId,
+              adapterId: adapter.id,
+            })
+          ) {
+            throw new Error('无法持久记录被控槽位绑定');
+          }
         }
       }
       link.description = description;
@@ -290,7 +364,7 @@ export class GameBridge implements Game {
       : undefined;
   }
 
-  #availability(): Availability {
+  #connected(): Waiting | Connected {
     const main = this.#links.get(Role.Main);
     const core = this.#links.get(Role.Core);
     const reason = main?.reason ?? core?.reason;
@@ -300,11 +374,7 @@ export class GameBridge implements Game {
     }
     const run = this.#pairedRun();
     if (run === undefined) return { ready: false, reason: '两条连接的 Runtime 会话不一致' };
-    if (this.#safety.isIsolated(this.#target)) {
-      return { ready: false, reason: '游戏目标已隔离或状态存储不可用' };
-    }
-    if (this.#release) return { ready: false, reason: '等待实时核核验输入释放' };
-    const health = main.health as GameMainHealth | undefined;
+    const health = main.health as GameMainHealth | GameMainHealthV2 | undefined;
     const realtime = core.health as GameCoreHealth | undefined;
     if (!health || !realtime) return { ready: false, reason: '等待两条连接上报健康' };
     const healthFor =
@@ -312,21 +382,88 @@ export class GameBridge implements Game {
       (this.#ctx.config.healthTimeoutMs ?? DEFAULT_HEALTH_MS) -
       this.#port.wireNowMs();
     if (healthFor <= 0) return { ready: false, reason: 'Game Runtime 健康上报已过期' };
-    if (!health.ready || health.riskLimitExceeded || realtime.leaseState === 'source_lost') {
-      return { ready: false, reason: 'Game Runtime 尚未就绪或报告了安全风险' };
-    }
+    return { ready: true, main, core, run, healthFor, health, realtime };
+  }
+
+  #authoritySlot(id: string): AuthoritySlot | undefined {
+    return this.#safety.view(gameAuthorityLedger)[authoritySlotKey(id)];
+  }
+
+  #authorityTaskIsCurrent(task: AuthorityTask, run: string): boolean {
+    return (
+      !task.ended &&
+      task.runtimeId === run &&
+      task.hostSessionId === this.#port.sessionId &&
+      task.request.expiresAtMs > this.wireNowMs()
+    );
+  }
+
+  #isolated(): boolean {
+    return (
+      this.#safety.isIsolated(this.#target) ||
+      (this.#target !== this.#legacyTarget && this.#safety.isIsolated(this.#legacyTarget))
+    );
+  }
+
+  #prerequisitesMet({ main, health }: Connected): boolean {
     const declared = (main.description as GameMainDescription).prerequisites;
-    if (
-      declared.length !== health.prerequisites.length ||
-      !declared.every((item) =>
+    return (
+      declared.length === health.prerequisites.length &&
+      declared.every((item) =>
         health.prerequisites.some(
           ({ id, text, confirmed }) => id === item.id && text === item.text && confirmed,
         ),
       )
+    );
+  }
+
+  #availability(): Availability {
+    const connected = this.#connected();
+    if (!connected.ready) return connected;
+    const { run, health, realtime } = connected;
+    if (this.#authorityCommand) return { ready: false, reason: '等待游戏授权命令完成' };
+    if (this.#release) return { ready: false, reason: '等待实时核核验输入释放' };
+    const controlTargetId = this.#ctx.config.controlTargetId;
+    let task: GameTaskOpenParams | undefined;
+    if (controlTargetId) {
+      const slot = this.#authoritySlot(controlTargetId);
+      if (!slot || !('pendingActionOutcome' in health)) {
+        return { ready: false, reason: '未核对被控槽位的完整持久回读' };
+      }
+      if (slot.pending.length > 0 || health.pendingActionOutcome) {
+        return { ready: false, reason: '物理动作结果未决，等待操作员结案' };
+      }
+      if (
+        !this.#ctx.permissions.has(GAME_TASK_OPEN) ||
+        !this.#ctx.permissions.has(GAME_RESOLVE_OUTCOME)
+      ) {
+        return { ready: false, reason: '语义 v2 需要 profile 授予开任务与动作结案能力' };
+      }
+      if (
+        !slot.task?.accepted ||
+        !this.#authorityTaskIsCurrent(slot.task, run) ||
+        health.activeTaskId !== slot.task.request.taskId
+      ) {
+        return { ready: false, reason: '等待操作员授权任务和 Runtime 回读当前任务' };
+      }
+      task = slot.task.request;
+    } else if (
+      Object.values(this.#safety.view(gameAuthorityLedger)).some(
+        (slot) => slot.adapterId === this.#ctx.config.adapterId && slot.pending.length > 0,
+      )
     ) {
+      return { ready: false, reason: '该适配包有关联槽位存在未决动作，须恢复语义 v2 回读' };
+    }
+    if (this.#isolated()) {
+      return { ready: false, reason: '游戏目标已隔离或状态存储不可用' };
+    }
+    if (!health.ready || health.riskLimitExceeded || realtime.leaseState === 'source_lost') {
+      return { ready: false, reason: 'Game Runtime 尚未就绪或报告了安全风险' };
+    }
+    if (!this.#prerequisitesMet(connected)) {
       return { ready: false, reason: '操作员前置条件未全部确认或声明不一致' };
     }
-    return { ready: true, main, core, run, healthFor };
+    return { ...connected, ...(task ? { task } : {}) };
   }
 
   status(): GameStatus {
@@ -340,11 +477,36 @@ export class GameBridge implements Game {
       coreConnected: core !== undefined && this.#active(core),
       runtimeId: this.#pairedRun() ?? null,
       adapter: (main?.description as GameMainDescription | undefined)?.adapter ?? null,
-      health: (main?.health as GameMainHealth | undefined) ?? null,
+      health: (main?.health as GameMainHealth | GameMainHealthV2 | undefined) ?? null,
       realtimeHealth: (core?.health as GameCoreHealth | undefined) ?? null,
       decision: this.#decision?.latest ?? null,
       inputPermitted: availability.ready && !!this.#permit && this.#usable(this.#permit),
     };
+    const controlTargetId = this.#ctx.config.controlTargetId;
+    if (controlTargetId) {
+      const slot = this.#authoritySlot(controlTargetId);
+      const task = slot?.task;
+      const health = status.health;
+      status.authority = {
+        controlTargetId,
+        pending: slot?.pending.map(({ outcome }) => outcome) ?? [],
+        activeTaskId: health && 'activeTaskId' in health ? health.activeTaskId : null,
+        task: task
+          ? {
+              taskId: task.request.taskId,
+              expiresAtMs: task.request.expiresAtMs,
+              state: this.#authorityTaskIsCurrent(
+                task,
+                main?.description?.runtimeId ?? task.runtimeId,
+              )
+                ? task.accepted
+                  ? 'accepted'
+                  : 'opening'
+                : 'ended',
+            }
+          : null,
+      };
+    }
     return structuredClone(status);
   }
 
@@ -442,7 +604,7 @@ export class GameBridge implements Game {
     if (this.#active(main)) {
       try {
         const reply = await main.rpc.request(method, params);
-        ok = checkGameBridgeResult(Role.Main, method, reply);
+        ok = checkGameBridgeResult(Role.Main, method, reply, main.major);
       } catch {
         // 未知结果由 Runtime 的绝对到期时间兜底。
       }
@@ -486,10 +648,18 @@ export class GameBridge implements Game {
   }
 
   #received(link: Link, method: GameEvent['method'], params: RpcParams): void {
-    if (!this.#active(link) || !checkGameBridgeParams(link.role, 'runtime', method, params)) return;
+    if (
+      !this.#active(link) ||
+      !checkGameBridgeParams(link.role, 'runtime', method, params, link.major)
+    )
+      return;
     if (!link.description) {
-      if (method === Method.HealthReported && !link.reason)
-        link.earlyHealth = params as unknown as Health;
+      if (method === Method.HealthReported && !link.reason) {
+        const previous = link.earlyHealth;
+        if (!previous || !('pendingActionOutcome' in previous) || !previous.pendingActionOutcome) {
+          link.earlyHealth = params as unknown as Health;
+        }
+      }
       return;
     }
     const payload = params as unknown as GameEvent['payload'];
@@ -528,6 +698,7 @@ export class GameBridge implements Game {
       }
     } else if (event.method === Method.InputReleased) {
       if (event.payload.token !== null && event.payload.token !== link.lastSent) return;
+      if (link.release && event.payload.atMs < link.release.atMs) return;
       this.#handleRelease(link, event.payload);
     }
     const actionId = event.method === Method.ActionCommitted ? event.payload.actionId : undefined;
@@ -545,20 +716,38 @@ export class GameBridge implements Game {
     }
 
     const runtimeId = link.description.runtimeId;
-    const committed = this.#safety.record(method, { runtimeId, role: link.role, payload });
+    const committed = this.#safety.record(method, {
+      runtimeId,
+      role: link.role,
+      payload,
+      ...(link.major === GAME_BRIDGE_SEMANTIC_V2 && method === Method.HealthReported
+        ? { controlTargetId: this.#ctx.config.controlTargetId }
+        : {}),
+    });
     if (!committed) {
       this.#stopInput('游戏事实无法持久化');
       return;
     }
     if (actionId !== undefined) this.#seenActions.add(actionId);
+    if (event.method === Method.InputReleased) {
+      link.release = event.payload;
+    }
     if (event.method === Method.HealthReported) {
+      const previous = link.health;
       link.health = event.payload;
       const point = this.#decision?.latest;
+      const taskChanged =
+        'activeTaskId' in event.payload &&
+        (event.payload.pendingActionOutcome !== null ||
+          (previous &&
+            'activeTaskId' in previous &&
+            previous.activeTaskId !== event.payload.activeTaskId));
       if (
         link.role === Role.Main &&
         point &&
-        event.payload.atMs > point.atMs &&
-        (event.payload as GameMainHealth).decisionPointId !== point.decisionPointId
+        (taskChanged ||
+          (event.payload.atMs > point.atMs &&
+            (event.payload as GameMainHealth).decisionPointId !== point.decisionPointId))
       ) {
         this.#decision = undefined;
         this.#telemetry.withdrew();
@@ -628,7 +817,14 @@ export class GameBridge implements Game {
     const next = permit.pending ? permit.lease.expiresAt : permit.renewAt;
     this.#timer = this.#clock.setTimeout(
       () => this.#recheck(),
-      Math.max(1, Math.min(availability.healthFor, next - this.#clock.now())),
+      Math.max(
+        1,
+        Math.min(
+          availability.healthFor,
+          next - this.#clock.now(),
+          (availability.task?.expiresAtMs ?? Infinity) - this.wireNowMs(),
+        ),
+      ),
     );
   }
 
@@ -668,7 +864,10 @@ export class GameBridge implements Game {
     permit.pending = true;
     this.#permit = permit;
     const wireNow = this.#port.wireNowMs();
-    const expiresAtMs = wireNow + Math.floor(lease.expiresAt - this.#clock.now());
+    const expiresAtMs = Math.min(
+      wireNow + Math.floor(lease.expiresAt - this.#clock.now()),
+      current.task?.expiresAtMs ?? Infinity,
+    );
     const params = { token: lease.token, expiresAtMs };
     if (
       !this.#active(link) ||
@@ -739,7 +938,8 @@ export class GameBridge implements Game {
       pending &&
       pending.link === link &&
       release.atMs >= pending.atMs &&
-      release.token === pending.token;
+      release.token === (pending.token || null) &&
+      (!pending.probe || release.reason === 'lease_revoked');
     if (completes && release.verification === 'verified') {
       pending.settled.resolve(true);
       this.#release = undefined;
@@ -758,7 +958,7 @@ export class GameBridge implements Game {
     if (this.#manual) return;
     this.#manual = reason;
     this.#stopInput(reason);
-    this.#safety.record(GameControlFact.Taken, { target: this.#target, reason });
+    this.#safety.record(GameControlFact.Taken, { target: this.#legacyTarget, reason });
     this.#telemetry.reset('stopped');
   }
 
@@ -766,12 +966,299 @@ export class GameBridge implements Game {
     const availability = this.#availability();
     if (!this.#manual) return { ok: false, reason: '游戏没有处于人工接管状态' };
     if (!availability.ready) return { ok: false, reason: availability.reason };
-    if (!this.#safety.record(GameControlFact.Returned, { target: this.#target })) {
+    if (!this.#safety.record(GameControlFact.Returned, { target: this.#legacyTarget })) {
       return { ok: false, reason: '无法记录操作员交还控制' };
     }
     this.#manual = undefined;
     this.#recheck();
     return { ok: true };
+  }
+
+  #authorityConnection(controlTargetId: string): Waiting | AuthorityConnection {
+    if (controlTargetId !== this.#ctx.config.controlTargetId) {
+      return { ready: false, reason: '操作的槽位与当前可信配置不符' };
+    }
+    const connected = this.#connected();
+    if (!connected.ready) return connected;
+    const slot = this.#authoritySlot(controlTargetId);
+    const { health, realtime } = connected;
+    if (!slot || !('pendingActionOutcome' in health)) {
+      return { ready: false, reason: '尚未核对槽位的完整持久回读' };
+    }
+    if (
+      this.#permit ||
+      this.#command ||
+      realtime.leaseState === 'valid' ||
+      realtime.leaseState === 'source_lost'
+    ) {
+      return { ready: false, reason: '等待实时核停止游戏输入并保持控制连接' };
+    }
+    return { ...connected, slot, health };
+  }
+
+  openTask(input: OperatorGameTaskOpenParams): Promise<GameControlResult> {
+    const { controlTargetId } = input;
+    const connected = this.#authorityConnection(controlTargetId);
+    if (!connected.ready) return Promise.resolve({ ok: false, reason: connected.reason });
+    const task = connected.slot.task;
+    let payload: GameTaskOpenParams;
+    if ('retryTaskId' in input) {
+      if (!task || task.accepted || task.request.taskId !== input.retryTaskId) {
+        return Promise.resolve({ ok: false, reason: '该编号没有待回读的开任务请求' });
+      }
+      payload = task.request;
+    } else {
+      payload = {
+        taskId: randomUUID(),
+        objective: input.objective,
+        expiresAtMs: this.wireNowMs() + input.durationMs,
+        overallCompletion: input.overallCompletion,
+      };
+    }
+    return this.#executeAuthority(controlTargetId, connected, { method: Method.TaskOpen, payload });
+  }
+
+  resolveOutcome(input: OperatorGameOutcomeResolveParams): Promise<GameControlResult> {
+    const { controlTargetId, reviewed, ...payload } = input;
+    if (reviewed !== true) {
+      return Promise.resolve({ ok: false, reason: '结案前须核对外部状态和输入释放' });
+    }
+    const connected = this.#authorityConnection(controlTargetId);
+    if (!connected.ready) return Promise.resolve({ ok: false, reason: connected.reason });
+    return this.#executeAuthority(controlTargetId, connected, {
+      method: Method.ActionResolveOutcome,
+      payload,
+    });
+  }
+
+  #authorityBlocker(
+    connection: AuthorityConnection,
+    command: AuthorityCommand,
+  ): string | undefined {
+    const { slot, health, run } = connection;
+    const current = health.pendingActionOutcome;
+    if (command.method === Method.ActionResolveOutcome) {
+      const { attemptId, sessionId, resolution } = command.payload;
+      const pending = slot.pending.find(({ outcome }) => outcome.attemptId === attemptId);
+      if (!pending || pending.conflict || pending.outcome.sessionId !== sessionId) {
+        return '没有可核对的对应物理尝试';
+      }
+      if (pending.resolution && pending.resolution.request.resolution !== resolution) {
+        return '原结案结果待回读，只能精确重送原参数';
+      }
+      if (current ? !sameAttempt(current, pending.outcome) : !pending.resolution) {
+        return '当前未决回读与原尝试不一致';
+      }
+      return undefined;
+    }
+
+    if (slot.pending.length || current || this.#isolated()) {
+      return '游戏目标存在未决状态或状态存储不可用';
+    }
+    if (health.riskLimitExceeded || !this.#prerequisitesMet(connection)) {
+      return '游戏未满足风险或操作员前置条件';
+    }
+    const task = slot.task;
+    if (command.payload.expiresAtMs <= this.wireNowMs()) return '授权任务已到期';
+    if (task?.request.taskId === command.payload.taskId) {
+      if (
+        task.accepted ||
+        !this.#authorityTaskIsCurrent(task, run) ||
+        (health.activeTaskId !== null && health.activeTaskId !== task.request.taskId)
+      )
+        return '无法在当前会话回读原开任务请求';
+      return undefined;
+    }
+    if (
+      health.activeTaskId !== null ||
+      (task && !task.ended && task.runtimeId === run && task.request.expiresAtMs > this.wireNowMs())
+    )
+      return '旧任务尚未终止或接纳结果待回读';
+    return undefined;
+  }
+
+  async #verifyRelease(link: Link, signal: AbortSignal): Promise<Stopping> {
+    const probe: Stopping = {
+      link,
+      token: link.lastSent,
+      atMs: this.wireNowMs(),
+      probe: true,
+      settled: Promise.withResolvers<boolean>(),
+    };
+    this.#release?.settled.resolve(false);
+    this.#release = probe;
+    try {
+      const [ack, verified] = await withDeadline(
+        this.#clock,
+        Promise.all([
+          link.rpc.request(
+            Method.InputStop,
+            {
+              throughToken: probe.token,
+              reason: '操作员核对游戏授权前释放输入',
+            },
+            { signal },
+          ),
+          probe.settled.promise,
+        ]),
+        RPC_MS,
+        '实时核输入释放核验',
+      );
+      if (!verified || !checkGameBridgeResult(Role.Core, Method.InputStop, ack)) {
+        throw new Error('实时核未核验输入已释放');
+      }
+      return probe;
+    } finally {
+      if (this.#release === probe) this.#release = undefined;
+    }
+  }
+
+  #settleEarlierDispatches(
+    method: AuthorityCommand['method'],
+    ids: readonly number[],
+    outcome: Outcome,
+  ): void {
+    if (!ids.length) return;
+    for (const intent of this.#safety.unresolved(method)) {
+      if (ids.includes(intent.id)) this.#safety.reconcile(intent, outcome);
+    }
+  }
+
+  async #executeAuthority(
+    controlTargetId: string,
+    initial: AuthorityConnection,
+    command: AuthorityCommand,
+  ): Promise<GameControlResult> {
+    if (this.#authorityCommand) return { ok: false, reason: '已有在途游戏授权命令' };
+    const { method, payload } = command;
+    if (!checkGameBridgeParams(Role.Main, 'bellis', method, payload, GAME_BRIDGE_SEMANTIC_V2)) {
+      return { ok: false, reason: '游戏授权命令不符合契约' };
+    }
+    const blocker = this.#authorityBlocker(initial, command);
+    if (blocker) return { ok: false, reason: blocker };
+
+    const controller = new AbortController();
+    this.#authorityCommand = controller;
+    const { signal } = controller;
+    const opening = method === Method.TaskOpen;
+    // 单次发报单独隔离，物理隔离保存在槽位上。只有精确回读可获得另一份发报授权。
+    const dispatch = randomUUID();
+    const recheck = () => {
+      const current = this.#authorityConnection(controlTargetId);
+      if (
+        signal.aborted ||
+        this.#ctx.signal.aborted ||
+        !current.ready ||
+        current.main !== initial.main ||
+        current.core !== initial.core
+      )
+        throw new Error('发送前游戏授权连接已失效');
+      const reason = this.#authorityBlocker(current, command);
+      if (reason) throw new Error(reason);
+      return current;
+    };
+    try {
+      const authorization = await this.#safety.authorize({
+        key: `game-authority:${dispatch}`,
+        type: method,
+        target: `game:authority:${controlTargetId}/${dispatch}`,
+        payload,
+        source: { origin: 'operator', inputs: [], untrusted: false },
+        capabilities: [opening ? GAME_TASK_OPEN : GAME_RESOLVE_OUTCOME],
+        timeSensitive: false,
+      });
+      if (!authorization.allowed) return { ok: false, reason: authorization.reason };
+      if (authorization.duplicate) return { ok: false, reason: '游戏授权发报编号已使用' };
+      const { intent: authorizedIntent } = authorization;
+      const intent = await this.#safety.execute(authorizedIntent, payload, async (request) => {
+        const { core } = recheck();
+        const release = await this.#verifyRelease(core, signal);
+        const current = recheck();
+        if (
+          core.release?.verification !== 'verified' ||
+          core.release.reason !== 'lease_revoked' ||
+          core.release.token !== (release.token || null) ||
+          core.release.atMs < release.atMs
+        )
+          throw new Error('发送前的输入释放核验失效');
+
+        const { slot, run, main } = current;
+        let previous: readonly number[] = [];
+        if (command.method === Method.TaskOpen) {
+          const task = slot.task;
+          if (task?.request.taskId === command.payload.taskId) {
+            previous = task.dispatches;
+          } else if (task?.dispatches.length) {
+            this.#settleEarlierDispatches(method, task.dispatches, {
+              ok: false,
+              error: '旧任务已终止，接纳回执未知',
+            });
+            if (!this.#safety.record(GameAuthorityFact.TaskRetired, { controlTargetId })) {
+              throw new Error('无法持久记录旧任务已终止');
+            }
+          }
+        } else {
+          previous =
+            slot.pending.find(({ outcome }) => outcome.attemptId === command.payload.attemptId)
+              ?.resolution?.dispatches ?? [];
+        }
+        if (
+          !this.#safety.record(
+            opening ? GameAuthorityFact.TaskDispatched : GameAuthorityFact.OutcomeDispatched,
+            {
+              controlTargetId,
+              request,
+              intentId: authorizedIntent.id,
+              runtimeId: run,
+              hostSessionId: this.#port.sessionId,
+            },
+          )
+        )
+          throw new Error('无法持久记录本次游戏授权发报');
+
+        let reply: unknown;
+        try {
+          reply = await main.rpc.request(method, request, { signal });
+        } catch (error) {
+          if (error instanceof RpcError && refusedBeforeExecution.has(error.code)) {
+            throw new Error(`Game Runtime 明确拒绝授权命令（${error.code}）`);
+          }
+          throw new IntentOutcomeUnknown('游戏授权回执未知，等待原请求回读');
+        }
+        const result = reply as Record<string, unknown>;
+        if (
+          !this.#active(main) ||
+          signal.aborted ||
+          !checkGameBridgeResult(Role.Main, method, reply, GAME_BRIDGE_SEMANTIC_V2) ||
+          (command.method === Method.TaskOpen
+            ? result.taskId !== command.payload.taskId
+            : result.attemptId !== command.payload.attemptId ||
+              result.resolution !== command.payload.resolution ||
+              this.#authoritySlot(controlTargetId)?.pending.some(
+                ({ outcome, conflict }) => outcome.attemptId === result.attemptId && conflict,
+              ))
+        )
+          throw new IntentOutcomeUnknown('游戏授权回执无法与原请求核对');
+        const receipt = { method, controlTargetId, ...result };
+        try {
+          this.#settleEarlierDispatches(method, previous, { ok: true, result: receipt });
+        } catch {
+          throw new IntentOutcomeUnknown('当前回执有效，尚未持久核对先前的发报');
+        }
+        return receipt;
+      });
+      return intent.state === 'succeeded'
+        ? { ok: true }
+        : {
+            ok: false,
+            reason: intent.error ?? '游戏授权命令未完成',
+          };
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : '游戏授权命令失败' };
+    } finally {
+      this.#authorityCommand = undefined;
+      this.#recheck();
+    }
   }
 
   submitGoal(
@@ -832,8 +1319,16 @@ export class GameBridge implements Game {
     if (!checkGameBridgeParams(Role.Main, 'bellis', command.method, command.payload)) {
       return { ok: false, reason: '游戏命令不符合契约' };
     }
-    const payload = structuredClone(command.payload);
-    const checked = { ...command, payload } as GameCommand;
+    const checked = structuredClone(command);
+    const { main, run, task } = availability;
+    let payload = checked.payload;
+    if (task && checked.method === Method.GoalSubmit) {
+      checked.payload.expiresAtMs = Math.min(checked.payload.expiresAtMs, task.expiresAtMs);
+      payload = { ...checked.payload, taskId: task.taskId } as GameGoalSubmitParams;
+    }
+    if (!checkGameBridgeParams(Role.Main, 'bellis', command.method, payload, main.major)) {
+      return { ok: false, reason: '当前会话的游戏命令不符合契约' };
+    }
     const blocker = this.#commandBlocker(checked);
     if (blocker) {
       this.#telemetry.discarded('game.command', payload.traceparent, this.#blockedReason(checked));
@@ -842,7 +1337,6 @@ export class GameBridge implements Game {
     if (this.#command) return { ok: false, reason: '已有在途游戏命令' };
     const controller = new AbortController();
     this.#command = controller;
-    const { main, run } = availability;
     const id =
       checked.method === Method.GoalSubmit
         ? checked.payload.goalId
@@ -879,6 +1373,7 @@ export class GameBridge implements Game {
         if (
           !current.ready ||
           current.main !== main ||
+          current.task?.taskId !== task?.taskId ||
           !this.#usable(permit) ||
           controller.signal.aborted
         ) {
@@ -908,7 +1403,7 @@ export class GameBridge implements Game {
           );
           prepared = undefined;
           const reply = await pending;
-          if (!checkGameBridgeResult(Role.Main, command.method, reply))
+          if (!checkGameBridgeResult(Role.Main, command.method, reply, main.major))
             throw new Error('游戏命令回执无效');
           return { accepted: true };
         } catch (error) {

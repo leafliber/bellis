@@ -1,0 +1,532 @@
+[
+  {
+    "name": "请求语义 v2",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "game.describe",
+      "params": {
+        "major": 2
+      }
+    }
+  },
+  {
+    "name": "语义 v2 描述",
+    "sender": "runtime",
+    "valid": true,
+    "responseTo": "game.describe",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "major": 2,
+        "runtimeId": "run-02",
+        "nowMs": 144000,
+        "controlTargetId": "slot-demo",
+        "adapter": {
+          "id": "synthetic-game",
+          "version": "0.1.0",
+          "screenTypes": []
+        },
+        "prerequisites": []
+      }
+    }
+  },
+  {
+    "name": "描述缺少槽位",
+    "sender": "runtime",
+    "valid": false,
+    "responseTo": "game.describe",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "major": 2,
+        "runtimeId": "run-02",
+        "nowMs": 144000,
+        "adapter": {
+          "id": "synthetic-game",
+          "version": "0.1.0",
+          "screenTypes": []
+        },
+        "prerequisites": []
+      }
+    }
+  },
+  {
+    "name": "描述版本不符",
+    "sender": "runtime",
+    "valid": false,
+    "responseTo": "game.describe",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "major": 1,
+        "runtimeId": "run-02",
+        "nowMs": 144000,
+        "controlTargetId": "slot-demo",
+        "adapter": {
+          "id": "synthetic-game",
+          "version": "0.1.0",
+          "screenTypes": []
+        },
+        "prerequisites": []
+      }
+    }
+  },
+  {
+    "name": "语义描述的时钟须为整数字面量",
+    "sender": "runtime",
+    "valid": false,
+    "responseTo": "game.describe",
+    "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"major\":2,\"runtimeId\":\"run-02\",\"nowMs\":144000.0,\"controlTargetId\":\"slot-demo\",\"adapter\":{\"id\":\"synthetic-game\",\"version\":\"0.1.0\",\"screenTypes\":[]},\"prerequisites\":[]}}"
+  },
+  {
+    "name": "无任务且未决为空",
+    "sender": "runtime",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": {
+        "atMs": 144001,
+        "ready": true,
+        "mode": "paused",
+        "goalId": null,
+        "decisionPointId": null,
+        "prerequisites": [],
+        "firstActionMs": null,
+        "frameAgeMs": 0,
+        "queueDepth": 0,
+        "riskScore": 0,
+        "riskLimitExceeded": false,
+        "lastRejection": null,
+        "pendingActionOutcome": null,
+        "activeTaskId": null
+      }
+    }
+  },
+  {
+    "name": "上报当前已接纳任务",
+    "sender": "runtime",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": {
+        "atMs": 144001,
+        "ready": true,
+        "mode": "paused",
+        "goalId": null,
+        "decisionPointId": null,
+        "prerequisites": [],
+        "firstActionMs": null,
+        "frameAgeMs": 0,
+        "queueDepth": 0,
+        "riskScore": 0,
+        "riskLimitExceeded": false,
+        "lastRejection": null,
+        "pendingActionOutcome": null,
+        "activeTaskId": "task-01"
+      }
+    }
+  },
+  {
+    "name": "未决来自原 Runtime 与原游戏会话",
+    "sender": "runtime",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": {
+        "atMs": 144001,
+        "ready": false,
+        "mode": "paused",
+        "goalId": null,
+        "decisionPointId": null,
+        "prerequisites": [],
+        "firstActionMs": null,
+        "frameAgeMs": 0,
+        "queueDepth": 0,
+        "riskScore": 0,
+        "riskLimitExceeded": false,
+        "lastRejection": null,
+        "pendingActionOutcome": {
+          "attemptId": "attempt-01",
+          "runtimeId": "run-01",
+          "sessionId": "play-old",
+          "goalId": "goal-01",
+          "actionId": "action-01",
+          "decisionPointId": null,
+          "reason": "效果未核实"
+        },
+        "activeTaskId": null
+      }
+    }
+  },
+  {
+    "name": "有未决时拒绝就绪",
+    "sender": "runtime",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": {
+        "atMs": 144001,
+        "ready": true,
+        "mode": "paused",
+        "goalId": null,
+        "decisionPointId": null,
+        "prerequisites": [],
+        "firstActionMs": null,
+        "frameAgeMs": 0,
+        "queueDepth": 0,
+        "riskScore": 0,
+        "riskLimitExceeded": false,
+        "lastRejection": null,
+        "pendingActionOutcome": {
+          "attemptId": "attempt-01",
+          "runtimeId": "run-01",
+          "sessionId": "play-old",
+          "goalId": "goal-01",
+          "actionId": "action-01",
+          "decisionPointId": null,
+          "reason": "效果未核实"
+        },
+        "activeTaskId": null
+      }
+    }
+  },
+  {
+    "name": "必须显式声明未决字段",
+    "sender": "runtime",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": {
+        "atMs": 144001,
+        "ready": true,
+        "mode": "paused",
+        "goalId": null,
+        "decisionPointId": null,
+        "prerequisites": [],
+        "firstActionMs": null,
+        "frameAgeMs": 0,
+        "queueDepth": 0,
+        "riskScore": 0,
+        "riskLimitExceeded": false,
+        "lastRejection": null,
+        "activeTaskId": null
+      }
+    }
+  },
+  {
+    "name": "必须显式声明任务字段",
+    "sender": "runtime",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "method": "health.reported",
+      "params": {
+        "atMs": 144001,
+        "ready": true,
+        "mode": "paused",
+        "goalId": null,
+        "decisionPointId": null,
+        "prerequisites": [],
+        "firstActionMs": null,
+        "frameAgeMs": 0,
+        "queueDepth": 0,
+        "riskScore": 0,
+        "riskLimitExceeded": false,
+        "lastRejection": null,
+        "pendingActionOutcome": null
+      }
+    }
+  },
+  {
+    "name": "开任务且无整体终局",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "task.open",
+      "params": {
+        "taskId": "task-01",
+        "objective": "读到调查结束",
+        "expiresAtMs": 150000,
+        "overallCompletion": null
+      }
+    }
+  },
+  {
+    "name": "签名终局",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "task.open",
+      "params": {
+        "taskId": "task-01",
+        "objective": "读到调查结束",
+        "expiresAtMs": 150000,
+        "overallCompletion": {
+          "kind": "signature",
+          "signature": "investigation-end"
+        }
+      }
+    }
+  },
+  {
+    "name": "画面终局",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "task.open",
+      "params": {
+        "taskId": "task-01",
+        "objective": "读到调查结束",
+        "expiresAtMs": 150000,
+        "overallCompletion": {
+          "kind": "screen",
+          "screenType": "菜单"
+        }
+      }
+    }
+  },
+  {
+    "name": "标定区文字出现",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "task.open",
+      "params": {
+        "taskId": "task-01",
+        "objective": "读到调查结束",
+        "expiresAtMs": 150000,
+        "overallCompletion": {
+          "kind": "text-appeared",
+          "text": "调查结束",
+          "roi": "状态区"
+        }
+      }
+    }
+  },
+  {
+    "name": "标定区文字消失",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "task.open",
+      "params": {
+        "taskId": "task-01",
+        "objective": "读到调查结束",
+        "expiresAtMs": 150000,
+        "overallCompletion": {
+          "kind": "text-disappeared",
+          "text": "调查中",
+          "roi": "状态区"
+        }
+      }
+    }
+  },
+  {
+    "name": "拒绝无标定区的文字终局",
+    "sender": "bellis",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "task.open",
+      "params": {
+        "taskId": "task-01",
+        "objective": "读到调查结束",
+        "expiresAtMs": 150000,
+        "overallCompletion": {
+          "kind": "text-appeared",
+          "text": "调查结束"
+        }
+      }
+    }
+  },
+  {
+    "name": "拒绝下发预算覆盖",
+    "sender": "bellis",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "task.open",
+      "params": {
+        "taskId": "task-01",
+        "objective": "读到调查结束",
+        "expiresAtMs": 150000,
+        "overallCompletion": null,
+        "maxInputs": 100
+      }
+    }
+  },
+  {
+    "name": "开任务回执",
+    "sender": "runtime",
+    "valid": true,
+    "responseTo": "task.open",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "taskId": "task-01"
+      }
+    }
+  },
+  {
+    "name": "子目标带当前授权任务",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "goal.submit",
+      "params": {
+        "goalId": "goal-02",
+        "objective": "读下一句",
+        "constraints": [],
+        "mode": "autonomous",
+        "decisionPointId": null,
+        "expiresAtMs": 145000,
+        "traceparent": null,
+        "taskId": "task-01"
+      }
+    }
+  },
+  {
+    "name": "拒绝无任务编号的子目标",
+    "sender": "bellis",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "goal.submit",
+      "params": {
+        "goalId": "goal-02",
+        "objective": "读下一句",
+        "constraints": [],
+        "mode": "autonomous",
+        "decisionPointId": null,
+        "expiresAtMs": 145000,
+        "traceparent": null
+      }
+    }
+  },
+  {
+    "name": "操作员确认已执行",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "action.resolve_outcome",
+      "params": {
+        "sessionId": "play-old",
+        "attemptId": "attempt-01",
+        "resolution": "confirmed_executed"
+      }
+    }
+  },
+  {
+    "name": "操作员确认未执行",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "action.resolve_outcome",
+      "params": {
+        "sessionId": "play-old",
+        "attemptId": "attempt-01",
+        "resolution": "confirmed_not_executed"
+      }
+    }
+  },
+  {
+    "name": "操作员核对后以未知结案",
+    "sender": "bellis",
+    "valid": true,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "action.resolve_outcome",
+      "params": {
+        "sessionId": "play-old",
+        "attemptId": "attempt-01",
+        "resolution": "reconciled_unknown"
+      }
+    }
+  },
+  {
+    "name": "拒绝由 Runtime 发起结案",
+    "sender": "runtime",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "action.resolve_outcome",
+      "params": {
+        "sessionId": "play-old",
+        "attemptId": "attempt-01",
+        "resolution": "confirmed_executed"
+      }
+    }
+  },
+  {
+    "name": "拒绝无原会话的结案",
+    "sender": "bellis",
+    "valid": false,
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "action.resolve_outcome",
+      "params": {
+        "attemptId": "attempt-01",
+        "resolution": "confirmed_executed"
+      }
+    }
+  },
+  {
+    "name": "结案回执",
+    "sender": "runtime",
+    "valid": true,
+    "responseTo": "action.resolve_outcome",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "attemptId": "attempt-01",
+        "resolution": "confirmed_executed"
+      }
+    }
+  },
+  {
+    "name": "拒绝空结案回执",
+    "sender": "runtime",
+    "valid": false,
+    "responseTo": "action.resolve_outcome",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {}
+    }
+  }
+]

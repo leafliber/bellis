@@ -11,9 +11,12 @@ const token = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const traceparent = nullable(Traceparent);
 
 /** 系统单调时钟的整毫秒；上界乘 1_000_000 后仍是 Rust u64 纳秒。 */
-const monotonicMs = Type.Integer({ minimum: 0, maximum: 18_446_744_073_709 });
+export const GAME_BRIDGE_MAX_MONOTONIC_MS = 18_446_744_073_709;
+const monotonicMs = Type.Integer({ minimum: 0, maximum: GAME_BRIDGE_MAX_MONOTONIC_MS });
 
 export const GAME_BRIDGE_MAJOR = 1;
+export const GAME_BRIDGE_SEMANTIC_V2 = 2;
+export type GameBridgeMajor = typeof GAME_BRIDGE_MAJOR | typeof GAME_BRIDGE_SEMANTIC_V2;
 
 /** v1 在线上须使用整数字面量的字段，包含 JSON-RPC 的请求编号和错误码。 */
 export const GAME_BRIDGE_INTEGER_FIELDS = [
@@ -41,6 +44,8 @@ export type GameBridgeRole = (typeof GameBridgeRole)[keyof typeof GameBridgeRole
 
 export const GameBridgeMethod = {
   Describe: 'game.describe',
+  TaskOpen: 'task.open',
+  ActionResolveOutcome: 'action.resolve_outcome',
   GoalSubmit: 'goal.submit',
   DecisionResolve: 'decision.resolve',
   LeaseRenew: 'lease.renew',
@@ -298,6 +303,92 @@ export const GameCoreHealth = Type.Object(
 );
 export type GameCoreHealth = Static<typeof GameCoreHealth>;
 
+/** 可信配置中的被控槽位标识，生命周期独立于 Runtime 进程。 */
+export const GameControlTargetId = instanceId;
+
+export const GameMainDescriptionV2 = Type.Object(
+  {
+    ...GameMainDescription.properties,
+    major: Type.Integer({ minimum: GAME_BRIDGE_SEMANTIC_V2, maximum: GAME_BRIDGE_SEMANTIC_V2 }),
+    controlTargetId: GameControlTargetId,
+  },
+  closed,
+);
+export type GameMainDescriptionV2 = Static<typeof GameMainDescriptionV2>;
+
+export const GamePendingActionOutcome = Type.Object(
+  {
+    attemptId: instanceId,
+    runtimeId: instanceId,
+    sessionId: instanceId,
+    goalId: instanceId,
+    actionId: instanceId,
+    decisionPointId: nullable(instanceId),
+    reason: text(200),
+  },
+  closed,
+);
+export type GamePendingActionOutcome = Static<typeof GamePendingActionOutcome>;
+
+export const GameMainHealthV2 = Type.Object(
+  {
+    ...GameMainHealth.properties,
+    pendingActionOutcome: nullable(GamePendingActionOutcome),
+    activeTaskId: nullable(instanceId),
+  },
+  {
+    ...closed,
+    not: { properties: { pendingActionOutcome: { type: 'object' }, ready: { const: true } } },
+  },
+);
+export type GameMainHealthV2 = Static<typeof GameMainHealthV2>;
+
+export const GameOutcomeResolution = Type.Enum([
+  'confirmed_executed',
+  'confirmed_not_executed',
+  'reconciled_unknown',
+]);
+export type GameOutcomeResolution = Static<typeof GameOutcomeResolution>;
+
+export const GameActionResolveOutcomeParams = Type.Object(
+  { sessionId: instanceId, attemptId: instanceId, resolution: GameOutcomeResolution },
+  closed,
+);
+export type GameActionResolveOutcomeParams = Static<typeof GameActionResolveOutcomeParams>;
+
+export const GameActionResolveOutcomeResult = Type.Object(
+  { attemptId: instanceId, resolution: GameOutcomeResolution },
+  closed,
+);
+
+export const GameOverallCompletion = Type.Union([
+  Type.Object({ kind: Type.Enum(['signature']), signature: text(120) }, closed),
+  Type.Object({ kind: Type.Enum(['screen']), screenType: GameScreenType }, closed),
+  Type.Object(
+    { kind: Type.Enum(['text-appeared', 'text-disappeared']), text: text(240), roi: text(80) },
+    closed,
+  ),
+]);
+export type GameOverallCompletion = Static<typeof GameOverallCompletion>;
+
+export const GameTaskOpenParams = Type.Object(
+  {
+    taskId: instanceId,
+    objective: GameGoalSubmitParams.properties.objective,
+    expiresAtMs: monotonicMs,
+    overallCompletion: nullable(GameOverallCompletion),
+  },
+  closed,
+);
+export type GameTaskOpenParams = Static<typeof GameTaskOpenParams>;
+
+export const GameTaskOpenResult = Type.Object({ taskId: instanceId }, closed);
+
+export const GameGoalSubmitParamsV2 = Type.Object(
+  { ...GameGoalSubmitParams.properties, taskId: instanceId },
+  closed,
+);
+
 export const gameBridgeSchemas = {
   GameDescribeVersion,
   GameDescribeParams,
@@ -319,7 +410,9 @@ export const gameBridgeSchemas = {
 } as const;
 
 export type GameBridgeSender = 'bellis' | 'runtime';
-export type GameBridgeSchemaName = keyof typeof gameBridgeSchemas;
+export type GameBridgeSchemaName =
+  | keyof typeof gameBridgeSchemas
+  | keyof typeof gameBridgeV2Schemas;
 
 export interface GameBridgeMethodSpec {
   readonly sender: GameBridgeSender;
@@ -405,3 +498,53 @@ export const GameBridgeMethods = {
     },
   },
 } as const satisfies Record<GameBridgeRole, Readonly<Record<string, GameBridgeMethodSpec>>>;
+
+export const gameBridgeV2Schemas = {
+  GameDescribeVersion,
+  GameDescribeParams,
+  GameMainDescriptionV2,
+  GameAck,
+  GameGoalSubmitParamsV2,
+  GameTaskOpenParams,
+  GameTaskOpenResult,
+  GameActionResolveOutcomeParams,
+  GameActionResolveOutcomeResult,
+  GameDecisionResolveParams,
+  GamePacingHoldParams,
+  GamePacingReleaseParams,
+  GameSituationObserved,
+  GameDecisionPointOpened,
+  GameActionCommitted,
+  GameMainHealthV2,
+} as const;
+
+/** 语义 v2 单独协商，实时核使用 v1 的控制契约。 */
+export const GameBridgeV2Methods = {
+  [GameBridgeRole.Main]: {
+    ...GameBridgeMethods[GameBridgeRole.Main],
+    [GameBridgeMethod.Describe]: {
+      ...GameBridgeMethods[GameBridgeRole.Main][GameBridgeMethod.Describe],
+      result: 'GameMainDescriptionV2',
+    },
+    [GameBridgeMethod.GoalSubmit]: {
+      ...GameBridgeMethods[GameBridgeRole.Main][GameBridgeMethod.GoalSubmit],
+      params: 'GameGoalSubmitParamsV2',
+    },
+    [GameBridgeMethod.HealthReported]: {
+      ...GameBridgeMethods[GameBridgeRole.Main][GameBridgeMethod.HealthReported],
+      params: 'GameMainHealthV2',
+    },
+    [GameBridgeMethod.TaskOpen]: {
+      sender: 'bellis',
+      params: 'GameTaskOpenParams',
+      result: 'GameTaskOpenResult',
+    },
+    [GameBridgeMethod.ActionResolveOutcome]: {
+      sender: 'bellis',
+      params: 'GameActionResolveOutcomeParams',
+      result: 'GameActionResolveOutcomeResult',
+    },
+  },
+} as const satisfies Partial<
+  Record<GameBridgeRole, Readonly<Record<string, GameBridgeMethodSpec>>>
+>;

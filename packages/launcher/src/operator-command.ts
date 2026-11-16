@@ -4,11 +4,19 @@
  * 打不开时把带令牌的地址打印出来。
  */
 import { spawn } from 'node:child_process';
-import { OperatorConsoleLoginResult, OperatorMethod } from '@bellis/protocol';
+import {
+  OperatorConsoleLoginResult,
+  OperatorGameOutcomeResolveParams,
+  OperatorGameTaskOpenParams,
+  OperatorMethod,
+} from '@bellis/protocol';
 import { Compile } from 'typebox/compile';
 
 export const OPERATOR_USAGE =
-  '用法：operator <status | mode 目标 | presence | estop [原因] | game-takeover | game-return | veto [句键] | release [句键] | preflight [M1|M2|M3] | forget 平台ID | resolve 意图编号 <succeeded|failed> | resolve --list | console>';
+  '用法：operator <status | mode 目标 | presence | estop [原因] | game-takeover | game-return | veto [句键] | release [句键] | preflight [M1|M2|M3] | forget 平台ID | resolve 意图编号 <succeeded|failed> | resolve --list | console>\n' +
+  'operator game-task-open 槽位 时长毫秒 根目标 [终局条件JSON]\n' +
+  'operator game-task-open 槽位 --retry 任务编号\n' +
+  'operator game-outcome-resolve 槽位 原会话编号 尝试编号 结案结果 --reviewed';
 
 export interface OperatorCommandIo {
   /** 经本机通道调宿主的操作员方法。 */
@@ -24,6 +32,8 @@ export type OperatorCommand =
   | { kind: 'console' };
 
 const isLogin = Compile(OperatorConsoleLoginResult);
+const isTaskOpen = Compile(OperatorGameTaskOpenParams);
+const isOutcomeResolve = Compile(OperatorGameOutcomeResolveParams);
 
 /**
  * 等宿主应答的时限：切换模式与只跑预检要等开播预检跑完（含配置了的决策模型探测，其截止时间至多 20 秒），
@@ -49,6 +59,41 @@ export function parseOperatorArgs(args: readonly string[]): OperatorCommand | un
       return rest.length === 0 ? call(OperatorMethod.GameTakeover, {}) : undefined;
     case 'game-return':
       return rest.length === 0 ? call(OperatorMethod.GameReturn, {}) : undefined;
+    case 'game-task-open': {
+      const [controlTargetId, duration, objective, completion] = rest;
+      if (rest.length < 3 || rest.length > 4) return undefined;
+      if (duration === '--retry') {
+        const params = { controlTargetId, retryTaskId: objective };
+        return rest.length === 3 && isTaskOpen.Check(params)
+          ? call(OperatorMethod.GameTaskOpen, params)
+          : undefined;
+      }
+      if (!duration || !/^[1-9][0-9]*$/.test(duration)) return undefined;
+      try {
+        const params = {
+          controlTargetId,
+          durationMs: Number(duration),
+          objective,
+          overallCompletion: completion === undefined ? null : (JSON.parse(completion) as unknown),
+        };
+        return isTaskOpen.Check(params) ? call(OperatorMethod.GameTaskOpen, params) : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    case 'game-outcome-resolve': {
+      const [controlTargetId, sessionId, attemptId, resolution, review] = rest;
+      const params = {
+        controlTargetId,
+        sessionId,
+        attemptId,
+        resolution,
+        reviewed: review === '--reviewed',
+      };
+      return rest.length === 5 && isOutcomeResolve.Check(params)
+        ? call(OperatorMethod.GameOutcomeResolve, params)
+        : undefined;
+    }
     case 'mode':
       return rest.length === 1 ? call(OperatorMethod.Mode, { target: rest[0] }) : undefined;
     case 'estop':
@@ -98,7 +143,13 @@ export async function runOperatorCommand(
     return 2;
   }
   if (command.kind === 'call') {
-    io.print(JSON.stringify(await io.request(command.method, command.params), null, 2));
+    const result = await io.request(command.method, command.params);
+    io.print(JSON.stringify(result, null, 2));
+    if (
+      command.method === OperatorMethod.GameTaskOpen ||
+      command.method === OperatorMethod.GameOutcomeResolve
+    )
+      return (result as { ok?: boolean } | null)?.ok === true ? 0 : 1;
     return 0;
   }
   if (command.kind === 'unresolved') {

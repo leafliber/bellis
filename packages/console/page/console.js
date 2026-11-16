@@ -51,6 +51,7 @@
  * @property {{ code: string, summary: string } | null} lastRejection
  * @property {number | null} riskScore
  * @property {boolean | null} riskLimitExceeded
+ * @property {{ controlTargetId: string, task: { taskId: string, state: 'opening' | 'accepted' | 'ended' } | null, pending: { sessionId: string, attemptId: string, reason: string }[] }} [authority]
  */
 /**
  * @typedef {object} Danmaku
@@ -429,6 +430,18 @@ function renderGame(game) {
   gamePanel.hidden = game === null;
   gameTakeoverButton.disabled = !game || game.state === 'MANUAL';
   gameReturnButton.disabled = game?.state !== 'MANUAL';
+  const authority = game?.authority;
+  byId('game-authority').hidden = !authority;
+  setText(byId('game-control-target'), authority?.controlTargetId ?? '—');
+  const task = authority?.task;
+  const taskStates = { opening: '等待接纳回执', accepted: '已接纳', ended: '已终止' };
+  setText(byId('game-authorized-task'), task ? `${task.taskId}（${taskStates[task.state]}）` : '—');
+  setText(
+    byId('game-pending-outcome'),
+    authority?.pending
+      .map(({ sessionId, attemptId, reason }) => `${sessionId} / ${attemptId}（${reason}）`)
+      .join('、') || '无',
+  );
 
   const modes = { autonomous: '自主', waiting_vote: '等待投票', paused: '暂停', manual: '人工' };
   const decision = game?.decision;

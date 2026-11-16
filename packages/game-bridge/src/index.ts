@@ -1,4 +1,5 @@
 import { ClockService, definePlugin, type PluginContext } from '@bellis/kernel';
+import { GameControlTargetId } from '@bellis/protocol';
 import { SafetyService } from '@bellis/safety';
 import { TelemetryService } from '@bellis/telemetry';
 import Type from 'typebox';
@@ -6,6 +7,7 @@ import { GameBridge, type GameBridgeConfig } from './bridge.ts';
 import { GameRuntimePortService } from './host.ts';
 import { GAME_GOAL, GAME_INPUT, GameFactObserved, GameService } from './service.ts';
 
+export { gameAuthorityLedger } from './authority.ts';
 export * from './host.ts';
 export * from './service.ts';
 
@@ -29,6 +31,7 @@ export const gameBridge = definePlugin({
       {
         adapterId: Type.String({ pattern: '^[a-z][a-z0-9-]{0,47}$' }),
         adapterVersion: Type.String({ minLength: 1, maxLength: 32 }),
+        controlTargetId: Type.Optional(GameControlTargetId),
         healthTimeoutMs: Type.Optional(Type.Integer({ minimum: 50, maximum: 60_000 })),
       },
       { additionalProperties: false },

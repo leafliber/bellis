@@ -24,6 +24,7 @@ import {
   GameRuntimeHost,
   GameRuntimePortService,
   GameService,
+  gameAuthorityLedger,
   gameBridge,
   gameControlLedger,
 } from '@bellis/game-bridge';
@@ -46,14 +47,24 @@ import {
   type GameInputReleased,
   type GameLeaseRenewParams,
   type GameMainHealth,
+  type GameMainHealthV2,
+  type GamePendingActionOutcome,
   type GameSituationObserved,
+  type GameTaskOpenParams,
   Role as HostRole,
   GameBridgeMethod as Method,
+  OperatorMethod,
   GameBridgeRole as Role,
   RpcErrorCode,
   type RpcParams,
 } from '@bellis/protocol';
-import { SafetyCore, SafetyService, safetyFacade } from '@bellis/safety';
+import {
+  GAME_RESOLVE_OUTCOME,
+  GAME_TASK_OPEN,
+  SafetyCore,
+  SafetyService,
+  safetyFacade,
+} from '@bellis/safety';
 import {
   PreCheck,
   type Speech,
@@ -78,7 +89,7 @@ import {
   TelemetryCore,
   TelemetryService,
 } from '../../telemetry/src/index.ts';
-import { createOperator } from '../src/operator.ts';
+import { createOperator, serveOperator } from '../src/operator.ts';
 import {
   SYNTHETIC_INJECTION,
   syntheticPoint,
@@ -106,6 +117,8 @@ type SetupOptions = {
   director?: Record<string, unknown>;
   gamePacing?: { holdMs?: number; voiceWaitMs?: number };
   telemetry?: 'memory' | 'broken' | 'broken-start';
+  controlTargetId?: string;
+  denyAuthorityGrant?: boolean;
 };
 
 function addSpeech(
@@ -305,7 +318,7 @@ async function setup(options: SetupOptions = {}) {
   const wireNowMs = () => WIRE_EPOCH + Math.floor(clock.now());
   const store = StateStore.open({
     path: options.storePath ?? ':memory:',
-    projections: [gameControlLedger, voteLedger],
+    projections: [gameControlLedger, gameAuthorityLedger, voteLedger],
     ...(options.fault ? { fault: options.fault } : {}),
   });
   store.recover();
@@ -389,8 +402,18 @@ async function setup(options: SetupOptions = {}) {
         plugin: gameBridge.manifest.id,
         disabled: false,
         explicitSwitch: true,
-        grant: [GAME_GOAL, GAME_INPUT],
-        config: { adapterId: ADAPTER.id, adapterVersion: ADAPTER.version },
+        grant: [
+          GAME_GOAL,
+          GAME_INPUT,
+          ...(options.controlTargetId && !options.denyAuthorityGrant
+            ? [GAME_TASK_OPEN, GAME_RESOLVE_OUTCOME]
+            : []),
+        ],
+        config: {
+          adapterId: ADAPTER.id,
+          adapterVersion: ADAPTER.version,
+          ...(options.controlTargetId ? { controlTargetId: options.controlTargetId } : {}),
+        },
       },
     ],
     catalog(gameBridge),
@@ -401,11 +424,29 @@ async function setup(options: SetupOptions = {}) {
   const game = registered.impl as Game;
   const key = createSessionKey();
   const path = createChannelPath('p3test');
+  const operator = createOperator({
+    core: safety,
+    subscribe: (listener) => store.subscribe(listener),
+    plugins: () => kernel?.snapshot() ?? [],
+    presentation: () => null,
+    review: () => null,
+    game: {
+      current: () => game,
+      takeOver: () => host.takeOver(),
+      returnControl: () => host.returnControl(),
+      openTask: (params) => host.openTask(params),
+      resolveOutcome: (params) => host.resolveOutcome(params),
+    },
+    preflight: async () => ['本测试通过 SafetyCore 设置监督模式'],
+    consoleLogin: () => undefined,
+  });
   const server = await listen(path, {
     key,
     onConnection(connection) {
       if (connection.role === HostRole.Watchdog) watchdog = connection;
-      else if (!host.accept(connection)) connection.close();
+      else if (connection.role === HostRole.Operator) {
+        serveOperator(new RpcPeer(connection, { timeoutMs: 5_000 }), operator);
+      } else if (!host.accept(connection)) connection.close();
     },
     onRejected: () => {},
     onError: (error) => {
@@ -413,15 +454,6 @@ async function setup(options: SetupOptions = {}) {
     },
   });
   await connect(path, HostRole.Watchdog, { key });
-  const operator = createOperator({
-    core: safety,
-    subscribe: (listener) => store.subscribe(listener),
-    plugins: () => kernel?.snapshot() ?? [],
-    presentation: () => null,
-    review: () => null,
-    preflight: async () => ['本测试通过 SafetyCore 设置监督模式'],
-    consoleLogin: () => undefined,
-  });
   return {
     clock,
     wireNowMs,
@@ -433,6 +465,9 @@ async function setup(options: SetupOptions = {}) {
     safety,
     store,
     operator,
+    async operatorPeer() {
+      return new RpcPeer(await connect(path, HostRole.Operator, { key }), { timeoutMs: 5_000 });
+    },
     telemetryLines: writer.lines,
     runtimeTracer: telemetry?.tracer('game-runtime-test'),
     model,
@@ -510,7 +545,7 @@ async function main(h: Harness, run = 'run', describe?: () => object) {
     answerWith(handle: () => unknown) {
       answer = handle;
     },
-    health(patch: Partial<GameMainHealth> = {}) {
+    health(patch: Partial<GameMainHealthV2> = {}) {
       p.rpc.notify(Method.HealthReported, {
         atMs: h.wireNowMs(),
         ready: true,
@@ -576,7 +611,7 @@ async function realtime(h: Harness, run = 'run') {
     const token = params.throughToken as number;
     stops.push(token);
     through = Math.max(through, token);
-    if (!lease || lease.token <= through) release('lease_revoked', token);
+    if (!lease || lease.token <= through) release('lease_revoked', token || null);
     return {};
   });
   p.connection.once('close', () => release('lease_source_lost'));
@@ -625,6 +660,57 @@ async function pair(h: Harness, run = 'run') {
   return { semantic, core };
 }
 
+const SLOT = 'slot-synthetic';
+const authorityOptions = { simulation: true, simulatedPort: true, controlTargetId: SLOT };
+const openTask = {
+  controlTargetId: SLOT,
+  durationMs: 180,
+  objective: '检查合成场景',
+  overallCompletion: null,
+};
+const pendingAttempt: GamePendingActionOutcome = {
+  attemptId: 'attempt-01',
+  runtimeId: 'old-run',
+  sessionId: 'play-original',
+  goalId: 'goal-original',
+  actionId: 'action-original',
+  decisionPointId: null,
+  reason: '效果无法核实',
+};
+const resolveAttempt = {
+  controlTargetId: SLOT,
+  sessionId: pendingAttempt.sessionId,
+  attemptId: pendingAttempt.attemptId,
+  resolution: 'reconciled_unknown',
+  reviewed: true,
+};
+
+async function authorityMain(h: Harness, run = 'run', controlTargetId = SLOT) {
+  const peer = await main(h, run, () => ({
+    major: 2,
+    controlTargetId,
+    runtimeId: run,
+    nowMs: h.wireNowMs(),
+    adapter: ADAPTER,
+    prerequisites: [CONDITION],
+  }));
+  return {
+    ...peer,
+    health(patch: Partial<GameMainHealthV2> = {}) {
+      peer.health({ activeTaskId: null, pendingActionOutcome: null, ...patch });
+    },
+  };
+}
+
+async function authorityPair(h: Harness, run = 'run', health: Partial<GameMainHealthV2> = {}) {
+  const semantic = await authorityMain(h, run);
+  const core = await realtime(h, run);
+  semantic.health(health);
+  core.health();
+  await until(() => h.game.status().health !== null && h.game.status().realtimeHealth !== null);
+  return { semantic, core };
+}
+
 const goal = (h: Harness, goalId = 'g-1'): GameGoalSubmitParams => ({
   goalId,
   objective: '检查合成场景的线索',
@@ -633,6 +719,249 @@ const goal = (h: Harness, goalId = 'g-1'): GameGoalSubmitParams => ({
   decisionPointId: null,
   expiresAtMs: h.wireNowMs() + 500,
   traceparent: null,
+});
+
+test('语义 v2 核对可信槽位且拒绝协商回退', async () => {
+  const h = await setup(authorityOptions);
+  try {
+    const core = await realtime(h);
+    core.health();
+    const wrong = await authorityMain(h, 'run', 'wrong-slot');
+    wrong.health();
+    await until(() => h.game.status().reason?.includes('槽位') === true);
+    assert.equal(h.game.status().runtimeId, null);
+    wrong.connection.close();
+    await until(() => !h.game.status().mainConnected);
+    const legacy = await main(h);
+    legacy.health();
+    await until(() => h.game.status().reason?.includes('主版本不兼容') === true);
+    assert.deepEqual(core.renewals, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test('操作员开任务经过闸门和释放核验，目标及许可沿用已确认任务截止', async () => {
+  const h = await setup(authorityOptions);
+  try {
+    const { semantic, core } = await authorityPair(h);
+    const rpc = await h.operatorPeer();
+    const requests: GameTaskOpenParams[] = [];
+    semantic.rpc.handle(Method.TaskOpen, (params) => {
+      const task = params as unknown as GameTaskOpenParams;
+      requests.push(task);
+      return { taskId: task.taskId };
+    });
+    semantic.health({ activeTaskId: 'unbound-task' });
+    await until(() => h.game.status().authority?.activeTaskId === 'unbound-task');
+    assert.equal((await h.game.submitGoal(goal(h), SOURCE)).ok, false);
+    assert.equal(core.renewals.length, 0);
+    semantic.health();
+    await until(() => h.game.status().authority?.activeTaskId === null);
+    const off = h.safety.addGuard(({ type }) =>
+      type === Method.TaskOpen ? { deny: '演练守卫拒绝开任务' } : undefined,
+    );
+    assert.deepEqual(await rpc.request(OperatorMethod.GameTaskOpen, openTask), {
+      ok: false,
+      reason: '演练守卫拒绝开任务',
+    });
+    off();
+    assert.equal(requests.length, 0);
+    assert.equal(core.stops.length, 0);
+    assert.deepEqual(await rpc.request(OperatorMethod.GameTaskOpen, openTask), { ok: true });
+    assert.deepEqual(core.stops, [0]);
+    const [task] = requests;
+    assert.ok(task);
+    assert.equal(task.expiresAtMs, WIRE_EPOCH + openTask.durationMs);
+    assert.equal(h.game.status().authority?.task?.state, 'accepted');
+    await h.mode();
+    assert.equal(core.renewals.length, 0);
+    semantic.health({ activeTaskId: task.taskId });
+    await until(() => h.game.status().inputPermitted);
+    assert.equal(core.renewals[0]?.expiresAtMs, task.expiresAtMs);
+    const override = { ...goal(h), taskId: 'forged-task' };
+    assert.equal((await h.game.submitGoal(override, SOURCE)).ok, false);
+    assert.equal((await h.game.submitGoal(goal(h), SOURCE)).ok, true);
+    assert.equal(semantic.commands[0]?.taskId, task.taskId);
+    assert.equal(semantic.commands[0]?.expiresAtMs, task.expiresAtMs);
+    assert.equal((await h.operator.gameTaskOpen(openTask)).ok, false);
+    assert.equal(requests.length, 1);
+
+    semantic.connection.close();
+    await until(() => core.actualLease === undefined && !h.game.status().mainConnected);
+    const attached = await authorityMain(h);
+    await until(() => h.game.status().runtimeId === 'run');
+    assert.equal(h.game.status().inputPermitted, false);
+    attached.health({ activeTaskId: task.taskId });
+    await until(() => h.game.status().inputPermitted);
+    h.clock.advance(openTask.durationMs);
+    await until(() => core.actualLease === undefined);
+    assert.equal(h.game.status().authority?.task?.state, 'ended');
+    assert.equal(h.game.status().inputPermitted, false);
+  } finally {
+    await h.close();
+  }
+});
+
+test('语义 v2 开任务缺少能力或释放未核验时不会发送', async () => {
+  for (const denyAuthorityGrant of [true, false]) {
+    const h = await setup({ ...authorityOptions, denyAuthorityGrant });
+    try {
+      const { semantic, core } = await authorityPair(h);
+      let sent = 0;
+      semantic.rpc.handle(Method.TaskOpen, () => {
+        sent++;
+        return {};
+      });
+      core.setVerification('residual');
+      const opening = h.operator.gameTaskOpen(openTask);
+      if (!denyAuthorityGrant) {
+        await until(() => core.stops.length === 1);
+        h.clock.advance(2_001);
+      }
+      assert.equal((await opening).ok, false);
+      assert.equal(sent, 0);
+      assert.deepEqual(core.renewals, []);
+    } finally {
+      await h.close();
+    }
+  }
+});
+
+test('开任务丢回执时只回读原授权，宿主重启后禁止恢复旧任务输入', async () => {
+  const path = join(tmpdir(), `bellis-game-task-${randomUUID()}.db`);
+  const options = { ...authorityOptions, storePath: path };
+  try {
+    const before = await setup(options);
+    let taskId: string;
+    try {
+      const { semantic, core } = await authorityPair(before);
+      const requests: RpcParams[] = [];
+      semantic.rpc.handle(Method.TaskOpen, (params) => {
+        requests.push(params);
+        return requests.length === 1 ? {} : { taskId: params.taskId };
+      });
+      await before.mode();
+      assert.equal((await before.operator.gameTaskOpen(openTask)).ok, false);
+      const task = before.game.status().authority?.task;
+      assert.ok(task);
+      assert.equal(task.state, 'opening');
+      taskId = task.taskId;
+      semantic.health({ activeTaskId: taskId });
+      await until(() => before.game.status().authority?.activeTaskId === taskId);
+      assert.equal(core.renewals.length, 0);
+      assert.equal((await before.operator.gameTaskOpen(openTask)).ok, false);
+      before.clock.advance(25);
+      core.clock.advance(25);
+      assert.deepEqual(
+        await before.operator.gameTaskOpen({ controlTargetId: SLOT, retryTaskId: taskId }),
+        { ok: true },
+      );
+      assert.equal(requests.length, 2);
+      assert.deepEqual(requests[0], requests[1]);
+      assert.equal(requests[0]?.expiresAtMs, WIRE_EPOCH + openTask.durationMs);
+      assert.deepEqual(before.store.intentsIn('unknown'), []);
+      await until(() => before.game.status().inputPermitted);
+    } finally {
+      await before.close();
+    }
+    const after = await setup(options);
+    try {
+      const { core } = await authorityPair(after, 'run', { activeTaskId: taskId });
+      await after.mode();
+      assert.equal(after.game.status().authority?.task?.state, 'ended');
+      assert.equal(after.game.status().inputPermitted, false);
+      assert.equal((await after.game.submitGoal(goal(after), SOURCE)).ok, false);
+      assert.equal((await after.operator.gameTaskOpen(openTask)).ok, false);
+      assert.equal(core.renewals.length, 0);
+    } finally {
+      await after.close();
+    }
+  } finally {
+    for (const suffix of ['', '-wal', '-shm']) rmSync(path + suffix, { force: true });
+  }
+});
+
+test('物理未决和原结案参数跨重启保留，仅匹配回执清除隔离', async () => {
+  const path = join(tmpdir(), `bellis-game-outcome-${randomUUID()}.db`);
+  const options = { ...authorityOptions, storePath: path };
+  try {
+    const before = await setup(options);
+    try {
+      const { semantic, core } = await authorityPair(before, 'new-run', {
+        ready: false,
+        pendingActionOutcome: pendingAttempt,
+      });
+      const rpc = await before.operatorPeer();
+      let dispatched = 0;
+      semantic.rpc.handle(Method.ActionResolveOutcome, () => {
+        dispatched++;
+        return { attemptId: 'mismatched', resolution: 'reconciled_unknown' };
+      });
+      assert.deepEqual(before.operator.status().game?.authority?.pending, [pendingAttempt]);
+      assert.ok(before.operator.alerts().some(({ text }) => text.includes('物理动作结果未决')));
+      await before.mode();
+      assert.equal((await before.game.submitGoal(goal(before), SOURCE)).ok, false);
+      assert.equal((await before.operator.gameTaskOpen(openTask)).ok, false);
+      assert.deepEqual(core.renewals, []);
+      assert.deepEqual(
+        await rpc.request(OperatorMethod.GameOutcomeResolve, {
+          ...resolveAttempt,
+          reviewed: false,
+        }),
+        { ok: false, reason: '参数不合法' },
+      );
+      assert.equal(dispatched, 0);
+      const refused = await rpc.request(OperatorMethod.GameOutcomeResolve, resolveAttempt);
+      assert.equal((refused as { ok: boolean }).ok, false);
+      assert.equal(dispatched, 1);
+      assert.equal(before.store.intentsIn('unknown').length, 1);
+      semantic.health();
+      await until(() => before.game.status().health?.ready === true);
+      assert.deepEqual(before.game.status().authority?.pending, [pendingAttempt]);
+    } finally {
+      await before.close();
+    }
+
+    const after = await setup(options);
+    try {
+      const { semantic, core } = await authorityPair(after, 'restarted-runtime');
+      assert.deepEqual(after.game.status().authority?.pending, [pendingAttempt]);
+      const received: RpcParams[] = [];
+      semantic.rpc.handle(Method.ActionResolveOutcome, (params) => {
+        received.push(params);
+        return { attemptId: params.attemptId, resolution: params.resolution };
+      });
+      const rpc = await after.operatorPeer();
+      const conflict = await rpc.request(OperatorMethod.GameOutcomeResolve, {
+        ...resolveAttempt,
+        resolution: 'confirmed_executed',
+      });
+      assert.equal((conflict as { ok: boolean }).ok, false);
+      assert.deepEqual(received, []);
+      assert.deepEqual(await rpc.request(OperatorMethod.GameOutcomeResolve, resolveAttempt), {
+        ok: true,
+      });
+      assert.deepEqual(received, [
+        {
+          sessionId: pendingAttempt.sessionId,
+          attemptId: pendingAttempt.attemptId,
+          resolution: 'reconciled_unknown',
+        },
+      ]);
+      assert.deepEqual(after.game.status().authority?.pending, []);
+      assert.deepEqual(after.store.intentsIn('unknown'), []);
+      assert.equal(
+        after.store.events().some(({ type }) => type === Method.ActionCommitted),
+        false,
+      );
+      assert.deepEqual(core.renewals, []);
+    } finally {
+      await after.close();
+    }
+  } finally {
+    for (const suffix of ['', '-wal', '-shm']) rmSync(path + suffix, { force: true });
+  }
 });
 
 const observedAction = (

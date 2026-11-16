@@ -107,8 +107,17 @@ export const STAGE_URL = 'obs.stage-url';
  */
 export const MEMORY_WRITE = 'memory.write';
 
+/** 操作员建立任务授权或核对物理结果，均不直接授予输入许可。 */
+export const GAME_TASK_OPEN = 'game.task-open';
+export const GAME_RESOLVE_OUTCOME = 'game.resolve-outcome';
+
 /** 安全停止下照常判定的能力：都不是观众能看到或听到的输出（见安全核“监督模式”）。 */
-const SAFE_STOP_EXEMPT: ReadonlySet<string> = new Set([STAGE_URL, MEMORY_WRITE]);
+const SAFE_STOP_EXEMPT: ReadonlySet<string> = new Set([
+  STAGE_URL,
+  MEMORY_WRITE,
+  GAME_TASK_OPEN,
+  GAME_RESOLVE_OUTCOME,
+]);
 
 /** OBS 外部变化按急停处理时的原因。可能是热键，也可能是手动操作，不断言是热键。 */
 export const OBS_EXTERNAL_REASON = {
@@ -125,6 +134,8 @@ const UNTRUSTED_FORBIDDEN = new Set([
   'obs.stream',
   'secret.read',
   'memory.private',
+  GAME_TASK_OPEN,
+  GAME_RESOLVE_OUTCOME,
 ]);
 
 function message(error: unknown): string {

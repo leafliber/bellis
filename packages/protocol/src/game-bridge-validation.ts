@@ -3,26 +3,34 @@ import { Compile } from 'typebox/compile';
 import {
   GAME_BRIDGE_INTEGER_FIELDS,
   GAME_BRIDGE_MAJOR,
+  GAME_BRIDGE_SEMANTIC_V2,
   type GameActionCommitted,
+  type GameBridgeMajor,
   GameBridgeMethod,
   type GameBridgeMethodSpec,
   GameBridgeMethods,
-  type GameBridgeRole,
+  GameBridgeRole,
   type GameBridgeSchemaName,
   type GameBridgeSender,
+  GameBridgeV2Methods,
   type GameDecisionPointOpened,
   GameDescribeVersion,
   type GameGoalSubmitParams,
   type GameMainDescription,
   type GameMainHealth,
+  type GameMainHealthV2,
   GameScreenType,
   type GameSituationObserved,
   gameBridgeSchemas,
+  gameBridgeV2Schemas,
 } from './game-bridge.ts';
 import { RpcFailure, RpcNotification, RpcRequest, RpcSuccess } from './jsonrpc.ts';
 
 const validators = new Map(
-  Object.entries(gameBridgeSchemas).map(([name, schema]) => [name, Compile(schema as TSchema)]),
+  Object.entries({ ...gameBridgeSchemas, ...gameBridgeV2Schemas }).map(([name, schema]) => [
+    name,
+    Compile(schema as TSchema),
+  ]),
 );
 const request = Compile(RpcRequest);
 const notification = Compile(RpcNotification);
@@ -40,7 +48,10 @@ export function readGameBridgeMajor(description: unknown): number | undefined {
 }
 
 /** 认证后的游戏连接在这里解码原始 JSON，趁 JS 仍能读到数字的原始写法。 */
-export function parseGameBridgeJson(raw: string): unknown {
+export function parseGameBridgeJson(
+  raw: string,
+  knownMajor: GameBridgeMajor = GAME_BRIDGE_MAJOR,
+): unknown {
   const malformed: Array<{ holder: object; key: string }> = [];
   const message: unknown = JSON.parse(
     raw,
@@ -67,6 +78,7 @@ export function parseGameBridgeJson(raw: string): unknown {
       if (
         version !== undefined &&
         version !== GAME_BRIDGE_MAJOR &&
+        version !== knownMajor &&
         !malformedAt(message.result, 'major')
       ) {
         return message;
@@ -81,8 +93,20 @@ const methods: Record<
   Readonly<Record<string, GameBridgeMethodSpec>>
 > = GameBridgeMethods;
 
-function methodSpec(role: GameBridgeRole, method: string): GameBridgeMethodSpec | undefined {
-  const registered = methods[role];
+const mainV2Methods: Readonly<Record<string, GameBridgeMethodSpec>> =
+  GameBridgeV2Methods[GameBridgeRole.Main];
+
+function methodSpec(
+  role: GameBridgeRole,
+  method: string,
+  major: number,
+): GameBridgeMethodSpec | undefined {
+  const registered =
+    major === GAME_BRIDGE_MAJOR
+      ? methods[role]
+      : major === GAME_BRIDGE_SEMANTIC_V2 && role === GameBridgeRole.Main
+        ? mainV2Methods
+        : undefined;
   return registered && Object.hasOwn(registered, method) ? registered[method] : undefined;
 }
 
@@ -111,7 +135,8 @@ function checkPayload(name: GameBridgeSchemaName, value: unknown): boolean {
   switch (name) {
     case 'GameDecisionPointOpened':
       return checkDecision(value as GameDecisionPointOpened);
-    case 'GameGoalSubmitParams': {
+    case 'GameGoalSubmitParams':
+    case 'GameGoalSubmitParamsV2': {
       const goal = value as GameGoalSubmitParams;
       return (goal.mode === 'waiting_vote') === (goal.decisionPointId !== null);
     }
@@ -119,7 +144,8 @@ function checkPayload(name: GameBridgeSchemaName, value: unknown): boolean {
       const action = value as GameActionCommitted;
       return (action.category === 'select') === (action.selection !== null);
     }
-    case 'GameMainDescription': {
+    case 'GameMainDescription':
+    case 'GameMainDescriptionV2': {
       const { adapter, prerequisites } = value as GameMainDescription;
       return (
         unique(prerequisites.map(({ id }) => id)) &&
@@ -140,6 +166,13 @@ function checkPayload(name: GameBridgeSchemaName, value: unknown): boolean {
     }
     case 'GameMainHealth':
       return unique((value as GameMainHealth).prerequisites.map(({ id }) => id));
+    case 'GameMainHealthV2': {
+      const health = value as GameMainHealthV2;
+      return (
+        (!health.ready || health.pendingActionOutcome === null) &&
+        unique(health.prerequisites.map(({ id }) => id))
+      );
+    }
     default:
       return true;
   }
@@ -151,8 +184,9 @@ export function checkGameBridgeParams(
   sender: GameBridgeSender,
   method: string,
   params: unknown,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
-  const spec = methodSpec(role, method);
+  const spec = methodSpec(role, method, major);
   return spec?.sender === sender && checkPayload(spec.params, params);
 }
 
@@ -161,15 +195,16 @@ export function checkGameBridgeMessage(
   role: GameBridgeRole,
   sender: GameBridgeSender,
   message: unknown,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
   if (request.Check(message)) {
-    const spec = methodSpec(role, message.method);
+    const spec = methodSpec(role, message.method, major);
     return (
       spec?.sender === sender && spec.result !== null && checkPayload(spec.params, message.params)
     );
   }
   if (notification.Check(message)) {
-    const spec = methodSpec(role, message.method);
+    const spec = methodSpec(role, message.method, major);
     return (
       spec?.sender === sender && spec.result === null && checkPayload(spec.params, message.params)
     );
@@ -182,9 +217,10 @@ export function checkGameBridgeResult(
   role: GameBridgeRole,
   method: string,
   result: unknown,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
-  const spec = methodSpec(role, method);
-  if (method === GameBridgeMethod.Describe && readGameBridgeMajor(result) !== GAME_BRIDGE_MAJOR) {
+  const spec = methodSpec(role, method, major);
+  if (method === GameBridgeMethod.Describe && readGameBridgeMajor(result) !== major) {
     return false;
   }
   return spec !== undefined && spec.result !== null && checkPayload(spec.result, result);
@@ -194,6 +230,7 @@ export function checkGameBridgeSuccess(
   role: GameBridgeRole,
   method: string,
   response: unknown,
+  major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
-  return success.Check(response) && checkGameBridgeResult(role, method, response.result);
+  return success.Check(response) && checkGameBridgeResult(role, method, response.result, major);
 }

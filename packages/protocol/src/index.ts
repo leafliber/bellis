@@ -1,6 +1,6 @@
 import { ChannelAccept, ChannelChallenge, ChannelHello, ChannelProof } from './channel.ts';
 import { HostConfig, ObsSecret } from './config.ts';
-import { gameBridgeSchemas } from './game-bridge.ts';
+import { gameBridgeSchemas, gameBridgeV2Schemas } from './game-bridge.ts';
 import {
   RpcCancelParams,
   RpcErrorObject,
@@ -25,6 +25,8 @@ import {
   OperatorEmergencyParams,
   OperatorForgetParams,
   OperatorGameControlParams,
+  OperatorGameOutcomeResolveParams,
+  OperatorGameTaskOpenParams,
   OperatorModeParams,
   OperatorPreflightParams,
   OperatorReleaseParams,
@@ -62,6 +64,7 @@ export const schemaModules = {
   config: { HostConfig, ObsSecret },
   channel: { ChannelHello, ChannelChallenge, ChannelProof, ChannelAccept },
   'game-bridge': gameBridgeSchemas,
+  'game-bridge-v2': gameBridgeV2Schemas,
   jsonrpc: {
     RpcRequest,
     RpcNotification,
@@ -82,6 +85,8 @@ export const schemaModules = {
     OperatorModeParams,
     OperatorEmergencyParams,
     OperatorGameControlParams,
+    OperatorGameOutcomeResolveParams,
+    OperatorGameTaskOpenParams,
     OperatorVetoParams,
     OperatorReleaseParams,
     OperatorPreflightParams,

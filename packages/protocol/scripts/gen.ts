@@ -17,8 +17,11 @@ import {
   ChannelHello,
   GAME_BRIDGE_INTEGER_FIELDS,
   GAME_BRIDGE_MAJOR,
+  GAME_BRIDGE_SEMANTIC_V2,
   GameBridgeMethods,
+  GameBridgeV2Methods,
   gameBridgeSchemas,
+  gameBridgeV2Schemas,
   ProcessShutdownParams,
   ProcessShutdownResult,
   RpcCancelParams,
@@ -41,6 +44,19 @@ const root = fileURLToPath(new URL('../../../', import.meta.url));
 const outDir = fileURLToPath(new URL('../schemas/', import.meta.url));
 const suffix = '.schema.json';
 const check = process.argv.includes('--check');
+const gameBridgeVersions = new Map([
+  ['game-bridge', { major: GAME_BRIDGE_MAJOR, methods: GameBridgeMethods }],
+  ['game-bridge-v2', { major: GAME_BRIDGE_SEMANTIC_V2, methods: GameBridgeV2Methods }],
+]);
+const strictGameModels = [
+  '--strict-types',
+  'str',
+  'int',
+  'bool',
+  'float',
+  '--enum-field-as-literal',
+  'all',
+];
 
 /**
  * 生成 sidecar 与 Game Runtime 实际用到的消息。路径相对仓库根；每个模块一次生成，互不引用。
@@ -74,7 +90,13 @@ const pythonModules = [
     name: 'game-bridge',
     path: 'packages/protocol/models/game_bridge.py',
     defs: { ...gameBridgeSchemas, RpcFailure, RpcSuccess },
-    options: ['--strict-types', 'str', 'int', 'bool', 'float', '--enum-field-as-literal', 'all'],
+    options: strictGameModels,
+  },
+  {
+    name: 'game-bridge-v2',
+    path: 'packages/protocol/models/game_bridge_v2.py',
+    defs: { ...gameBridgeV2Schemas, RpcFailure, RpcSuccess },
+    options: strictGameModels,
   },
 ];
 
@@ -107,13 +129,12 @@ const CODEGEN_OPTIONS = [
 ];
 
 function render(name: string, defs: Record<string, unknown>): string {
+  const bridge = gameBridgeVersions.get(name);
   const doc = {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: `urn:bellis:schema:${name}`,
     $defs: defs,
-    ...(name === 'game-bridge'
-      ? { 'x-major': GAME_BRIDGE_MAJOR, 'x-methods': GameBridgeMethods }
-      : {}),
+    ...(bridge ? { 'x-major': bridge.major, 'x-methods': bridge.methods } : {}),
   };
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
@@ -144,23 +165,44 @@ function renderPython(
 ): string {
   const schema = render(name, defs);
   const generated = uvRun(['datamodel-codegen', ...CODEGEN_OPTIONS, ...options], schema);
+  const bridge = gameBridgeVersions.get(name);
   const fixed = uvRun(
     // 长的字面量枚举由下面的 format 换行，再由完整 lint 检查。
     ['ruff', 'check', '--fix', '--extend-ignore', 'E501', '--quiet', '--stdin-filename', path, '-'],
-    name === 'game-bridge' ? withGameBridgeDecoder(generated) : generated,
+    bridge ? withGameBridgeDecoder(generated, bridge.major) : generated,
   );
   return uvRun(['ruff', 'format', '--quiet', '--stdin-filename', path, '-'], fixed);
 }
 
-function withGameBridgeDecoder(generated: string): string {
-  const models = generated.replace(
+function withGameBridgeDecoder(generated: string, major: number): string {
+  let models = generated.replace(
     'from __future__ import annotations\n',
     'from __future__ import annotations\n\nimport json\nfrom typing import cast\nfrom pydantic import ValidationError\n',
   );
+  if (major === GAME_BRIDGE_SEMANTIC_V2) {
+    const declaration = 'class GameMainHealthV2(BaseModel):\n';
+    if (!models.includes(declaration)) throw new Error('缺少 GameMainHealthV2 生成模型');
+    models = models
+      .replace(
+        'from pydantic import ValidationError\n',
+        'from pydantic import ValidationError, model_validator\n',
+      )
+      .replace(
+        declaration,
+        `${declaration}
+    @model_validator(mode='after')
+    def _pending_requires_not_ready(self) -> GameMainHealthV2:
+        if self.pendingActionOutcome is not None and self.ready:
+            raise ValueError('有未决动作时不能报告就绪')
+        return self
+
+`,
+      );
+  }
   const template = readFileSync(new URL('./game-bridge-decoder.py.in', import.meta.url), 'utf8');
   return [
     models,
-    `GAME_BRIDGE_MAJOR = ${GAME_BRIDGE_MAJOR}`,
+    `GAME_BRIDGE_MAJOR = ${major}`,
     `_MAX_SAFE_INTEGER = ${Number.MAX_SAFE_INTEGER}`,
     `_INTEGER_FIELDS = frozenset(${JSON.stringify(GAME_BRIDGE_INTEGER_FIELDS)})`,
     '',

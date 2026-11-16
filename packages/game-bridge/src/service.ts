@@ -9,6 +9,8 @@ import type {
   GameInputReleased,
   GameMainDescription,
   GameMainHealth,
+  GameMainHealthV2,
+  GamePendingActionOutcome,
   GameSituationObserved,
 } from '@bellis/protocol';
 import type { Intent, IntentSource, Projection } from '@bellis/store';
@@ -45,10 +47,20 @@ export interface GameStatus {
   coreConnected: boolean;
   runtimeId: string | null;
   adapter: GameMainDescription['adapter'] | null;
-  health: GameMainHealth | null;
+  health: GameMainHealth | GameMainHealthV2 | null;
   realtimeHealth: GameCoreHealth | null;
   decision: GameDecisionPointOpened | null;
   inputPermitted: boolean;
+  authority?: {
+    controlTargetId: string;
+    pending: readonly GamePendingActionOutcome[];
+    activeTaskId: string | null;
+    task: {
+      taskId: string;
+      expiresAtMs: number;
+      state: 'opening' | 'accepted' | 'ended';
+    } | null;
+  };
 }
 
 export type GameEvent =
@@ -56,7 +68,7 @@ export type GameEvent =
   | { method: 'decision_point.opened'; payload: GameDecisionPointOpened }
   | { method: 'action.committed'; payload: GameActionCommitted }
   | { method: 'input.released'; payload: GameInputReleased }
-  | { method: 'health.reported'; payload: GameMainHealth | GameCoreHealth };
+  | { method: 'health.reported'; payload: GameMainHealth | GameMainHealthV2 | GameCoreHealth };
 
 export type GameFact = GameEvent & {
   seq: number;

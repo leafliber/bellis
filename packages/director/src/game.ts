@@ -35,6 +35,7 @@ export interface GameContext {
 interface Session {
   game: Game;
   runtimeId: string;
+  taskId: string | undefined;
   situation?: Fact<GameSituationObserved>;
   point?: Fact<GameDecisionPointOpened>;
   failure?: { seq: number; screen: FailureScreen };
@@ -48,6 +49,7 @@ interface Session {
 export interface GameTurn {
   game: Game;
   runtimeId: string;
+  taskId: string | undefined;
   point: GameDecisionPointOpened | null;
   failure: Session['failure'];
   context: GameContext;
@@ -87,10 +89,16 @@ export class DirectorGame {
     const status = game.status();
     const { runtimeId } = status;
     if (!runtimeId) return;
-    if (this.#session?.game !== game || this.#session.runtimeId !== runtimeId) {
+    const taskId = status.authority?.task?.taskId;
+    if (
+      this.#session?.game !== game ||
+      this.#session.runtimeId !== runtimeId ||
+      this.#session.taskId !== taskId
+    ) {
       this.#session = {
         game,
         runtimeId,
+        taskId,
         seenLookpoints: new Map(),
         committed: [],
       };
@@ -106,6 +114,11 @@ export class DirectorGame {
     if (fact.method === 'action.committed') {
       state.committed.push({ seq: fact.seq, data: fact.payload });
       if (state.committed.length > 8) state.committed.shift();
+      return;
+    }
+    if (status.authority?.pending.length) {
+      delete state.failure;
+      delete state.lookpoint;
       return;
     }
     if (fact.method === 'decision_point.opened') {
@@ -210,6 +223,7 @@ export class DirectorGame {
     return {
       game: state.game,
       runtimeId: state.runtimeId,
+      taskId: state.taskId,
       point,
       failure: state.failure,
       context: {
@@ -230,6 +244,7 @@ export class DirectorGame {
       !!current &&
       current.state.game === turn.game &&
       current.state.runtimeId === turn.runtimeId &&
+      current.state.taskId === turn.taskId &&
       current.status.state === 'READY' &&
       current.status.decision?.decisionPointId === turn.point?.decisionPointId &&
       (!turn.failure || current.state.failure?.seq === turn.failure.seq)

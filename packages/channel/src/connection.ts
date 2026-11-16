@@ -7,6 +7,8 @@ import {
   ChannelHello,
   ChannelProof,
   ChannelRole,
+  GAME_BRIDGE_MAJOR,
+  GAME_BRIDGE_SEMANTIC_V2,
   GameBridgeRole,
   parseGameBridgeJson,
 } from '@bellis/protocol';
@@ -235,7 +237,9 @@ export class Connection extends EventEmitter<ConnectionEvents> {
     const game = this.#role === GameBridgeRole.Main || this.#role === GameBridgeRole.Core;
     try {
       const raw = frame.payload.toString('utf8');
-      message = game ? parseGameBridgeJson(raw) : JSON.parse(raw);
+      const major =
+        this.#role === GameBridgeRole.Main ? GAME_BRIDGE_SEMANTIC_V2 : GAME_BRIDGE_MAJOR;
+      message = game ? parseGameBridgeJson(raw, major) : JSON.parse(raw);
     } catch (error) {
       const reason = game ? '游戏桥 JSON 帧编码不合法' : '消息不是合法 JSON';
       this.destroy(new ChannelError('protocol-error', reason, { cause: error }));
