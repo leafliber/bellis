@@ -81,6 +81,7 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 
 - `pendingActionOutcome` 对象包含唯一 `attemptId`、执行时的 `runtimeId`、源游戏会话的 `sessionId`、`goalId`、`actionId`、可空 `decisionPointId` 和原因 `reason`（1–200 字符）。它可来自已结束的进程或会话。存在未决时 `ready=false`。Bellis 按槽位持久记录并隔离，普通 P-04 卡住仍走原来的恢复规则。空字段、重连和提交新目标均不解除已记录隔离。
 - `action.resolve_outcome` 由 Bellis 在操作员核对外部状态和输入释放后，经已认证的操作员入口与执行闸门发往 `game-runtime.main`。请求为 `{sessionId, attemptId, resolution}`，取值为 `confirmed_executed`、`confirmed_not_executed` 或 `reconciled_unknown`。Runtime 核对原尝试、持久结案后回复 `{attemptId, resolution}`。原参数精确重送时返回同一结果，冲突或不匹配时拒绝。Bellis 在持久记录匹配的应答后解除该尝试的隔离。结案是独立事实，`action.committed` 仍由执行回执与效果核验产生。
+- Bellis 的结案记录保留槽位、原尝试的全部身份及结案结果。原身份的迟到健康重放不会重建持久隔离，已持久结案的精确重复请求可从原回执读回。同一槽位重用尝试编号并改变原 Runtime、会话、目标、动作或决策点时，持久隔离该冲突并拒绝旧结案回执；开任务与输入许可仍须当前连接的完整健康回读。
 - `task.open` 同样由已认证的操作员入口经执行闸门发出。请求为 `{taskId, objective, expiresAtMs, overallCompletion}`，由宿主分配新 `taskId`，`expiresAtMs` 是授权终止的绝对单调时刻。Runtime 用可信本地配置冻结同一任务的调用、物理输入和无进展预算，持久接纳后回复 `{taskId}`。原参数精确重送时返回同一结果，参数冲突时拒绝，任务终止后保留原结果供回读。开新任务前，旧任务已结束或撤权，且原尝试已结清、输入释放已核验。开任务只建立可执行范围，输入仍须原有许可。
 - `overallCompletion` 可为 `null`，或取 `{kind:"signature", signature}`、`{kind:"screen", screenType}`、`{kind:"text-appeared", text, roi}`、`{kind:"text-disappeared", text, roi}`。签名最多 120 字符、文字最多 240 字符、ROI 名最多 80 字符，均为非空字符串。`screenType` 为通用画面类型。Runtime 依据适配包核对签名与已标定区域，从有效新证据判定完成。
 - 语义 v2 的 `goal.submit` 必报 `taskId`。Bellis 从同槽位已持久接纳且与当前健康读回一致的绑定注入该字段，并将目标截止限制在任务到期以内。投票、暂停、重连或 P-04 恢复均沿用原任务的根目标、终局与预算。任务到期、Runtime 主进程重启或缺少可信预算账目时，旧任务终止，`activeTaskId` 上报 `null`。
