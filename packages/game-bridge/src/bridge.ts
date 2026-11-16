@@ -30,12 +30,14 @@ import {
 } from '@bellis/protocol';
 import { isRealOutput, type Lease, type SafetyFacade } from '@bellis/safety';
 import { IntentOutcomeUnknown, type IntentSource } from '@bellis/store';
+import { useTracer } from '@bellis/telemetry';
 import { Compile } from 'typebox/compile';
 import type { GameControlResult, GameRuntimeHost } from './host.ts';
 import {
   GAME_GOAL,
   GAME_INPUT,
   type Game,
+  type GameCommand,
   type GameCommandResult,
   GameControlFact,
   type GameEvent,
@@ -45,6 +47,7 @@ import {
   type GameStatus,
   gameControlLedger,
 } from './service.ts';
+import { GameTelemetry } from './telemetry.ts';
 
 export interface GameBridgeConfig {
   adapterId: string;
@@ -73,10 +76,6 @@ const refusedBeforeExecution = new Set<number>([
 
 type Health = GameMainHealth | GameCoreHealth;
 type Description = GameMainDescription | GameCoreDescription;
-type Command =
-  | { method: typeof Method.GoalSubmit; payload: GameGoalSubmitParams }
-  | { method: typeof Method.DecisionResolve; payload: GameDecisionResolveParams };
-
 interface Link {
   role: Role;
   rpc: RpcPeer;
@@ -120,6 +119,7 @@ export class GameBridge implements Game {
   readonly #port: GameRuntimeHost['port'];
   readonly #clock: Clock;
   readonly #safety: SafetyFacade;
+  readonly #telemetry: GameTelemetry;
   readonly #target: string;
   readonly #links = new Map<Role, Link>();
   readonly #listeners = new Set<(fact: GameFact) => void>();
@@ -145,6 +145,7 @@ export class GameBridge implements Game {
     this.#port = port;
     this.#clock = clock;
     this.#safety = safety;
+    this.#telemetry = new GameTelemetry(useTracer(ctx, 'game-bridge'), clock, port.wireNowMs);
     this.#target = `game:${ctx.config.adapterId}`;
     this.#manual = safety.view(gameControlLedger)[this.#target];
   }
@@ -169,11 +170,16 @@ export class GameBridge implements Game {
     );
     this.#ctx.register(
       this.#safety.onControl((event) => {
-        if (event.kind === 'stop') this.#stopInput(event.reason);
-        else if (event.kind === 'mode') this.#recheck();
+        if (event.kind === 'stop') {
+          this.#stopInput(event.reason);
+          this.#telemetry.reset('stopped');
+        } else if (event.kind === 'mode') this.#recheck();
       }),
     );
-    const onQuiesce = () => this.#stopInput('游戏桥静止中');
+    const onQuiesce = () => {
+      this.#stopInput('游戏桥静止中');
+      this.#telemetry.reset('unloaded');
+    };
     signal.addEventListener('abort', onQuiesce, { once: true });
     this.#ctx.register(() => signal.removeEventListener('abort', onQuiesce));
   }
@@ -212,6 +218,7 @@ export class GameBridge implements Game {
         this.#release.settled.resolve(false);
         this.#release = undefined;
       }
+      this.#telemetry.reset('connection_changed');
     });
     for (const method of role === Role.Main
       ? [
@@ -486,8 +493,15 @@ export class GameBridge implements Game {
       return;
     }
     const payload = params as unknown as GameEvent['payload'];
-    if (payload.atMs < link.description.nowMs - 1 || payload.atMs > this.#port.wireNowMs() + 1)
+    if (payload.atMs < link.description.nowMs - 1 || payload.atMs > this.#port.wireNowMs() + 1) {
+      if ('traceparent' in payload) {
+        if (method === Method.ActionCommitted)
+          this.#telemetry.discarded('game.action', payload.traceparent, 'invalid_time');
+        if (method === Method.DecisionPointOpened)
+          this.#telemetry.discarded('game.decision', payload.traceparent, 'invalid_time');
+      }
       return;
+    }
     const currentRun = this.#pairedRun();
     if (
       !currentRun &&
@@ -517,12 +531,18 @@ export class GameBridge implements Game {
       this.#handleRelease(link, event.payload);
     }
     const actionId = event.method === Method.ActionCommitted ? event.payload.actionId : undefined;
-    if (actionId !== undefined && this.#seenActions.has(actionId)) return;
+    if (event.method === Method.ActionCommitted && this.#seenActions.has(event.payload.actionId)) {
+      this.#telemetry.discarded('game.action', event.payload.traceparent, 'duplicate');
+      return;
+    }
     const decision =
       event.method === Method.DecisionPointOpened
         ? this.#projectDecision(event.payload)
         : undefined;
-    if (event.method === Method.DecisionPointOpened && !decision) return;
+    if (event.method === Method.DecisionPointOpened && !decision) {
+      this.#telemetry.discarded('game.decision', event.payload.traceparent, 'ignored_update');
+      return;
+    }
 
     const runtimeId = link.description.runtimeId;
     const committed = this.#safety.record(method, { runtimeId, role: link.role, payload });
@@ -541,15 +561,19 @@ export class GameBridge implements Game {
         (event.payload as GameMainHealth).decisionPointId !== point.decisionPointId
       ) {
         this.#decision = undefined;
+        this.#telemetry.withdrew();
       }
     } else if (decision) {
+      const update = this.#decision?.latest.decisionPointId === decision.latest.decisionPointId;
       this.#seenDecisions.add(decision.latest.decisionPointId);
       this.#decision = decision;
+      this.#telemetry.opened(runtimeId, decision.latest, update);
     } else if (event.method === Method.ActionCommitted && event.payload.selection) {
       const { decisionPointId } = event.payload.selection;
       this.#seenDecisions.add(decisionPointId);
       if (this.#decision?.latest.decisionPointId === decisionPointId) this.#decision = undefined;
     }
+    if (event.method === Method.ActionCommitted) this.#telemetry.action(runtimeId, event.payload);
     for (const listener of [...this.#listeners]) {
       try {
         listener(structuredClone({ ...event, seq: committed.seq, role: link.role, runtimeId }));
@@ -735,6 +759,7 @@ export class GameBridge implements Game {
     this.#manual = reason;
     this.#stopInput(reason);
     this.#safety.record(GameControlFact.Taken, { target: this.#target, reason });
+    this.#telemetry.reset('stopped');
   }
 
   returnControl(): GameControlResult {
@@ -765,7 +790,7 @@ export class GameBridge implements Game {
     return this.#execute({ method: Method.DecisionResolve, payload }, source, stillValid);
   }
 
-  #commandBlocker(command: Command): string | undefined {
+  #commandBlocker(command: GameCommand): string | undefined {
     const now = this.#port.wireNowMs();
     const point = this.#decision?.latest;
     if (command.method === Method.GoalSubmit) {
@@ -782,8 +807,24 @@ export class GameBridge implements Game {
     return undefined;
   }
 
+  #observeBlocked(command: GameCommand): void {
+    const now = this.wireNowMs();
+    const point = this.#decision?.latest;
+    const expired =
+      command.method === Method.GoalSubmit
+        ? command.payload.expiresAtMs <= now
+        : point?.decisionPointId === command.payload.decisionPointId &&
+          point.timing !== null &&
+          point.timing.resolveByMs <= now;
+    this.#telemetry.discarded(
+      'game.command',
+      command.payload.traceparent,
+      expired ? 'expired' : 'stale',
+    );
+  }
+
   async #execute(
-    command: Command,
+    command: GameCommand,
     source: IntentSource,
     stillValid?: () => boolean,
   ): Promise<GameCommandResult> {
@@ -796,9 +837,12 @@ export class GameBridge implements Game {
       return { ok: false, reason: '游戏命令不符合契约' };
     }
     const payload = structuredClone(command.payload);
-    const checked = { ...command, payload } as Command;
+    const checked = { ...command, payload } as GameCommand;
     const blocker = this.#commandBlocker(checked);
-    if (blocker) return { ok: false, reason: blocker };
+    if (blocker) {
+      this.#observeBlocked(checked);
+      return { ok: false, reason: blocker };
+    }
     if (this.#command) return { ok: false, reason: '已有在途游戏命令' };
     const controller = new AbortController();
     this.#command = controller;
@@ -808,6 +852,8 @@ export class GameBridge implements Game {
         ? checked.payload.goalId
         : checked.payload.decisionPointId;
     const key = JSON.stringify(['game', command.method, run, id]);
+    let observeResult: ReturnType<GameTelemetry['sent']>;
+    let outcome: 'accepted' | 'refused' | 'unknown' = 'unknown';
     try {
       const decision = await this.#safety.authorize({
         key,
@@ -820,6 +866,7 @@ export class GameBridge implements Game {
       });
       if (!decision.allowed) return { ok: false, reason: decision.reason };
       if (decision.duplicate) {
+        this.#telemetry.discarded('game.command', payload.traceparent, 'duplicate');
         return decision.intent.state === 'succeeded'
           ? { ok: true, intent: decision.intent, duplicate: true }
           : {
@@ -839,7 +886,10 @@ export class GameBridge implements Game {
           throw new Error('发送前游戏连接或输入许可已失效');
         }
         const changed = this.#commandBlocker(checked);
-        if (changed) throw new Error(changed);
+        if (changed) {
+          this.#observeBlocked(checked);
+          throw new Error(changed);
+        }
         if (stillValid && !stillValid()) throw new Error('发起命令时的游戏局面已失效');
         try {
           const pending = main.rpc.request(command.method, payload, {
@@ -847,6 +897,12 @@ export class GameBridge implements Game {
           });
           if (checked.method === Method.DecisionResolve && this.#decision)
             this.#decision.resolveSent = true;
+          observeResult = this.#telemetry.sent(
+            run,
+            checked,
+            this.wireNowMs(),
+            checked.method === Method.DecisionResolve ? this.#decision?.latest.timing : undefined,
+          );
           const reply = await pending;
           if (!checkGameBridgeResult(Role.Main, command.method, reply))
             throw new Error('游戏命令回执无效');
@@ -859,10 +915,17 @@ export class GameBridge implements Game {
           throw new IntentOutcomeUnknown('游戏命令已尝试发送，执行结果未知');
         }
       });
+      outcome =
+        intent.state === 'succeeded'
+          ? 'accepted'
+          : intent.state === 'unknown'
+            ? 'unknown'
+            : 'refused';
       return intent.state === 'succeeded'
         ? { ok: true, intent, duplicate: false }
         : { ok: false, reason: intent.error ?? '游戏意图未完成', intent };
     } finally {
+      observeResult?.(outcome);
       this.#command = undefined;
       this.#recheck();
     }
@@ -878,6 +941,7 @@ export class GameBridge implements Game {
   dispose(): void {
     this.#stopInput('游戏桥已关闭');
     this.#disposed = true;
+    this.#telemetry.reset('unloaded');
     this.#release?.settled.resolve(false);
     for (const link of this.#links.values()) link.rpc.connection.close();
     this.#links.clear();

@@ -1,5 +1,6 @@
 import { ClockService, definePlugin, type PluginContext } from '@bellis/kernel';
 import { SafetyService } from '@bellis/safety';
+import { TelemetryService } from '@bellis/telemetry';
 import Type from 'typebox';
 import { GameBridge, type GameBridgeConfig } from './bridge.ts';
 import { GameRuntimePortService } from './host.ts';
@@ -17,7 +18,12 @@ export const gameBridge = definePlugin({
     tier: 'ordinary',
     process: 'in-process',
     provides: [GameService.ref],
-    inject: [GameRuntimePortService.ref, ClockService.ref, SafetyService.ref],
+    inject: [
+      GameRuntimePortService.ref,
+      ClockService.ref,
+      SafetyService.ref,
+      `${TelemetryService.ref}?`,
+    ],
     permissions: [GAME_GOAL, GAME_INPUT],
     config: Type.Object(
       {
