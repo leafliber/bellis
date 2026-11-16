@@ -576,6 +576,7 @@ async function realtime(h: Harness, run = 'run') {
   let expiry: ReturnType<ManualClock['setTimeout']> | undefined;
   let verification: GameInputReleased['verification'] = 'verified';
   let renewReply: unknown = {};
+  let releaseOnStop = true;
   const renewals: GameLeaseRenewParams[] = [];
   const stops: number[] = [];
   const releases: GameInputReleased['reason'][] = [];
@@ -611,7 +612,8 @@ async function realtime(h: Harness, run = 'run') {
     const token = params.throughToken as number;
     stops.push(token);
     through = Math.max(through, token);
-    if (!lease || lease.token <= through) release('lease_revoked', token || null);
+    if (releaseOnStop && (!lease || lease.token <= through))
+      release('lease_revoked', token || null);
     return {};
   });
   p.connection.once('close', () => release('lease_source_lost'));
@@ -633,6 +635,9 @@ async function realtime(h: Harness, run = 'run') {
     },
     setRenewReply(value: unknown) {
       renewReply = value;
+    },
+    setReleaseOnStop(value: boolean) {
+      releaseOnStop = value;
     },
     input() {
       if (!p.connection.isOpen || !lease || now() >= lease.expiresAtMs) return false;
@@ -683,7 +688,7 @@ const resolveAttempt = {
   attemptId: pendingAttempt.attemptId,
   resolution: 'reconciled_unknown',
   reviewed: true,
-};
+} as const;
 
 async function authorityMain(h: Harness, run = 'run', controlTargetId = SLOT) {
   const peer = await main(h, run, () => ({
@@ -828,6 +833,55 @@ test('语义 v2 开任务缺少能力或释放未核验时不会发送', async (
   }
 });
 
+test('第二次开任务拒绝同毫秒的旧释放，只接受本次停止后的核验', async () => {
+  const h = await setup(authorityOptions);
+  try {
+    const { semantic, core } = await authorityPair(h);
+    const opened: RpcParams[] = [];
+    semantic.rpc.handle(Method.TaskOpen, (params) => {
+      opened.push(params);
+      return { taskId: params.taskId };
+    });
+    assert.deepEqual(await h.operator.gameTaskOpen(openTask), { ok: true });
+    const previous = h.store.events().find(({ type }) => type === Method.InputReleased)?.data as
+      | { payload: GameInputReleased }
+      | undefined;
+    assert.equal(previous?.payload.atMs, WIRE_EPOCH);
+    assert.ok(previous);
+    const taskId = opened[0]?.taskId;
+    assert.ok(typeof taskId === 'string');
+    semantic.health({ activeTaskId: taskId });
+    await until(() => h.game.status().authority?.activeTaskId === taskId);
+    semantic.health();
+    await until(() => h.game.status().authority?.task?.state === 'ended');
+    assert.equal(h.wireNowMs(), WIRE_EPOCH);
+
+    // 第二次 input.stop 先只回 ACK，随后重送第一次的释放通知。
+    core.setReleaseOnStop(false);
+    const opening = h.operator.gameTaskOpen(openTask);
+    await until(() => h.store.intentsIn('executing').some(({ type }) => type === Method.TaskOpen));
+    await flush();
+    if (core.stops.length === 1) {
+      core.clock.advance(2);
+      h.clock.advance(2);
+    }
+    await until(() => core.stops.length === 2);
+    core.rpc.notify(Method.InputReleased, previous.payload);
+    await until(
+      () => h.store.events().filter(({ type }) => type === Method.InputReleased).length === 2,
+    );
+    await flush();
+    assert.equal(opened.length, 1);
+    assert.equal(h.store.intentsIn('executing').length, 1);
+
+    core.release('lease_revoked', null);
+    assert.deepEqual(await opening, { ok: true });
+    assert.equal(opened.length, 2);
+  } finally {
+    await h.close();
+  }
+});
+
 test('开任务丢回执时只回读原授权，宿主重启后禁止恢复旧任务输入', async () => {
   const path = join(tmpdir(), `bellis-game-task-${randomUUID()}.db`);
   const options = { ...authorityOptions, storePath: path };
@@ -956,6 +1010,186 @@ test('物理未决和原结案参数跨重启保留，仅匹配回执清除隔�
         false,
       );
       assert.deepEqual(core.renewals, []);
+    } finally {
+      await after.close();
+    }
+  } finally {
+    for (const suffix of ['', '-wal', '-shm']) rmSync(path + suffix, { force: true });
+  }
+});
+
+test('v2 槽位的未知目标意图在配置回退和宿主重启后阻止旧语义许可与目标', async () => {
+  const file = join(tmpdir(), `bellis-game-downgrade-${randomUUID()}.db`);
+  const sim = { simulation: true, simulatedPort: true, storePath: file };
+  const v1Config = { adapterId: ADAPTER.id, adapterVersion: ADAPTER.version };
+  const assertQuarantined = async (h: Harness, game: Game) => {
+    const semantic = await main(h, 'legacy-runtime');
+    const core = await realtime(h, 'legacy-runtime');
+    semantic.health();
+    core.health();
+    await until(() => game.status().health !== null && game.status().realtimeHealth !== null);
+    assert.match(game.status().reason ?? '', /隔离/);
+    assert.equal(game.status().inputPermitted, false);
+    assert.equal(h.safety.leases.current(GAME_INPUT), undefined);
+    assert.equal((await game.submitGoal(goal(h, 'legacy-goal'), SOURCE)).ok, false);
+    assert.equal(core.renewals.length, 0);
+    assert.equal(semantic.submissions.length, 0);
+    return { semantic, core };
+  };
+  try {
+    const first = await setup({ ...sim, controlTargetId: SLOT });
+    let unknownId: number;
+    try {
+      const { semantic, core } = await authorityPair(first);
+      semantic.rpc.handle(Method.TaskOpen, (params) => ({ taskId: params.taskId }));
+      assert.deepEqual(await first.operator.gameTaskOpen(openTask), { ok: true });
+      const taskId = first.game.status().authority?.task?.taskId;
+      assert.ok(taskId);
+      semantic.health({ activeTaskId: taskId });
+      await first.mode();
+      await until(() => first.game.status().inputPermitted);
+
+      semantic.answerWith(() => new Promise(() => {}));
+      const submitting = first.game.submitGoal(goal(first, 'possibly-accepted'), SOURCE);
+      await until(() => semantic.submissions.length === 1);
+      semantic.connection.close();
+      const result = await submitting;
+      assert.equal(result.ok, false);
+      assert.equal(result.intent?.state, 'unknown');
+      assert.equal(result.intent.target, `game:slot:${SLOT}`);
+      unknownId = result.intent.id;
+      assert.deepEqual(first.game.status().authority?.pending, []);
+      await until(() => core.actualLease === undefined);
+
+      // 用宿主的真实插件生命周期重新加载同一适配包的旧语义配置。
+      await first.kernel.disable('game');
+      assert.deepEqual(await first.kernel.replace('game', gameBridge, v1Config), { ok: true });
+      await first.kernel.enable('game');
+      await first.kernel.settled();
+      const current = first.kernel.services.resolve(GameService.name, GameService.major);
+      assert.ok(!('missing' in current));
+      await assertQuarantined(first, current.impl as Game);
+    } finally {
+      await first.close();
+    }
+    const restarted = await setup(sim);
+    try {
+      await restarted.mode();
+      const { semantic } = await assertQuarantined(restarted, restarted.game);
+      assert.equal(restarted.store.intent(unknownId)?.state, 'unknown');
+      assert.equal(restarted.operator.resolve({ id: unknownId, outcome: 'failed' }).ok, true);
+      semantic.health();
+      await until(() => restarted.game.status().inputPermitted);
+      assert.equal(
+        (await restarted.game.submitGoal(goal(restarted, 'operator-recovered'), SOURCE)).ok,
+        true,
+      );
+    } finally {
+      await restarted.close();
+    }
+  } finally {
+    for (const suffix of ['', '-wal', '-shm']) rmSync(file + suffix, { force: true });
+  }
+});
+
+test('已结案尝试的健康重放不会复活隔离，重启后可复读精确结案', async () => {
+  const path = join(tmpdir(), `bellis-game-outcome-replay-${randomUUID()}.db`);
+  const options = { ...authorityOptions, storePath: path };
+  const pending = { ready: false, pendingActionOutcome: pendingAttempt };
+  try {
+    const before = await setup(options);
+    try {
+      const { semantic } = await authorityPair(before, 'run-before-replay', pending);
+      semantic.rpc.handle(Method.ActionResolveOutcome, (params) => ({
+        attemptId: params.attemptId,
+        resolution: params.resolution,
+      }));
+      assert.deepEqual(await before.operator.gameOutcomeResolve(resolveAttempt), { ok: true });
+      semantic.health();
+      await until(() => before.game.status().health?.ready === true);
+      semantic.health(pending);
+      await until(() => before.game.status().health?.ready === false);
+      assert.deepEqual(before.game.status().authority?.pending, []);
+    } finally {
+      await before.close();
+    }
+    const after = await setup(options);
+    try {
+      const { semantic, core } = await authorityPair(after, 'run-after-replay', pending);
+      let sent = 0;
+      semantic.rpc.handle(Method.ActionResolveOutcome, () => {
+        sent++;
+        return {};
+      });
+      assert.deepEqual(after.game.status().authority?.pending, []);
+      assert.deepEqual(await after.operator.gameOutcomeResolve(resolveAttempt), { ok: true });
+      assert.equal(
+        (
+          await after.operator.gameOutcomeResolve({
+            ...resolveAttempt,
+            resolution: 'confirmed_not_executed',
+          })
+        ).ok,
+        false,
+      );
+      assert.equal(sent, 0);
+      assert.equal(core.stops.length, 0);
+      assert.equal(after.game.status().inputPermitted, false);
+      semantic.health();
+      await until(() => after.game.status().health?.ready === true);
+      semantic.rpc.handle(Method.TaskOpen, (params) => ({ taskId: params.taskId }));
+      assert.deepEqual(await after.operator.gameTaskOpen(openTask), { ok: true });
+    } finally {
+      await after.close();
+    }
+  } finally {
+    for (const suffix of ['', '-wal', '-shm']) rmSync(path + suffix, { force: true });
+  }
+});
+
+test('已结案编号换了身份时旧回执不能放行，重启和空健康均保留隔离', async () => {
+  const path = join(tmpdir(), `bellis-game-outcome-reuse-${randomUUID()}.db`);
+  const options = { ...authorityOptions, storePath: path };
+  const collision = { ...pendingAttempt, goalId: 'other-goal', actionId: 'other-action' };
+  try {
+    const before = await setup(options);
+    try {
+      const { semantic, core } = await authorityPair(before, 'run-before-conflict', {
+        ready: false,
+        pendingActionOutcome: pendingAttempt,
+      });
+      let sent = 0;
+      semantic.rpc.handle(Method.ActionResolveOutcome, (params) => {
+        sent++;
+        return { attemptId: params.attemptId, resolution: params.resolution };
+      });
+      assert.deepEqual(await before.operator.gameOutcomeResolve(resolveAttempt), { ok: true });
+      // 同一尝试和会话编号，换成另一目标及动作。Runtime 仍会为原三元组回相同的应答。
+      before.clock.advance(2);
+      core.clock.advance(2);
+      semantic.health({ ready: false, pendingActionOutcome: collision });
+      await until(
+        () => before.game.status().authority?.pending[0]?.actionId === collision.actionId,
+      );
+      assert.match(before.game.status().reason ?? '', /身份冲突/);
+      assert.equal((await before.operator.gameOutcomeResolve(resolveAttempt)).ok, false);
+      assert.equal(sent, 1);
+      semantic.health();
+      await until(() => before.game.status().health?.ready === true);
+      assert.equal((await before.operator.gameTaskOpen(openTask)).ok, false);
+    } finally {
+      await before.close();
+    }
+    const after = await setup(options);
+    try {
+      const { core, semantic } = await authorityPair(after, 'run-after-conflict');
+      await after.mode();
+      assert.deepEqual(after.game.status().authority?.pending, [collision]);
+      assert.equal((await after.operator.gameOutcomeResolve(resolveAttempt)).ok, false);
+      assert.equal((await after.operator.gameTaskOpen(openTask)).ok, false);
+      assert.equal((await after.game.submitGoal(goal(after), SOURCE)).ok, false);
+      assert.equal(semantic.submissions.length, 0);
+      assert.equal(core.renewals.length, 0);
     } finally {
       await after.close();
     }

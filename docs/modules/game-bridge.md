@@ -33,7 +33,7 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 
 在 profile 启用普通插件 `game-bridge` 时，指定 `adapterId`、`adapterVersion` 并授予 `game.goal` 与 `game.input`。示例条目默认禁用。`healthTimeoutMs` 是两条连接的健康时限，缺省 2000 ms。宿主把已认证的连接交给插件实例。实例在卸载时归还输入许可，等待仍在线的实时核核验释放，然后关闭两条连接并撤销注册。核验超时按插件静止中规则强制清理。
 
-启用语义 v2 时，在该条目的可信配置中加 `controlTargetId`，并在 `grant` 中加 `game.task-open` 与 `game.resolve-outcome`。槽位须由维护者独立配置到两端。Bellis 核对认证描述的槽位与适配包，并持久绑定槽位和适配包编号。Runtime 从可信配置校验该槽位对应的唯一窗口及本地账目。槽位已有物理未决时，切回旧版也不能解除。
+启用语义 v2 时，在该条目的可信配置中加 `controlTargetId`，并在 `grant` 中加 `game.task-open` 与 `game.resolve-outcome`。槽位须由维护者独立配置到两端。Bellis 核对认证描述的槽位与适配包，并持久绑定槽位和适配包编号。Runtime 从可信配置校验该槽位对应的唯一窗口及本地账目。宿主对同一适配包检查其旧版目标和已绑定槽位的未决隔离，配置重载、版本切换和进程重启均沿用这些记录。
 
 - `game@1` 的 `status()` 提供连接、握手后匹配的会话、最近健康、决策点及输入许可状态。`wireNowMs()` 返回契约所用的单调毫秒。`subscribe()` 和观察扩展点 `game.fact-observed` 都只分发写入状态存储成功的事实。事实带角色和 Runtime 会话，旧连接的回调作废。
 - `submitGoal()` 与 `resolveDecision()` 在有效且已确认的输入许可下，经 `game.goal` 闸门执行。已经尝试发送的请求遇到断线、超时或无效回执时，按[状态存储的未知结果规则](state-store.md#副作用流程)隔离游戏目标。用现有 `pnpm operator resolve` 结案。
@@ -81,13 +81,14 @@ Bellis 宿主在本机通道上接受以下两个角色，每种同时只有一�
 
 - `pendingActionOutcome` 对象包含唯一 `attemptId`、执行时的 `runtimeId`、源游戏会话的 `sessionId`、`goalId`、`actionId`、可空 `decisionPointId` 和原因 `reason`（1–200 字符）。它可来自已结束的进程或会话。存在未决时 `ready=false`。Bellis 按槽位持久记录并隔离，普通 P-04 卡住仍走原来的恢复规则。空字段、重连和提交新目标均不解除已记录隔离。
 - `action.resolve_outcome` 由 Bellis 在操作员核对外部状态和输入释放后，经已认证的操作员入口与执行闸门发往 `game-runtime.main`。请求为 `{sessionId, attemptId, resolution}`，取值为 `confirmed_executed`、`confirmed_not_executed` 或 `reconciled_unknown`。Runtime 核对原尝试、持久结案后回复 `{attemptId, resolution}`。原参数精确重送时返回同一结果，冲突或不匹配时拒绝。Bellis 在持久记录匹配的应答后解除该尝试的隔离。结案是独立事实，`action.committed` 仍由执行回执与效果核验产生。
+- Bellis 的结案记录保留槽位、原尝试的全部身份及结案结果。原身份的迟到健康重放不会重建持久隔离，已持久结案的精确重复请求可从原回执读回。同一槽位重用尝试编号并改变原 Runtime、会话、目标、动作或决策点时，持久隔离该冲突并拒绝旧结案回执；开任务与输入许可仍须当前连接的完整健康回读。
 - `task.open` 同样由已认证的操作员入口经执行闸门发出。请求为 `{taskId, objective, expiresAtMs, overallCompletion}`，由宿主分配新 `taskId`，`expiresAtMs` 是授权终止的绝对单调时刻。Runtime 用可信本地配置冻结同一任务的调用、物理输入和无进展预算，持久接纳后回复 `{taskId}`。原参数精确重送时返回同一结果，参数冲突时拒绝，任务终止后保留原结果供回读。开新任务前，旧任务已结束或撤权，且原尝试已结清、输入释放已核验。开任务只建立可执行范围，输入仍须原有许可。
 - `overallCompletion` 可为 `null`，或取 `{kind:"signature", signature}`、`{kind:"screen", screenType}`、`{kind:"text-appeared", text, roi}`、`{kind:"text-disappeared", text, roi}`。签名最多 120 字符、文字最多 240 字符、ROI 名最多 80 字符，均为非空字符串。`screenType` 为通用画面类型。Runtime 依据适配包核对签名与已标定区域，从有效新证据判定完成。
 - 语义 v2 的 `goal.submit` 必报 `taskId`。Bellis 从同槽位已持久接纳且与当前健康读回一致的绑定注入该字段，并将目标截止限制在任务到期以内。投票、暂停、重连或 P-04 恢复均沿用原任务的根目标、终局与预算。任务到期、Runtime 主进程重启或缺少可信预算账目时，旧任务终止，`activeTaskId` 上报 `null`。
 
 命令因参数冲突或前置条件不满足而拒绝时，可返回 `-32602`，此时未提交该命令。写入后无法证实结果时保留歧义，由相同命令的幂等回读处理。v2 语义消息的标识沿用实例 ID 格式，长度为 1–64，以 ASCII 字母或数字开头，其余字符可包含 `_.:-`。真实自主 GR-38 的双端验收为 PENDING。
 
-开任务与结案前，Bellis 经当前控制连接发出 `input.stop`，等待匹配的 `input.released` 核验和应答。还未发放令牌时使用 `throughToken: 0`，对应的释放报告使用 `token: null`。操作员经[运维命令](operations.md#游戏授权任务与动作结案)核对并发起这两类请求。宿主重启后须重新授权任务。同一宿主会话与 Runtime 进程的语义重连可在原截止前继续使用同一绑定，条件是该连接的任务及未决回读有效且一致。
+开任务与结案前，Bellis 经当前控制连接发出 `input.stop`，等待匹配的 `input.released` 核验和应答。同一连接上的新核验请求须越过前次停止应答和已收到释放报告的单调时间水位。前次停止应答无法核对时须重新连接实时核。还未发放令牌时使用 `throughToken: 0`，对应的释放报告使用 `token: null`。操作员经[运维命令](operations.md#游戏授权任务与动作结案)核对并发起这两类请求。宿主重启后须重新授权任务。同一宿主会话与 Runtime 进程的语义重连可在原截止前继续使用同一绑定，条件是该连接的任务及未决回读有效且一致。
 
 ### 控制消息
 
