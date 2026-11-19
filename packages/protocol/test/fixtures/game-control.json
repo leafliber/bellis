@@ -23,6 +23,51 @@
     "valid": true
   },
   {
+    "name": "scoped-local-dialogue-lease",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "lease.renew",
+      "params": {
+        "token": 7,
+        "expiresAtMs": 144500,
+        "localDialogue": {
+          "sessionId": "fixture01",
+          "runtimeId": "run-02",
+          "authorizationId": "scope",
+          "adapterId": "synthetic-fixture",
+          "maxActions": 2,
+          "expiresAtMs": 145000
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "recovery-lease-requires-fixed-budget",
+    "sender": "bellis",
+    "message": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "lease.renew",
+      "params": {
+        "token": 7,
+        "expiresAtMs": 144500,
+        "localRecovery": {
+          "sessionId": "fixture01",
+          "runtimeId": "run-02",
+          "authorizationId": "scope",
+          "adapterId": "synthetic-fixture",
+          "kind": "recover",
+          "maxActions": 3,
+          "expiresAtMs": 145000
+        }
+      }
+    },
+    "valid": false
+  },
+  {
     "name": "fractional-spelling-of-integer-token",
     "sender": "bellis",
     "rawJson": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"lease.renew\",\"params\":{\"token\":7.0,\"expiresAtMs\":144500}}",

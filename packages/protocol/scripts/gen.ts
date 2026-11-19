@@ -18,6 +18,7 @@ import {
   GAME_BRIDGE_INTEGER_FIELDS,
   GAME_BRIDGE_MAJOR,
   GAME_BRIDGE_SEMANTIC_V2,
+  GAME_BRIDGE_V1_INTEGER_FIELDS,
   GameBridgeMethods,
   GameBridgeV2Methods,
   gameBridgeSchemas,
@@ -200,11 +201,13 @@ function withGameBridgeDecoder(generated: string, major: number): string {
       );
   }
   const template = readFileSync(new URL('./game-bridge-decoder.py.in', import.meta.url), 'utf8');
+  const integerFields =
+    major === GAME_BRIDGE_MAJOR ? GAME_BRIDGE_V1_INTEGER_FIELDS : GAME_BRIDGE_INTEGER_FIELDS;
   return [
     models,
     `GAME_BRIDGE_MAJOR = ${major}`,
     `_MAX_SAFE_INTEGER = ${Number.MAX_SAFE_INTEGER}`,
-    `_INTEGER_FIELDS = frozenset(${JSON.stringify(GAME_BRIDGE_INTEGER_FIELDS)})`,
+    `_INTEGER_FIELDS = frozenset(${JSON.stringify(integerFields)})`,
     '',
     template,
   ].join('\n');

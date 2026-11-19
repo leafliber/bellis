@@ -1,13 +1,24 @@
 /**
  * 监督模式（D-32）。M0 只在 `sim` profile 下可用；升级只能由操作员显式执行，安全核可以自动降级。
  */
-export type Mode = 'M0' | 'M1' | 'M2' | 'M3' | 'safe-stop';
+type LocalGameMode = 'local-dialogue' | 'local-recovery' | 'local-choice';
+export type Mode = 'M0' | 'M1' | 'M2' | 'M3' | 'safe-stop' | LocalGameMode;
+
+export function isLocalGameMode(mode: Mode): mode is LocalGameMode {
+  return mode === 'local-dialogue' || mode === 'local-recovery' || mode === 'local-choice';
+}
 
 /** M0 只在仿真中出现，与真实输出模式不可互换：不在同一条升降序列上。 */
-const RANK: Record<Mode, number> = { 'safe-stop': 0, M0: 0.5, M1: 1, M2: 2, M3: 3 };
+const RANK: Record<Exclude<Mode, LocalGameMode>, number> = {
+  'safe-stop': 0,
+  M0: 0.5,
+  M1: 1,
+  M2: 2,
+  M3: 3,
+};
 
 export function producesOutput(mode: Mode): boolean {
-  return mode !== 'safe-stop';
+  return mode !== 'safe-stop' && !isLocalGameMode(mode);
 }
 
 /** 真实输出模式（M1–M3）：M0 只连模拟设备，不算。 */
@@ -37,6 +48,8 @@ export function upgradeBlocker(
 ): string | undefined {
   if (target === current) return '已经处于该模式';
   if (target === 'safe-stop') return undefined;
+  if (isLocalGameMode(target) || isLocalGameMode(current))
+    return '本机游戏只可经独立授权入口从安全停止开启';
   // 仿真与真实输出互不相通：先检查，再看是不是降级。
   if (ctx.simulation && target !== 'M0') return 'sim profile 下只允许 M0';
   if (!ctx.simulation && target === 'M0') return 'M0 只在 sim profile 下可用';

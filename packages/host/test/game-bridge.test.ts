@@ -26,6 +26,7 @@ import {
   GameService,
   gameAuthorityLedger,
   gameBridge,
+  gameChoiceOptionsDigest,
   gameControlLedger,
 } from '@bellis/game-bridge';
 import {
@@ -35,9 +36,11 @@ import {
   definePlugin,
   Kernel,
   ManualClock,
+  type ResolvedEntry,
   seededRandom,
 } from '@bellis/kernel';
 import { MemoryService } from '@bellis/memory';
+import { EventSubscription, SimObs } from '@bellis/obs';
 import {
   GAME_LEASE_REFUSED,
   type GameActionCommitted,
@@ -53,6 +56,7 @@ import {
   type GameTaskOpenParams,
   Role as HostRole,
   GameBridgeMethod as Method,
+  OperatorLocalDialogueStart,
   OperatorMethod,
   GameBridgeRole as Role,
   RpcErrorCode,
@@ -61,6 +65,7 @@ import {
 import {
   GAME_RESOLVE_OUTCOME,
   GAME_TASK_OPEN,
+  NAMED_CHOICE_INVALID_PARAMS,
   SafetyCore,
   SafetyService,
   safetyFacade,
@@ -89,6 +94,7 @@ import {
   TelemetryCore,
   TelemetryService,
 } from '../../telemetry/src/index.ts';
+import { localGameEntry, monitorLocalGameObs, startLocalGame } from '../src/local-game.ts';
 import { createOperator, serveOperator } from '../src/operator.ts';
 import {
   SYNTHETIC_INJECTION,
@@ -97,7 +103,16 @@ import {
 } from './fixtures/game-director.ts';
 
 const WIRE_EPOCH = 100_000;
+const LOCAL_ADAPTER_ID = 'local-fixture';
 const ADAPTER = { id: 'synthetic-game', version: '1', screenTypes: [] };
+const disabledModeration: ResolvedEntry = {
+  id: 'moderation',
+  plugin: 'moderation',
+  config: {},
+  disabled: true,
+  explicitSwitch: true,
+  grant: [],
+};
 const CONDITION = { id: 'prepare', text: '确认合成场景就绪', confirmed: true };
 const SOURCE = { origin: 'director', inputs: [], untrusted: true };
 
@@ -119,6 +134,11 @@ type SetupOptions = {
   telemetry?: 'memory' | 'broken' | 'broken-start';
   controlTargetId?: string;
   denyAuthorityGrant?: boolean;
+  localDialogue?: {
+    obsReady: boolean;
+    recovery?: boolean;
+    namedChoice?: boolean;
+  };
 };
 
 function addSpeech(
@@ -325,6 +345,39 @@ async function setup(options: SetupOptions = {}) {
   const obs = new MemoryObs();
   let kernel: Kernel | undefined;
   let watchdog: Connection | undefined;
+  const gameEntry: ResolvedEntry = {
+    id: 'game',
+    plugin: gameBridge.manifest.id,
+    disabled: false,
+    explicitSwitch: true,
+    grant: [
+      GAME_GOAL,
+      GAME_INPUT,
+      ...(options.controlTargetId && !options.denyAuthorityGrant
+        ? [GAME_TASK_OPEN, GAME_RESOLVE_OUTCOME]
+        : []),
+    ],
+    config: {
+      adapterId: options.localDialogue ? LOCAL_ADAPTER_ID : ADAPTER.id,
+      adapterVersion: ADAPTER.version,
+      ...(options.localDialogue ? { localDialogue: true } : {}),
+      ...(options.localDialogue?.recovery ? { localRecovery: true } : {}),
+      ...(options.localDialogue?.namedChoice ? { localNamedChoice: true } : {}),
+      ...(options.controlTargetId ? { controlTargetId: options.controlTargetId } : {}),
+    },
+  };
+  const localEntry = localGameEntry(
+    options.simulation ?? false,
+    [gameEntry, disabledModeration],
+    options.localDialogue
+      ? {
+          adapterId: LOCAL_ADAPTER_ID,
+          dialogue: true,
+          ...(options.localDialogue.recovery ? { recovery: true } : {}),
+          ...(options.localDialogue.namedChoice ? { namedChoice: true } : {}),
+        }
+      : undefined,
+  );
   const safety = new SafetyCore({
     store,
     clock,
@@ -341,7 +394,20 @@ async function setup(options: SetupOptions = {}) {
     obs,
     permissionsOf: (holder) => kernel?.permissionsOf(holder),
     watchdogConnected: () => watchdog?.isOpen === true,
+    ...(localEntry
+      ? {
+          localDialogue: {
+            adapterId: localEntry.adapterId,
+            dialogueEnabled: localEntry.dialogue,
+            ready: () => options.localDialogue?.obsReady === true,
+            wireNowMs,
+            recoveryEnabled: localEntry.recovery,
+            namedChoiceEnabled: localEntry.namedChoice,
+          },
+        }
+      : {}),
   });
+  if (localEntry) safety.setModeration(false);
   kernel = new Kernel({ clock, safety: safety.kernelHooks() });
   const host = new GameRuntimeHost({
     simulated: options.simulatedPort ?? false,
@@ -395,29 +461,7 @@ async function setup(options: SetupOptions = {}) {
   );
   const model = options.director ? addDirector(kernel, options.director) : undefined;
   const stage = options.gamePacing ? addSpeech(kernel, safety, options.gamePacing) : undefined;
-  kernel.add(
-    [
-      {
-        id: 'game',
-        plugin: gameBridge.manifest.id,
-        disabled: false,
-        explicitSwitch: true,
-        grant: [
-          GAME_GOAL,
-          GAME_INPUT,
-          ...(options.controlTargetId && !options.denyAuthorityGrant
-            ? [GAME_TASK_OPEN, GAME_RESOLVE_OUTCOME]
-            : []),
-        ],
-        config: {
-          adapterId: ADAPTER.id,
-          adapterVersion: ADAPTER.version,
-          ...(options.controlTargetId ? { controlTargetId: options.controlTargetId } : {}),
-        },
-      },
-    ],
-    catalog(gameBridge),
-  );
+  kernel.add([gameEntry], catalog(gameBridge));
   await kernel.settled();
   const registered = kernel.services.resolve(GameService.name, GameService.major);
   assert.ok(!('missing' in registered));
@@ -445,7 +489,23 @@ async function setup(options: SetupOptions = {}) {
     onConnection(connection) {
       if (connection.role === HostRole.Watchdog) watchdog = connection;
       else if (connection.role === HostRole.Operator) {
-        serveOperator(new RpcPeer(connection, { timeoutMs: 5_000 }), operator);
+        serveOperator(
+          new RpcPeer(connection, { timeoutMs: 5_000 }),
+          operator,
+          localEntry
+            ? {
+                entry: localEntry,
+                core: safety,
+                sessionId: 'session1',
+                holder: () =>
+                  kernel
+                    .snapshot()
+                    .find((entry) => entry.id === localEntry.id && entry.state === 'active')
+                    ?.instanceId,
+                game: () => game,
+              }
+            : undefined,
+        );
       } else if (!host.accept(connection)) connection.close();
     },
     onRejected: () => {},
@@ -545,7 +605,7 @@ async function main(h: Harness, run = 'run', describe?: () => object) {
     answerWith(handle: () => unknown) {
       answer = handle;
     },
-    health(patch: Partial<GameMainHealthV2> = {}) {
+    health(patch: Partial<GameMainHealth & GameMainHealthV2> = {}) {
       p.rpc.notify(Method.HealthReported, {
         atMs: h.wireNowMs(),
         ready: true,
@@ -595,12 +655,18 @@ async function realtime(h: Harness, run = 'run') {
       } satisfies GameInputReleased);
   };
   p.rpc.handle(Method.LeaseRenew, (params) => {
-    const { token, expiresAtMs } = params as unknown as GameLeaseRenewParams;
+    const { token, expiresAtMs, localDialogue, localRecovery } =
+      params as unknown as GameLeaseRenewParams;
     if (token <= through || expiresAtMs <= now() || (lease && token < lease.token)) {
       throw new RpcError(GAME_LEASE_REFUSED, 'invalid lease');
     }
     if (expiry) clock.clearTimeout(expiry);
-    lease = { token, expiresAtMs };
+    lease = {
+      token,
+      expiresAtMs,
+      ...(localDialogue ? { localDialogue } : {}),
+      ...(localRecovery ? { localRecovery } : {}),
+    };
     renewals.push(lease);
     expiry = clock.setTimeout(() => {
       through = token;
@@ -664,6 +730,568 @@ async function pair(h: Harness, run = 'run') {
   await until(() => h.game.status().state === 'READY');
   return { semantic, core };
 }
+
+async function attachLocalDialogue(h: Harness, recovery: boolean | 'named' = false) {
+  const runtimeId = 'local-run';
+  const prerequisites = [
+    {
+      id:
+        recovery === 'named'
+          ? 'local-named-choice'
+          : recovery
+            ? 'local-recovery'
+            : 'local-dialogue',
+      text: '本机游戏',
+      confirmed: true,
+    },
+  ];
+  const semantic = await main(h, runtimeId, () => ({
+    major: 1,
+    runtimeId,
+    nowMs: h.wireNowMs(),
+    adapter: { ...ADAPTER, id: LOCAL_ADAPTER_ID },
+    prerequisites,
+  }));
+  const realtimePeer = await realtime(h, runtimeId);
+  semantic.health({ prerequisites });
+  realtimePeer.health();
+  await until(() => h.game.status().state === 'READY');
+  const game = h.kernel.snapshot().find((entry) => entry.id === 'game');
+  assert.ok(game?.instanceId);
+  const holder = game.instanceId;
+  const params = {
+    runtimeId,
+    expiresAtMs: h.wireNowMs() + 10_000,
+    maxActions: 1,
+    confirmationWindowMs: 20,
+  };
+  return { semantic, realtimePeer, holder, params, prerequisites };
+}
+
+test('本机读档只签发两次导航的授权，选择另行授权', async () => {
+  const h = await setup({ localDialogue: { obsReady: true, recovery: true } });
+  try {
+    const { semantic, realtimePeer, holder, params, prerequisites } = await attachLocalDialogue(
+      h,
+      true,
+    );
+    semantic.health({ prerequisites, localRecovery: { kind: 'recover' } });
+    await until(() => h.operator.status().game?.localRecovery?.kind === 'recover');
+    const request = {
+      runtimeId: params.runtimeId,
+      expiresAtMs: params.expiresAtMs,
+      confirmationWindowMs: params.confirmationWindowMs,
+      kind: 'recover',
+    };
+    const begin = () =>
+      startLocalGame(
+        'recovery',
+        request,
+        new AbortController().signal,
+        h.safety,
+        'session1',
+        holder,
+        h.game,
+      );
+    assert.equal((await begin()).ok, true);
+    const scope = h.safety.localRecovery;
+    assert.equal(scope?.kind, 'recover');
+    assert.equal(scope.maxActions, 2);
+    assert.equal(h.safety.localDialogue, undefined);
+    assert.equal(h.safety.presenceValid(), false);
+    assert.deepEqual(semantic.submissions, [Method.GoalSubmit]);
+    assert.equal(semantic.commands[0]?.goalId, scope.authorizationId);
+    assert.deepEqual(semantic.commands[0]?.localRecovery, scope);
+    assert.deepEqual(realtimePeer.renewals[0]?.localRecovery, scope);
+    assert.equal(realtimePeer.renewals[0]?.localDialogue, undefined);
+    assert.equal(
+      (
+        await h.game.resolveDecision(
+          {
+            decisionPointId: 'any-fork',
+            optionId: 'any-option',
+            source: 'operator',
+            traceparent: null,
+          },
+          { origin: 'operator', inputs: [], untrusted: false },
+        )
+      ).ok,
+      false,
+    );
+    await h.safety.emergencyStop('本机读档结束');
+    await until(() => realtimePeer.stops.length > 0);
+    assert.equal(h.safety.localRecovery, undefined);
+    assert.equal((await begin()).ok, false);
+    assert.deepEqual(semantic.submissions, [Method.GoalSubmit]);
+  } finally {
+    await h.close();
+  }
+});
+
+for (const previousKind of ['recover', 'load'] as const) {
+  test(`本机续接核对前次 ${previousKind} 的授权与最终释放`, async () => {
+    const h = await setup({ localDialogue: { obsReady: true, recovery: true } });
+    try {
+      const { semantic, realtimePeer, holder, params, prerequisites } = await attachLocalDialogue(
+        h,
+        true,
+      );
+      const initialAuthority = 'prior-recovery';
+      const initialRuntime = 'prior-runtime';
+      const initial = h.store.append('local_recovery.authorized', {
+        kind: 'recover',
+        sessionId: 'prior',
+        runtimeId: initialRuntime,
+        authorizationId: initialAuthority,
+        adapterId: LOCAL_ADAPTER_ID,
+        maxActions: 2,
+        expiresAtMs: params.expiresAtMs - 100,
+      });
+      h.store.append('action.committed', {
+        role: Role.Main,
+        runtimeId: initialRuntime,
+        payload: { goalId: initialAuthority, category: 'navigate', selection: null },
+      });
+      const priorRuntime = previousKind === 'load' ? 'prior-load-runtime' : initialRuntime;
+      const openAuthorizationId = previousKind === 'load' ? 'prior-load' : initialAuthority;
+      let open = initial;
+      if (previousKind === 'load') {
+        h.store.append('input.released', {
+          role: Role.Core,
+          runtimeId: initialRuntime,
+          payload: { reason: 'stop', verification: 'verified' },
+        });
+        open = h.store.append('local_recovery.authorized', {
+          ...initial.data,
+          kind: 'load',
+          sessionId: 'priorload',
+          runtimeId: priorRuntime,
+          authorizationId: openAuthorizationId,
+          openAuthorizationId: initialAuthority,
+          openAuthorizationSeq: initial.seq,
+          maxActions: 1,
+        });
+      }
+      const proof = { kind: 'load', openAuthorizationId, openAuthorizationSeq: open.seq } as const;
+      semantic.health({ prerequisites, localRecovery: proof });
+      await until(() => h.operator.status().game?.localRecovery?.kind === 'load');
+      const start = () =>
+        startLocalGame(
+          'recovery',
+          {
+            kind: 'load',
+            runtimeId: params.runtimeId,
+            expiresAtMs: params.expiresAtMs,
+            confirmationWindowMs: params.confirmationWindowMs,
+          },
+          new AbortController().signal,
+          h.safety,
+          'session1',
+          holder,
+          h.game,
+        );
+      assert.equal((await start()).ok, false);
+      assert.equal(realtimePeer.renewals.length, 0);
+      h.store.append('input.released', {
+        role: Role.Core,
+        runtimeId: priorRuntime,
+        payload: { reason: 'stop', verification: 'verified' },
+      });
+      assert.equal((await start()).ok, true);
+      assert.deepEqual(semantic.submissions, [Method.GoalSubmit]);
+      const scope = h.safety.localRecovery;
+      assert.equal(scope?.kind, 'load');
+      assert.equal(scope.maxActions, 1);
+      assert.equal(scope.openAuthorizationId, openAuthorizationId);
+      assert.equal(scope.openAuthorizationSeq, open.seq);
+      assert.deepEqual(semantic.commands[0]?.localRecovery, scope);
+      assert.deepEqual(realtimePeer.renewals[0]?.localRecovery, scope);
+      await h.safety.emergencyStop('续接结束');
+      assert.equal((await start()).ok, false);
+      assert.equal(semantic.submissions.length, 1);
+    } finally {
+      await h.close();
+    }
+  });
+}
+
+test('本机指名按完整顺序和当前帧签一次，并保留指名来源', async () => {
+  const h = await setup({ localDialogue: { obsReady: true, namedChoice: true } });
+  try {
+    const { semantic, realtimePeer, holder, params, prerequisites } = await attachLocalDialogue(
+      h,
+      'named',
+    );
+    const options = [
+      { id: 'first', label: '选项甲' },
+      { id: 'second', label: '选项乙' },
+    ];
+    const proof = {
+      kind: 'named',
+      decisionPointId: 'current-fork',
+      optionsDigest: gameChoiceOptionsDigest(options),
+      frameNumber: 71,
+      transformVersion: 4,
+    } as const;
+    semantic.rpc.notify(Method.DecisionPointOpened, {
+      decisionPointId: proof.decisionPointId,
+      atMs: h.wireNowMs(),
+      prompt: '本机无计时指名',
+      options,
+      candidates: [],
+      timing: null,
+      traceparent: null,
+    });
+    semantic.health({
+      prerequisites,
+      decisionPointId: proof.decisionPointId,
+      localRecovery: proof,
+    });
+    await until(() => h.operator.status().game?.localRecovery?.kind === 'named');
+    const nomination = {
+      source: 'delegated-reviewer',
+      approvalRef: 'approval-1',
+      nominationRef: 'nomination-1',
+    };
+    const request = {
+      kind: 'named',
+      runtimeId: params.runtimeId,
+      expiresAtMs: params.expiresAtMs,
+      confirmationWindowMs: params.confirmationWindowMs,
+      optionIndex: 1,
+      nomination,
+    };
+    const start = (labels: string[], nominationRef = nomination.nominationRef) =>
+      startLocalGame(
+        'named-choice',
+        { ...request, options: labels, nomination: { ...nomination, nominationRef } },
+        new AbortController().signal,
+        h.safety,
+        'session1',
+        holder,
+        h.game,
+      );
+    const priorInput = {
+      type: 'decision.resolve',
+      target: `game:${LOCAL_ADAPTER_ID}`,
+      payloadHash: 'prior-payload',
+      source: { origin: 'operator', inputs: [], untrusted: false },
+      capabilities: ['game.goal'],
+      timeSensitive: true,
+    };
+    const accepted = h.store.authorize({
+      ...priorInput,
+      key: JSON.stringify(['local-named-choice', 'already-accepted']),
+    }).intent;
+    h.store.start(accepted.id);
+    h.store.succeed(accepted.id, { accepted: true });
+    const originalKey = ['local-named-choice', nomination.nominationRef];
+    const rejected = h.store.authorize({ ...priorInput, key: JSON.stringify(originalKey) }).intent;
+    h.store.start(rejected.id);
+    h.store.fail(rejected.id, NAMED_CHOICE_INVALID_PARAMS);
+    assert.equal((await start(['选项乙', '选项甲'])).ok, false);
+    assert.equal(
+      (
+        await start(
+          options.map(({ label }) => label),
+          'already-accepted',
+        )
+      ).ok,
+      false,
+    );
+    assert.equal(realtimePeer.renewals.length, 0);
+    assert.equal(semantic.submissions.length, 0);
+    assert.equal((await start(options.map(({ label }) => label))).ok, true);
+    assert.equal(h.safety.mode, 'local-choice');
+    assert.equal(h.safety.presenceValid(), false);
+    const scope = h.safety.localRecovery;
+    assert.equal(scope?.kind, 'named');
+    assert.equal(scope.maxActions, 1);
+    assert.equal(scope.optionId, 'second');
+    assert.equal(scope.frameNumber, proof.frameNumber);
+    assert.equal(scope.transformVersion, proof.transformVersion);
+    assert.equal(scope.optionsDigest, proof.optionsDigest);
+    assert.deepEqual(semantic.submissions, [Method.DecisionResolve]);
+    assert.deepEqual(semantic.commands[0]?.localRecovery, scope);
+    assert.deepEqual(realtimePeer.renewals[0]?.localRecovery, scope);
+    assert.deepEqual(
+      h.store.events().find(({ type }) => type === 'local_choice.authorized')?.data,
+      { ...scope, nomination },
+    );
+    assert.equal(h.store.intentByKey(JSON.stringify([...originalKey, 2]))?.state, 'succeeded');
+    await h.safety.emergencyStop('本机指名选择结束');
+    await until(() => realtimePeer.stops.length > 0);
+    assert.equal(h.game.status().inputPermitted, false);
+  } finally {
+    await h.close();
+  }
+});
+
+test('本机无计时选择将当前点和唯一选项绑定到同一份单次许可', async () => {
+  const h = await setup({ localDialogue: { obsReady: true, recovery: true } });
+  try {
+    const { semantic, realtimePeer, holder, params, prerequisites } = await attachLocalDialogue(
+      h,
+      true,
+    );
+    const proof = {
+      kind: 'untried',
+      decisionPointId: 'current-fork',
+      optionId: 'untried-option',
+    } as const;
+    semantic.rpc.notify(Method.DecisionPointOpened, {
+      decisionPointId: proof.decisionPointId,
+      atMs: h.wireNowMs(),
+      prompt: '本机无计时选择',
+      options: [{ id: proof.optionId, label: '本机核验选项' }],
+      candidates: [],
+      timing: null,
+      traceparent: null,
+    });
+    semantic.health({
+      prerequisites,
+      decisionPointId: proof.decisionPointId,
+      localRecovery: proof,
+    });
+    await until(() => h.operator.status().game?.localRecovery?.kind === 'untried');
+    const result = await startLocalGame(
+      'recovery',
+      {
+        runtimeId: params.runtimeId,
+        expiresAtMs: params.expiresAtMs,
+        confirmationWindowMs: params.confirmationWindowMs,
+        kind: proof.kind,
+      },
+      new AbortController().signal,
+      h.safety,
+      'session1',
+      holder,
+      h.game,
+    );
+    assert.equal(result.ok, true);
+    const scope = h.safety.localRecovery;
+    assert.equal(scope?.maxActions, 1);
+    assert.deepEqual(realtimePeer.renewals[0]?.localRecovery, scope);
+    assert.deepEqual(semantic.submissions, [Method.DecisionResolve]);
+    assert.equal(semantic.commands[0]?.source, 'operator');
+    assert.equal(semantic.commands[0]?.optionId, proof.optionId);
+    assert.deepEqual(semantic.commands[0]?.localRecovery, scope);
+    assert.equal(
+      (
+        await h.game.resolveDecision(
+          {
+            decisionPointId: proof.decisionPointId,
+            optionId: 'other-option',
+            source: 'operator',
+            traceparent: null,
+            localRecovery: scope,
+          },
+          { origin: 'operator', inputs: [], untrusted: false },
+        )
+      ).ok,
+      false,
+    );
+    assert.deepEqual(semantic.submissions, [Method.DecisionResolve]);
+  } finally {
+    await h.close();
+  }
+});
+
+test('本机 profile 只能请求受信任部署已批准的适配包与操作', () => {
+  const profile = (adapterId: string, localRecovery = false) => [
+    {
+      id: 'game',
+      plugin: gameBridge.manifest.id,
+      disabled: false,
+      explicitSwitch: true,
+      grant: [GAME_GOAL, GAME_INPUT],
+      config: { adapterId, adapterVersion: ADAPTER.version, localDialogue: true, localRecovery },
+    },
+    disabledModeration,
+  ];
+  const admission = { adapterId: LOCAL_ADAPTER_ID, dialogue: true } as const;
+  assert.throws(() => localGameEntry(false, profile(admission.adapterId)), /未批准/);
+  assert.throws(() => localGameEntry(false, profile(ADAPTER.id), admission), /未批准/);
+  assert.throws(
+    () => localGameEntry(false, profile(admission.adapterId, true), admission),
+    /未批准/,
+  );
+  assert.throws(() => localGameEntry(true, profile(admission.adapterId), admission), /只启用/);
+  assert.deepEqual(localGameEntry(false, profile(admission.adapterId), admission), {
+    id: 'game',
+    adapterId: admission.adapterId,
+    dialogue: true,
+    recovery: false,
+    namedChoice: false,
+  });
+});
+
+test('本机 OBS 读回拒绝活跃输出，输出事件立即使已有读回失效', async () => {
+  const obs = await SimObs.start({ initialScene: 'Safe' });
+  obs.setInputMuted('Stage', true);
+  obs.streaming = true;
+  const invalidations: string[] = [];
+  const witness = monitorLocalGameObs(
+    { url: obs.url },
+    { stageSource: 'Stage', safeScene: 'Safe', stopStream: false },
+    () => true,
+    (reason) => invalidations.push(reason),
+    () => {},
+  );
+  try {
+    await until(() => invalidations.some((reason) => reason.includes('输出或宿主配置')));
+    assert.equal(witness.ready(), false);
+    obs.streaming = false;
+    await until(witness.ready);
+    obs.streaming = true;
+    obs.emitEvent('StreamStateChanged', EventSubscription.Outputs, { outputActive: true });
+    await until(() => invalidations.some((reason) => reason.includes('状态发生变化')));
+    assert.equal(witness.ready(), false);
+  } finally {
+    witness.close();
+    await obs.close();
+  }
+});
+
+test('已认证操作员独立签发语义范围和实时许可，OBS 证明失效即撤权', async () => {
+  const guard = { obsReady: false };
+  const h = await setup({ localDialogue: guard });
+  const operator = await h.operatorPeer();
+  try {
+    const { semantic, realtimePeer, holder, params } = await attachLocalDialogue(h);
+    const start = () =>
+      operator.request(OperatorLocalDialogueStart, params) as Promise<{ ok: boolean }>;
+
+    assert.equal(h.safety.requestMode('M1').ok, false);
+    assert.equal(h.safety.requestMode('M2').ok, false);
+    assert.equal(h.safety.requestMode('M3').ok, false);
+    assert.throws(() => h.safety.confirmPresence());
+    assert.equal((await start()).ok, false);
+    assert.equal(realtimePeer.renewals.length, 0);
+    guard.obsReady = true;
+    assert.ok(
+      h.safety.startLocalDialogue(holder, {
+        sessionId: 'session1',
+        runtimeId: params.runtimeId,
+        adapterId: ADAPTER.id,
+        authorizationId: 'outside-deployment',
+        expiresAtMs: params.expiresAtMs,
+        maxActions: params.maxActions,
+      }),
+    );
+    const result = await start();
+    assert.equal(result.ok, true);
+    assert.equal(h.safety.mode, 'local-dialogue');
+    assert.equal(h.safety.presenceValid(), false);
+    const scope = h.operator.status().localDialogue;
+    assert.ok(scope);
+    assert.deepEqual(semantic.commands[0]?.localDialogue, scope);
+    assert.deepEqual(realtimePeer.renewals[0]?.localDialogue, scope);
+    assert.ok((realtimePeer.renewals[0]?.expiresAtMs ?? Infinity) <= scope.expiresAtMs);
+    assert.equal(scope.maxActions, 1);
+    assert.equal(semantic.commands[0]?.goalId, scope.authorizationId);
+    assert.equal(h.safety.grant(holder, STAGE_AUDIO).ok, false);
+    assert.equal((await start()).ok, false);
+
+    guard.obsReady = false;
+    h.clock.advance(250);
+    await until(() => h.safety.mode === 'safe-stop' && realtimePeer.stops.length > 0);
+    assert.equal(h.operator.status().localDialogue, undefined);
+    assert.equal(h.game.status().inputPermitted, false);
+    assert.equal(semantic.commands.length, 1);
+  } finally {
+    operator.connection.close();
+    await h.close();
+  }
+});
+
+for (const gap of ['快照过龄', '帧龄暂缺']) {
+  test(`本机对白目标接纳后等待下一次健康上报（${gap}）`, async () => {
+    const h = await setup({ localDialogue: { obsReady: true } });
+    try {
+      const { semantic, holder, params } = await attachLocalDialogue(h);
+      const health = h.game.status().health;
+      assert.ok(health);
+      const { prerequisites } = health;
+      semantic.health({ prerequisites, frameAgeMs: 57 });
+      await until(() => h.game.status().health?.frameAgeMs === 57);
+
+      const received = Promise.withResolvers<void>();
+      const reply = Promise.withResolvers<object>();
+      semantic.answerWith(() => {
+        received.resolve();
+        return reply.promise;
+      });
+      let returned = false;
+      const pending = startLocalGame(
+        'dialogue',
+        params,
+        new AbortController().signal,
+        h.safety,
+        'session1',
+        holder,
+        h.game,
+      ).then((result) => {
+        returned = true;
+        return result;
+      });
+      await received.promise;
+      h.clock.advance(446);
+      if (gap === '帧龄暂缺') {
+        semantic.health({ prerequisites, frameAgeMs: null });
+        await until(() => h.game.status().health?.frameAgeMs === null);
+      }
+      assert.equal(h.game.status().inputPermitted, true);
+      reply.resolve({});
+      await until(() =>
+        h.store.intentsIn('succeeded').some(({ type }) => type === Method.GoalSubmit),
+      );
+      assert.equal(h.safety.mode, 'local-dialogue');
+      assert.equal(returned, false);
+      const scope = h.safety.localDialogue;
+      assert.ok(scope);
+      semantic.health({ prerequisites, goalId: scope.authorizationId });
+      assert.equal((await pending).ok, true);
+    } finally {
+      await h.close();
+    }
+  });
+}
+
+test('本机对白操作员取消在途目标后立即撤销输入许可', async () => {
+  const h = await setup({ localDialogue: { obsReady: true } });
+  try {
+    const { semantic, realtimePeer, holder, params } = await attachLocalDialogue(h);
+    const received = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<object>();
+    semantic.answerWith(() => {
+      received.resolve();
+      return reply.promise;
+    });
+    const controller = new AbortController();
+    const pending = startLocalGame(
+      'dialogue',
+      params,
+      controller.signal,
+      h.safety,
+      'session1',
+      holder,
+      h.game,
+    );
+    await received.promise;
+    assert.ok(realtimePeer.actualLease?.localDialogue);
+    controller.abort();
+    assert.equal(h.safety.mode, 'safe-stop');
+    assert.equal(h.safety.localDialogue, undefined);
+    await until(() => realtimePeer.stops.length > 0);
+    assert.equal((await pending).ok, false);
+    assert.equal(semantic.commands.length, 1);
+    assert.equal(h.game.status().inputPermitted, false);
+    reply.resolve({});
+  } finally {
+    await h.close();
+  }
+});
 
 const SLOT = 'slot-synthetic';
 const authorityOptions = { simulation: true, simulatedPort: true, controlTargetId: SLOT };

@@ -129,8 +129,9 @@ class GameDecisionResolveParams(BaseModel):
     )
     decisionPointId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
     optionId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
-    source: Literal['director', 'vote']
+    source: Literal['director', 'vote', 'operator']
     traceparent: Traceparent | None
+    localRecovery: LocalRecovery4 | LocalRecovery5 | LocalRecovery6 | LocalRecovery7 | None = None
 
 
 class GameDescribeParams(BaseModel):
@@ -155,6 +156,8 @@ class GameGoalSubmitParams(BaseModel):
     decisionPointId: DecisionPointId | None
     expiresAtMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
     traceparent: Traceparent | None
+    localDialogue: LocalDialogue | None = None
+    localRecovery: LocalRecovery | LocalRecovery1 | LocalRecovery2 | LocalRecovery3 | None = None
 
 
 class GameInputReleased(BaseModel):
@@ -201,6 +204,133 @@ class GameLeaseRenewParams(BaseModel):
     )
     token: Annotated[StrictInt, Field(ge=1, le=9007199254740991)]
     expiresAtMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
+    localDialogue: LocalDialogue | None = None
+    localRecovery: LocalRecovery8 | LocalRecovery9 | LocalRecovery10 | LocalRecovery11 | None = None
+
+
+class GameLocalDialogue(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    sessionId: Annotated[StrictStr, Field(pattern='^[a-z0-9]{1,16}$')]
+    runtimeId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    authorizationId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    adapterId: Annotated[StrictStr, Field(pattern='^[a-z][a-z0-9-]{0,47}$')]
+    maxActions: Annotated[StrictInt, Field(ge=1, le=20)]
+    expiresAtMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
+
+
+class GameLocalRecovery1(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    sessionId: Annotated[StrictStr, Field(pattern='^[a-z0-9]{1,16}$')]
+    runtimeId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    authorizationId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    adapterId: Annotated[StrictStr, Field(pattern='^[a-z][a-z0-9-]{0,47}$')]
+    maxActions: Literal[2]
+    expiresAtMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
+    kind: Literal['recover']
+
+
+class GameLocalRecovery2(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    sessionId: Annotated[StrictStr, Field(pattern='^[a-z0-9]{1,16}$')]
+    runtimeId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    authorizationId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    adapterId: Annotated[StrictStr, Field(pattern='^[a-z][a-z0-9-]{0,47}$')]
+    maxActions: Literal[1]
+    expiresAtMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
+    kind: Literal['load']
+    openAuthorizationId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    openAuthorizationSeq: Annotated[StrictInt, Field(ge=1, le=9007199254740991)]
+
+
+class GameLocalRecovery3(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    sessionId: Annotated[StrictStr, Field(pattern='^[a-z0-9]{1,16}$')]
+    runtimeId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    authorizationId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    adapterId: Annotated[StrictStr, Field(pattern='^[a-z][a-z0-9-]{0,47}$')]
+    maxActions: Literal[1]
+    expiresAtMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
+    kind: Literal['prefix', 'untried']
+    decisionPointId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    optionId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+
+
+class GameLocalRecovery4(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    sessionId: Annotated[StrictStr, Field(pattern='^[a-z0-9]{1,16}$')]
+    runtimeId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    authorizationId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    adapterId: Annotated[StrictStr, Field(pattern='^[a-z][a-z0-9-]{0,47}$')]
+    maxActions: Literal[1]
+    expiresAtMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
+    kind: Literal['named']
+    decisionPointId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    optionsDigest: Annotated[StrictStr, Field(pattern='^[0-9a-f]{64}$')]
+    frameNumber: Annotated[StrictInt, Field(ge=1, le=9007199254740991)]
+    transformVersion: Annotated[StrictInt, Field(ge=0, le=4294967295)]
+    optionId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+
+
+type GameLocalRecovery = (
+    GameLocalRecovery1 | GameLocalRecovery2 | GameLocalRecovery3 | GameLocalRecovery4
+)
+
+
+type GameLocalRecoveryKind = Literal['recover', 'load', 'prefix', 'untried']
+
+
+class GameLocalRecoveryReadiness1(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['recover']
+
+
+class GameLocalRecoveryReadiness2(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['load']
+    openAuthorizationId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    openAuthorizationSeq: Annotated[StrictInt, Field(ge=1, le=9007199254740991)]
+
+
+class GameLocalRecoveryReadiness3(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['prefix', 'untried']
+    decisionPointId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    optionId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+
+
+class GameLocalRecoveryReadiness4(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['named']
+    decisionPointId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
+    optionsDigest: Annotated[StrictStr, Field(pattern='^[0-9a-f]{64}$')]
+    frameNumber: Annotated[StrictInt, Field(ge=1, le=9007199254740991)]
+    transformVersion: Annotated[StrictInt, Field(ge=0, le=4294967295)]
+
+
+type GameLocalRecoveryReadiness = (
+    GameLocalRecoveryReadiness1
+    | GameLocalRecoveryReadiness2
+    | GameLocalRecoveryReadiness3
+    | GameLocalRecoveryReadiness4
+)
 
 
 class GameMainDescription(BaseModel):
@@ -230,6 +360,9 @@ class GameMainHealth(BaseModel):
     riskScore: Annotated[StrictFloat, Field(ge=0.0, le=1.0)]
     riskLimitExceeded: StrictBool
     lastRejection: LastRejection | None
+    localRecovery: LocalRecovery12 | LocalRecovery13 | LocalRecovery14 | LocalRecovery15 | None = (
+        None
+    )
 
 
 class GamePacingHoldParams(BaseModel):
@@ -308,6 +441,74 @@ class LastRejection(BaseModel):
     atMs: Annotated[StrictInt, Field(ge=0, le=18446744073709)]
     code: Annotated[StrictStr, Field(pattern='^[a-z][a-z0-9-]{0,47}$')]
     summary: Annotated[StrictStr, Field(max_length=200, min_length=1)]
+
+
+class LocalDialogue(GameLocalDialogue):
+    pass
+
+
+class LocalRecovery(GameLocalRecovery1):
+    pass
+
+
+class LocalRecovery1(GameLocalRecovery2):
+    pass
+
+
+class LocalRecovery10(GameLocalRecovery3):
+    pass
+
+
+class LocalRecovery11(GameLocalRecovery4):
+    pass
+
+
+class LocalRecovery12(GameLocalRecoveryReadiness1):
+    pass
+
+
+class LocalRecovery13(GameLocalRecoveryReadiness2):
+    pass
+
+
+class LocalRecovery14(GameLocalRecoveryReadiness3):
+    pass
+
+
+class LocalRecovery15(GameLocalRecoveryReadiness4):
+    pass
+
+
+class LocalRecovery2(GameLocalRecovery3):
+    pass
+
+
+class LocalRecovery3(GameLocalRecovery4):
+    pass
+
+
+class LocalRecovery4(GameLocalRecovery1):
+    pass
+
+
+class LocalRecovery5(GameLocalRecovery2):
+    pass
+
+
+class LocalRecovery6(GameLocalRecovery3):
+    pass
+
+
+class LocalRecovery7(GameLocalRecovery4):
+    pass
+
+
+class LocalRecovery8(GameLocalRecovery1):
+    pass
+
+
+class LocalRecovery9(GameLocalRecovery2):
+    pass
 
 
 class Lookpoint(BaseModel):
@@ -393,7 +594,7 @@ class Selection(BaseModel):
     )
     decisionPointId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
     optionId: Annotated[StrictStr, Field(pattern='^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$')]
-    source: Literal['director', 'vote', 'default']
+    source: Literal['director', 'vote', 'default', 'operator']
 
 
 class Timing(BaseModel):
@@ -427,6 +628,10 @@ _INTEGER_FIELDS = frozenset(
         'firstActionMs',
         'frameAgeMs',
         'queueDepth',
+        'maxActions',
+        'openAuthorizationSeq',
+        'frameNumber',
+        'transformVersion',
     ]
 )
 

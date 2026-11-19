@@ -12,6 +12,7 @@ import { tombstoneFact } from '@bellis/memory';
 import {
   GameBridgeMethod,
   GameBridgeRole,
+  type GameLocalRecoveryReadiness,
   GameMainHealth,
   GameMainHealthV2,
   GameSituationObserved,
@@ -28,12 +29,19 @@ import {
   OperatorResolveParams,
   OperatorVetoParams,
 } from '@bellis/protocol';
-import type { EmergencyReport, Mode, SafetyCore } from '@bellis/safety';
+import type {
+  EmergencyReport,
+  LocalDialogueScope,
+  LocalRecoveryScope,
+  Mode,
+  SafetyCore,
+} from '@bellis/safety';
 import type { HeldSentence, ReviewMode, ReviewSettings } from '@bellis/speech';
 import type { Presentation } from '@bellis/stage';
 import type { Intent, StoredEvent } from '@bellis/store';
 import type { TSchema } from 'typebox';
 import { Compile } from 'typebox/compile';
+import { type LocalGameOperatorOptions, serveLocalGame } from './local-game.ts';
 import type { DanmakuReport, LlmReport, MemoryStatusReport, PersonaReport } from './readiness.ts';
 
 export type Target = 'M1' | 'M2' | 'M3';
@@ -104,10 +112,13 @@ export interface OperatorGameStatus
   lastRejection: GameMainHealth['lastRejection'];
   riskScore: number | null;
   riskLimitExceeded: boolean | null;
+  localRecovery?: GameLocalRecoveryReadiness;
 }
 
 export interface OperatorStatus {
   mode: Mode;
+  localDialogue?: LocalDialogueScope;
+  localRecovery?: LocalRecoveryScope;
   maintenance: boolean;
   moderationEnabled: boolean | null;
   presenceValid: boolean;
@@ -276,6 +287,16 @@ function gameStatus(
   } = game.status();
   const timing = decision?.timing;
   const now = game.wireNowMs();
+  const recovery =
+    state === 'READY' &&
+    health?.ready &&
+    'localRecovery' in health &&
+    health.localRecovery &&
+    health.atMs <= now &&
+    health.frameAgeMs !== null &&
+    now - health.atMs + health.frameAgeMs <= 500
+      ? health.localRecovery
+      : undefined;
   return {
     state,
     reason,
@@ -284,6 +305,7 @@ function gameStatus(
     runtimeId,
     inputPermitted,
     ...(authority ? { authority } : {}),
+    ...(recovery ? { localRecovery: recovery } : {}),
     mode: health?.mode ?? null,
     goalId: health?.goalId ?? null,
     decision: decision
@@ -411,8 +433,12 @@ export function createOperator(deps: OperatorDeps): OperatorApi {
   return {
     status() {
       const at = now();
+      const dialogue = core.localDialogue;
+      const recovery = core.localRecovery;
       return {
         mode: core.mode,
+        ...(dialogue ? { localDialogue: dialogue } : {}),
+        ...(recovery ? { localRecovery: recovery } : {}),
         maintenance: core.maintenance,
         moderationEnabled: core.moderationEnabled ?? null,
         presenceValid: core.presenceValid(),
@@ -577,7 +603,11 @@ export function operatorActions(api: OperatorApi): Record<Method, (params: unkno
 }
 
 /** 本机通道上的操作员命令（`pnpm operator`）。参数不合法时回 `{ ok: false, reason: '参数不合法' }`。 */
-export function serveOperator(rpc: RpcPeer, api: OperatorApi): void {
+export function serveOperator(
+  rpc: RpcPeer,
+  api: OperatorApi,
+  localGame?: LocalGameOperatorOptions,
+): void {
   for (const [method, action] of Object.entries(operatorActions(api))) {
     rpc.handle(method, async (params) => {
       try {
@@ -588,6 +618,7 @@ export function serveOperator(rpc: RpcPeer, api: OperatorApi): void {
       }
     });
   }
+  if (localGame) serveLocalGame(rpc, localGame);
 }
 
 /** 操作台的 `/api/*` 接口：与命令行调同一套动作；登录、会话与注销由操作台服务自己处理。 */

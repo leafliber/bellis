@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { defineExtension, defineService } from '@bellis/kernel';
 import type {
   GameActionCommitted,
@@ -17,6 +18,14 @@ import type { Intent, IntentSource, Projection } from '@bellis/store';
 
 export const GAME_GOAL = 'game.goal';
 export const GAME_INPUT = 'game.input';
+export const LOCAL_DIALOGUE_GOAL_RPC_MS = 6_000;
+
+/** R-32 的完整有序选项身份，语义端对同一 UTF-8 JSON 数组取 SHA-256。 */
+export function gameChoiceOptionsDigest(options: ReadonlyArray<{ id: string; label: string }>) {
+  return createHash('sha256')
+    .update(JSON.stringify(options.map(({ id, label }) => [id, label])))
+    .digest('hex');
+}
 
 export const GameControlFact = {
   Taken: 'game.control-taken',

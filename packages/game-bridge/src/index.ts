@@ -31,6 +31,9 @@ export const gameBridge = definePlugin({
       {
         adapterId: Type.String({ pattern: '^[a-z][a-z0-9-]{0,47}$' }),
         adapterVersion: Type.String({ minLength: 1, maxLength: 32 }),
+        localDialogue: Type.Optional(Type.Boolean()),
+        localRecovery: Type.Optional(Type.Boolean()),
+        localNamedChoice: Type.Optional(Type.Boolean()),
         controlTargetId: Type.Optional(GameControlTargetId),
         healthTimeoutMs: Type.Optional(Type.Integer({ minimum: 50, maximum: 60_000 })),
       },

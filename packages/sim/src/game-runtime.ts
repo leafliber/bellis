@@ -405,6 +405,8 @@ export class SimGameRuntime {
     this.#world.record('game.resolve', { runtimeId: RUNTIME_ID, ...decision });
     const point = this.#decision;
     if (
+      decision.source === 'operator' ||
+      decision.localRecovery !== undefined ||
       !point ||
       point.decisionPointId !== decision.decisionPointId ||
       (point.timing && (decision.source === 'vote' || this.now >= point.timing.resolveByMs)) ||
