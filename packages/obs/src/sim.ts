@@ -302,6 +302,15 @@ export class SimObs {
       }
       case 'GetStreamStatus':
         return { code: RequestStatus.Success, data: { outputActive: this.streaming } };
+      case 'GetRecordStatus':
+      case 'GetReplayBufferStatus':
+      case 'GetVirtualCamStatus':
+        return { code: RequestStatus.Success, data: { outputActive: false } };
+      case 'GetOutputList':
+        return {
+          code: RequestStatus.Success,
+          data: { outputs: [{ outputName: 'stream', outputActive: this.streaming }] },
+        };
       case 'StartStream':
         if (this.streaming) return { code: RequestStatus.OutputRunning };
         this.streaming = true;

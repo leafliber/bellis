@@ -109,6 +109,146 @@
       },
       "additionalProperties": false
     },
+    "OperatorLocalDialogueStartParams": {
+      "type": "object",
+      "required": [
+        "runtimeId",
+        "expiresAtMs",
+        "maxActions",
+        "confirmationWindowMs"
+      ],
+      "properties": {
+        "runtimeId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709
+        },
+        "maxActions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "confirmationWindowMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorLocalNamedChoiceStartParams": {
+      "type": "object",
+      "required": [
+        "runtimeId",
+        "kind",
+        "expiresAtMs",
+        "confirmationWindowMs",
+        "options",
+        "optionIndex",
+        "nomination"
+      ],
+      "properties": {
+        "runtimeId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "kind": {
+          "type": "string",
+          "const": "named"
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709
+        },
+        "confirmationWindowMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "optionIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "nomination": {
+          "type": "object",
+          "required": [
+            "source",
+            "approvalRef",
+            "nominationRef"
+          ],
+          "properties": {
+            "source": {
+              "enum": [
+                "maintainer",
+                "delegated-reviewer"
+              ]
+            },
+            "approvalRef": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "nominationRef": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "OperatorLocalRecoveryStartParams": {
+      "type": "object",
+      "required": [
+        "runtimeId",
+        "kind",
+        "expiresAtMs",
+        "confirmationWindowMs"
+      ],
+      "properties": {
+        "runtimeId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "kind": {
+          "enum": [
+            "recover",
+            "load",
+            "prefix",
+            "untried"
+          ]
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709
+        },
+        "confirmationWindowMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        }
+      },
+      "additionalProperties": false
+    },
     "OperatorModeParams": {
       "type": "object",
       "required": [

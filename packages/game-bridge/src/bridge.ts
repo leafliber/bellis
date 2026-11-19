@@ -45,8 +45,10 @@ import {
 import {
   GAME_RESOLVE_OUTCOME,
   GAME_TASK_OPEN,
+  isLocalGameMode,
   isRealOutput,
   type Lease,
+  NAMED_CHOICE_INVALID_PARAMS,
   type SafetyFacade,
 } from '@bellis/safety';
 import { IntentOutcomeUnknown, type IntentSource, type Outcome } from '@bellis/store';
@@ -74,13 +76,18 @@ import {
   type GamePacing,
   type GamePacingHold,
   type GameStatus,
+  gameChoiceOptionsDigest,
   gameControlLedger,
+  LOCAL_DIALOGUE_GOAL_RPC_MS,
 } from './service.ts';
 import { GameTelemetry } from './telemetry.ts';
 
 export interface GameBridgeConfig {
   adapterId: string;
   adapterVersion: string;
+  localDialogue?: boolean;
+  localRecovery?: boolean;
+  localNamedChoice?: boolean;
   controlTargetId?: string;
   healthTimeoutMs?: number;
 }
@@ -431,7 +438,17 @@ export class GameBridge implements Game {
 
   #prerequisitesMet({ main, health }: Connected): boolean {
     const declared = (main.description as GameMainDescription).prerequisites;
+    const { localDialogue, localRecovery, localNamedChoice } = this.#ctx.config;
     return (
+      ((!localDialogue && !localRecovery && !localNamedChoice) ||
+        (main.major === GAME_BRIDGE_MAJOR &&
+          declared.some(
+            ({ id, confirmed }) =>
+              confirmed &&
+              ((localDialogue && id === 'local-dialogue') ||
+                (localRecovery && id === 'local-recovery') ||
+                (localNamedChoice && id === 'local-named-choice')),
+          ))) &&
       declared.length === health.prerequisites.length &&
       declared.every((item) =>
         health.prerequisites.some(
@@ -791,6 +808,31 @@ export class GameBridge implements Game {
   }
 
   #modeAllowsInput(): boolean {
+    if (this.#safety.mode === 'local-dialogue') {
+      const scope = this.#safety.localDialogue;
+      return (
+        !!scope &&
+        !!this.#ctx.config.localDialogue &&
+        !this.#port.simulated &&
+        !this.#decision &&
+        scope.runtimeId === this.#pairedRun() &&
+        scope.adapterId === this.#ctx.config.adapterId
+      );
+    }
+    if (this.#safety.mode === 'local-recovery' || this.#safety.mode === 'local-choice') {
+      const scope = this.#safety.localRecovery;
+      const { localRecovery, localNamedChoice } = this.#ctx.config;
+      return (
+        !!scope &&
+        (scope.kind === 'named'
+          ? this.#safety.mode === 'local-choice' && localNamedChoice === true
+          : this.#safety.mode === 'local-recovery' && localRecovery === true) &&
+        !this.#port.simulated &&
+        this.#links.get(Role.Main)?.major === GAME_BRIDGE_MAJOR &&
+        scope.runtimeId === this.#pairedRun() &&
+        scope.adapterId === this.#ctx.config.adapterId
+      );
+    }
     return isRealOutput(this.#safety.mode) || (this.#port.simulated && this.#safety.mode === 'M0');
   }
 
@@ -815,6 +857,12 @@ export class GameBridge implements Game {
     }
     const availability = this.#availability();
     if (!availability.ready || this.#manual || !this.#modeAllowsInput()) {
+      if (isLocalGameMode(this.#safety.mode)) {
+        this.#safety.requestDowngrade(
+          availability.ready ? '本机游戏授权、画面或控制已失效' : availability.reason,
+        );
+        return;
+      }
       this.#stopInput(
         availability.ready ? (this.#manual ?? '当前模式禁止游戏输入') : availability.reason,
       );
@@ -881,13 +929,23 @@ export class GameBridge implements Game {
     permit.pending = true;
     this.#permit = permit;
     const wireNow = this.#port.wireNowMs();
+    const localDialogue = this.#safety.localDialogue;
+    const localRecovery = this.#safety.localRecovery;
     const expiresAtMs = Math.min(
       wireNow + Math.floor(lease.expiresAt - this.#clock.now()),
       current.task?.expiresAtMs ?? Infinity,
+      localDialogue?.expiresAtMs ?? Infinity,
+      localRecovery?.expiresAtMs ?? Infinity,
     );
-    const params = { token: lease.token, expiresAtMs };
+    const params = {
+      token: lease.token,
+      expiresAtMs,
+      ...(localDialogue ? { localDialogue } : {}),
+      ...(localRecovery ? { localRecovery } : {}),
+    };
     if (
       !this.#active(link) ||
+      (isLocalGameMode(this.#safety.mode) && !localDialogue && !localRecovery) ||
       expiresAtMs <= wireNow ||
       !checkGameBridgeParams(Role.Core, 'bellis', Method.LeaseRenew, params)
     ) {
@@ -988,6 +1046,7 @@ export class GameBridge implements Game {
     if (this.#manual) return;
     this.#manual = reason;
     this.#stopInput(reason);
+    if (isLocalGameMode(this.#safety.mode)) this.#safety.requestDowngrade(reason);
     this.#safety.record(GameControlFact.Taken, { target: this.#legacyTarget, reason });
     this.#telemetry.reset('stopped');
   }
@@ -1364,6 +1423,31 @@ export class GameBridge implements Game {
   #commandBlocker(command: GameCommand): string | undefined {
     const now = this.#port.wireNowMs();
     const point = this.#decision?.latest;
+    if (command.payload.localRecovery) {
+      const scope = this.#safety.localRecovery;
+      if (!scope || !isDeepStrictEqual(command.payload.localRecovery, scope))
+        return '不属于当前本机恢复授权';
+      if (scope.kind === 'recover' || scope.kind === 'load') {
+        if (command.method !== Method.GoalSubmit || point)
+          return '本机读档授权只适用于当前恢复步骤';
+      } else if (
+        command.method !== Method.DecisionResolve ||
+        command.payload.source !== 'operator' ||
+        command.payload.optionId !== scope.optionId ||
+        command.payload.decisionPointId !== scope.decisionPointId ||
+        !point ||
+        point.timing !== null ||
+        (scope.kind === 'named' && scope.optionsDigest !== gameChoiceOptionsDigest(point.options))
+      ) {
+        return '本机选择只适用于当前已授权的无计时选项';
+      }
+    } else if (
+      this.#safety.mode === 'local-recovery' ||
+      this.#safety.mode === 'local-choice' ||
+      (command.method === Method.DecisionResolve && command.payload.source === 'operator')
+    ) {
+      return '缺少本机恢复授权';
+    }
     if (command.method === Method.GoalSubmit) {
       if (command.payload.mode === 'manual') return '人工接管只能由操作员执行';
       if (command.payload.expiresAtMs <= now) return '游戏目标已过期';
@@ -1395,6 +1479,19 @@ export class GameBridge implements Game {
     source: IntentSource,
     stillValid?: () => boolean,
   ): Promise<GameCommandResult> {
+    const localDialogue = this.#safety.localDialogue;
+    const localScope = localDialogue ?? this.#safety.localRecovery;
+    if (this.#safety.mode === 'local-dialogue') {
+      if (
+        !localDialogue ||
+        command.method !== Method.GoalSubmit ||
+        command.payload.localRecovery !== undefined ||
+        !isDeepStrictEqual(command.payload.localDialogue, localDialogue)
+      )
+        return { ok: false, reason: '不属于当前本机对白授权' };
+    } else if (command.method === Method.GoalSubmit && command.payload.localDialogue) {
+      return { ok: false, reason: '当前模式不接受本机对白目标' };
+    }
     const availability = this.#availability();
     const permit = this.#permit;
     if (!availability.ready) return { ok: false, reason: availability.reason };
@@ -1469,12 +1566,16 @@ export class GameBridge implements Game {
           throw new Error(changed);
         }
         if (stillValid && !stillValid()) throw new Error('发起命令时的游戏局面已失效');
+        const timeoutMs = localScope
+          ? Math.min(LOCAL_DIALOGUE_GOAL_RPC_MS, localScope.expiresAtMs - this.wireNowMs())
+          : undefined;
+        if (timeoutMs !== undefined && timeoutMs <= 0) throw new Error('本机游戏授权已到期');
         try {
           // 执行闸门核对过语义载荷。发送时只替换本次 RPC 的追踪上下文。
           const pending = main.rpc.request(
             command.method,
             { ...authorized, traceparent: prepared.traceparent },
-            { signal: controller.signal },
+            { signal: controller.signal, ...(timeoutMs === undefined ? {} : { timeoutMs }) },
           );
           if (checked.method === Method.DecisionResolve && this.#decision)
             this.#decision.resolveSent = true;
@@ -1492,6 +1593,13 @@ export class GameBridge implements Game {
           return { accepted: true };
         } catch (error) {
           if (error instanceof RpcError && refusedBeforeExecution.has(error.code)) {
+            if (localScope && 'kind' in localScope && localScope.kind === 'named') {
+              this.#ctx.log('game.local-choice.refused', {
+                code: error.code,
+              });
+              if (error.code === RpcErrorCode.InvalidParams)
+                throw new Error(NAMED_CHOICE_INVALID_PARAMS);
+            }
             throw new Error(`Game Runtime 明确拒绝游戏命令（${error.code}）`);
           }
           this.#stopInput('游戏命令执行结果未知');

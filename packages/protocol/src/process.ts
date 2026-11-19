@@ -4,6 +4,8 @@ import {
   GAME_BRIDGE_MAX_MONOTONIC_MS,
   GameActionResolveOutcomeParams,
   GameControlTargetId,
+  GameLocalDialogue,
+  GameLocalRecoveryKind,
   GameTaskOpenParams,
 } from './game-bridge.ts';
 
@@ -130,6 +132,58 @@ export const OperatorMethod = {
   /** 操作员结案：为结果未知的意图补记结局，解除它对目标的隔离（见状态存储“重启”）。 */
   Resolve: 'operator.resolve',
 } as const;
+
+export const OperatorLocalDialogueStart = 'operator.local_dialogue_start';
+export const OperatorLocalDialogueStartParams = Type.Object(
+  {
+    runtimeId: GameLocalDialogue.properties.runtimeId,
+    expiresAtMs: GameLocalDialogue.properties.expiresAtMs,
+    maxActions: GameLocalDialogue.properties.maxActions,
+    confirmationWindowMs: Type.Integer({ minimum: 1, maximum: 60_000 }),
+  },
+  closed,
+);
+export type OperatorLocalDialogueStartParams = Static<typeof OperatorLocalDialogueStartParams>;
+
+export const OperatorLocalRecoveryStart = 'operator.local_recovery_start';
+export const OperatorLocalRecoveryStartParams = Type.Object(
+  {
+    runtimeId: GameLocalDialogue.properties.runtimeId,
+    kind: GameLocalRecoveryKind,
+    expiresAtMs: GameLocalDialogue.properties.expiresAtMs,
+    confirmationWindowMs: OperatorLocalDialogueStartParams.properties.confirmationWindowMs,
+  },
+  closed,
+);
+export type OperatorLocalRecoveryStartParams = Static<typeof OperatorLocalRecoveryStartParams>;
+
+export const LocalChoiceNomination = Type.Object(
+  {
+    source: Type.Enum(['maintainer', 'delegated-reviewer']),
+    approvalRef: Type.String({ minLength: 1, maxLength: 160 }),
+    nominationRef: Type.String({ minLength: 1, maxLength: 160 }),
+  },
+  closed,
+);
+export type LocalChoiceNomination = Static<typeof LocalChoiceNomination>;
+
+export const OperatorLocalNamedChoiceStart = 'operator.local_named_choice_start';
+export const OperatorLocalNamedChoiceStartParams = Type.Object(
+  {
+    ...OperatorLocalRecoveryStartParams.properties,
+    kind: Type.Literal('named'),
+    options: Type.Array(Type.String({ minLength: 1, maxLength: 240 }), {
+      minItems: 1,
+      maxItems: 64,
+    }),
+    optionIndex: Type.Integer({ minimum: 0, maximum: 63 }),
+    nomination: LocalChoiceNomination,
+  },
+  closed,
+);
+export type OperatorLocalNamedChoiceStartParams = Static<
+  typeof OperatorLocalNamedChoiceStartParams
+>;
 
 export const OperatorModeParams = Type.Object(
   {

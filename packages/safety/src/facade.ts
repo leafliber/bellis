@@ -7,7 +7,14 @@ import {
   type StoredEvent,
 } from '@bellis/store';
 import type { ControlSignal } from './control.ts';
-import type { Decision, IntentRequest, LeaseResult, SafetyCore } from './core.ts';
+import type {
+  Decision,
+  IntentRequest,
+  LeaseResult,
+  LocalDialogueScope,
+  LocalRecoveryScope,
+  SafetyCore,
+} from './core.ts';
 import type { Lease, LeaseUpdate } from './leases.ts';
 import type { Mode } from './supervision.ts';
 
@@ -19,6 +26,8 @@ import type { Mode } from './supervision.ts';
  */
 export interface SafetyFacade {
   readonly mode: Mode;
+  readonly localDialogue?: LocalDialogueScope | undefined;
+  readonly localRecovery?: LocalRecoveryScope | undefined;
   readonly moderationEnabled: boolean | undefined;
   /** 急停时静音的 Stage 源，也是写 Stage URL 唯一允许的目标。 */
   readonly stageSource: string;
@@ -69,6 +78,12 @@ export function safetyFacade(
   return {
     get mode() {
       return core.mode;
+    },
+    get localDialogue() {
+      return core.localDialogue;
+    },
+    get localRecovery() {
+      return core.localRecovery;
     },
     get moderationEnabled() {
       return core.moderationEnabled;

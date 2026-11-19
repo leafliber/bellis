@@ -4,6 +4,7 @@ import {
   GAME_BRIDGE_INTEGER_FIELDS,
   GAME_BRIDGE_MAJOR,
   GAME_BRIDGE_SEMANTIC_V2,
+  GAME_BRIDGE_V1_INTEGER_FIELDS,
   type GameActionCommitted,
   type GameBridgeMajor,
   GameBridgeMethod,
@@ -14,8 +15,10 @@ import {
   type GameBridgeSender,
   GameBridgeV2Methods,
   type GameDecisionPointOpened,
+  type GameDecisionResolveParams,
   GameDescribeVersion,
   type GameGoalSubmitParams,
+  type GameLeaseRenewParams,
   type GameMainDescription,
   type GameMainHealth,
   type GameMainHealthV2,
@@ -26,12 +29,12 @@ import {
 } from './game-bridge.ts';
 import { RpcFailure, RpcNotification, RpcRequest, RpcSuccess } from './jsonrpc.ts';
 
-const validators = new Map(
-  Object.entries({ ...gameBridgeSchemas, ...gameBridgeV2Schemas }).map(([name, schema]) => [
-    name,
-    Compile(schema as TSchema),
-  ]),
-);
+function compileSchemas(schemas: Record<string, TSchema>) {
+  return new Map(Object.entries(schemas).map(([name, schema]) => [name, Compile(schema)]));
+}
+
+const validators = compileSchemas(gameBridgeSchemas);
+const mainV2Validators = compileSchemas(gameBridgeV2Schemas);
 const request = Compile(RpcRequest);
 const notification = Compile(RpcNotification);
 const success = Compile(RpcSuccess);
@@ -40,6 +43,7 @@ const descriptionVersion = Compile(GameDescribeVersion);
 const genericScreenTypes = new Set<string>(GameScreenType.enum);
 
 const integerFields = new Set<string>(GAME_BRIDGE_INTEGER_FIELDS);
+const v1IntegerFields = new Set<string>(GAME_BRIDGE_V1_INTEGER_FIELDS);
 const integerLiteral = /^(?:0|-?[1-9][0-9]*)$/;
 
 /** 先读握手的公共主版本字段。只在收到所请求的 game.describe 应答时使用。 */
@@ -52,13 +56,14 @@ export function parseGameBridgeJson(
   raw: string,
   knownMajor: GameBridgeMajor = GAME_BRIDGE_MAJOR,
 ): unknown {
+  const fields = knownMajor === GAME_BRIDGE_MAJOR ? v1IntegerFields : integerFields;
   const malformed: Array<{ holder: object; key: string }> = [];
   const message: unknown = JSON.parse(
     raw,
     function (this: object, key: string, value: unknown, context?: { source?: string }) {
       if (
         typeof value === 'number' &&
-        integerFields.has(key) &&
+        fields.has(key) &&
         (!Number.isSafeInteger(value) || !integerLiteral.test(context?.source ?? ''))
       ) {
         malformed.push({ holder: this, key });
@@ -130,15 +135,53 @@ function checkDecision(point: GameDecisionPointOpened): boolean {
 }
 
 /** 只校验单条消息内的关系；连接和当前游戏状态由两端处理。 */
-function checkPayload(name: GameBridgeSchemaName, value: unknown): boolean {
-  if (!validators.get(name)?.Check(value)) return false;
+function checkPayload(name: GameBridgeSchemaName, value: unknown, major: number): boolean {
+  const schemas = major === GAME_BRIDGE_SEMANTIC_V2 ? mainV2Validators : validators;
+  if (!schemas.get(name)?.Check(value)) return false;
   switch (name) {
     case 'GameDecisionPointOpened':
       return checkDecision(value as GameDecisionPointOpened);
     case 'GameGoalSubmitParams':
     case 'GameGoalSubmitParamsV2': {
       const goal = value as GameGoalSubmitParams;
-      return (goal.mode === 'waiting_vote') === (goal.decisionPointId !== null);
+      if (
+        goal.localRecovery &&
+        (goal.localDialogue ||
+          (goal.localRecovery.kind !== 'recover' && goal.localRecovery.kind !== 'load') ||
+          (goal.localRecovery.kind === 'load' &&
+            goal.localRecovery.authorizationId === goal.localRecovery.openAuthorizationId))
+      )
+        return false;
+      const scope = goal.localRecovery ?? goal.localDialogue;
+      return (
+        (goal.mode === 'waiting_vote') === (goal.decisionPointId !== null) &&
+        (scope === undefined ||
+          (goal.mode === 'autonomous' &&
+            goal.goalId === scope.authorizationId &&
+            goal.expiresAtMs === scope.expiresAtMs))
+      );
+    }
+    case 'GameDecisionResolveParams': {
+      const decision = value as GameDecisionResolveParams;
+      const scope = decision.localRecovery;
+      if (!scope) return decision.source !== 'operator';
+      return (
+        (scope.kind === 'prefix' || scope.kind === 'untried' || scope.kind === 'named') &&
+        decision.source === 'operator' &&
+        decision.decisionPointId === scope.decisionPointId &&
+        decision.optionId === scope.optionId
+      );
+    }
+    case 'GameLeaseRenewParams': {
+      const lease = value as GameLeaseRenewParams;
+      if (lease.localDialogue && lease.localRecovery) return false;
+      if (
+        lease.localRecovery?.kind === 'load' &&
+        lease.localRecovery.authorizationId === lease.localRecovery.openAuthorizationId
+      )
+        return false;
+      const scope = lease.localRecovery ?? lease.localDialogue;
+      return scope === undefined || lease.expiresAtMs <= scope.expiresAtMs;
     }
     case 'GameActionCommitted': {
       const action = value as GameActionCommitted;
@@ -164,8 +207,18 @@ function checkPayload(name: GameBridgeSchemaName, value: unknown): boolean {
         lookpoints.every((item) => item.atMs <= atMs)
       );
     }
-    case 'GameMainHealth':
-      return unique((value as GameMainHealth).prerequisites.map(({ id }) => id));
+    case 'GameMainHealth': {
+      const health = value as GameMainHealth;
+      const proof = health.localRecovery;
+      return (
+        unique(health.prerequisites.map(({ id }) => id)) &&
+        (!proof ||
+          (health.ready &&
+            !health.riskLimitExceeded &&
+            health.frameAgeMs !== null &&
+            health.decisionPointId === ('decisionPointId' in proof ? proof.decisionPointId : null)))
+      );
+    }
     case 'GameMainHealthV2': {
       const health = value as GameMainHealthV2;
       return (
@@ -187,7 +240,7 @@ export function checkGameBridgeParams(
   major: number = GAME_BRIDGE_MAJOR,
 ): boolean {
   const spec = methodSpec(role, method, major);
-  return spec?.sender === sender && checkPayload(spec.params, params);
+  return spec?.sender === sender && checkPayload(spec.params, params, major);
 }
 
 /** 校验一条应用请求或通知。JSON-RPC 的请求相关与 rpc.cancel 仍由通道处理。 */
@@ -200,13 +253,17 @@ export function checkGameBridgeMessage(
   if (request.Check(message)) {
     const spec = methodSpec(role, message.method, major);
     return (
-      spec?.sender === sender && spec.result !== null && checkPayload(spec.params, message.params)
+      spec?.sender === sender &&
+      spec.result !== null &&
+      checkPayload(spec.params, message.params, major)
     );
   }
   if (notification.Check(message)) {
     const spec = methodSpec(role, message.method, major);
     return (
-      spec?.sender === sender && spec.result === null && checkPayload(spec.params, message.params)
+      spec?.sender === sender &&
+      spec.result === null &&
+      checkPayload(spec.params, message.params, major)
     );
   }
   return false;
@@ -223,7 +280,7 @@ export function checkGameBridgeResult(
   if (method === GameBridgeMethod.Describe && readGameBridgeMajor(result) !== major) {
     return false;
   }
-  return spec !== undefined && spec.result !== null && checkPayload(spec.result, result);
+  return spec !== undefined && spec.result !== null && checkPayload(spec.result, result, major);
 }
 
 export function checkGameBridgeSuccess(

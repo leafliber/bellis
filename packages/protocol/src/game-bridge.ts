@@ -36,6 +36,14 @@ export const GAME_BRIDGE_INTEGER_FIELDS = [
   'queueDepth',
 ] as const;
 
+export const GAME_BRIDGE_V1_INTEGER_FIELDS = [
+  ...GAME_BRIDGE_INTEGER_FIELDS,
+  'maxActions',
+  'openAuthorizationSeq',
+  'frameNumber',
+  'transformVersion',
+] as const;
+
 export const GameBridgeRole = {
   Main: 'game-runtime.main',
   Core: 'game-runtime.core',
@@ -96,8 +104,9 @@ const GameFailure = Type.Object(
   { source: nullable(GameSelectionSource), summary: text(240) },
   closed,
 );
+const selectionIds = { decisionPointId: instanceId, optionId: instanceId };
 const GameSelection = Type.Object(
-  { decisionPointId: instanceId, optionId: instanceId, source: GameSelectionSource },
+  { ...selectionIds, source: Type.Enum([...GameSelectionSource.enum, 'operator']) },
   closed,
 );
 const GameLookpoint = Type.Object(
@@ -153,27 +162,117 @@ export type GameCoreDescription = Static<typeof GameCoreDescription>;
 
 export const GameAck = Type.Object({}, closed);
 
+/** R-30 的范围同时交给已认证的语义端和实时核。 */
+export const GameLocalDialogue = Type.Object(
+  {
+    sessionId: Type.String({ pattern: '^[a-z0-9]{1,16}$' }),
+    runtimeId: instanceId,
+    authorizationId: instanceId,
+    adapterId,
+    maxActions: Type.Integer({ minimum: 1, maximum: 20 }),
+    expiresAtMs: monotonicMs,
+  },
+  closed,
+);
+export type GameLocalDialogue = Static<typeof GameLocalDialogue>;
+
+export const GameLocalRecoveryKind = Type.Enum(['recover', 'load', 'prefix', 'untried']);
+export type GameLocalRecoveryKind = Static<typeof GameLocalRecoveryKind>;
+
+const localRecoveryLoad = { kind: Type.Literal('recover') };
+const localRecoveryContinuation = {
+  kind: Type.Literal('load'),
+  openAuthorizationId: instanceId,
+  openAuthorizationSeq: token,
+};
+const localRecoverySelection = {
+  kind: Type.Enum(['prefix', 'untried']),
+  decisionPointId: instanceId,
+  optionId: instanceId,
+};
+const localNamedChoice = {
+  kind: Type.Literal('named'),
+  decisionPointId: instanceId,
+  optionsDigest: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+  frameNumber: token,
+  transformVersion: count,
+};
+
+/** 当前新帧和本机账本可共同验证的本机恢复入口。 */
+export const GameLocalRecoveryReadiness = Type.Union([
+  Type.Object(localRecoveryLoad, closed),
+  Type.Object(localRecoveryContinuation, closed),
+  Type.Object(localRecoverySelection, closed),
+  Type.Object(localNamedChoice, closed),
+]);
+export type GameLocalRecoveryReadiness = Static<typeof GameLocalRecoveryReadiness>;
+
+/** 与 R-30 互斥，每次单独授权恢复或一次指定的选择。 */
+export const GameLocalRecovery = Type.Union([
+  Type.Object(
+    { ...GameLocalDialogue.properties, ...localRecoveryLoad, maxActions: Type.Literal(2) },
+    closed,
+  ),
+  Type.Object(
+    { ...GameLocalDialogue.properties, ...localRecoveryContinuation, maxActions: Type.Literal(1) },
+    closed,
+  ),
+  Type.Object(
+    { ...GameLocalDialogue.properties, ...localRecoverySelection, maxActions: Type.Literal(1) },
+    closed,
+  ),
+  Type.Object(
+    {
+      ...GameLocalDialogue.properties,
+      ...localNamedChoice,
+      optionId: instanceId,
+      maxActions: Type.Literal(1),
+    },
+    closed,
+  ),
+]);
+export type GameLocalRecovery = Static<typeof GameLocalRecovery>;
+
+const goalFields = {
+  goalId: instanceId,
+  objective: text(600),
+  constraints: Type.Array(text(160), { maxItems: 16 }),
+  mode: GameMode,
+  decisionPointId: nullable(instanceId),
+  expiresAtMs: monotonicMs,
+  traceparent,
+};
 export const GameGoalSubmitParams = Type.Object(
   {
-    goalId: instanceId,
-    objective: text(600),
-    constraints: Type.Array(text(160), { maxItems: 16 }),
-    mode: GameMode,
-    decisionPointId: nullable(instanceId),
-    expiresAtMs: monotonicMs,
-    traceparent,
+    ...goalFields,
+    localDialogue: Type.Optional(GameLocalDialogue),
+    localRecovery: Type.Optional(GameLocalRecovery),
   },
   closed,
 );
 export type GameGoalSubmitParams = Static<typeof GameGoalSubmitParams>;
 
+const decisionResolve = { ...selectionIds, source: GameDecisionSource, traceparent };
+
 export const GameDecisionResolveParams = Type.Object(
-  { decisionPointId: instanceId, optionId: instanceId, source: GameDecisionSource, traceparent },
+  {
+    ...decisionResolve,
+    source: Type.Enum([...GameDecisionSource.enum, 'operator']),
+    localRecovery: Type.Optional(GameLocalRecovery),
+  },
   closed,
 );
 export type GameDecisionResolveParams = Static<typeof GameDecisionResolveParams>;
 
-export const GameLeaseRenewParams = Type.Object({ token, expiresAtMs: monotonicMs }, closed);
+export const GameLeaseRenewParams = Type.Object(
+  {
+    token,
+    expiresAtMs: monotonicMs,
+    localDialogue: Type.Optional(GameLocalDialogue),
+    localRecovery: Type.Optional(GameLocalRecovery),
+  },
+  closed,
+);
 export type GameLeaseRenewParams = Static<typeof GameLeaseRenewParams>;
 
 export const GameInputStopParams = Type.Object(
@@ -271,23 +370,25 @@ export const GameInputReleased = Type.Object(
 );
 export type GameInputReleased = Static<typeof GameInputReleased>;
 
+const mainHealth = {
+  atMs: monotonicMs,
+  ready: Type.Boolean(),
+  mode: GameMode,
+  goalId: nullable(instanceId),
+  decisionPointId: nullable(instanceId),
+  prerequisites,
+  firstActionMs: nullable(count),
+  frameAgeMs: nullable(count),
+  queueDepth: count,
+  riskScore: Type.Number({ minimum: 0, maximum: 1 }),
+  riskLimitExceeded: Type.Boolean(),
+  lastRejection: nullable(
+    Type.Object({ atMs: monotonicMs, code: adapterId, summary: text(200) }, closed),
+  ),
+};
+
 export const GameMainHealth = Type.Object(
-  {
-    atMs: monotonicMs,
-    ready: Type.Boolean(),
-    mode: GameMode,
-    goalId: nullable(instanceId),
-    decisionPointId: nullable(instanceId),
-    prerequisites,
-    firstActionMs: nullable(count),
-    frameAgeMs: nullable(count),
-    queueDepth: count,
-    riskScore: Type.Number({ minimum: 0, maximum: 1 }),
-    riskLimitExceeded: Type.Boolean(),
-    lastRejection: nullable(
-      Type.Object({ atMs: monotonicMs, code: adapterId, summary: text(200) }, closed),
-    ),
-  },
+  { ...mainHealth, localRecovery: Type.Optional(GameLocalRecoveryReadiness) },
   closed,
 );
 export type GameMainHealth = Static<typeof GameMainHealth>;
@@ -332,7 +433,7 @@ export type GamePendingActionOutcome = Static<typeof GamePendingActionOutcome>;
 
 export const GameMainHealthV2 = Type.Object(
   {
-    ...GameMainHealth.properties,
+    ...mainHealth,
     pendingActionOutcome: nullable(GamePendingActionOutcome),
     activeTaskId: nullable(instanceId),
   },
@@ -384,10 +485,7 @@ export type GameTaskOpenParams = Static<typeof GameTaskOpenParams>;
 
 export const GameTaskOpenResult = Type.Object({ taskId: instanceId }, closed);
 
-export const GameGoalSubmitParamsV2 = Type.Object(
-  { ...GameGoalSubmitParams.properties, taskId: instanceId },
-  closed,
-);
+export const GameGoalSubmitParamsV2 = Type.Object({ ...goalFields, taskId: instanceId }, closed);
 
 export const gameBridgeSchemas = {
   GameDescribeVersion,
@@ -395,6 +493,10 @@ export const gameBridgeSchemas = {
   GameMainDescription,
   GameCoreDescription,
   GameAck,
+  GameLocalDialogue,
+  GameLocalRecovery,
+  GameLocalRecoveryKind,
+  GameLocalRecoveryReadiness,
   GameGoalSubmitParams,
   GameDecisionResolveParams,
   GameLeaseRenewParams,
@@ -509,12 +611,18 @@ export const gameBridgeV2Schemas = {
   GameTaskOpenResult,
   GameActionResolveOutcomeParams,
   GameActionResolveOutcomeResult,
-  GameDecisionResolveParams,
+  GameDecisionResolveParams: Type.Object(decisionResolve, closed),
   GamePacingHoldParams,
   GamePacingReleaseParams,
   GameSituationObserved,
   GameDecisionPointOpened,
-  GameActionCommitted,
+  GameActionCommitted: Type.Object(
+    {
+      ...GameActionCommitted.properties,
+      selection: nullable(Type.Object({ ...selectionIds, source: GameSelectionSource }, closed)),
+    },
+    closed,
+  ),
   GameMainHealthV2,
 } as const;
 

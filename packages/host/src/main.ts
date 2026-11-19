@@ -74,6 +74,7 @@ import {
 } from '@bellis/stage';
 import { StateStore } from '@bellis/store';
 import { Compile } from 'typebox/compile';
+import { localGameEntry } from './local-game.ts';
 import { consoleRoutes, createOperator, serveOperator, type Target } from './operator.ts';
 import { preflight } from './preflight.ts';
 import {
@@ -120,6 +121,8 @@ const configPath = process.env[ChildEnv.Config];
 if (!configPath) throw new Error(`缺少环境变量 ${ChildEnv.Config}`);
 const config = loadConfig(configPath);
 const entries = resolveProfile(readJsonFile(config.profile), config.patches.map(readJsonFile));
+// 标准启动器没有受信任的本机游戏准入策略，不能用 profile 启用本机授权。
+localGameEntry(config.simulation, entries);
 // 审核插件的开关必须在 profile 中显式设置，没有隐含默认（D-18）。
 const moderationEntry = entries.find((entry) => entry.id === 'moderation');
 if (!moderationEntry?.explicitSwitch) {

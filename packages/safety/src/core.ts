@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
   type Clock,
   type KernelSafetyHooks,
@@ -92,7 +93,61 @@ export interface SafetyOptions {
   /** 插件实例被授予的权限（来自插件内核）。 */
   permissionsOf(holder: string): ReadonlySet<string> | undefined;
   watchdogConnected(): boolean;
+  localDialogue?: {
+    ready(): boolean;
+    wireNowMs(): number;
+    readonly adapterId: string;
+    readonly dialogueEnabled: boolean;
+    readonly recoveryEnabled: boolean;
+    readonly namedChoiceEnabled: boolean;
+  };
   log?(event: string, fields: Record<string, unknown>): void;
+}
+
+export interface LocalDialogueScope {
+  readonly sessionId: string;
+  readonly runtimeId: string;
+  readonly authorizationId: string;
+  readonly adapterId: string;
+  readonly maxActions: number;
+  readonly expiresAtMs: number;
+}
+
+export type LocalRecoveryScope = LocalDialogueScope &
+  (
+    | { readonly kind: 'recover'; readonly maxActions: 2 }
+    | {
+        readonly kind: 'load';
+        readonly maxActions: 1;
+        readonly openAuthorizationId: string;
+        readonly openAuthorizationSeq: number;
+      }
+    | {
+        readonly kind: 'prefix' | 'untried';
+        readonly maxActions: 1;
+        readonly decisionPointId: string;
+        readonly optionId: string;
+      }
+    | {
+        readonly kind: 'named';
+        readonly maxActions: 1;
+        readonly decisionPointId: string;
+        readonly optionId: string;
+        readonly optionsDigest: string;
+        readonly frameNumber: number;
+        readonly transformVersion: number;
+      }
+  );
+
+type NamedChoiceScope = Extract<LocalRecoveryScope, { kind: 'named' }>;
+
+/** 语义端在接纳前明确拒绝参数，保留既有意图结局文字供重启后的指名核对。 */
+export const NAMED_CHOICE_INVALID_PARAMS = 'Game Runtime 明确拒绝游戏命令（-32602）';
+
+interface ChoiceNomination {
+  readonly source: 'maintainer' | 'delegated-reviewer';
+  readonly approvalRef: string;
+  readonly nominationRef: string;
 }
 
 /**
@@ -158,6 +213,7 @@ export class SafetyCore {
   readonly #obs: EmergencyObs;
   readonly #permissionsOf: (holder: string) => ReadonlySet<string> | undefined;
   readonly #watchdogConnected: () => boolean;
+  readonly #dialogueGuard: SafetyOptions['localDialogue'];
   readonly #log: (event: string, fields: Record<string, unknown>) => void;
   readonly #rate: RateLimiter;
   readonly #guards = new Set<Guard>();
@@ -167,6 +223,15 @@ export class SafetyCore {
   #maintenance = false;
   #moderation: boolean | undefined;
   #obsRun: Promise<EmergencyReport['obs']> | undefined;
+  #dialogue:
+    | {
+        holder: string;
+        scope: LocalDialogueScope | LocalRecoveryScope;
+        nominationKey?: string;
+      }
+    | undefined;
+  #dialogueTimer: TimerHandle | undefined;
+  #dialogueUsed = false;
 
   constructor(options: SafetyOptions) {
     this.#store = options.store;
@@ -176,6 +241,7 @@ export class SafetyCore {
     this.#obs = options.obs;
     this.#permissionsOf = options.permissionsOf;
     this.#watchdogConnected = options.watchdogConnected;
+    this.#dialogueGuard = options.localDialogue && Object.freeze({ ...options.localDialogue });
     this.#log = options.log ?? (() => {});
     this.#rate = new RateLimiter(options.clock, options.config.rateLimits);
     this.control = new ControlChannel((error) =>
@@ -206,6 +272,266 @@ export class SafetyCore {
     return this.#moderation;
   }
 
+  get localDialogue(): LocalDialogueScope | undefined {
+    const scope = this.#activeLocalScope();
+    if (this.#mode === 'local-dialogue' && scope && !('kind' in scope)) return scope;
+    return undefined;
+  }
+
+  get localRecovery(): LocalRecoveryScope | undefined {
+    const scope = this.#activeLocalScope();
+    if (
+      (this.#mode === 'local-recovery' || this.#mode === 'local-choice') &&
+      scope &&
+      'kind' in scope
+    )
+      return scope;
+    return undefined;
+  }
+
+  #activeLocalScope(): LocalDialogueScope | LocalRecoveryScope | undefined {
+    const scope = this.#dialogue?.scope;
+    if (
+      scope &&
+      this.#dialogueGuard &&
+      this.#store.healthy &&
+      !this.#maintenance &&
+      this.#moderation === false &&
+      this.#obs.ready &&
+      this.#watchdogConnected() &&
+      this.#dialogueGuard.ready() &&
+      this.#dialogueGuard.wireNowMs() < scope.expiresAtMs
+    )
+      return scope;
+    return undefined;
+  }
+
+  /** 仅由宿主的已认证操作员入口调用。一个宿主会话只接纳一次独立授权。 */
+  startLocalDialogue(holder: string, scope: LocalDialogueScope): string | undefined {
+    if (!this.#dialogueGuard?.dialogueEnabled) return '当前部署未启用本机对白授权';
+    if (
+      'kind' in scope ||
+      !Number.isInteger(scope.maxActions) ||
+      scope.maxActions < 1 ||
+      scope.maxActions > 20
+    )
+      return '本机对白授权范围不合法';
+    return this.#startLocalScope(holder, scope);
+  }
+
+  startLocalRecovery(
+    holder: string,
+    scope: Exclude<LocalRecoveryScope, NamedChoiceScope>,
+  ): string | undefined {
+    if (!this.#dialogueGuard?.recoveryEnabled) return '当前部署未启用本机恢复授权';
+    const validId = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+    let valid = false;
+    switch (scope.kind) {
+      case 'recover':
+        valid = scope.maxActions === 2 && !('decisionPointId' in scope) && !('optionId' in scope);
+        break;
+      case 'load':
+        valid =
+          scope.maxActions === 1 &&
+          scope.openAuthorizationId !== scope.authorizationId &&
+          validId.test(scope.openAuthorizationId) &&
+          Number.isSafeInteger(scope.openAuthorizationSeq) &&
+          scope.openAuthorizationSeq > 0 &&
+          this.#verifiedRecoveryOpen(scope);
+        break;
+      case 'prefix':
+      case 'untried':
+        valid =
+          scope.maxActions === 1 &&
+          validId.test(scope.decisionPointId) &&
+          validId.test(scope.optionId);
+        break;
+    }
+    if (!valid) return '本机恢复授权范围不合法';
+    return this.#startLocalScope(holder, scope);
+  }
+
+  startLocalNamedChoice(
+    holder: string,
+    scope: NamedChoiceScope,
+    nomination: ChoiceNomination,
+  ): string | undefined {
+    if (!this.#dialogueGuard?.namedChoiceEnabled) return '当前 profile 未启用本机指名选择';
+    const validId = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+    if (
+      scope.kind !== 'named' ||
+      scope.maxActions !== 1 ||
+      !validId.test(scope.decisionPointId) ||
+      !validId.test(scope.optionId) ||
+      !/^[0-9a-f]{64}$/.test(scope.optionsDigest) ||
+      !Number.isSafeInteger(scope.frameNumber) ||
+      scope.frameNumber < 1 ||
+      !Number.isInteger(scope.transformVersion) ||
+      scope.transformVersion < 0 ||
+      scope.transformVersion > 0xffff_ffff ||
+      (nomination.source !== 'maintainer' && nomination.source !== 'delegated-reviewer') ||
+      !nomination.approvalRef.trim() ||
+      !nomination.nominationRef.trim()
+    )
+      return '本机指名选择授权范围不合法';
+    return this.#startLocalScope(holder, scope, nomination);
+  }
+
+  #verifiedRecoveryOpen(scope: Extract<LocalRecoveryScope, { kind: 'load' }>): boolean {
+    // 语义端另行核对原读档步骤从未发送。安全核只信已持久化的宿主事实。
+    try {
+      const [open, ...later] = this.#store.events(scope.openAuthorizationSeq - 1);
+      if (open?.seq !== scope.openAuthorizationSeq || open.type !== 'local_recovery.authorized')
+        return false;
+      const original = open.data as LocalRecoveryScope;
+      if (
+        (original.kind !== 'recover' && original.kind !== 'load') ||
+        original.authorizationId !== scope.openAuthorizationId ||
+        original.adapterId !== scope.adapterId ||
+        original.sessionId === scope.sessionId ||
+        original.runtimeId === scope.runtimeId ||
+        later.some(({ type }) => type === 'local_recovery.authorized')
+      )
+        return false;
+      const actions = later.filter(({ type }) => type === 'action.committed');
+      let completedAt = open.seq;
+      if (original.kind === 'recover') {
+        const [action] = actions;
+        if (original.maxActions !== 2 || !action || actions.length !== 1) return false;
+        const { runtimeId, role, payload } = action.data as {
+          runtimeId?: string;
+          role?: string;
+          payload?: { goalId?: string; category?: string; selection?: unknown };
+        };
+        if (
+          runtimeId !== original.runtimeId ||
+          role !== 'game-runtime.main' ||
+          payload?.goalId !== original.authorizationId ||
+          payload.category !== 'navigate' ||
+          payload.selection !== null
+        )
+          return false;
+        completedAt = action.seq;
+      } else {
+        // 上一次续接的 Runtime 账库必须证明仍在已开菜单且未送出。当前仅核对最近授权链和最终释放。
+        if (
+          original.maxActions !== 1 ||
+          actions.length !== 0 ||
+          !Number.isSafeInteger(original.openAuthorizationSeq) ||
+          original.openAuthorizationSeq <= 0 ||
+          original.openAuthorizationSeq >= open.seq
+        )
+          return false;
+        const [parent] = this.#store.events(original.openAuthorizationSeq - 1);
+        const parentScope = parent?.data as LocalRecoveryScope | undefined;
+        if (
+          parent?.seq !== original.openAuthorizationSeq ||
+          parent.type !== 'local_recovery.authorized' ||
+          parentScope?.authorizationId !== original.openAuthorizationId ||
+          parentScope.adapterId !== original.adapterId ||
+          (parentScope.kind !== 'recover' && parentScope.kind !== 'load')
+        )
+          return false;
+      }
+      return later.some(({ seq, type, data }) => {
+        if (seq <= completedAt || type !== 'input.released') return false;
+        const released = data as {
+          runtimeId?: string;
+          role?: string;
+          payload?: { reason?: string; verification?: string };
+        };
+        return (
+          released.runtimeId === original.runtimeId &&
+          released.role === 'game-runtime.core' &&
+          released.payload?.reason === 'stop' &&
+          released.payload.verification === 'verified'
+        );
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  #startLocalScope(
+    holder: string,
+    scope: LocalDialogueScope | LocalRecoveryScope,
+    nomination?: ChoiceNomination,
+  ): string | undefined {
+    const guard = this.#dialogueGuard;
+    if (!guard || this.#config.simulation || this.#mode !== 'safe-stop' || this.#dialogueUsed)
+      return '当前宿主未启用或已使用本机游戏授权';
+    if (
+      this.#maintenance ||
+      this.#moderation !== false ||
+      !this.#store.healthy ||
+      !this.#obs.ready ||
+      !this.#watchdogConnected() ||
+      !guard.ready()
+    )
+      return '本机游戏的状态存储、OBS 或看门狗未就绪';
+    const remaining = scope.expiresAtMs - guard.wireNowMs();
+    const capabilities = this.#permissionsOf(holder);
+    if (
+      scope.adapterId !== guard.adapterId ||
+      !capabilities?.has('game.input') ||
+      !capabilities.has('game.goal') ||
+      !Number.isSafeInteger(scope.expiresAtMs) ||
+      remaining <= 0 ||
+      remaining > 120_000
+    )
+      return '本机游戏授权范围不合法';
+    let nominationKey: string | undefined;
+    if (nomination) {
+      try {
+        nominationKey = this.#namedChoiceIntentKey(nomination.nominationRef);
+        if (!nominationKey) return '这次指名已有已接纳或未能明确拒绝的游戏意图';
+      } catch {
+        return '无法核对本机指名的历史意图';
+      }
+    }
+    const mode =
+      'kind' in scope
+        ? scope.kind === 'named'
+          ? 'local-choice'
+          : 'local-recovery'
+        : 'local-dialogue';
+    if (
+      !this.#record(`${mode.replace('-', '_')}.authorized`, {
+        ...scope,
+        ...(nomination ? { nomination } : {}),
+      })
+    )
+      return '无法持久记录本机游戏授权';
+    this.#dialogueUsed = true;
+    this.#dialogue = {
+      holder,
+      scope: Object.freeze({ ...scope }),
+      ...(nominationKey ? { nominationKey } : {}),
+    };
+    this.#dialogueTimer = this.#clock.setTimeout(
+      () => void this.emergencyStop('本机游戏授权到期'),
+      remaining,
+    );
+    this.#setMode(mode, '操作员授权本机游戏', 'operator');
+    return undefined;
+  }
+
+  #namedChoiceIntentKey(reference: string): string | undefined {
+    const base = ['local-named-choice', reference];
+    let key = JSON.stringify(base);
+    for (let attempt = 2; ; attempt += 1) {
+      const prior = this.#store.intentByKey(key);
+      if (!prior) return key;
+      if (
+        prior.type !== 'decision.resolve' ||
+        prior.state !== 'failed' ||
+        prior.error !== NAMED_CHOICE_INVALID_PARAMS
+      )
+        return undefined;
+      key = JSON.stringify([...base, attempt]);
+    }
+  }
+
   presenceValid(): boolean {
     return this.#clock.now() < this.#presenceUntil;
   }
@@ -230,11 +556,17 @@ export class SafetyCore {
 
   /** 授权一个意图。任一检查不通过即拒绝；每次判定都写入状态存储（写不进时照样拒绝）。 */
   async authorize(request: IntentRequest): Promise<Decision> {
+    const recovery = this.localRecovery;
+    const nominationKey = recovery?.kind === 'named' ? this.#dialogue?.nominationKey : undefined;
     const reason = await this.#denial(request);
     if (reason !== undefined) return this.#deny(request, reason);
     try {
       const { intent, duplicate } = this.#store.authorize({
-        key: request.key,
+        key:
+          nominationKey ??
+          (recovery
+            ? JSON.stringify(['local-recovery', recovery.sessionId, recovery.authorizationId])
+            : request.key),
         type: request.type,
         target: request.target,
         payloadHash: payloadHash(request.payload),
@@ -258,7 +590,7 @@ export class SafetyCore {
     // 只申请安全停止下的例外能力（写 Stage URL、写 Iris）的意图，安全停止下照常判定。
     const exempt =
       request.capabilities.length > 0 && request.capabilities.every((c) => SAFE_STOP_EXEMPT.has(c));
-    const immediate = this.#outputBlocker(exempt);
+    const immediate = this.#intentBlocker(request, exempt);
     if (immediate) return immediate;
     const granted = this.#permissionsOf(request.holder);
     if (!granted) return `未知的意图来源 ${request.holder}`;
@@ -291,7 +623,64 @@ export class SafetyCore {
       if (verdict && typeof verdict.deny === 'string') return verdict.deny;
     }
     // 守卫可能是异步的：判定期间若进入了安全停止，同样拒绝。
-    return this.#outputBlocker(exempt);
+    return this.#intentBlocker(request, exempt);
+  }
+
+  #intentBlocker(request: IntentRequest, exempt: boolean): string | undefined {
+    if (!this.#dialogueGuard) return this.#outputBlocker(exempt);
+    const payload = request.payload as Record<string, unknown> | null;
+    if (
+      !payload ||
+      request.holder !== this.#dialogue?.holder ||
+      !request.timeSensitive ||
+      request.source.origin !== 'operator' ||
+      request.source.untrusted ||
+      request.capabilities.length !== 1 ||
+      request.capabilities[0] !== 'game.goal'
+    )
+      return '本机游戏只允许本会话独立授权的操作员意图';
+    const dialogue = this.localDialogue;
+    if (
+      dialogue &&
+      payload.localRecovery === undefined &&
+      request.type === 'goal.submit' &&
+      payload.goalId === dialogue.authorizationId &&
+      isDeepStrictEqual(payload.localDialogue, dialogue)
+    )
+      return undefined;
+    const recovery = this.localRecovery;
+    if (
+      recovery &&
+      payload.localDialogue === undefined &&
+      isDeepStrictEqual(payload.localRecovery, recovery)
+    ) {
+      if (recovery.kind === 'recover' || recovery.kind === 'load') {
+        if (
+          request.type === 'goal.submit' &&
+          payload.goalId === recovery.authorizationId &&
+          payload.mode === 'autonomous' &&
+          payload.decisionPointId === null &&
+          payload.expiresAtMs === recovery.expiresAtMs
+        )
+          return undefined;
+      } else if (
+        request.type === 'decision.resolve' &&
+        payload.source === 'operator' &&
+        payload.decisionPointId === recovery.decisionPointId &&
+        payload.optionId === recovery.optionId
+      )
+        return undefined;
+    }
+    return '意图超出当前本机游戏授权';
+  }
+
+  #leaseBlocker(holder: string, resource: string): string | undefined {
+    if (!this.#dialogueGuard) return this.#outputBlocker(resource === STAGE_URL);
+    return this.#activeLocalScope() &&
+      this.#dialogue?.holder === holder &&
+      resource === 'game.input'
+      ? undefined
+      : '本机游戏只允许当前游戏桥的输入许可';
   }
 
   /** `exempt` 为 true 时是安全停止下的例外（写 Stage URL、写 Iris）：安全停止下放行，维护态仍拒绝。 */
@@ -353,7 +742,7 @@ export class SafetyCore {
   // ---------------------------------------------------------------- 执行许可
 
   grant(holder: string, resource: string): LeaseResult {
-    const blocked = this.#outputBlocker(resource === STAGE_URL);
+    const blocked = this.#leaseBlocker(holder, resource);
     if (blocked) return { ok: false, reason: blocked };
     const capability = this.#config.leaseCapabilities[resource];
     if (!capability) return { ok: false, reason: `资源 ${resource} 没有配置所需能力` };
@@ -368,7 +757,7 @@ export class SafetyCore {
   }
 
   renew(lease: Lease): LeaseResult {
-    const blocked = this.#outputBlocker(lease.resource === STAGE_URL);
+    const blocked = this.#leaseBlocker(lease.holder, lease.resource);
     if (blocked) return { ok: false, reason: blocked };
     try {
       return { ok: true, lease: this.leases.renew(lease) };
@@ -384,6 +773,10 @@ export class SafetyCore {
    * 经 OBS 应急连接静音 Stage 源并切安全场景，完成后在控制通道广播结果。前三步同步完成，不依赖存储写入成功。
    */
   emergencyStop(reason: string): Promise<EmergencyReport> {
+    if (this.#dialogueGuard) this.#dialogueUsed = true;
+    if (this.#dialogueTimer) this.#clock.clearTimeout(this.#dialogueTimer);
+    this.#dialogueTimer = undefined;
+    this.#dialogue = undefined;
     const revoked = this.leases.revokeAll(`急停：${reason}`);
     this.control.broadcast({ kind: 'stop', reason });
     if (this.#mode !== 'safe-stop') this.#setMode('safe-stop', reason, 'safety');
@@ -486,6 +879,7 @@ export class SafetyCore {
 
   /** 切换到目标模式的前置条件是否满足（不切换、不记录）；满足时返回 undefined。 */
   modeBlocker(target: Mode): string | undefined {
+    if (this.#dialogueGuard && target !== 'safe-stop') return '本机对白 profile 只允许独立授权';
     return upgradeBlocker(this.#mode, target, this.#upgradeContext());
   }
 
@@ -494,6 +888,7 @@ export class SafetyCore {
    * 不切换、不记录；满足时返回 undefined。
    */
   preconditionBlocker(target: Mode): string | undefined {
+    if (this.#dialogueGuard && target !== 'safe-stop') return '本机对白 profile 只允许独立授权';
     return preconditionBlocker(this.#mode, target, this.#upgradeContext());
   }
 
@@ -527,6 +922,7 @@ export class SafetyCore {
 
   /** 操作员确认在场（M2 的前提）。操作台页面在线不算在场。 */
   confirmPresence(): void {
+    if (this.#dialogueGuard) throw new Error('本机对白 profile 不登记人工在场');
     this.#presenceUntil = this.#clock.now() + this.#config.presenceTtlMs;
     this.#record('presence.confirmed', { ttlMs: this.#config.presenceTtlMs });
     this.#watchPresence();

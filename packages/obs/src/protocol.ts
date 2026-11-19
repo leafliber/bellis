@@ -26,8 +26,11 @@ export const RequestStatus = {
  * Scenes，`InputMuteStateChanged` 属于 Inputs；InputVolumeMeters 是高频事件，单独一位。
  */
 export const EventSubscription = {
+  General: 1 << 0,
+  Config: 1 << 1,
   Scenes: 1 << 2,
   Inputs: 1 << 3,
+  Outputs: 1 << 6,
   InputVolumeMeters: 1 << 16,
 } as const;
 

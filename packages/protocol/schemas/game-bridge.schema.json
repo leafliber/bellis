@@ -171,6 +171,385 @@
       "properties": {},
       "additionalProperties": false
     },
+    "GameLocalDialogue": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "runtimeId",
+        "authorizationId",
+        "adapterId",
+        "maxActions",
+        "expiresAtMs"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^[a-z0-9]{1,16}$"
+        },
+        "runtimeId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "authorizationId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "adapterId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,47}$"
+        },
+        "maxActions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709
+        }
+      },
+      "additionalProperties": false
+    },
+    "GameLocalRecovery": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "runtimeId",
+            "authorizationId",
+            "adapterId",
+            "maxActions",
+            "expiresAtMs",
+            "kind"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{1,16}$"
+            },
+            "runtimeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "authorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "adapterId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,47}$"
+            },
+            "maxActions": {
+              "type": "number",
+              "const": 2
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709
+            },
+            "kind": {
+              "type": "string",
+              "const": "recover"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "runtimeId",
+            "authorizationId",
+            "adapterId",
+            "maxActions",
+            "expiresAtMs",
+            "kind",
+            "openAuthorizationId",
+            "openAuthorizationSeq"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{1,16}$"
+            },
+            "runtimeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "authorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "adapterId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,47}$"
+            },
+            "maxActions": {
+              "type": "number",
+              "const": 1
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709
+            },
+            "kind": {
+              "type": "string",
+              "const": "load"
+            },
+            "openAuthorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "openAuthorizationSeq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "runtimeId",
+            "authorizationId",
+            "adapterId",
+            "maxActions",
+            "expiresAtMs",
+            "kind",
+            "decisionPointId",
+            "optionId"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{1,16}$"
+            },
+            "runtimeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "authorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "adapterId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,47}$"
+            },
+            "maxActions": {
+              "type": "number",
+              "const": 1
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709
+            },
+            "kind": {
+              "enum": [
+                "prefix",
+                "untried"
+              ]
+            },
+            "decisionPointId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "optionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "runtimeId",
+            "authorizationId",
+            "adapterId",
+            "maxActions",
+            "expiresAtMs",
+            "kind",
+            "decisionPointId",
+            "optionsDigest",
+            "frameNumber",
+            "transformVersion",
+            "optionId"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{1,16}$"
+            },
+            "runtimeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "authorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "adapterId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,47}$"
+            },
+            "maxActions": {
+              "type": "number",
+              "const": 1
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709
+            },
+            "kind": {
+              "type": "string",
+              "const": "named"
+            },
+            "decisionPointId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "optionsDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "frameNumber": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "transformVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "optionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "GameLocalRecoveryKind": {
+      "enum": [
+        "recover",
+        "load",
+        "prefix",
+        "untried"
+      ]
+    },
+    "GameLocalRecoveryReadiness": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "recover"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "openAuthorizationId",
+            "openAuthorizationSeq"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "load"
+            },
+            "openAuthorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "openAuthorizationSeq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "decisionPointId",
+            "optionId"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "prefix",
+                "untried"
+              ]
+            },
+            "decisionPointId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "optionId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "decisionPointId",
+            "optionsDigest",
+            "frameNumber",
+            "transformVersion"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "named"
+            },
+            "decisionPointId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "optionsDigest": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "frameNumber": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "transformVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "GameGoalSubmitParams": {
       "type": "object",
       "required": [
@@ -235,6 +614,276 @@
               "type": "null"
             }
           ]
+        },
+        "localDialogue": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "runtimeId",
+            "authorizationId",
+            "adapterId",
+            "maxActions",
+            "expiresAtMs"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{1,16}$"
+            },
+            "runtimeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "authorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "adapterId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,47}$"
+            },
+            "maxActions": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709
+            }
+          },
+          "additionalProperties": false
+        },
+        "localRecovery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 2
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "recover"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "openAuthorizationId",
+                "openAuthorizationSeq"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "load"
+                },
+                "openAuthorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "openAuthorizationSeq": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "decisionPointId",
+                "optionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "enum": [
+                    "prefix",
+                    "untried"
+                  ]
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "decisionPointId",
+                "optionsDigest",
+                "frameNumber",
+                "transformVersion",
+                "optionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "named"
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionsDigest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "frameNumber": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "transformVersion": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "optionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -259,7 +908,8 @@
         "source": {
           "enum": [
             "director",
-            "vote"
+            "vote",
+            "operator"
           ]
         },
         "traceparent": {
@@ -270,6 +920,236 @@
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "localRecovery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 2
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "recover"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "openAuthorizationId",
+                "openAuthorizationSeq"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "load"
+                },
+                "openAuthorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "openAuthorizationSeq": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "decisionPointId",
+                "optionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "enum": [
+                    "prefix",
+                    "untried"
+                  ]
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "decisionPointId",
+                "optionsDigest",
+                "frameNumber",
+                "transformVersion",
+                "optionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "named"
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionsDigest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "frameNumber": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "transformVersion": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "optionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
             }
           ]
         }
@@ -292,6 +1172,276 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 18446744073709
+        },
+        "localDialogue": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "runtimeId",
+            "authorizationId",
+            "adapterId",
+            "maxActions",
+            "expiresAtMs"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{1,16}$"
+            },
+            "runtimeId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "authorizationId": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+            },
+            "adapterId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,47}$"
+            },
+            "maxActions": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "expiresAtMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709
+            }
+          },
+          "additionalProperties": false
+        },
+        "localRecovery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 2
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "recover"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "openAuthorizationId",
+                "openAuthorizationSeq"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "load"
+                },
+                "openAuthorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "openAuthorizationSeq": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "decisionPointId",
+                "optionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "enum": [
+                    "prefix",
+                    "untried"
+                  ]
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "runtimeId",
+                "authorizationId",
+                "adapterId",
+                "maxActions",
+                "expiresAtMs",
+                "kind",
+                "decisionPointId",
+                "optionsDigest",
+                "frameNumber",
+                "transformVersion",
+                "optionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]{1,16}$"
+                },
+                "runtimeId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "authorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "adapterId": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,47}$"
+                },
+                "maxActions": {
+                  "type": "number",
+                  "const": 1
+                },
+                "expiresAtMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "named"
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionsDigest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "frameNumber": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "transformVersion": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "optionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -793,7 +1943,8 @@
                   "enum": [
                     "director",
                     "vote",
-                    "default"
+                    "default",
+                    "operator"
                   ]
                 }
               },
@@ -1025,6 +2176,107 @@
             },
             {
               "type": "null"
+            }
+          ]
+        },
+        "localRecovery": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "recover"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "openAuthorizationId",
+                "openAuthorizationSeq"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "load"
+                },
+                "openAuthorizationId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "openAuthorizationSeq": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "decisionPointId",
+                "optionId"
+              ],
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "prefix",
+                    "untried"
+                  ]
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "decisionPointId",
+                "optionsDigest",
+                "frameNumber",
+                "transformVersion"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "named"
+                },
+                "decisionPointId": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
+                },
+                "optionsDigest": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "frameNumber": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "transformVersion": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                }
+              },
+              "additionalProperties": false
             }
           ]
         }

@@ -29,6 +29,63 @@ const controlFixtures = JSON.parse(
   readFileSync(new URL('./fixtures/game-control.json', import.meta.url), 'utf8'),
 ) as WireFixture[];
 
+test('本机对白目标和短租约绑定同一范围并拒绝超出范围', () => {
+  const localDialogue = {
+    sessionId: 'session1',
+    runtimeId: 'runtime',
+    authorizationId: 'goal',
+    adapterId: 'local-fixture',
+    maxActions: 1,
+    expiresAtMs: 900,
+  };
+  const goal = {
+    goalId: 'goal',
+    objective: '推进普通对白',
+    constraints: [],
+    mode: 'autonomous',
+    decisionPointId: null,
+    expiresAtMs: 900,
+    traceparent: null,
+    localDialogue,
+  };
+  assert.equal(checkGameBridgeParams(Role.Main, 'bellis', Method.GoalSubmit, goal, 1), true);
+  for (const changed of [{ goalId: 'other' }, { expiresAtMs: 901 }, { mode: 'paused' }]) {
+    assert.equal(
+      checkGameBridgeParams(Role.Main, 'bellis', Method.GoalSubmit, { ...goal, ...changed }, 1),
+      false,
+    );
+  }
+  assert.equal(
+    checkGameBridgeParams(Role.Main, 'bellis', Method.GoalSubmit, { ...goal, taskId: 'task' }, 2),
+    false,
+  );
+  const lease = { token: 1, expiresAtMs: 899, localDialogue };
+  assert.equal(checkGameBridgeParams(Role.Core, 'bellis', Method.LeaseRenew, lease, 1), true);
+  assert.equal(
+    checkGameBridgeParams(
+      Role.Core,
+      'bellis',
+      Method.LeaseRenew,
+      { ...lease, expiresAtMs: 901 },
+      1,
+    ),
+    false,
+  );
+  assert.equal(
+    checkGameBridgeParams(
+      Role.Core,
+      'bellis',
+      Method.LeaseRenew,
+      {
+        ...lease,
+        localDialogue: { ...localDialogue, maxActions: 21 },
+      },
+      1,
+    ),
+    false,
+  );
+});
+
 test('语义 v2 夹具独立于旧语义和控制角色', () => {
   const fixtures = JSON.parse(
     readFileSync(new URL('./fixtures/game-main-v2.json', import.meta.url), 'utf8'),

@@ -75,7 +75,9 @@ def _matches(case: _WireCase, methods: dict[str, _Method], bridge: ModuleType) -
         model = getattr(bridge, model_name)
         assert isinstance(model, type) and issubclass(model, BaseModel)
         decoded = model.model_validate(payload)
-        assert json.loads(decoded.model_dump_json()) == payload, case['name']
+        assert json.loads(decoded.model_dump_json(by_alias=True, exclude_unset=True)) == payload, (
+            case['name']
+        )
     except ValidationError:
         return False
     return True
