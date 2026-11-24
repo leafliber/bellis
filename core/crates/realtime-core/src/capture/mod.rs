@@ -14,7 +14,7 @@ pub use geometry::{
 pub use pipeline::{Capture, CaptureStopped, CaptureThread, FrameStatus, Geometry, TargetError};
 pub use selector::{WindowInfo, WindowSelector};
 pub use wgc::{BorderRequest, BorderStatus, WgcCapture, WgcOptions, WgcStats, is_supported};
-pub use window::{TopLevelWindow, find_window, list_windows, query_geometry};
+pub use window::{TopLevelWindow, find_window, list_windows, query_geometry, select_window};
 
 use std::fmt;
 use std::time::Duration;

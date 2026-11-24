@@ -198,9 +198,53 @@ fn read_credential(_target: &str) -> io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use std::fs;
+    use std::path::PathBuf;
+
+    use serde_json::{Value, json};
 
     use super::{Session, date_time, is_session_id};
+
+    #[test]
+    fn session_info_fixture_decodes_via_utf16le_and_rejects_invalid() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("tests/fixtures/realtime_core/session_info.json");
+        let doc: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(doc["credential_encoding"], "utf-16le");
+        assert_eq!(doc["credential_type"], "CRED_TYPE_GENERIC");
+
+        let valid = &doc["valid"];
+        let text = serde_json::to_string(valid).unwrap();
+        // 按 Windows CredMan 通用凭据的 UTF-16LE 字节往返后再解码。
+        let blob: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let (pairs, rem) = blob.as_chunks::<2>();
+        assert_eq!(rem, [0u8; 0]);
+        let units: Vec<u16> = pairs.iter().copied().map(u16::from_le_bytes).collect();
+        let decoded_text = String::from_utf16(&units).unwrap();
+
+        let session = Session::decode(&decoded_text).expect("valid fixture must decode");
+        assert_eq!(session.id, valid["sessionId"].as_str().unwrap());
+        assert_eq!(
+            session.credentials.path,
+            valid["channelPath"].as_str().unwrap()
+        );
+        assert_eq!(
+            session.credentials.encoded_key(),
+            valid["channelKey"].as_str().unwrap()
+        );
+        assert_eq!(session.launcher_pid, valid["launcherPid"].as_u64().unwrap());
+        assert_eq!(session.started_at, valid["startedAt"].as_str().unwrap());
+
+        for case in doc["invalid"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let raw = serde_json::to_string(&case["payload"]).unwrap();
+            assert!(
+                Session::decode(&raw).is_none(),
+                "invalid fixture {name} unexpectedly decoded"
+            );
+        }
+    }
 
     #[test]
     fn decodes_valid_session_info_and_rejects_malformed() {

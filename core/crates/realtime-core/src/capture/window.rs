@@ -53,13 +53,16 @@ pub fn list_windows() -> Result<Vec<TopLevelWindow>, CaptureError> {
         .collect())
 }
 
-/// 按识别条件找唯一窗口；找不到或不唯一均明确报错，不猜测。
+/// 在给定顶层窗口列表中按识别条件选择唯一窗口；找不到或不唯一均明确报错，不猜测。
 ///
 /// # Errors
 ///
-/// 找不到时返回 [`CaptureError::WindowNotFound`]，多于一个时返回 [`CaptureError::AmbiguousWindow`]。
-pub fn find_window(selector: &WindowSelector) -> Result<TopLevelWindow, CaptureError> {
-    let mut matches: Vec<TopLevelWindow> = list_windows()?
+/// 找不到或空选择器时返回 [`CaptureError::WindowNotFound`]，多于一个时返回 [`CaptureError::AmbiguousWindow`]。
+pub fn select_window(
+    windows: Vec<TopLevelWindow>,
+    selector: &WindowSelector,
+) -> Result<TopLevelWindow, CaptureError> {
+    let mut matches: Vec<TopLevelWindow> = windows
         .into_iter()
         .filter(|window| selector.matches(&window.info))
         .collect();
@@ -73,6 +76,16 @@ pub fn find_window(selector: &WindowSelector) -> Result<TopLevelWindow, CaptureE
             matches: count,
         }),
     }
+}
+
+/// 按识别条件在当前桌面找唯一窗口；找不到或不唯一均明确报错，不猜测。
+///
+/// # Errors
+///
+/// `EnumWindows` 失败时返回 [`CaptureError::Os`]，找不到时返回 [`CaptureError::WindowNotFound`]，
+/// 多于一个时返回 [`CaptureError::AmbiguousWindow`]。
+pub fn find_window(selector: &WindowSelector) -> Result<TopLevelWindow, CaptureError> {
+    select_window(list_windows()?, selector)
 }
 
 /// 查询窗口物理像素几何：DWM 边界、客户区屏幕范围与显示器有效 DPI。
@@ -268,11 +281,78 @@ fn process_image(process_id: u32) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_window, list_windows};
-    use crate::capture::{CaptureError, WindowSelector};
+    use windows::Win32::Foundation::HWND;
+
+    use super::{TopLevelWindow, find_window, list_windows, select_window};
+    use crate::capture::{CaptureError, WindowInfo, WindowSelector};
+
+    fn sample_window(
+        id: usize,
+        process_id: u32,
+        image: &str,
+        class: &str,
+        title: &str,
+    ) -> TopLevelWindow {
+        TopLevelWindow {
+            hwnd: HWND(std::ptr::without_provenance_mut(id)),
+            process_id,
+            info: WindowInfo {
+                process_image: Some(image.into()),
+                class_name: class.into(),
+                title: title.into(),
+            },
+        }
+    }
 
     #[test]
-    fn missing_window_is_reported_not_guessed() {
+    fn select_window_handles_zero_one_multiple_and_empty_selector() {
+        let windows = vec![
+            sample_window(1, 1001, r"C:\Games\Game.exe", "UnityWndClass", "Game"),
+            sample_window(2, 1002, r"C:\Games\Game.exe", "UnityWndClass", "Launcher"),
+            sample_window(3, 2001, r"C:\Tools\Editor.exe", "EditorWnd", "Editor"),
+        ];
+
+        // 0 匹配
+        let missing = WindowSelector {
+            process_name: Some("no-such-process-7f3a9c.exe".into()),
+            ..WindowSelector::default()
+        };
+        assert!(matches!(
+            select_window(windows.clone(), &missing),
+            Err(CaptureError::WindowNotFound { .. })
+        ));
+
+        // 唯一匹配
+        let unique = WindowSelector {
+            process_name: Some("game.exe".into()),
+            class_name: Some("UnityWndClass".into()),
+            title: Some("Game".into()),
+        };
+        let found = select_window(windows.clone(), &unique).expect("unique match");
+        assert_eq!(found.process_id, 1001);
+        assert_eq!(found.hwnd, HWND(std::ptr::without_provenance_mut(1)));
+
+        // 多匹配拒绝猜测
+        let ambiguous = WindowSelector {
+            process_name: Some("game.exe".into()),
+            class_name: Some("UnityWndClass".into()),
+            title: None,
+        };
+        assert!(matches!(
+            select_window(windows.clone(), &ambiguous),
+            Err(CaptureError::AmbiguousWindow { matches: 2, .. })
+        ));
+
+        // 空选择器永不匹配
+        assert!(matches!(
+            select_window(windows, &WindowSelector::default()),
+            Err(CaptureError::WindowNotFound { .. })
+        ));
+    }
+
+    #[test]
+    #[ignore = "requires interactive Windows desktop"]
+    fn find_window_on_live_desktop() {
         let selector = WindowSelector {
             process_name: Some("no-such-process-7f3a9c.exe".into()),
             ..WindowSelector::default()

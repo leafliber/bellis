@@ -1,0 +1,83 @@
+{
+  "description": "Bellis V2 Windows 凭据管理器 SessionInfo 跨语言夹具（通用凭据 UTF-16LE JSON）",
+  "credential_type": "CRED_TYPE_GENERIC",
+  "credential_encoding": "utf-16le",
+  "default_target": "session.bellis",
+  "valid": {
+    "v": 1,
+    "sessionId": "a01b2c",
+    "channelPath": "\\\\.\\pipe\\bellis-a01b2c-aaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "channelKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "launcherPid": 4242,
+    "startedAt": "2026-11-24T12:34:56.789Z"
+  },
+  "invalid": [
+    {
+      "name": "unsupported_version",
+      "payload": {
+        "v": 2,
+        "sessionId": "a01b2c",
+        "channelPath": "\\\\.\\pipe\\bellis-a01b2c-aaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "channelKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "launcherPid": 4242,
+        "startedAt": "2026-11-24T12:34:56.789Z"
+      }
+    },
+    {
+      "name": "uppercase_session_id",
+      "payload": {
+        "v": 1,
+        "sessionId": "A01B2C",
+        "channelPath": "\\\\.\\pipe\\bellis-a01b2c-aaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "channelKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "launcherPid": 4242,
+        "startedAt": "2026-11-24T12:34:56.789Z"
+      }
+    },
+    {
+      "name": "zero_launcher_pid",
+      "payload": {
+        "v": 1,
+        "sessionId": "a01b2c",
+        "channelPath": "\\\\.\\pipe\\bellis-a01b2c-aaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "channelKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "launcherPid": 0,
+        "startedAt": "2026-11-24T12:34:56.789Z"
+      }
+    },
+    {
+      "name": "non_pipe_channel_path",
+      "payload": {
+        "v": 1,
+        "sessionId": "a01b2c",
+        "channelPath": "C:\\temp\\not-a-pipe",
+        "channelKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "launcherPid": 4242,
+        "startedAt": "2026-11-24T12:34:56.789Z"
+      }
+    },
+    {
+      "name": "unknown_field",
+      "payload": {
+        "v": 1,
+        "sessionId": "a01b2c",
+        "channelPath": "\\\\.\\pipe\\bellis-a01b2c-aaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "channelKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "launcherPid": 4242,
+        "startedAt": "2026-11-24T12:34:56.789Z",
+        "extra": true
+      }
+    },
+    {
+      "name": "invalid_rfc3339_date",
+      "payload": {
+        "v": 1,
+        "sessionId": "a01b2c",
+        "channelPath": "\\\\.\\pipe\\bellis-a01b2c-aaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "channelKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "launcherPid": 4242,
+        "startedAt": "2026-02-29T00:00:00Z"
+      }
+    }
+  ]
+}
