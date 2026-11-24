@@ -1,0 +1,2036 @@
+{
+  "source": {
+    "repository": "leafliber/bellis",
+    "commit": "e4f9c91ead0d0b799d00d79a862addd389ddc1db",
+    "files": [
+      "packages/channel/src/frame.ts",
+      "packages/channel/src/connection.ts",
+      "packages/channel/src/address.ts",
+      "packages/channel/src/endpoint.ts",
+      "packages/channel/src/rpc.ts",
+      "packages/protocol/src/channel.ts",
+      "packages/protocol/src/jsonrpc.ts"
+    ],
+    "generator": "core/crates/bellis-channel/testdata/generate-vectors.ts",
+    "node": "v26.12.0"
+  },
+  "constants": {
+    "proof_domain": "bellis-channel/1",
+    "frame_header_bytes": 5,
+    "handshake_max_frame_bytes": 1024,
+    "default_max_frame_bytes": 1048576,
+    "default_handshake_timeout_ms": 2000,
+    "close_grace_ms": 1000,
+    "default_max_pending_handshakes": 16,
+    "default_rpc_max_inflight": 64,
+    "session_key_bytes": 32,
+    "max_uds_path_bytes": 103
+  },
+  "frames": [
+    {
+      "kind": 0,
+      "payload_hex": "",
+      "frame_hex": "0000000000"
+    },
+    {
+      "kind": 1,
+      "payload_hex": "7b2261223a317d",
+      "frame_hex": "00000007017b2261223a317d"
+    },
+    {
+      "kind": 2,
+      "payload_hex": "000102ff",
+      "frame_hex": "0000000402000102ff"
+    },
+    {
+      "kind": 1,
+      "payload_hex": "7b2274657874223a22e4bda0e5a5bd227d",
+      "frame_hex": "00000011017b2274657874223a22e4bda0e5a5bd227d"
+    },
+    {
+      "kind": 2,
+      "payload_hex": "070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707",
+      "frame_hex": "0000012c02070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707070707"
+    }
+  ],
+  "decoder": [
+    {
+      "name": "two-frames",
+      "max_payload_bytes": 64,
+      "input_hex": "00000002006162000000010209",
+      "frames": [
+        {
+          "kind": 0,
+          "payload_hex": "6162"
+        },
+        {
+          "kind": 2,
+          "payload_hex": "09"
+        }
+      ],
+      "error": null,
+      "buffered_bytes": 0
+    },
+    {
+      "name": "exactly-max",
+      "max_payload_bytes": 4,
+      "input_hex": "000000040161626364",
+      "frames": [
+        {
+          "kind": 1,
+          "payload_hex": "61626364"
+        }
+      ],
+      "error": null,
+      "buffered_bytes": 0
+    },
+    {
+      "name": "over-max-header-only",
+      "max_payload_bytes": 4,
+      "input_hex": "0000000501",
+      "frames": [],
+      "error": "frame-too-large",
+      "buffered_bytes": null
+    },
+    {
+      "name": "unknown-kind",
+      "max_payload_bytes": 64,
+      "input_hex": "0000000009",
+      "frames": [],
+      "error": "protocol-error",
+      "buffered_bytes": null
+    },
+    {
+      "name": "unknown-kind-checked-before-length",
+      "max_payload_bytes": 4,
+      "input_hex": "ffffffff03",
+      "frames": [],
+      "error": "protocol-error",
+      "buffered_bytes": null
+    },
+    {
+      "name": "max-length-field",
+      "max_payload_bytes": 1024,
+      "input_hex": "ffffffff01",
+      "frames": [],
+      "error": "frame-too-large",
+      "buffered_bytes": null
+    },
+    {
+      "name": "partial-header",
+      "max_payload_bytes": 64,
+      "input_hex": "000000",
+      "frames": [],
+      "error": null,
+      "buffered_bytes": 3
+    },
+    {
+      "name": "partial-payload",
+      "max_payload_bytes": 64,
+      "input_hex": "00000004016162",
+      "frames": [],
+      "error": null,
+      "buffered_bytes": 7
+    }
+  ],
+  "address": {
+    "random_hex": "00112233445566778899aabbccddeeff",
+    "windows": {
+      "session_id": "s1",
+      "path": "\\\\.\\pipe\\bellis-s1-aaisem2ekvthpcezvk54zxpo74"
+    },
+    "posix": {
+      "session_id": "s1",
+      "file_name": "bellis-s1-aaisem2ekvthpcezvk54zxpo74.sock"
+    },
+    "session_ids": [
+      {
+        "session_id": "s1",
+        "valid": true
+      },
+      {
+        "session_id": "aaaaaaaaaaaaaaaa",
+        "valid": true
+      },
+      {
+        "session_id": "aaaaaaaaaaaaaaaaa",
+        "valid": false
+      },
+      {
+        "session_id": "",
+        "valid": false
+      },
+      {
+        "session_id": "../x",
+        "valid": false
+      },
+      {
+        "session_id": "A1",
+        "valid": false
+      },
+      {
+        "session_id": "ab-c",
+        "valid": false
+      },
+      {
+        "session_id": "0",
+        "valid": true
+      }
+    ],
+    "session_keys": [
+      {
+        "text": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+        "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      },
+      {
+        "text": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "key_hex": null
+      },
+      {
+        "text": "not a key",
+        "key_hex": null
+      },
+      {
+        "text": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHw",
+        "key_hex": null
+      },
+      {
+        "text": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9",
+        "key_hex": null
+      },
+      {
+        "text": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "key_hex": null
+      }
+    ]
+  },
+  "session": {
+    "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "role": "game-runtime.core",
+    "client_nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+    "server_nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    "mac_record": "[\"bellis-channel/1\",\"server\",\"game-runtime.core\",\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\",\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\"]",
+    "handshake": [
+      {
+        "from": "client",
+        "kind": 0,
+        "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+      },
+      {
+        "from": "server",
+        "kind": 0,
+        "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+        "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+      },
+      {
+        "from": "client",
+        "kind": 0,
+        "frame_hex": "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+        "text": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}"
+      },
+      {
+        "from": "server",
+        "kind": 0,
+        "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+        "text": "{\"v\":1,\"type\":\"accept\"}"
+      }
+    ],
+    "rpc": [
+      {
+        "name": "client-request",
+        "actor": "client",
+        "call": "request",
+        "method": "math.add",
+        "params": {
+          "a": 1,
+          "b": 2
+        },
+        "result": 3,
+        "error": null,
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "00000043017b226a736f6e727063223a22322e30222c226964223a312c226d6574686f64223a226d6174682e616464222c22706172616d73223a7b2261223a312c2262223a327d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"math.add\",\"params\":{\"a\":1,\"b\":2}}"
+          },
+          {
+            "from": "server",
+            "kind": 1,
+            "frame_hex": "00000023017b226a736f6e727063223a22322e30222c226964223a312c22726573756c74223a337d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":3}"
+          }
+        ]
+      },
+      {
+        "name": "server-request",
+        "actor": "server",
+        "call": "request",
+        "method": "host.ping",
+        "params": null,
+        "result": null,
+        "error": null,
+        "frames": [
+          {
+            "from": "server",
+            "kind": 1,
+            "frame_hex": "0000002d017b226a736f6e727063223a22322e30222c226964223a312c226d6574686f64223a22686f73742e70696e67227d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"host.ping\"}"
+          },
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "00000026017b226a736f6e727063223a22322e30222c226964223a312c22726573756c74223a6e756c6c7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":null}"
+          }
+        ]
+      },
+      {
+        "name": "client-notify",
+        "actor": "client",
+        "call": "notify",
+        "method": "host.heartbeat",
+        "params": {
+          "seq": 7
+        },
+        "result": null,
+        "error": null,
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "0000003e017b226a736f6e727063223a22322e30222c226d6574686f64223a22686f73742e686561727462656174222c22706172616d73223a7b22736571223a377d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"method\":\"host.heartbeat\",\"params\":{\"seq\":7}}"
+          }
+        ]
+      },
+      {
+        "name": "client-notify-no-params",
+        "actor": "client",
+        "call": "notify",
+        "method": "host.heartbeat",
+        "params": null,
+        "result": null,
+        "error": null,
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "0000002b017b226a736f6e727063223a22322e30222c226d6574686f64223a22686f73742e686561727462656174227d",
+            "text": "{\"jsonrpc\":\"2.0\",\"method\":\"host.heartbeat\"}"
+          }
+        ]
+      },
+      {
+        "name": "method-not-found",
+        "actor": "client",
+        "call": "request",
+        "method": "no.such",
+        "params": null,
+        "result": null,
+        "error": {
+          "rpc": {
+            "code": -32601,
+            "message": "Method not found: no.such",
+            "data": null
+          }
+        },
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "0000002b017b226a736f6e727063223a22322e30222c226964223a322c226d6574686f64223a226e6f2e73756368227d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"no.such\"}"
+          },
+          {
+            "from": "server",
+            "kind": 1,
+            "frame_hex": "00000056017b226a736f6e727063223a22322e30222c226964223a322c226572726f72223a7b22636f6465223a2d33323630312c226d657373616765223a224d6574686f64206e6f7420666f756e643a206e6f2e73756368227d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32601,\"message\":\"Method not found: no.such\"}}"
+          }
+        ]
+      },
+      {
+        "name": "handler-rpc-error",
+        "actor": "client",
+        "call": "request",
+        "method": "a.fail",
+        "params": null,
+        "result": null,
+        "error": {
+          "rpc": {
+            "code": 1001,
+            "message": "不允许",
+            "data": {
+              "reason": "x"
+            }
+          }
+        },
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "0000002a017b226a736f6e727063223a22322e30222c226964223a332c226d6574686f64223a22612e6661696c227d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"a.fail\"}"
+          },
+          {
+            "from": "server",
+            "kind": 1,
+            "frame_hex": "0000005a017b226a736f6e727063223a22322e30222c226964223a332c226572726f72223a7b22636f6465223a313030312c226d657373616765223a22e4b88de58581e8aeb8222c2264617461223a7b22726561736f6e223a2278227d7d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":1001,\"message\":\"不允许\",\"data\":{\"reason\":\"x\"}}}"
+          }
+        ]
+      },
+      {
+        "name": "handler-internal-error",
+        "actor": "client",
+        "call": "request",
+        "method": "a.crash",
+        "params": null,
+        "result": null,
+        "error": {
+          "rpc": {
+            "code": -32603,
+            "message": "Internal error",
+            "data": null
+          }
+        },
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "0000002b017b226a736f6e727063223a22322e30222c226964223a342c226d6574686f64223a22612e6372617368227d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"a.crash\"}"
+          },
+          {
+            "from": "server",
+            "kind": 1,
+            "frame_hex": "0000004b017b226a736f6e727063223a22322e30222c226964223a342c226572726f72223a7b22636f6465223a2d33323630332c226d657373616765223a22496e7465726e616c206572726f72227d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":4,\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}"
+          }
+        ]
+      },
+      {
+        "name": "invalid-request",
+        "actor": "client",
+        "call": "raw",
+        "raw": {
+          "jsonrpc": "2.0",
+          "method": "Bad Name",
+          "id": 1
+        },
+        "result": null,
+        "error": null,
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "0000002c017b226a736f6e727063223a22322e30222c226d6574686f64223a22426164204e616d65222c226964223a317d",
+            "text": "{\"jsonrpc\":\"2.0\",\"method\":\"Bad Name\",\"id\":1}"
+          },
+          {
+            "from": "server",
+            "kind": 1,
+            "frame_hex": "0000004f017b226a736f6e727063223a22322e30222c226964223a6e756c6c2c226572726f72223a7b22636f6465223a2d33323630302c226d657373616765223a22496e76616c69642052657175657374227d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}"
+          }
+        ]
+      },
+      {
+        "name": "string-id",
+        "actor": "client",
+        "call": "raw",
+        "raw": {
+          "jsonrpc": "2.0",
+          "id": "req-1",
+          "method": "math.add",
+          "params": {
+            "a": 2,
+            "b": 3
+          }
+        },
+        "result": null,
+        "error": null,
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "00000049017b226a736f6e727063223a22322e30222c226964223a227265712d31222c226d6574686f64223a226d6174682e616464222c22706172616d73223a7b2261223a322c2262223a337d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"method\":\"math.add\",\"params\":{\"a\":2,\"b\":3}}"
+          },
+          {
+            "from": "server",
+            "kind": 1,
+            "frame_hex": "00000029017b226a736f6e727063223a22322e30222c226964223a227265712d31222c22726573756c74223a357d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":\"req-1\",\"result\":5}"
+          }
+        ]
+      },
+      {
+        "name": "request-timeout",
+        "actor": "client",
+        "call": "request",
+        "method": "a.hang",
+        "params": {},
+        "timeout_ms": 20,
+        "result": null,
+        "error": {
+          "channel": "timeout"
+        },
+        "frames": [
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "00000036017b226a736f6e727063223a22322e30222c226964223a352c226d6574686f64223a22612e68616e67222c22706172616d73223a7b7d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"a.hang\",\"params\":{}}"
+          },
+          {
+            "from": "client",
+            "kind": 1,
+            "frame_hex": "00000039017b226a736f6e727063223a22322e30222c226d6574686f64223a227270632e63616e63656c222c22706172616d73223a7b226964223a357d7d",
+            "text": "{\"jsonrpc\":\"2.0\",\"method\":\"rpc.cancel\",\"params\":{\"id\":5}}"
+          }
+        ]
+      },
+      {
+        "name": "server-binary",
+        "actor": "server",
+        "call": "binary",
+        "binary_hex": "010203",
+        "result": null,
+        "error": null,
+        "frames": [
+          {
+            "from": "server",
+            "kind": 2,
+            "frame_hex": "0000000302010203"
+          }
+        ]
+      }
+    ]
+  },
+  "handshake_cases": [
+    {
+      "name": "valid",
+      "side": "server",
+      "note": "正常握手，accept 后紧跟的业务帧不丢",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+        "00000007017b226e223a317d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+          "text": "{\"v\":1,\"type\":\"accept\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [
+        {
+          "json": "{\"n\":1}"
+        }
+      ],
+      "close_error": null
+    },
+    {
+      "name": "data-before-auth",
+      "side": "server",
+      "note": "认证完成前发送业务数据",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000001e017b226a736f6e727063223a22322e30222c226d6574686f64223a2278227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "data-first",
+      "side": "server",
+      "note": "第一帧就是业务数据",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000020017b226a736f6e727063223a22322e30222c226d6574686f64223a22612e62227d"
+      ],
+      "end": false,
+      "output": [],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "binary-first",
+      "side": "server",
+      "note": "第一帧是二进制帧",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "000000010201"
+      ],
+      "end": false,
+      "output": [],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "tampered-proof",
+      "side": "server",
+      "note": "客户端证明被篡改一位",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22796875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "reflected-proof",
+      "side": "server",
+      "note": "把服务端的证明原样回送",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "replayed-handshake",
+      "side": "server",
+      "note": "重放上一次连接的 hello 与 proof，服务端随机数已变",
+      "role": "game-runtime.core",
+      "nonce_hex": "e0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a22344f4869342d546c3575666f36657272374f3375375f447838765030396662332d506e362d5f7a395f7638222c2270726f6f66223a22613051572d5a516d6331522d574f7135766845704862577541324b5964445251674666696c343739333941227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"4OHi4-Tl5ufo6err7O3u7_Dx8vP09fb3-Pn6-_z9_v8\",\"proof\":\"a0QW-ZQmc1R-WOq5vhEpHbWuA2KYdDRQgFfil47939A\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "wrong-key",
+      "side": "server",
+      "note": "客户端用了别的密钥",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a2244672d754951476a6d7a69716a386c443153654d35595968387652766a47724e7a6d593448374166386d6f227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "wrong-domain",
+      "side": "server",
+      "note": "客户端的证明用了别的协议标识",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a224f77706f685a7463476c4239382d424979496768764171475a75517859756265635f5a7832484457614b6b227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "wrong-role-in-proof",
+      "side": "server",
+      "note": "证明里的角色与 hello 不同",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a224e32654f515f4e61504a386e4a56684970534a735272476c5942525f5474306b4264716761346775576f41227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "non-canonical-proof",
+      "side": "server",
+      "note": "证明的最后一个字符低位不同，解出的字节相同",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a73334a227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+          "text": "{\"v\":1,\"type\":\"accept\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "hello-version-2",
+      "side": "server",
+      "note": "hello 的版本不是 1",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a322c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d"
+      ],
+      "end": false,
+      "output": [],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "hello-version-float",
+      "side": "server",
+      "note": "hello 的版本写成 1.0",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000069007b2276223a312e302c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+          "text": "{\"v\":1,\"type\":\"accept\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "hello-not-json",
+      "side": "server",
+      "note": "hello 不是 JSON",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "000000050068656c6c6f"
+      ],
+      "end": false,
+      "output": [],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "hello-bad-role",
+      "side": "server",
+      "note": "角色名不合法",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "0000005e007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2242616420526f6c65222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d"
+      ],
+      "end": false,
+      "output": [],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "proof-bad-format",
+      "side": "server",
+      "note": "proof 的长度不对",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004b007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a227875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "unknown-kind",
+      "side": "server",
+      "note": "未知的帧类型",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "0000000003"
+      ],
+      "end": false,
+      "output": [],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "hello-at-limit",
+      "side": "server",
+      "note": "认证前帧长正好等于上限",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000400007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+          "text": "{\"v\":1,\"type\":\"accept\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "oversize-before-auth",
+      "side": "server",
+      "note": "认证前帧长超过上限",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000401007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d20202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020"
+      ],
+      "end": false,
+      "output": [],
+      "result": "frame-too-large",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "eof-after-hello",
+      "side": "server",
+      "note": "握手完成前对端关闭",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d"
+      ],
+      "end": true,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        }
+      ],
+      "result": "closed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "handshake-after-open",
+      "side": "server",
+      "note": "认证后再收到握手帧",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+          "text": "{\"v\":1,\"type\":\"accept\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [],
+      "close_error": "protocol-error"
+    },
+    {
+      "name": "oversize-after-auth",
+      "side": "server",
+      "note": "认证后帧长等于上限的送达，超过上限的断开",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 64,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+        "00000040017b22706164223a22787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878227d",
+        "00000041017b22706164223a2278787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+          "text": "{\"v\":1,\"type\":\"accept\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [
+        {
+          "json": "{\"pad\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}"
+        }
+      ],
+      "close_error": "frame-too-large"
+    },
+    {
+      "name": "invalid-json-after-open",
+      "side": "server",
+      "note": "认证后收到不是 JSON 的 JSON 帧",
+      "role": "game-runtime.core",
+      "nonce_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+        "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+        "00000001017b"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+          "text": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "00000017007b2276223a312c2274797065223a22616363657074227d",
+          "text": "{\"v\":1,\"type\":\"accept\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [],
+      "close_error": "protocol-error"
+    },
+    {
+      "name": "valid",
+      "side": "client",
+      "note": "正常握手，accept 后紧跟的业务帧不丢",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+        "00000017007b2276223a312c2274797065223a22616363657074227d",
+        "00000007017b226e223a317d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+          "text": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [
+        {
+          "json": "{\"n\":1}"
+        }
+      ],
+      "close_error": null
+    },
+    {
+      "name": "tampered-proof",
+      "side": "client",
+      "note": "服务端证明被篡改一位",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244744b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "replayed-challenge",
+      "side": "client",
+      "note": "重放上一次连接的 challenge，客户端随机数已变",
+      "role": "game-runtime.core",
+      "nonce_hex": "c0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedf",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a22774d484377385446787366497963724c7a4d334f7a3944523074505531646258324e6e6132397a64337438227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t8\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "wrong-key",
+      "side": "client",
+      "note": "服务端用了别的密钥（地址被抢注）",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a224a6642467750664731412d4a6c766f5a444b3768556d535058314c46374f79527563354b33652d6c464945227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "wrong-domain",
+      "side": "client",
+      "note": "服务端的证明用了别的协议标识",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2262667845744d525273694f5f716172734c315968716f5041326e752d3766484b755545783778646c30416b227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "reflected-hello",
+      "side": "client",
+      "note": "服务端以客户端方向的证明回应",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "auth-failed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "non-canonical-proof",
+      "side": "client",
+      "note": "证明的最后一个字符低位不同，解出的字节相同",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a78227d",
+        "00000017007b2276223a312c2274797065223a22616363657074227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+          "text": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "challenge-version-2",
+      "side": "client",
+      "note": "challenge 的版本不是 1",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a322c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "data-before-auth",
+      "side": "client",
+      "note": "认证完成前收到业务数据",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000020017b226a736f6e727063223a22322e30222c226d6574686f64223a22612e62227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "oversize-before-auth",
+      "side": "client",
+      "note": "认证前帧长超过上限",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "0000040100"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "frame-too-large",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "bad-accept",
+      "side": "client",
+      "note": "accept 不合法",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+        "00000016007b2276223a312c2274797065223a226163657074227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+          "text": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}"
+        }
+      ],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "data-instead-of-accept",
+      "side": "client",
+      "note": "收到证明后服务端没有回 accept 而是业务数据",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+        "00000007017b226e223a317d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+          "text": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}"
+        }
+      ],
+      "result": "protocol-error",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "eof-after-hello",
+      "side": "client",
+      "note": "握手完成前对端关闭",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [],
+      "end": true,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        }
+      ],
+      "result": "closed",
+      "delivered": [],
+      "close_error": null
+    },
+    {
+      "name": "oversize-after-auth",
+      "side": "client",
+      "note": "认证后帧长等于上限的送达，超过上限的断开",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 64,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+        "00000017007b2276223a312c2274797065223a22616363657074227d",
+        "00000040017b22706164223a22787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878227d",
+        "00000041017b22706164223a2278787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878787878227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+          "text": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [
+        {
+          "json": "{\"pad\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}"
+        }
+      ],
+      "close_error": "frame-too-large"
+    },
+    {
+      "name": "handshake-after-open",
+      "side": "client",
+      "note": "认证后再收到握手帧",
+      "role": "game-runtime.core",
+      "nonce_hex": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+      "max_frame_bytes": 1048576,
+      "input_hex": [
+        "00000086007b2276223a312c2274797065223a226368616c6c656e6765222c226e6f6e6365223a226f4b47696f36536c7071656f71617172724b32757237437873724f3074626133754c6d3675377939767238222c2270726f6f66223a2244394b6a776b4d396f4554755436575439444168682d4b4e395a55795a544b693273593145395866775a77227d",
+        "00000017007b2276223a312c2274797065223a22616363657074227d",
+        "00000017007b2276223a312c2274797065223a22616363657074227d"
+      ],
+      "end": false,
+      "output": [
+        {
+          "kind": 0,
+          "frame_hex": "00000067007b2276223a312c2274797065223a2268656c6c6f222c22726f6c65223a2267616d652d72756e74696d652e636f7265222c226e6f6e6365223a226749474367345346686f65496959714c6a49324f6a3543526b704f556c5a61586d4a6d616d3579646e7038227d",
+          "text": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}"
+        },
+        {
+          "kind": 0,
+          "frame_hex": "0000004c007b2276223a312c2274797065223a2270726f6f66222c2270726f6f66223a22797875624c526b4b707748446353556f6b306b5870516446504c4f4671646b754437615249732d6a733349227d",
+          "text": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}"
+        }
+      ],
+      "result": "open",
+      "delivered": [],
+      "close_error": "protocol-error"
+    }
+  ],
+  "payloads": [
+    {
+      "name": "object",
+      "payload_hex": "7b2261223a317d",
+      "valid": true,
+      "value_json": "{\"a\":1}",
+      "error": null
+    },
+    {
+      "name": "whitespace",
+      "payload_hex": "20090d0a7b2261223a317d200a",
+      "valid": true,
+      "value_json": "{\"a\":1}",
+      "error": null
+    },
+    {
+      "name": "top-level-string",
+      "payload_hex": "227465787422",
+      "valid": true,
+      "value_json": "\"text\"",
+      "error": null
+    },
+    {
+      "name": "non-ascii",
+      "payload_hex": "7b2274657874223a22e4bda0e5a5bd227d",
+      "valid": true,
+      "value_json": "{\"text\":\"你好\"}",
+      "error": null
+    },
+    {
+      "name": "escaped-non-ascii",
+      "payload_hex": "7b2274657874223a225c75346636305c7535393764227d",
+      "valid": true,
+      "value_json": "{\"text\":\"你好\"}",
+      "error": null
+    },
+    {
+      "name": "duplicate-key-last-wins",
+      "payload_hex": "7b2261223a312c2261223a327d",
+      "valid": true,
+      "value_json": "{\"a\":2}",
+      "error": null
+    },
+    {
+      "name": "invalid-utf8-replaced",
+      "payload_hex": "7b2261223a22ffe282227d",
+      "valid": true,
+      "value_json": "{\"a\":\"��\"}",
+      "error": null
+    },
+    {
+      "name": "lone-surrogate-escape",
+      "payload_hex": "7b2261223a225c7564383030227d",
+      "valid": true,
+      "value_json": "{\"a\":\"\\ud800\"}",
+      "error": null
+    },
+    {
+      "name": "nesting-200",
+      "payload_hex": "5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d",
+      "valid": true,
+      "value_json": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+      "error": null
+    },
+    {
+      "name": "bom",
+      "payload_hex": "efbbbf7b7d",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "nan",
+      "payload_hex": "4e614e",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "infinity",
+      "payload_hex": "7b2261223a496e66696e6974797d",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "trailing-data",
+      "payload_hex": "7b2261223a317d7b2262223a327d",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "trailing-comma",
+      "payload_hex": "7b2261223a312c7d",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "single-quotes",
+      "payload_hex": "7b2761273a317d",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "empty",
+      "payload_hex": "",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "utf16",
+      "payload_hex": "7b007d00",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    },
+    {
+      "name": "raw-control-char",
+      "payload_hex": "7b2261223a2201227d",
+      "valid": false,
+      "value_json": null,
+      "error": "protocol-error"
+    }
+  ],
+  "messages": {
+    "hello": [
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1.0,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1e0,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":2,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":\"1\",\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":true,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"Hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\",\"x\":1}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"Bad Role\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"1abc\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"abc\\n\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"abé\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"a.b_c:d-e9\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":1,\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"IGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8A\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"IGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8=\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"IGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8+\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"IGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8/\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\\n\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"IGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8é\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":2,\"v\":1,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1,\"v\":2,\"type\":\"hello\",\"role\":\"game-runtime.core\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "[]",
+        "valid": false
+      },
+      {
+        "json": "null",
+        "valid": false
+      },
+      {
+        "json": "\"hello\"",
+        "valid": false
+      },
+      {
+        "json": "1",
+        "valid": false
+      }
+    ],
+    "challenge": [
+      {
+        "json": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\",\"x\":1}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"challenge\",\"nonce\":\"KGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":2,\"type\":\"challenge\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"proof\",\"nonce\":\"oKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr8\",\"proof\":\"D9KjwkM9oETuT6WT9DAhh-KN9ZUyZTKi2sY1E9XfwZw\"}",
+        "valid": false
+      }
+    ],
+    "proof": [
+      {
+        "json": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\",\"nonce\":\"gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp8\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"proof\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3IA\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"challenge\",\"proof\":\"yxubLRkKpwHDcSUok0kXpQdFPLOFqdkuD7aRIs-js3I\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"proof\"}",
+        "valid": false
+      }
+    ],
+    "accept": [
+      {
+        "json": "{\"v\":1,\"type\":\"accept\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"type\":\"accept\",\"v\":1}",
+        "valid": true
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"accept\",\"x\":1}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":2,\"type\":\"accept\"}",
+        "valid": false
+      },
+      {
+        "json": "{\"v\":1,\"type\":\"acept\"}",
+        "valid": false
+      },
+      {
+        "json": "{}",
+        "valid": false
+      }
+    ],
+    "rpc": [
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\",\"params\":{\"x\":1}}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":\"abc\",\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":\"\",\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1.0,\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1e2,\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":9007199254740991,\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":9007199254740992,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":-9007199254740991,\"method\":\"a.b\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":-9007199254740992,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":null,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":true,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":[1],\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"Bad Name\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"nodot\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b.c\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a._b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b_1\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\\n\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b.\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"rpc.cancel\"}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\",\"params\":[]}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\",\"params\":null}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\",\"params\":\"x\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\",\"params\":{}}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\",\"params\":{\"a\\nb\":1,\"\":2}}",
+        "kind": "request"
+      },
+      {
+        "json": "{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":2.0,\"id\":1,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"id\":1,\"method\":\"a.b\"}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"a.b\",\"x\":1}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"method\":\"a.b\",\"params\":{\"seq\":7}}",
+        "kind": "notification"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"method\":\"a.b\"}",
+        "kind": "notification"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"method\":\"a.b\",\"params\":[]}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"method\":\"rpc.cancel\",\"params\":{\"id\":1}}",
+        "kind": "notification"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":null}",
+        "kind": "success"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"a\":[1,2]}}",
+        "kind": "success"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":1,\"error\":{\"code\":1,\"message\":\"m\"}}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":null,\"result\":1}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":\"x\",\"result\":1}",
+        "kind": "success"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"m\"}}",
+        "kind": "failure"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}",
+        "kind": "failure"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1,\"message\":\"m\",\"data\":{\"k\":[1]}}}",
+        "kind": "failure"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1,\"message\":\"m\",\"data\":null}}",
+        "kind": "failure"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1,\"message\":\"m\",\"x\":1}}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1.5,\"message\":\"m\"}}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1.0,\"message\":\"m\"}}",
+        "kind": "failure"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1e300,\"message\":\"m\"}}",
+        "kind": "failure"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":\"1\",\"message\":\"m\"}}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1}}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":1,\"message\":1}}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":null}",
+        "kind": "invalid"
+      },
+      {
+        "json": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":1,\"message\":\"m\"}}",
+        "kind": "invalid"
+      },
+      {
+        "json": "[]",
+        "kind": "invalid"
+      },
+      {
+        "json": "\"x\"",
+        "kind": "invalid"
+      },
+      {
+        "json": "null",
+        "kind": "invalid"
+      },
+      {
+        "json": "1",
+        "kind": "invalid"
+      }
+    ],
+    "cancel_params": [
+      {
+        "json": "{\"id\":1}",
+        "valid": true
+      },
+      {
+        "json": "{\"id\":\"x\"}",
+        "valid": true
+      },
+      {
+        "json": "{\"id\":null}",
+        "valid": false
+      },
+      {
+        "json": "{}",
+        "valid": false
+      },
+      {
+        "json": "{\"id\":1,\"x\":2}",
+        "valid": false
+      },
+      {
+        "json": "{\"id\":1.5}",
+        "valid": false
+      },
+      {
+        "json": "[]",
+        "valid": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,217 @@
+{
+  "description": "Bellis V2 统一许可控制 RPC（5 方法）跨语言往返夹具",
+  "protocol_version": 1,
+  "error_codes": {
+    "LEASE_REFUSED": -32004
+  },
+  "cases": [
+    {
+      "name": "lease_renew_request",
+      "kind": "request",
+      "method": "lease.renew",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "lease.renew",
+        "params": {
+          "token": 7,
+          "expires_ns": 1234567890000
+        }
+      }
+    },
+    {
+      "name": "lease_renew_response_ok",
+      "kind": "success",
+      "method": "lease.renew",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {}
+      }
+    },
+    {
+      "name": "lease_renew_response_refused",
+      "kind": "failure",
+      "method": "lease.renew",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "error": {
+          "code": -32004,
+          "message": "token 6 is older than the current token 7"
+        }
+      }
+    },
+    {
+      "name": "lease_revoke_request",
+      "kind": "request",
+      "method": "lease.revoke",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "lease.revoke",
+        "params": {
+          "token": 7
+        }
+      }
+    },
+    {
+      "name": "lease_revoke_response_ok",
+      "kind": "success",
+      "method": "lease.revoke",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {}
+      }
+    },
+    {
+      "name": "input_stop_unconditional_request",
+      "kind": "request",
+      "method": "input.stop",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "input.stop",
+        "params": {
+          "through_token": null
+        }
+      }
+    },
+    {
+      "name": "input_stop_unconditional_response",
+      "kind": "success",
+      "method": "input.stop",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "result": {
+          "release_id": 12
+        }
+      }
+    },
+    {
+      "name": "input_stop_scoped_request",
+      "kind": "request",
+      "method": "input.stop",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "input.stop",
+        "params": {
+          "through_token": 7
+        }
+      }
+    },
+    {
+      "name": "input_stop_scoped_response_superseded",
+      "kind": "success",
+      "method": "input.stop",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "result": {
+          "release_id": null
+        }
+      }
+    },
+    {
+      "name": "input_released_unverified",
+      "kind": "notification",
+      "method": "input.released",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "input.released",
+        "params": {
+          "release_id": 1,
+          "token": null,
+          "reason": "core_start",
+          "producer": null,
+          "released_at_ns": 1000000000,
+          "verification": "unverified",
+          "residual_items": []
+        }
+      }
+    },
+    {
+      "name": "input_released_verified",
+      "kind": "notification",
+      "method": "input.released",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "input.released",
+        "params": {
+          "release_id": 12,
+          "token": 7,
+          "reason": "input_stop",
+          "producer": {
+            "id": "fast-agent",
+            "generation": 3
+          },
+          "released_at_ns": 1234568000000,
+          "verification": "verified",
+          "residual_items": []
+        }
+      }
+    },
+    {
+      "name": "input_released_residual",
+      "kind": "notification",
+      "method": "input.released",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "input.released",
+        "params": {
+          "release_id": 13,
+          "token": 8,
+          "reason": "takeover",
+          "producer": {
+            "id": "fast-agent",
+            "generation": 4
+          },
+          "released_at_ns": 1234569000000,
+          "verification": "residual",
+          "residual_items": [
+            {
+              "type": "key",
+              "scan_code": 17
+            },
+            {
+              "type": "mouse_button",
+              "button": "left"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "health_notification",
+      "kind": "notification",
+      "method": "health",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "health",
+        "params": {
+          "now_ns": 1234570000000,
+          "capture": "capturing",
+          "audio": "searching",
+          "inputs_held": false,
+          "producer": {
+            "id": "fast-agent",
+            "generation": 4
+          },
+          "latest_frame": {
+            "frame_number": 420,
+            "capture_ns": 1234569950000
+          },
+          "latest_audio": {
+            "block_number": 98,
+            "capture_ns": 1234569940000
+          },
+          "lease": "valid",
+          "queue_depth": 2
+        }
+      }
+    }
+  ]
+}

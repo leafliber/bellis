@@ -1,0 +1,450 @@
+{
+  "description": "Bellis V2 核连接 RPC（主控进程 <-> 实时核）跨语言往返夹具",
+  "protocol_version": 1,
+  "error_codes": {
+    "PROTOCOL_VERSION_MISMATCH": -32001,
+    "FRAME_RING_MISMATCH": -32002,
+    "CAPTURE_UNSUPPORTED": -32003,
+    "AUDIO_RING_MISMATCH": -32005,
+    "INPUT_POLICY_CONFLICT": -32006
+  },
+  "cases": [
+    {
+      "name": "core_hello_request",
+      "kind": "request",
+      "method": "core.hello",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "core.hello",
+        "params": {
+          "protocol_version": 1,
+          "core_version": "0.1.0"
+        }
+      }
+    },
+    {
+      "name": "core_hello_response_ok",
+      "kind": "success",
+      "method": "core.hello",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "result": {
+          "protocol_version": 1
+        }
+      }
+    },
+    {
+      "name": "core_hello_response_mismatch",
+      "kind": "failure",
+      "method": "core.hello",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 0,
+        "error": {
+          "code": -32001,
+          "message": "unsupported protocol version"
+        }
+      }
+    },
+    {
+      "name": "frame_ring_attach_request",
+      "kind": "request",
+      "method": "frame_ring.attach",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "frame_ring.attach",
+        "params": {
+          "name": "Local\\bellis-frame-ring-1",
+          "size_bytes": 110592232,
+          "layout_version": 1,
+          "slot_count": 3,
+          "slot_stride": 36864064,
+          "max_width": 3840,
+          "max_height": 2160
+        }
+      }
+    },
+    {
+      "name": "frame_ring_attach_response",
+      "kind": "success",
+      "method": "frame_ring.attach",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {}
+      }
+    },
+    {
+      "name": "capture_set_target_request",
+      "kind": "request",
+      "method": "capture.set_target",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "capture.set_target",
+        "params": {
+          "process_name": "Game.exe",
+          "window_class": "UnityWndClass",
+          "title": null
+        }
+      }
+    },
+    {
+      "name": "capture_set_target_response",
+      "kind": "success",
+      "method": "capture.set_target",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {}
+      }
+    },
+    {
+      "name": "audio_ring_attach_request",
+      "kind": "request",
+      "method": "audio_ring.attach",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "audio_ring.attach",
+        "params": {
+          "name": "Local\\bellis-audio-ring-1",
+          "size_bytes": 67632,
+          "layout_version": 1,
+          "block_count": 16,
+          "block_stride": 4224,
+          "block_capacity": 4192,
+          "sample_rate": 48000,
+          "channels": 2,
+          "sample_format": 1
+        }
+      }
+    },
+    {
+      "name": "audio_ring_attach_response",
+      "kind": "success",
+      "method": "audio_ring.attach",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {}
+      }
+    },
+    {
+      "name": "audio_set_target_request",
+      "kind": "request",
+      "method": "audio.set_target",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "audio.set_target",
+        "params": {
+          "process_name": "Game.exe",
+          "window_class": null,
+          "title": "My Game"
+        }
+      }
+    },
+    {
+      "name": "audio_set_target_response",
+      "kind": "success",
+      "method": "audio.set_target",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "result": {}
+      }
+    },
+    {
+      "name": "input_configure_request",
+      "kind": "request",
+      "method": "input.configure",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "input.configure",
+        "params": {
+          "click_buttons": ["left", "right"],
+          "press_keys": [28, 57],
+          "scroll": true,
+          "click_regions": [
+            {
+              "left": 0.05,
+              "top": 0.05,
+              "right": 0.95,
+              "bottom": 0.95
+            }
+          ],
+          "forbidden_zones": [
+            {
+              "left": 0.9,
+              "top": 0.0,
+              "right": 1.0,
+              "bottom": 0.1
+            }
+          ],
+          "press_duration_ms": 40,
+          "max_rate": 12.5,
+          "hold_keys": [17, 30, 31, 32],
+          "hold_buttons": ["left"],
+          "max_hold_ms": 5000
+        }
+      }
+    },
+    {
+      "name": "input_configure_response_ok",
+      "kind": "success",
+      "method": "input.configure",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "result": {}
+      }
+    },
+    {
+      "name": "input_configure_response_conflict",
+      "kind": "failure",
+      "method": "input.configure",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "error": {
+          "code": -32006,
+          "message": "the input policy is already set for this instance"
+        }
+      }
+    },
+    {
+      "name": "producer_heartbeat_notification",
+      "kind": "notification",
+      "method": "producer.heartbeat",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "producer.heartbeat",
+        "params": {
+          "producer": {
+            "id": "fast-agent",
+            "generation": 1
+          },
+          "seq": 42
+        }
+      }
+    },
+    {
+      "name": "producer_revoke_request",
+      "kind": "request",
+      "method": "producer.revoke",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "producer.revoke",
+        "params": {
+          "generation": 1
+        }
+      }
+    },
+    {
+      "name": "producer_revoke_response",
+      "kind": "success",
+      "method": "producer.revoke",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "result": {
+          "release_id": 4
+        }
+      }
+    },
+    {
+      "name": "action_submit_request",
+      "kind": "request",
+      "method": "action.submit",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "action.submit",
+        "params": {
+          "producer": {
+            "id": "fast-agent",
+            "generation": 2
+          },
+          "seq": 10,
+          "base_frame": 120,
+          "start_ns": 2000000000,
+          "deadline_ns": 2500000000,
+          "steps": [
+            {
+              "offset_ns": 0,
+              "held": [
+                {
+                  "type": "key",
+                  "scan_code": 17
+                },
+                {
+                  "type": "mouse_button",
+                  "button": "left"
+                },
+                {
+                  "type": "axis",
+                  "axis": "look_x",
+                  "value": 0.25
+                }
+              ],
+              "actions": [
+                {
+                  "type": "click",
+                  "id": 101,
+                  "x": 640,
+                  "y": 360,
+                  "button": "left"
+                },
+                {
+                  "type": "key_press",
+                  "id": 102,
+                  "scan_code": 57
+                },
+                {
+                  "type": "scroll",
+                  "id": 103,
+                  "x": 640,
+                  "y": 360,
+                  "notches": -2
+                },
+                {
+                  "type": "mouse_move",
+                  "id": 104,
+                  "dx": 15,
+                  "dy": -8
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "action_submit_response_accepted",
+      "kind": "success",
+      "method": "action.submit",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "result": {
+          "type": "accepted"
+        }
+      }
+    },
+    {
+      "name": "action_submit_response_rejected",
+      "kind": "success",
+      "method": "action.submit",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "result": {
+          "type": "rejected",
+          "reason": "not_allowed",
+          "message": "key scan_code 1 is not in press_keys"
+        }
+      }
+    },
+    {
+      "name": "action_receipt_notification",
+      "kind": "notification",
+      "method": "action.receipt",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "action.receipt",
+        "params": {
+          "producer": {
+            "id": "fast-agent",
+            "generation": 2
+          },
+          "block_seq": 10,
+          "outcomes": [
+            {
+              "type": "executed",
+              "id": 101,
+              "at_ns": 2000100000
+            },
+            {
+              "type": "dropped",
+              "id": 102,
+              "reason": "rate_limited"
+            },
+            {
+              "type": "uncertain",
+              "id": 103,
+              "at_ns": 2000200000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "input_released_notification",
+      "kind": "notification",
+      "method": "input.released",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "input.released",
+        "params": {
+          "release_id": 4,
+          "token": 7,
+          "reason": "heartbeat_timeout",
+          "producer": {
+            "id": "fast-agent",
+            "generation": 2
+          },
+          "released_at_ns": 2600000000,
+          "verification": "unverified",
+          "residual_items": []
+        }
+      }
+    },
+    {
+      "name": "health_notification",
+      "kind": "notification",
+      "method": "health",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "method": "health",
+        "params": {
+          "now_ns": 2700000000,
+          "capture": "idle",
+          "audio": "idle",
+          "inputs_held": false,
+          "producer": null,
+          "latest_frame": null,
+          "latest_audio": null,
+          "lease": "not_granted",
+          "queue_depth": 0
+        }
+      }
+    },
+    {
+      "name": "shutdown_request",
+      "kind": "request",
+      "method": "shutdown",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "shutdown",
+        "params": {}
+      }
+    },
+    {
+      "name": "shutdown_response",
+      "kind": "success",
+      "method": "shutdown",
+      "envelope": {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "result": {}
+      }
+    }
+  ]
+}

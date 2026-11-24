@@ -1,0 +1,87 @@
+{
+  "frame_ring": {
+    "constants": {
+      "MAGIC": 5138124842827138882,
+      "MAGIC_ASCII": "BGRTRING",
+      "LAYOUT_VERSION": 1,
+      "SLOTS_OFFSET": 64,
+      "SLOT_PIXELS_OFFSET": 64,
+      "SLOT_ALIGN": 64,
+      "PIXEL_FORMAT_BGRA8": 1
+    },
+    "structs": {
+      "FrameRingHeader": {
+        "size": 40,
+        "align": 8,
+        "fields": [
+          { "name": "magic", "offset": 0, "size": 8, "type": "u64" },
+          { "name": "layout_version", "offset": 8, "size": 4, "type": "u32" },
+          { "name": "slot_count", "offset": 12, "size": 4, "type": "u32" },
+          { "name": "slot_stride", "offset": 16, "size": 8, "type": "u64" },
+          { "name": "max_width", "offset": 24, "size": 4, "type": "u32" },
+          { "name": "max_height", "offset": 28, "size": 4, "type": "u32" },
+          { "name": "write_seq", "offset": 32, "size": 8, "type": "atomic_u64" }
+        ]
+      },
+      "FrameSlotHeader": {
+        "size": 48,
+        "align": 8,
+        "fields": [
+          { "name": "seq", "offset": 0, "size": 8, "type": "atomic_u64" },
+          { "name": "frame_number", "offset": 8, "size": 8, "type": "u64" },
+          { "name": "capture_ns", "offset": 16, "size": 8, "type": "u64" },
+          { "name": "transform_version", "offset": 24, "size": 8, "type": "u64" },
+          { "name": "width", "offset": 32, "size": 4, "type": "u32" },
+          { "name": "height", "offset": 36, "size": 4, "type": "u32" },
+          { "name": "row_stride", "offset": 40, "size": 4, "type": "u32" },
+          { "name": "pixel_format", "offset": 44, "size": 4, "type": "u32" }
+        ]
+      }
+    }
+  },
+  "audio_ring": {
+    "constants": {
+      "MAGIC": 5713172735255004994,
+      "MAGIC_ASCII": "BGRAUDIO",
+      "LAYOUT_VERSION": 1,
+      "BLOCKS_OFFSET": 64,
+      "BLOCK_SAMPLES_OFFSET": 64,
+      "BLOCK_ALIGN": 64,
+      "SAMPLE_FORMAT_F32": 1,
+      "BYTES_PER_VALUE": 4,
+      "MAX_CHANNELS": 2,
+      "MIN_SAMPLE_RATE": 8000,
+      "MAX_SAMPLE_RATE": 192000,
+      "FLAG_DISCONTINUITY": 1,
+      "KNOWN_FLAGS": 1
+    },
+    "structs": {
+      "AudioRingHeader": {
+        "size": 48,
+        "align": 8,
+        "fields": [
+          { "name": "magic", "offset": 0, "size": 8, "type": "u64" },
+          { "name": "layout_version", "offset": 8, "size": 4, "type": "u32" },
+          { "name": "block_count", "offset": 12, "size": 4, "type": "u32" },
+          { "name": "block_stride", "offset": 16, "size": 8, "type": "u64" },
+          { "name": "block_capacity", "offset": 24, "size": 4, "type": "u32" },
+          { "name": "sample_rate", "offset": 28, "size": 4, "type": "u32" },
+          { "name": "channels", "offset": 32, "size": 4, "type": "u32" },
+          { "name": "sample_format", "offset": 36, "size": 4, "type": "u32" },
+          { "name": "write_seq", "offset": 40, "size": 8, "type": "atomic_u64" }
+        ]
+      },
+      "AudioBlockHeader": {
+        "size": 32,
+        "align": 8,
+        "fields": [
+          { "name": "seq", "offset": 0, "size": 8, "type": "atomic_u64" },
+          { "name": "block_number", "offset": 8, "size": 8, "type": "u64" },
+          { "name": "capture_ns", "offset": 16, "size": 8, "type": "u64" },
+          { "name": "sample_count", "offset": 24, "size": 4, "type": "u32" },
+          { "name": "flags", "offset": 28, "size": 4, "type": "u32" }
+        ]
+      }
+    }
+  }
+}
