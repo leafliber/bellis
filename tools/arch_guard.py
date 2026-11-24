@@ -40,10 +40,33 @@ def _iter_prod_files(root: Path) -> tuple[list[Path], list[Path]]:
     core_dir = root / "core"
     if core_dir.is_dir():
         for path in sorted(core_dir.rglob("*.rs")):
+            if path.name == "tests.rs" or path.name.endswith("_test.rs"):
+                continue
             if not any(part in SKIP_DIRS for part in path.relative_to(core_dir).parts):
                 rs_files.append(path)
 
     return py_files, rs_files
+
+
+def _prod_line_count(path: Path, text: str) -> int:
+    lines = text.splitlines()
+    if path.suffix != ".rs":
+        return len(lines)
+    for idx, line in enumerate(lines):
+        if line.startswith("#[cfg(test)]"):
+            return idx
+    return len(lines)
+
+
+def _is_forbidden_prod_filename(path: Path) -> bool:
+    if path.suffix not in {".py", ".rs"}:
+        return False
+    stem = path.stem
+    return (
+        stem in {"sim", "fake"}
+        or stem.startswith(("sim_", "fake_"))
+        or stem.endswith(("_sim", "_fake"))
+    )
 
 
 def _module_name(py_root: Path, path: Path) -> str | None:
@@ -148,6 +171,12 @@ def _check_layer_rule(src_mod: str, dst_mod: str) -> str | None:
             f"Layer violation: bellis_common must not depend on {dst_top} ({src_mod} -> {dst_mod})"
         )
 
+    if {src_top, dst_top} == {"bellis_game", "bellis_host"}:
+        return (
+            f"Cross-process import forbidden: {src_top} must not depend on {dst_top} "
+            f"({src_mod} -> {dst_mod})"
+        )
+
     if (
         src_top == "bellis_game"
         and dst_top == "bellis_game"
@@ -180,14 +209,14 @@ def check_repo(root: Path) -> GuardResult:
         if path.suffix == ".py":
             py_texts[path] = text
 
-        line_count = len(text.splitlines())
+        line_count = _prod_line_count(path, text)
         if line_count > MAX_LINES:
             errors.append(f"File exceeds {MAX_LINES} lines ({line_count}): {rel}")
         elif line_count > WARN_LINES:
             warnings.append(f"File exceeds {WARN_LINES} lines ({line_count}): {rel}")
 
-        if path.suffix == ".py" and (path.name.startswith("sim_") or path.name.endswith("_sim.py")):
-            errors.append(f"Forbidden simulation file in production directory: {rel}")
+        if _is_forbidden_prod_filename(path):
+            errors.append(f"Forbidden sim/fake file in production directory: {rel}")
 
         if "TraceService" in text:
             errors.append(f"Forbidden identifier 'TraceService' in production source: {rel}")

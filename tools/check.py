@@ -30,7 +30,7 @@ def _core_has_changes(root: Path) -> bool:
     if proc.returncode == 0 and proc.stdout.strip():
         return True
     diff = subprocess.run(
-        ["git", "diff", "--name-only", "HEAD", "--", "core"],
+        ["git", "diff", "--name-only", "main...HEAD", "--", "core"],
         cwd=root,
         capture_output=True,
         text=True,
