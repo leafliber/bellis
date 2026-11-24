@@ -1,0 +1,6 @@
+[package]
+name = "bellis-channel"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

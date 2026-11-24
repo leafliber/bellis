@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bellis"
+version = "0.1.0"
+description = "Bellis V2 monorepo: deterministic safety/realtime core + fast/slow dual-agent runtime"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "bellis-common",
+    "bellis-game",
+    "bellis-host",
+]
+
+[project.scripts]
+check = "tools.check:main"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.400",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.11",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["tools"]
+
+[tool.uv.workspace]
+members = [
+    "py/bellis_common",
+    "py/bellis_game",
+    "py/bellis_host",
+]
+
+[tool.uv.sources]
+bellis-common = { workspace = true }
+bellis-game = { workspace = true }
+bellis-host = { workspace = true }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".local", "lab"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["py", "tools", "tests"]
+exclude = [".local", ".venv", "core", "lab"]
+extraPaths = [
+    "py/bellis_common/src",
+    "py/bellis_game/src",
+    "py/bellis_host/src",
+    ".",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = ["-q", "--basetemp=.pytest_cache/tmp"]
