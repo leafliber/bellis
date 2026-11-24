@@ -2,6 +2,9 @@
 .DS_Store
 Thumbs.db
 
+# 本地未跟踪资产专有隔离目录（原 V1 配置、数据库、Live2D、历史报告等，与新代码完全隔离）
+/.local/
+
 # 本地运行数据、报告与探针输出
 /reports/
 /.bellis/
