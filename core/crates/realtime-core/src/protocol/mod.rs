@@ -3,7 +3,7 @@
 //! 跨语言一致性由 `tests/fixtures/realtime_core/` 下的 JSON 夹具往返断言保证：
 //! - 许可控制连接（独立控制台 / Host ↔ 实时核）只有唯一一套 5 个 RPC 方法：
 //!   `lease.renew`、`lease.revoke`、`input.stop`、`input.released`、`health`；
-//! - 核连接（主控进程 ↔ 实时核）精简为 Step 1–2 最小必需集。
+//! - 核连接（主控进程 ↔ 实时核）只保留采集、共享内存、输入策略与动作控制最小必需集。
 
 pub mod actions;
 pub mod messages;
