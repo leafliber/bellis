@@ -287,17 +287,7 @@ async def test_no_fresh_frame(frame: RingFrame | None) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("template", "score", "expected"),
-    [
-        (None, 0.9, ExecutionStatus.NO_VISUAL_CHANGE),
-        (BEFORE, 1, ExecutionStatus.VERIFIED_CHANGED),
-        (AFTER, 0.9, ExecutionStatus.NO_VISUAL_CHANGE),
-    ],
-)
-async def test_roi_verification(
-    template: RingFrame | None, score: float, expected: ExecutionStatus
-) -> None:
+async def test_roi_verification() -> None:
     frame = replace(AFTER, pixels=(bytes(8) + bytes([255]) * 8) * 2)
     executor, _, _ = setup_executor(frame)
     result = await executor.execute_input(
@@ -305,13 +295,12 @@ async def test_roi_verification(
         before_frame=BEFORE,
         transform=TRANSFORM,
         verify_roi=rpc.NormRect(0, 0, 0.5, 1),
-        verify_template=encode_frame(template, image_format="png").data if template else None,
-        min_template_score=score,
     )
-    assert result.status == expected and result.diff and result.diff.changed_ratio == 0
+    assert result.status == ExecutionStatus.NO_VISUAL_CHANGE
+    assert result.diff and result.diff.changed_ratio == 0
 
 
-async def test_mean_diff_and_template_override() -> None:
+async def test_mean_diff_verification() -> None:
     executor, _, _ = setup_executor(replace(AFTER, pixels=bytes([2]) * 32))
     result = await executor.execute_input(KEY, before_frame=BEFORE, transform=TRANSFORM)
     assert (
@@ -319,11 +308,6 @@ async def test_mean_diff_and_template_override() -> None:
         and result.diff
         and result.diff.changed_ratio == 0
     )
-    template = encode_frame(AFTER, image_format="png").data
-    result = await executor.execute_input(
-        KEY, before_frame=BEFORE, transform=TRANSFORM, verify_template=template
-    )
-    assert result.status == ExecutionStatus.NO_VISUAL_CHANGE
 
 
 async def test_policy_and_rejection() -> None:

@@ -23,7 +23,6 @@ from bellis_game.perception import (
     encode_frame,
     frame_diff,
     load_game_profile,
-    match_template_patch,
     norm_rect_to_pixels,
     parse_strict_json_object,
     resolve_vlm_api_key,
@@ -85,17 +84,11 @@ def test_crop_coordinates() -> None:
     assert t.norm_to_client(0, 0) == (11, 1)
     assert t.norm_to_client(0.5, 0.5) == (22, 4)
     assert t.norm_to_client(1, 1) == (32, 6)
-    for x in range(11, 33):
-        for y in range(1, 7):
-            assert t.norm_to_client(*t.client_to_norm(x, y)) == (x, y)
     for bad in [True, -0.0001, 1.0001, float("nan"), float("inf"), -float("inf")]:
         with pytest.raises(ValueError):
             t.norm_to_client(0, bad)
         with pytest.raises(ValueError):
             t.norm_to_client(bad, 1)
-    for x, y in [(10, 1), (33, 1), (11, 0), (11, 7), (12, True)]:
-        with pytest.raises(ValueError):
-            t.client_to_norm(x, y)
     for args in [(0, 0, 0, 1), (0, -1, 2, 2), (0, True, 2, 2)]:
         with pytest.raises(ValueError):
             PixelRect(*args)
@@ -149,7 +142,7 @@ def test_grid_minor_lines_and_interior_tags(w: int, h: int) -> None:
                 assert ((255, 255, 255) in pixels) == (min(w, h) >= 320)
 
 
-def test_diff_and_template() -> None:
+def test_frame_diff() -> None:
     before = solid(4, 2)
     white = bytes([255] * 4)
     after = replace(before, pixels=(bytes(8) + white * 2) * 2)
@@ -160,12 +153,6 @@ def test_diff_and_template() -> None:
     assert frame_diff(after, after).mean_abs_diff == 0
     mismatch = frame_diff(before, solid(2, 4))
     assert (mismatch.changed_ratio, mismatch.mean_abs_diff) == (1, 255)
-    template = encode_frame(solid(9, 7, white), image_format="png").data
-    assert match_template_patch(after, template, roi=RIGHT) == 1
-    assert match_template_patch(before, template) == 0
-    assert match_template_patch(after, template, sample_size=(4, 2)) == 0.5
-    with pytest.raises(ValueError):
-        match_template_patch(before, template, sample_size=(0, 2))
 
 
 def test_hsr_profile() -> None:
@@ -179,7 +166,6 @@ def test_hsr_profile() -> None:
     assert policy.click_buttons == (MouseButton.LEFT,)
     assert policy.press_keys == (1, 28, 33, 50, 57, 62) and not policy.hold_keys
     assert (policy.scroll, policy.press_duration_ms, policy.max_rate) == (False, 60, 3)
-    assert p.named_rois["full"] == NormRect(0, 0, 1, 1)
     assert p.point_allowed(10, 10, 1000, 1000)
     assert p.point_allowed(970, 25, 1000, 1000)
     for x, y in [(9, 10), (990, 500), (500, 990), (970, 24), (1000, 50), (-1, 10)]:
@@ -203,7 +189,6 @@ def test_profile_without_reasoning_effort(tmp_path: Path) -> None:
     ("old", "new"),
     [
         ("game_id =", "extra = 1\ngame_id ="),
-        ("[rois]", "[other]"),
         ("[window]", "window = 1"),
         ('"StarRail.exe"', '""'),
         ("1920", "true"),
@@ -219,7 +204,6 @@ def test_profile_without_reasoning_effort(tmp_path: Path) -> None:
         ("3.0", "0.0"),
         ("right = 0.99", "right = 0.01"),
         ("top = 0.0,", "top = -0.1,"),
-        ("full = { left = 0.0", "full = { left = 2.0"),
         ('"jpeg"', '"bmp"'),
         ('reasoning_effort = "low"', 'reasoning_effort = ""'),
         ("85", "101"),

@@ -74,19 +74,6 @@ class FrameTransform:
             min(c.bottom - 1, c.top + int(ny * (c.bottom - c.top))),
         )
 
-    def client_to_norm(self, x: int, y: int) -> tuple[float, float]:
-        c = self.crop
-        inside = c.left <= x < c.right and c.top <= y < c.bottom
-        if type(x) is not int or type(y) is not int or not inside:
-            raise ValueError("expected integer coordinates inside crop")
-
-        def lower_edge(offset: int, size: int) -> float:
-            value = offset / size
-            # Keep the normalized edge inside its pixel even after floating-point rounding.
-            return math.nextafter(value, 1.0) if value * size < offset else value
-
-        return lower_edge(x - c.left, c.right - c.left), lower_edge(y - c.top, c.bottom - c.top)
-
 
 @dataclass(frozen=True, slots=True)
 class EncodedFrame:
@@ -222,21 +209,3 @@ def frame_diff(
     histogram = ImageChops.lighter(ImageChops.lighter(r, g), b).histogram()
     ratio = sum(histogram[channel_threshold + 1 :]) / (diff.width * diff.height)
     return FrameDiff(ratio, sum(ImageStat.Stat(diff).mean) / 3, *diff.size)
-
-
-def match_template_patch(
-    frame: RingFrame,
-    template_bytes: bytes,
-    *,
-    roi: NormRect | None = None,
-    sample_size: tuple[int, int] = (32, 32),
-) -> float:
-    """Compare the entire ROI with a template at a common grayscale sample size."""
-    if len(sample_size) != 2 or not all(_positive(v) for v in sample_size):
-        raise ValueError("invalid patch sample dimensions")
-    region, _ = _region(frame, roi)
-    with Image.open(BytesIO(template_bytes)) as template:
-        gray = (im.convert("L") for im in (region, template))
-        # Pillow's size annotation also supports optional NumPy arrays.
-        a, b = (im.resize(sample_size, Image.Resampling.BOX) for im in gray)  # pyright: ignore[reportUnknownMemberType]
-    return 1.0 - ImageStat.Stat(ImageChops.difference(a, b)).mean[0] / 255

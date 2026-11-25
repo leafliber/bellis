@@ -7,7 +7,6 @@ from .frame import (
     PixelRect,
     encode_frame,
     frame_diff,
-    match_template_patch,
     norm_rect_to_pixels,
     ring_frame_to_rgb,
 )
@@ -38,7 +37,6 @@ __all__ = [
     "encode_frame",
     "frame_diff",
     "load_game_profile",
-    "match_template_patch",
     "norm_rect_to_pixels",
     "parse_strict_json_object",
     "resolve_vlm_api_key",

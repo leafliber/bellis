@@ -63,7 +63,6 @@ class GameProfile:
     key_scan_codes: Mapping[str, int]
     input_policy: InputPolicy
     vlm: VlmProfileConfig
-    named_rois: Mapping[str, NormRect]
 
     def scan_code_for(self, key_name: str) -> int | None:
         return self.key_scan_codes.get(key_name.casefold())
@@ -149,18 +148,15 @@ def _policy(raw: object) -> tuple[Mapping[str, int], InputPolicy]:
 def load_game_profile(path: Path | str) -> GameProfile:
     try:
         with Path(path).open("rb") as f:
-            root = _table(tomllib.load(f), "game_id display_name window display vlm input rois")
+            root = _table(tomllib.load(f), "game_id display_name window display vlm input")
         win = _table(root["window"], "process_name", "window_class title")
         window = WindowTargetParams(**{k: _text(v) for k, v in win.items()})
         display = _table(root["display"], "expected_width expected_height")
         codes, policy = _policy(root["input"])
-        rois = {_text(k): NormRect.from_dict(v) for k, v in _table(root["rois"]).items()}
-        if not all(map(valid_norm_rect, rois.values())):
-            raise ProfileError("invalid named ROI")
         return GameProfile(
             _text(root["game_id"]), _text(root["display_name"]), window,
             _int(display["expected_width"]), _int(display["expected_height"]),
-            codes, policy, _vlm(root["vlm"]), MappingProxyType(rois),
+            codes, policy, _vlm(root["vlm"]),
         )  # fmt: skip
     except ProfileError:
         raise

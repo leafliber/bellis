@@ -138,7 +138,7 @@ class ActionExecutor:
         self._pending_deadline_id = None
         self._deadline_clear.set()
 
-    def _release_signal(self) -> asyncio.Future[rpc.InputReleasedParams]:
+    def release_signal(self) -> asyncio.Future[rpc.InputReleasedParams]:
         if self._signal is None:
             self._signal = asyncio.get_running_loop().create_future()
             if self._last_release is not None:
@@ -158,11 +158,9 @@ class ActionExecutor:
         before_frame: RingFrame,
         transform: perception.FrameTransform,
         verify_roi: rpc.NormRect | None = None,
-        verify_template: bytes | None = None,
-        min_template_score: float = 0.9,
     ) -> ExecutionOutcome:
         cfg = self._cfg
-        signal = self._release_signal()
+        signal = self.release_signal()
         base = before_frame.frame_number
         if self._pending_deadline_id is not None and not signal.done():
             cleared = asyncio.create_task(self._deadline_clear.wait())
@@ -239,14 +237,10 @@ class ActionExecutor:
             frame = self._read_frame()
             if frame and frame.frame_number > base and frame.capture_ns >= event.at_ns:
                 diff = perception.frame_diff(before_frame, frame, roi=verify_roi)
-                if verify_template is None:
-                    changed = (
-                        diff.changed_ratio >= cfg.min_changed_ratio
-                        or diff.mean_abs_diff >= cfg.min_mean_abs_diff
-                    )
-                else:
-                    score = perception.match_template_patch(frame, verify_template, roi=verify_roi)
-                    changed = score >= min_template_score
+                changed = (
+                    diff.changed_ratio >= cfg.min_changed_ratio
+                    or diff.mean_abs_diff >= cfg.min_mean_abs_diff
+                )
                 status = ExecutionStatus.NO_VISUAL_CHANGE
                 if changed:
                     status = ExecutionStatus.VERIFIED_CHANGED
@@ -259,7 +253,7 @@ class ActionExecutor:
     async def execute_wait(
         self, proposal: actions.WaitProposal, *, before_frame: RingFrame
     ) -> ExecutionOutcome:
-        signal = self._release_signal()
+        signal = self.release_signal()
         outcome = ExecutionOutcome(
             ExecutionStatus.WAITED, proposal.reason, before_frame.frame_number
         )
@@ -272,7 +266,7 @@ class ActionExecutor:
         return replace(outcome, after_frame=after, diff=diff)
 
     async def wait_for_settle(self, *, roi: rpc.NormRect | None = None) -> RingFrame | None:
-        signal = self._release_signal()
+        signal = self.release_signal()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._cfg.settle_timeout_s
         anchor = latest = None

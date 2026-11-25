@@ -145,7 +145,7 @@ class FastLoop:
         self._heartbeat = asyncio.create_task(self._beat())
         try:
             # Reuse the executor's latched notification, including releases preceding this goal.
-            signal = self._executor._release_signal()  # pyright: ignore[reportPrivateUsage]
+            signal = self._executor.release_signal()
             self._work = asyncio.create_task(self._drive(goal, deadline))
             await asyncio.wait((self._work, signal), timeout=max(0, deadline - perf_counter()),
                                return_when=asyncio.FIRST_COMPLETED)  # fmt: skip
