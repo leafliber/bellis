@@ -402,7 +402,7 @@ async def test_permit_server_close_waits_for_final_verification_not_unverified()
                 nonlocal final_sent, peer_open_for_final
                 assert peer is not None
                 # Unrelated older release_id=6 verified must also NOT wake wait for release_id=7.
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.02)
                 if peer.connection.is_open:
                     peer.notify(
                         PermitMethods.INPUT_RELEASED,
@@ -416,7 +416,7 @@ async def test_permit_server_close_waits_for_final_verification_not_unverified()
                             residual_items=(),
                         ).to_dict(),
                     )
-                await asyncio.sleep(0.025)
+                await asyncio.sleep(0.05)
                 peer_open_for_final = peer.connection.is_open
                 if peer_open_for_final:
                     peer.notify(
@@ -444,9 +444,9 @@ async def test_permit_server_close_waits_for_final_verification_not_unverified()
         await server.wait_connected(timeout=2.0)
         await server.grant_start()
 
-        started = time.monotonic()
+        started = time.perf_counter()
         await server.close(release_wait_s=0.5)
-        elapsed = time.monotonic() - started
+        elapsed = time.perf_counter() - started
 
         assert peer_open_for_final, (
             "close() disconnected before final verified notification arrived"
