@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 check = "tools.check:main"
+permit-console = "bellis_game.console:main"
 
 [dependency-groups]
 dev = [
