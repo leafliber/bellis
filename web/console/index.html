@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>贝莉 · 直播操作台</title>
+  <link rel="stylesheet" href="/console.css">
+  <script defer src="/console.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand"><span aria-hidden="true">✳</span> BELLIS</div>
+    <button id="logout" disabled>退出登录</button>
+  </header>
+  <main>
+    <h1>直播操作台</h1>
+    <section class="transport" aria-label="直播控制">
+      <div class="mode"><span id="lamp"></span><strong id="mode">连接中…</strong></div>
+      <p id="reason" role="status"></p>
+      <div class="controls">
+        <button class="stop" data-control="control/emergency" disabled>紧急停止</button>
+        <button data-control="control/live" disabled>开始直播</button>
+        <button data-control="control/pause" disabled>暂停直播</button>
+        <button data-control="control/clear-emergency" disabled>解除急停</button>
+      </div>
+      <div class="metrics"><span id="stage">Stage —</span><span id="queue">待处理弹幕 —</span></div>
+    </section>
+    <p id="feedback" role="status" aria-live="polite"></p>
+    <div class="panels">
+      <section>
+        <h2>手动发声</h2>
+        <form id="say">
+          <label>口播内容<textarea name="text" rows="3" required></textarea></label>
+          <div class="controls"><button class="primary" disabled>播报</button>
+            <button type="button" data-control="speech/interrupt" disabled>打断发声</button></div>
+        </form>
+        <h3>最近实际播出</h3>
+        <ol id="heard"><li>暂无播出记录</li></ol>
+      </section>
+      <section>
+        <h2>观众投票</h2>
+        <p id="vote-status" role="status">暂无进行中的投票</p>
+        <ol id="counts"></ol>
+        <form id="vote">
+          <label>问题<input name="question" maxlength="120" required></label>
+          <label>选项（每行一个，共 2–4 个）<textarea name="options" rows="3" required></textarea></label>
+          <label>时长（秒）<input type="number" name="duration_s" value="30" min="10" max="300" required></label>
+          <div class="controls"><button class="primary" disabled>开始投票</button>
+            <button type="button" data-control="vote/close" disabled>结束投票</button></div>
+        </form>
+      </section>
+      <section>
+        <h2>测试弹幕</h2>
+        <form id="danmaku">
+          <div class="pair">
+            <label>观众 ID<input name="viewer_id" value="operator-test" required></label>
+            <label>昵称<input name="viewer_name" value="观众" required></label>
+          </div>
+          <label>弹幕内容<input name="text" maxlength="120" required></label>
+          <button disabled>发送测试弹幕</button>
+        </form>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
