@@ -22,6 +22,18 @@ from .safety import (
     SafetyError,
     SafetySnapshot,
 )
+from .speech import (
+    Segmenter,
+    SpeechArbiter,
+    SpeechOutcome,
+    SpeechPriority,
+    SpeechRequest,
+    TtsSynthesizer,
+    heard_prefix,
+    speakable,
+    subtitle_starts,
+)
+from .stage import StageConfig, StageEvent, StageServer, encode_audio_frame
 from .store import (
     EventRecord,
     HostStore,
@@ -31,12 +43,19 @@ from .store import (
     StoreError,
     payload_hash,
 )
+from .tts import (
+    MinimaxConfig,
+    MiniMaxTtsClient,
+    TtsChunk,
+    TtsError,
+    WordStamp,
+    resolve_minimax_api_key,
+)
 from .watchdog import WATCHDOG_ROLE, WatchdogLink, find_watchdog_executable
 
 __version__ = "0.1.0"
 
 __all__ = [
-    "WATCHDOG_ROLE",
     "EmergencyOutcome",
     "EmergencySummary",
     "EventRecord",
@@ -49,6 +68,8 @@ __all__ = [
     "IntentState",
     "Lease",
     "LeaseUpdate",
+    "MiniMaxTtsClient",
+    "MinimaxConfig",
     "ObsClient",
     "ObsConfig",
     "ObsError",
@@ -58,10 +79,28 @@ __all__ = [
     "SafetyCore",
     "SafetyError",
     "SafetySnapshot",
+    "Segmenter",
+    "SpeechArbiter",
+    "SpeechOutcome",
+    "SpeechPriority",
+    "SpeechRequest",
+    "StageConfig",
+    "StageEvent",
+    "StageServer",
     "StoreError",
+    "TtsChunk",
+    "TtsError",
+    "TtsSynthesizer",
+    "WATCHDOG_ROLE",
     "WatchdogLink",
+    "WordStamp",
+    "encode_audio_frame",
     "find_watchdog_executable",
+    "heard_prefix",
     "obs_auth_string",
     "payload_hash",
+    "resolve_minimax_api_key",
     "resolve_obs_password",
+    "speakable",
+    "subtitle_starts",
 ]

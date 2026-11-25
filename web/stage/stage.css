@@ -1,0 +1,25 @@
+html,
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+#subtitle {
+  position: absolute;
+  left: 5%;
+  right: 5%;
+  bottom: 6%;
+  color: #fff;
+  font: 600 44px / 1.4 sans-serif;
+  text-align: center;
+  text-shadow:
+    0 0 4px #000,
+    0 0 8px #000;
+  white-space: pre-wrap;
+}
+
+/* 还没显示的字照样参与排版（连同阴影一起不可见），整句的位置与换行从一开始就固定。 */
+#subtitle-hidden {
+  visibility: hidden;
+}
