@@ -1,0 +1,144 @@
+"""Run a single game goal using an externally authorized realtime core."""
+
+import argparse
+import asyncio
+import json
+import sys
+from collections.abc import Callable, Sequence
+from contextlib import AsyncExitStack
+from dataclasses import asdict, replace
+from pathlib import Path
+from uuid import uuid4
+
+from bellis_common.cred import DEFAULT_SESSION_TARGET
+from bellis_common.telemetry import JsonlTelemetry
+
+from bellis_game.io import CoreClient, CoreClientOptions, FrameRing, find_core_executable
+from bellis_game.io.protocol import ActionReceiptParams, InputReleasedParams, Producer
+from bellis_game.perception import GameProfile, VlmClient, VlmConfig, load_game_profile
+from bellis_game.skills import ActionExecutor
+
+from .agent import FastLoop
+from .events import ActionRecord, ControlReleased, GoalCompleted, GoalSet, LoopOutcome
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", type=Path, default=Path("games/hsr.toml"))
+    parser.add_argument("--goal", required=True)
+    parser.add_argument("--goal-id")
+    parser.add_argument("--max-steps", type=int, default=8)
+    parser.add_argument("--timeout", type=float, default=90.0)
+    parser.add_argument("--permit-cred", default=DEFAULT_SESSION_TARGET)
+    parser.add_argument("--permit-session-id")
+    parser.add_argument("--emergency-hotkey", default="ctrl+shift+f12")
+    parser.add_argument("--telemetry", type=Path)
+    parser.add_argument("--core-exe", type=Path)
+    parser.add_argument("--base-url")
+    parser.add_argument("--model")
+    parser.add_argument("--max-width", type=int, default=3840)
+    parser.add_argument("--max-height", type=int, default=2160)
+    return parser
+
+
+def core_options(args: argparse.Namespace) -> CoreClientOptions:
+    return CoreClientOptions(
+        executable=args.core_exe or find_core_executable(),
+        permit_cred=args.permit_cred,
+        permit_session_id=args.permit_session_id,
+        emergency_hotkey=args.emergency_hotkey,
+    )
+
+
+def vlm_config(profile: GameProfile, base_url: str | None, model: str | None) -> VlmConfig:
+    config = VlmConfig.from_profile(profile.vlm)
+    return replace(
+        config,
+        base_url=config.base_url if base_url is None else base_url,
+        model=config.model if model is None else model,
+    )
+
+
+async def open_loop(
+    stack: AsyncExitStack,
+    options: CoreClientOptions,
+    ring: FrameRing,
+    profile: GameProfile,
+    vlm: VlmClient,
+    telemetry: JsonlTelemetry | None,
+    *,
+    on_step: Callable[[ActionRecord], None] | None = None,
+) -> FastLoop:
+    producer = Producer("game-agent", generation=1)
+
+    def on_receipt(receipt: ActionReceiptParams) -> None:
+        executor.on_receipt(receipt)
+
+    def on_released(release: InputReleasedParams) -> None:
+        executor.on_released(release)
+
+    core = CoreClient(options, on_receipt=on_receipt, on_released=on_released)
+    executor = ActionExecutor(core, ring, profile, producer)
+
+    async def stop_core() -> None:
+        result = await core.stop()
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"realtime core shutdown failed ({result.stage}, {result.returncode})"
+            )
+
+    await core.start()
+    stack.push_async_callback(stop_core)
+    await core.attach_frame_ring(ring)
+    await core.set_capture_target(profile.window)
+    await core.configure_input(profile.input_policy)
+    loop = FastLoop(
+        core, ring, vlm, executor, profile, producer, telemetry=telemetry, on_step=on_step
+    )
+    stack.push_async_callback(loop.close)
+    return loop
+
+
+def report_outcome(outcome: LoopOutcome) -> int:
+    print(type(outcome).__name__, json.dumps(asdict(outcome), ensure_ascii=False), flush=True)
+    if isinstance(outcome, GoalCompleted):
+        return 0
+    return 2 if isinstance(outcome, ControlReleased) else 1
+
+
+async def _run(args: argparse.Namespace) -> int:
+    goal = GoalSet(
+        uuid4().hex if args.goal_id is None else args.goal_id,
+        args.goal,
+        args.max_steps,
+        args.timeout,
+    )
+    profile = load_game_profile(args.profile)
+    options = core_options(args)
+    async with AsyncExitStack() as stack:
+        telemetry = stack.enter_context(JsonlTelemetry(args.telemetry)) if args.telemetry else None
+        vlm = await stack.enter_async_context(
+            VlmClient(vlm_config(profile, args.base_url, args.model), telemetry=telemetry)
+        )
+        ring = stack.enter_context(FrameRing.create(args.max_width, args.max_height))
+        loop = await open_loop(stack, options, ring, profile, vlm, telemetry)
+        outcome = await loop.run_goal(goal)
+    return report_outcome(outcome)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        args = build_parser().parse_args(argv)
+    except SystemExit as exc:
+        return 1 if exc.code else 0
+    try:
+        return asyncio.run(_run(args))
+    except KeyboardInterrupt:
+        return 1
+    except Exception as exc:
+        print(f"game-agent: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
