@@ -1,5 +1,7 @@
 """Deterministic safety/media host and slow-loop agent for Bellis."""
 
+from typing import TYPE_CHECKING, Any
+
 from .audience import (
     AudienceHub,
     DanmakuCandidate,
@@ -76,6 +78,19 @@ from .watchdog import WATCHDOG_ROLE, WatchdogLink, find_watchdog_executable
 
 __version__ = "0.1.0"
 
+if TYPE_CHECKING:
+    from .app import HostApp, HostConfig, StartInfo
+
+
+def __getattr__(name: str) -> Any:
+    # Keep the CLI module unloaded until Python executes it with -m.
+    if name in {"HostApp", "HostConfig", "StartInfo"}:
+        from .app import HostApp, HostConfig, StartInfo
+
+        return {"HostApp": HostApp, "HostConfig": HostConfig, "StartInfo": StartInfo}[name]
+    raise AttributeError(name)
+
+
 __all__ = [
     "AudienceHub",
     "ConsoleConfig",
@@ -88,6 +103,8 @@ __all__ = [
     "EmergencySummary",
     "EventRecord",
     "GateDecision",
+    "HostApp",
+    "HostConfig",
     "HostMode",
     "HostStore",
     "IntentRecord",
@@ -119,6 +136,7 @@ __all__ = [
     "StageConfig",
     "StageEvent",
     "StageServer",
+    "StartInfo",
     "StoreError",
     "TtsChunk",
     "TtsError",

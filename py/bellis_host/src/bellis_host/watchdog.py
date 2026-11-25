@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import math
+import os
 import secrets
 from contextlib import suppress
 from pathlib import Path
@@ -28,6 +29,18 @@ ENV_ROLE = "BELLIS_ROLE"
 ENV_OBS_PASSWORD = "BELLIS_OBS_PASSWORD"
 
 
+def credentials_from_env() -> ChannelCredentials | None:
+    if ENV_CHANNEL_PATH in os.environ or ENV_CHANNEL_KEY in os.environ:
+        return ChannelCredentials.decode(os.environ[ENV_CHANNEL_PATH], os.environ[ENV_CHANNEL_KEY])
+    return None
+
+
+def new_credentials(session_id: str | None = None) -> ChannelCredentials:
+    return ChannelCredentials(
+        create_channel_path(session_id or secrets.token_hex(8)), create_session_key()
+    )
+
+
 def find_watchdog_executable(repo_root: Path | None = None) -> Path:
     root = repo_root or Path(__file__).resolve().parents[4]
     for build in ("release", "debug"):
@@ -44,12 +57,11 @@ class WatchdogLink:
         *,
         heartbeat_interval_s: float = 0.25,
         session_id: str | None = None,
+        credentials: ChannelCredentials | None = None,
     ) -> None:
         if not 0 < heartbeat_interval_s < math.inf:
             raise ValueError("expected finite positive heartbeat interval")
-        self.credentials = ChannelCredentials(
-            create_channel_path(session_id or secrets.token_hex(6)), create_session_key()
-        )
+        self.credentials = credentials or new_credentials(session_id)
         self._safety = safety
         self._interval = heartbeat_interval_s
         self._server: ChannelServer | None = None

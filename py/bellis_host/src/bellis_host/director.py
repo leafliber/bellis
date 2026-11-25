@@ -31,7 +31,7 @@ class DirectorConfig:
     base_url: str = "https://ark.cn-beijing.volces.com/api/plan/v3"
     model: str = "deepseek-v4.1-flash"
     reasoning_effort: str = "low"
-    max_tokens: int = 512
+    max_tokens: int = 2048
     temperature: float = 0.7
     timeout_s: float = 20.0
     api_key_env: str = "BELLIS_VLM_API_KEY"
