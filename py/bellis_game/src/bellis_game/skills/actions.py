@@ -94,9 +94,11 @@ _ACTION_FIELDS = {
     "stop": {"reason", "detail"},
 }
 DECISION_ALLOWED_KEYS = DECISION_REQUIRED_KEYS.union(*_ACTION_FIELDS.values())
+_NULLABLE_KEYS = DECISION_ALLOWED_KEYS - DECISION_REQUIRED_KEYS
 
 
 def parse_agent_decision(raw: Mapping[str, object]) -> AgentDecision:
+    raw = {k: v for k, v in raw.items() if v is not None or k not in _NULLABLE_KEYS}
     match raw:
         case {"observation": str() as observation, "action": str() as action}:
             allowed = _ACTION_FIELDS.get(action)

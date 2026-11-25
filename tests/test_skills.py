@@ -90,7 +90,6 @@ def test_decision(payload: dict[str, object], expected: ActionProposal) -> None:
         {"action": "done", "evidence": "proof", "observation": 1},
         {"action": "key_press"},
         {"action": "key_press", "key": " "},
-        {"action": "key_press", "key": "esc", "reason": None},
         {"action": "click", "nx": 0, "ny": 0, "target": ""},
         {"action": "click", "nx": 0, "target": "ok"},
         {"action": "click", "nx": 0, "ny": 0, "target": "ok", "expected_effect": False},
@@ -111,6 +110,25 @@ def test_decision(payload: dict[str, object], expected: ActionProposal) -> None:
 def test_invalid_decision(payload: dict[str, object]) -> None:
     with pytest.raises(ProposalError):
         parse_agent_decision({"observation": "screen", **payload})
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        dict(action="click", nx=0, ny=1, target="ok"),
+        dict(action="key_press", key="esc"),
+        dict(action="wait", duration_ms=100),
+        dict(action="done", evidence="proof"),
+        dict(action="stop", reason="unknown"),
+    ],
+)
+def test_null_decision_fields(fields: dict[str, object]) -> None:
+    required = {"observation": "screen", **fields}
+    padded = {**dict.fromkeys(DECISION_ALLOWED_KEYS), **required}
+    assert parse_agent_decision(padded) == parse_agent_decision(required)
+    for field in (*required, "unknown"):
+        with pytest.raises(ProposalError):
+            parse_agent_decision({**padded, field: None})
 
 
 def test_action_specific_fields() -> None:

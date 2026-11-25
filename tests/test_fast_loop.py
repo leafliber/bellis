@@ -7,6 +7,7 @@ from pathlib import Path
 from time import perf_counter_ns
 from unittest.mock import Mock
 
+import bellis_game.perception as vision
 import pytest
 from bellis_common.cred import DEFAULT_SESSION_TARGET
 from bellis_common.telemetry import JsonlTelemetry
@@ -275,11 +276,27 @@ async def test_verified_change_resets_streak_and_history_is_bounded() -> None:
     assert [r["step"] for r in json.loads(s.model.prompts[-1])["history"]] == [3, 4]
 
 
-@pytest.mark.parametrize("bad", [ERROR, INVALID])
-async def test_transient_decision_errors_recover(bad: Answer) -> None:
+@pytest.mark.parametrize(
+    ("bad", "status", "detail"),
+    [
+        (VlmError("truncated", SECRET), "vlm_error", "vlm:truncated"),
+        (VlmError("schema_error", SECRET), "vlm_error", "vlm:schema_error"),
+        (INVALID, "proposal_error", "invalid decision"),
+    ],
+)
+async def test_transient_decision_errors_recover(bad: Answer, status: str, detail: str) -> None:
     s = Session(bad, KEY, bad, DONE)
     assert isinstance(await s.loop.run_goal(GOAL), GoalCompleted)
-    assert len(s.blocks) == 1 and [r.step for r in s.records] == [2, 4]
+    first, key, third, done = s.records
+    assert first == ActionRecord(1, 1, "", "none", detail, status)
+    assert third == ActionRecord(3, 2, "", "none", detail, status)
+    assert len(s.blocks) == 1 and (key.action, done.action) == ("key_press", "done")
+    assert [json.loads(prompt)["history"] for prompt in s.model.prompts] == [
+        [],
+        [],
+        [key.to_prompt_dict()],
+        [key.to_prompt_dict()],
+    ]
 
 
 @pytest.mark.parametrize(
@@ -423,13 +440,33 @@ def test_system_prompt_scopes_actions_and_logical_keys() -> None:
         "delete",
         "settings",
         "irreversible",
+        "coordinate grid",
+        "nx ticks",
+        "ny ticks",
+        "Omit unused",
     ):
         assert rule in prompt
     assert "[0.0, 1.0]" in prompt and "click | key_press | wait | done | stop" in prompt
 
 
+@pytest.mark.parametrize("overlay_grid", [True, False])
+async def test_grid_option_reaches_encoder(
+    overlay_grid: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert CONFIG.overlay_grid is True
+    encoder = Mock(wraps=vision.encode_frame)
+    monkeypatch.setattr(vision, "encode_frame", encoder)
+    s = Session(DONE, config=replace(CONFIG, overlay_grid=overlay_grid))
+    assert isinstance(await s.loop.run_goal(GOAL), GoalCompleted)
+    assert encoder.call_args.kwargs["overlay_grid"] is overlay_grid
+
+
 def test_validation() -> None:
     for field in fields(CONFIG):
+        if field.name == "overlay_grid":
+            with pytest.raises(ValueError):
+                replace(CONFIG, overlay_grid=1)  # pyright: ignore[reportArgumentType]
+            continue
         for value in (0, -1, True, float("nan"), float("inf")):
             with pytest.raises(ValueError):
                 replace(CONFIG, **{field.name: value})

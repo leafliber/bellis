@@ -103,6 +103,35 @@ def test_crop_coordinates() -> None:
         norm_rect_to_pixels(NormRect(0, 1, 1, 0), 2, 2)
 
 
+@pytest.mark.parametrize("edge", [320, 63])
+def test_grid_on_encoded_crop(edge: int) -> None:
+    frame = solid(800, 400)
+    plain = encode_frame(frame, crop=RIGHT, max_long_edge=edge, image_format="png")
+    grid = encode_frame(
+        frame, crop=RIGHT, max_long_edge=edge, image_format="png", overlay_grid=True
+    )
+    assert plain.transform == grid.transform
+    with Image.open(BytesIO(plain.data)) as original, Image.open(BytesIO(grid.data)) as marked:
+        assert marked.format == "PNG" and marked.mode == "RGB"
+        assert marked.size == original.size == (edge, edge)
+        if edge < 64:
+            assert marked.tobytes() == original.tobytes()
+        else:
+            assert original.getbbox() is None
+            for tick in range(edge // 10, edge, edge // 10):
+                assert marked.getpixel((tick, 150)) != original.getpixel((tick, 150))
+                assert marked.getpixel((150, tick)) != original.getpixel((150, tick))
+                for box in (
+                    (tick - 12, 0, tick + 12, 14),
+                    (tick - 12, edge - 14, tick + 12, edge),
+                    (0, tick - 7, 24, tick + 7),
+                    (edge - 24, tick - 7, edge, tick + 7),
+                ):
+                    assert (255, 255, 255) in marked.crop(box).get_flattened_data()
+            assert marked.getpixel((150, 150)) == original.getpixel((150, 150))
+    assert frame.pixels == bytes(frame.row_stride * frame.height)
+
+
 def test_diff_and_template() -> None:
     before = solid(4, 2)
     white = bytes([255] * 4)
@@ -336,7 +365,7 @@ async def test_vlm_payload_and_close(options: bool, tmp_path: Path) -> None:
     (payload,) = payloads
     assert payload == {
         "model": CONFIG.model,
-        "max_tokens": 1024,
+        "max_tokens": 4096,
         "messages": [
             {"role": "system", "content": "private-system"},
             {
@@ -376,7 +405,10 @@ async def test_vlm_payload_and_close(options: bool, tmp_path: Path) -> None:
         ("length", "truncated"),
         ("unknown_reason", "truncated"),
         ("body", "invalid_json"),
-        ("schema", "schema_error"),
+        ("missing_required", "schema_error"),
+        ("unexpected_keys", "schema_error"),
+        ("not_object", "schema_error"),
+        ("bad_envelope", "schema_error"),
         ("envelope", "invalid_json"),
     ],
 )
@@ -399,7 +431,10 @@ async def test_vlm_failures(
             "length": reply("length"),
             "unknown_reason": reply("private-detail"),
             "body": reply(content="private-detail"),
-            "schema": reply(content="{}"),
+            "missing_required": reply(content="{}"),
+            "unexpected_keys": reply(content='{"state":"ok","private-key":"private-value"}'),
+            "not_object": reply(content='["private-value"]'),
+            "bad_envelope": httpx2.Response(200, json={"choices": []}),
             "envelope": httpx2.Response(
                 200, headers={"content-type": "application/json"}, text="private-detail"
             ),
@@ -420,12 +455,26 @@ async def test_vlm_failures(
                     user_text="private-user",
                     image=image,
                     required_keys=frozenset({"state"}),
+                    allowed_keys=frozenset({"state"}),
                 )
     assert calls == 1 and error.value.code == code
     log = path.read_text(encoding="utf-8")
     diagnostics = log + str(error.value) + caplog.text
     assert "private-" not in diagnostics and image.base64_data not in diagnostics
     record = json.loads(log)
+    if code == "schema_error":
+        assert record["attrs"]["schema_issue"] == mode
+        assert (
+            str(error.value)
+            == {
+                "not_object": "Expected a JSON object",
+                "missing_required": "Missing required response fields",
+                "unexpected_keys": "Unexpected response fields",
+                "bad_envelope": "Malformed VLM completion",
+            }[mode]
+        )
+    else:
+        assert "schema_issue" not in record["attrs"]
     status = {"redirect": 302, "status": 500}.get(mode)
     assert error.value.status_code == status
     if status is None:

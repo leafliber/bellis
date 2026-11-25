@@ -20,9 +20,17 @@ from .profile import ProfileError, VlmProfileConfig, checked_base_url, timeout_s
 
 
 class VlmError(Exception):
-    def __init__(self, code: str, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int | None = None,
+        schema_issue: str | None = None,
+    ) -> None:
         self.code = code
         self.status_code = status_code
+        self.schema_issue = schema_issue
         super().__init__(message)
 
 
@@ -31,7 +39,7 @@ class VlmConfig:
     base_url: str
     model: str
     timeout_s: float = 30.0
-    max_tokens: int = 1024
+    max_tokens: int = 4096
     reasoning_effort: str | None = "low"
     response_format_json: bool = True
     cred_targets: tuple[str, ...] = ("ark.bellis", "ark.bellis-game-runtime")
@@ -127,10 +135,14 @@ def parse_strict_json_object(
     except (ValueError, RecursionError):
         raise VlmError("invalid_json", "Invalid JSON response") from None
     if not isinstance(obj, dict):
-        raise VlmError("schema_error", "Expected a JSON object")
+        raise VlmError("schema_error", "Expected a JSON object", schema_issue="not_object")
     data = cast("dict[str, object]", obj)
-    if required_keys - data.keys() or (allowed_keys is not None and data.keys() - allowed_keys):
-        raise VlmError("schema_error", "Unexpected response fields")
+    if required_keys - data.keys():
+        raise VlmError(
+            "schema_error", "Missing required response fields", schema_issue="missing_required"
+        )
+    if allowed_keys is not None and data.keys() - allowed_keys:
+        raise VlmError("schema_error", "Unexpected response fields", schema_issue="unexpected_keys")
     return data
 
 
@@ -233,11 +245,13 @@ class VlmClient:
             return result
         except VlmError as exc:
             attrs["error_code"] = exc.code
+            if exc.code == "schema_error":
+                attrs["schema_issue"] = exc.schema_issue or "bad_envelope"
             if exc.status_code is not None:
                 attrs["status_code"] = exc.status_code
             raise
         except (AttributeError, TypeError, KeyError, IndexError):
-            attrs["error_code"] = "schema_error"
+            attrs.update(error_code="schema_error", schema_issue="bad_envelope")
             raise VlmError("schema_error", "Malformed VLM completion") from None
         finally:
             if self._telemetry is not None:

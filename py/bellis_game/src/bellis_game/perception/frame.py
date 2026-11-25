@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import Literal
 
-from PIL import Image, ImageChops, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageStat
 
 from bellis_game.io.frame_ring import RingFrame
 from bellis_game.io.protocol import NormRect
@@ -123,6 +123,35 @@ def _region(
     return image, c
 
 
+def _draw_grid(image: Image.Image) -> Image.Image:
+    w, h = image.size
+    overlay = Image.new("RGBA", image.size)
+    draw = ImageDraw.Draw(overlay)
+    line = (190, 245, 255, 90)
+    ticks = [(i * w // 10, i * h // 10, f"0.{i}") for i in range(1, 10)]
+    for x, y, _ in ticks:
+        draw.line((x, 0, x, h - 1), fill=line)
+        draw.line((0, y, w - 1, y), fill=line)
+
+    font = ImageFont.load_default_imagefont()
+    for x, y, text in ticks:
+        left, top, right, bottom = font.getbbox(text)
+        label = Image.new("RGBA", (right - left + 4, bottom - top + 2))
+        pen = ImageDraw.Draw(label)
+        pen.rounded_rectangle((0, 0, label.width - 1, label.height - 1), 2, fill=(0, 0, 0, 165))
+        pen.text((2 - left, 1 - top), text, fill="white", font=font)
+        label.thumbnail((w // 10, h // 16), Image.Resampling.LANCZOS)
+        lw, lh = label.size
+        for pos in (
+            (x - lw // 2, 0),
+            (x - lw // 2, h - lh),
+            (0, y - lh // 2),
+            (w - lw, y - lh // 2),
+        ):
+            overlay.paste(label, pos)
+    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+
+
 def encode_frame(
     frame: RingFrame,
     *,
@@ -130,11 +159,14 @@ def encode_frame(
     crop: NormRect | None = None,
     image_format: Literal["jpeg", "png"] = "jpeg",
     jpeg_quality: int = 85,
+    overlay_grid: bool = False,
 ) -> EncodedFrame:
     valid_quality = type(jpeg_quality) is int and 1 <= jpeg_quality <= 100
     if image_format not in ("jpeg", "png") or not valid_quality:
         raise ValueError("invalid image format or JPEG quality")
     image, pixels = _region(frame, crop, max_long_edge)
+    if overlay_grid and min(image.size) >= 64:
+        image = _draw_grid(image)
     buf = BytesIO()
     options = {"quality": jpeg_quality} if image_format == "jpeg" else {}
     image.save(buf, format=image_format, **options)
