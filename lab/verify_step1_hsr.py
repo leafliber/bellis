@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -68,6 +69,25 @@ def _resolve_permit_options(args: argparse.Namespace) -> tuple[ChannelCredential
         )
     print(f"[hsr] Found permit session {info.session_id} (launcher pid={info.launcher_pid})")
     return None, args.cred_target, info.session_id
+
+
+def _start_stdin_reader(loop: asyncio.AbstractEventLoop) -> asyncio.Queue[str]:
+    queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def _pump() -> None:
+        try:
+            while True:
+                line = sys.stdin.readline()
+                with contextlib.suppress(RuntimeError):
+                    loop.call_soon_threadsafe(queue.put_nowait, line)
+                if not line:
+                    return
+        except OSError:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(queue.put_nowait, "")
+
+    threading.Thread(target=_pump, name="hsr-stdin", daemon=True).start()
+    return queue
 
 
 async def _heartbeat_loop(client: CoreClient, producer: Producer, interval: float = 0.1) -> None:
@@ -190,8 +210,9 @@ async def _run(args: argparse.Namespace) -> int:
                 "      `pause`/`stop` in Terminal 1) to verify immediate physical release verification.\n",
                 flush=True,
             )
+            lines = _start_stdin_reader(asyncio.get_running_loop())
             while True:
-                line = await asyncio.to_thread(sys.stdin.readline)
+                line = await lines.get()
                 if not line:
                     break
                 parts = line.strip().lower().split()

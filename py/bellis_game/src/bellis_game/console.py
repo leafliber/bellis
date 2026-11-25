@@ -8,6 +8,7 @@ import contextlib
 import os
 import secrets
 import sys
+import threading
 import time
 from collections.abc import Callable
 from typing import Any, Final
@@ -95,6 +96,8 @@ class PermitServer:
         self._peer: ch.RpcPeer | None = None
         self._renew_task: asyncio.Task[None] | None = None
         self._released_event = asyncio.Event()
+        self._awaiting_release_id: int | None = None
+        self._finalized_release_ids: set[int] = set()
         self._connected_event = asyncio.Event()
         self._closed = False
 
@@ -188,12 +191,22 @@ class PermitServer:
         self._cancel_renew()
         try:
             if self.connected and self.active_token is not None:
-                self._released_event.clear()
+                target_release_id: int | None = None
                 with contextlib.suppress(ch.ChannelError, ch.RpcError, proto.ProtocolError):
-                    await self.stop_input(through_token=None)
-                with contextlib.suppress(TimeoutError):
-                    async with asyncio.timeout(release_wait_s):
-                        await self._released_event.wait()
+                    target_release_id = (await self.stop_input(through_token=None)).release_id
+                if (
+                    target_release_id is not None
+                    and target_release_id not in self._finalized_release_ids
+                    and self.connected
+                ):
+                    self._released_event.clear()
+                    self._awaiting_release_id = target_release_id
+                    try:
+                        with contextlib.suppress(TimeoutError):
+                            async with asyncio.timeout(release_wait_s):
+                                await self._released_event.wait()
+                    finally:
+                        self._awaiting_release_id = None
         finally:
             peer, self._peer = self._peer, None
             server, self._server = self._server, None
@@ -227,6 +240,7 @@ class PermitServer:
         peer.on_notification(proto.PermitMethods.INPUT_RELEASED, self._on_released)
         peer.on_notification(proto.PermitMethods.HEALTH, self._on_health)
         peer.closed.add_done_callback(lambda _t: self._on_peer_closed(peer))
+        self._finalized_release_ids.clear()
         self._peer = peer
         self._connected_event.set()
         self._emit(f"[permit] realtime-core connected (role={conn.role})")
@@ -237,6 +251,8 @@ class PermitServer:
             self.active_token = None
             self._peer = None
             self._connected_event.clear()
+            if self._awaiting_release_id is not None:
+                self._released_event.set()
             self._emit("[permit] realtime-core disconnected; lease cleared")
 
     def _on_released(self, raw: dict[str, Any]) -> None:
@@ -246,7 +262,12 @@ class PermitServer:
             self._emit(f"[permit] invalid input.released: {exc}")
             return
         self.last_released = rel
-        self._released_event.set()
+        if rel.verification is not proto.ReleaseVerification.UNVERIFIED:
+            if len(self._finalized_release_ids) > 128:
+                self._finalized_release_ids.clear()
+            self._finalized_release_ids.add(rel.release_id)
+            if self._awaiting_release_id == rel.release_id:
+                self._released_event.set()
         if rel.reason in _REVOKING_REASONS and (
             self.active_token is not None and (rel.token is None or rel.token >= self.active_token)
         ):
@@ -280,6 +301,26 @@ class PermitServer:
             self._emit(f"[permit] renewal stopped (token={token}): {exc}")
 
 
+def _start_stdin_reader(loop: asyncio.AbstractEventLoop) -> asyncio.Queue[str]:
+    """Read stdin on a daemon thread so Ctrl+C on Windows never blocks default executor shutdown."""
+    queue: asyncio.Queue[str] = asyncio.Queue()
+
+    def _pump() -> None:
+        try:
+            while True:
+                line = sys.stdin.readline()
+                with contextlib.suppress(RuntimeError):
+                    loop.call_soon_threadsafe(queue.put_nowait, line)
+                if not line:
+                    return
+        except OSError:
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(queue.put_nowait, "")
+
+    threading.Thread(target=_pump, name="permit-stdin", daemon=True).start()
+    return queue
+
+
 async def _run_console(args: argparse.Namespace) -> int:
     cred_target = None if args.env_only else args.cred_target
     server = PermitServer(
@@ -298,8 +339,9 @@ async def _run_console(args: argparse.Namespace) -> int:
         print(f"  $env:{ENV_PERMIT_PATH} = '{server.credentials.path}'")
         print(f"  $env:{ENV_PERMIT_KEY} = '{server.credentials.encoded_key}'")
     print("Commands: start | pause | stop | status | quit", flush=True)
+    lines = _start_stdin_reader(asyncio.get_running_loop())
     try:
-        while line := await asyncio.to_thread(sys.stdin.readline):
+        while line := await lines.get():
             cmd = line.strip().lower()
             if not cmd:
                 continue
