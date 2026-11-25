@@ -132,6 +132,23 @@ def test_grid_on_encoded_crop(edge: int) -> None:
     assert frame.pixels == bytes(frame.row_stride * frame.height)
 
 
+@pytest.mark.parametrize(("w", "h"), [(80, 64), (400, 319), (400, 320)])
+def test_grid_minor_lines_and_interior_tags(w: int, h: int) -> None:
+    encoded = encode_frame(solid(w, h), image_format="png", overlay_grid=True)
+    with Image.open(BytesIO(encoded.data)) as image:
+        # Sample both axes between grid lines, away from pills.
+        x, y = w // 2 + 1, h // 2 + 1
+        for i in range(3, 18):
+            expected = (34, 43, 45) if i % 2 else (78, 101, 105)
+            assert image.getpixel((i * w // 20, y)) == expected
+            assert image.getpixel((x, i * h // 20)) == expected
+        for i in (2, 4, 6, 8):
+            for j in (2, 4, 6, 8):
+                cx, cy = i * w // 10, j * h // 10
+                pixels = image.crop((cx - 6, cy - 4, cx + 6, cy + 4)).get_flattened_data()
+                assert ((255, 255, 255) in pixels) == (min(w, h) >= 320)
+
+
 def test_diff_and_template() -> None:
     before = solid(4, 2)
     white = bytes([255] * 4)
@@ -153,6 +170,7 @@ def test_diff_and_template() -> None:
 
 def test_hsr_profile() -> None:
     p = load_game_profile(PROFILE)
+    assert p.vlm.max_long_edge == 1280
     assert (p.game_id, p.display_name) == ("hsr", "Honkai: Star Rail")
     assert p.window == WindowTargetParams("StarRail.exe", "UnityWndClass")
     assert (p.expected_width, p.expected_height) == (1920, 1080)
@@ -206,7 +224,7 @@ def test_profile_without_reasoning_effort(tmp_path: Path) -> None:
         ('reasoning_effort = "low"', 'reasoning_effort = ""'),
         ("85", "101"),
         ("30.0", "inf"),
-        ("1024", "0"),
+        ("max_long_edge = 1280", "max_long_edge = 0"),
         ("https://", "http://"),
         ('["ark.bellis", "ark.bellis-game-runtime"]', '"target"'),
         ('"hsr"', "["),

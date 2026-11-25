@@ -127,19 +127,35 @@ def _draw_grid(image: Image.Image) -> Image.Image:
     w, h = image.size
     overlay = Image.new("RGBA", image.size)
     draw = ImageDraw.Draw(overlay)
-    line = (190, 245, 255, 90)
+    minor = (190, 245, 255, 45)
+    major = (190, 245, 255, 105)
+    for i in range(1, 20, 2):
+        x, y = i * w // 20, i * h // 20
+        draw.line((x, 0, x, h - 1), fill=minor)
+        draw.line((0, y, w - 1, y), fill=minor)
     ticks = [(i * w // 10, i * h // 10, f"0.{i}") for i in range(1, 10)]
     for x, y, _ in ticks:
-        draw.line((x, 0, x, h - 1), fill=line)
-        draw.line((0, y, w - 1, y), fill=line)
+        draw.line((x, 0, x, h - 1), fill=major)
+        draw.line((0, y, w - 1, y), fill=major)
 
     font = ImageFont.load_default_imagefont()
-    for x, y, text in ticks:
+
+    def pill(text: str, opacity: int) -> Image.Image:
         left, top, right, bottom = font.getbbox(text)
         label = Image.new("RGBA", (right - left + 4, bottom - top + 2))
         pen = ImageDraw.Draw(label)
-        pen.rounded_rectangle((0, 0, label.width - 1, label.height - 1), 2, fill=(0, 0, 0, 165))
+        pen.rounded_rectangle((0, 0, label.width - 1, label.height - 1), 2, fill=(0, 0, 0, opacity))
         pen.text((2 - left, 1 - top), text, fill="white", font=font)
+        return label
+
+    if min(w, h) >= 320:
+        for i in (2, 4, 6, 8):
+            for j in (2, 4, 6, 8):
+                tag = pill(f".{i},.{j}", 130)
+                overlay.paste(tag, (i * w // 10 - tag.width // 2, j * h // 10 - tag.height // 2))
+
+    for x, y, text in ticks:
+        label = pill(text, 165)
         label.thumbnail((w // 10, h // 16), Image.Resampling.LANCZOS)
         lw, lh = label.size
         for pos in (

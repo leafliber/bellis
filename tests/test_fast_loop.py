@@ -281,6 +281,11 @@ async def test_verified_change_resets_streak_and_history_is_bounded() -> None:
     [
         (VlmError("truncated", SECRET), "vlm_error", "vlm:truncated"),
         (VlmError("schema_error", SECRET), "vlm_error", "vlm:schema_error"),
+        (
+            VlmError("schema_error", SECRET, schema_issue="unexpected_keys"),
+            "vlm_error",
+            "vlm:schema_error:unexpected_keys",
+        ),
         (INVALID, "proposal_error", "invalid decision"),
     ],
 )
@@ -441,12 +446,22 @@ def test_system_prompt_scopes_actions_and_logical_keys() -> None:
         "settings",
         "irreversible",
         "coordinate grid",
+        "0.05",
+        "minor lines",
+        ".x,.y",
+        "flat JSON object",
+        "NO nested objects",
+        "NO extra keys",
         "nx ticks",
         "ny ticks",
         "Omit unused",
     ):
         assert rule in prompt
     assert "[0.0, 1.0]" in prompt and "click | key_press | wait | done | stop" in prompt
+    click, done = (json.loads(line) for line in prompt.splitlines() if line.startswith("{"))
+    assert (click["action"], done["action"]) == ("click", "done")
+    assert set(click) == {"observation", "action", "nx", "ny", "target"}
+    assert set(done) == {"observation", "action", "evidence"}
 
 
 @pytest.mark.parametrize("overlay_grid", [True, False])
