@@ -12,6 +12,14 @@ from bellis_game.io import protocol as rpc
 
 from . import actions
 
+_FATAL_VERIFICATIONS = frozenset(
+    (
+        rpc.ReleaseVerification.UP_FAILED,
+        rpc.ReleaseVerification.RESIDUAL,
+        rpc.ReleaseVerification.UNAVAILABLE,
+    )
+)
+
 
 class FrameReader(Protocol):
     def read_latest(self) -> RingFrame | None: ...
@@ -38,7 +46,7 @@ class ExecutionStatus(StrEnum):
 class ExecutionConfig:
     action_deadline_s: float = 0.8
     receipt_timeout_s: float = 1.5
-    post_action_delay_s: float = 0.35
+    post_action_delay_s: float = 0.6
     verify_timeout_s: float = 1.5
     poll_interval_s: float = 0.02
     min_changed_ratio: float = 0.005
@@ -86,6 +94,9 @@ class ActionExecutor:
         self._receipts: dict[int, asyncio.Future[rpc.ActionReceiptParams]] = {}
         self._last_release: rpc.InputReleasedParams | None = None
         self._signal: asyncio.Future[rpc.InputReleasedParams] | None = None
+        self._pending_deadline_id: int | None = None
+        self._deadline_clear = asyncio.Event()
+        self._deadline_clear.set()
 
     def on_receipt(self, rec: rpc.ActionReceiptParams) -> None:
         if rec.producer != self._producer or len(rec.outcomes) != 1:
@@ -95,11 +106,23 @@ class ActionExecutor:
             waiter.set_result(rec)
 
     def on_released(self, rel: rpc.InputReleasedParams) -> None:
-        if rel.reason != rpc.ReleaseReason.CORE_START:
-            self._last_release = rel
-            if self._signal is not None and not self._signal.done():
-                self._signal.set_result(rel)
-            self._signal = None
+        if rel.reason == rpc.ReleaseReason.CORE_START:
+            return
+        deadline_expired = rel.reason == rpc.ReleaseReason.DEADLINE_EXPIRED
+        if deadline_expired and rel.verification not in _FATAL_VERIFICATIONS:
+            pending = self._pending_deadline_id
+            if rel.verification == rpc.ReleaseVerification.UNVERIFIED:
+                self._pending_deadline_id = rel.release_id
+                self._deadline_clear.clear()
+            elif pending is not None and rel.release_id >= pending:
+                self._pending_deadline_id = None
+                self._deadline_clear.set()
+            return
+        self._last_release = rel
+        if self._signal is not None and not self._signal.done():
+            self._signal.set_result(rel)
+        self._signal = None
+        self._deadline_clear.set()
 
     @property
     def control_released(self) -> bool:
@@ -112,6 +135,8 @@ class ActionExecutor:
     def reset_release(self) -> None:
         if self.control_released:
             self._last_release = self._signal = None
+        self._pending_deadline_id = None
+        self._deadline_clear.set()
 
     def _release_signal(self) -> asyncio.Future[rpc.InputReleasedParams]:
         if self._signal is None:
@@ -139,6 +164,17 @@ class ActionExecutor:
         cfg = self._cfg
         signal = self._release_signal()
         base = before_frame.frame_number
+        if self._pending_deadline_id is not None and not signal.done():
+            cleared = asyncio.create_task(self._deadline_clear.wait())
+            try:
+                await asyncio.wait(
+                    (cleared, signal),
+                    timeout=min(cfg.receipt_timeout_s, 0.5),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                cleared.cancel()
+                await asyncio.gather(cleared, return_exceptions=True)
         if signal.done():
             rel = signal.result()
             return ExecutionOutcome(ExecutionStatus.CONTROL_RELEASED, rel.reason, base, release=rel)

@@ -217,6 +217,30 @@ async def test_completion_history_heartbeat_and_redaction(tmp_path: Path) -> Non
     assert rows[-1]["attrs"] == {"outcome": "GoalCompleted", "reason": "done", "steps": 3}
 
 
+async def test_action_deadline_during_next_model_call_preserves_goal() -> None:
+    s = Session(KEY, CLICK, DONE)
+    deadline = replace(RELEASE, reason=rpc.ReleaseReason.DEADLINE_EXPIRED)
+    async with asyncio.timeout(2):
+        goal = asyncio.create_task(s.loop.run_goal(GOAL))
+        await s.submitted.wait()
+        s.model.called.clear()
+        s.model.gate = asyncio.Event()
+        await s.model.called.wait()
+        assert [(r.action, r.status) for r in s.records] == [
+            ("key_press", ExecutionStatus.VERIFIED_CHANGED)
+        ]
+        s.executor.on_released(replace(deadline, verification=rpc.ReleaseVerification.UNVERIFIED))
+        await asyncio.sleep(0)
+        s.executor.on_released(deadline)
+        s.model.gate.set()
+        assert await goal == GoalCompleted(GOAL.goal_id, SECRET, 3, 3)
+    assert not s.model.cancelled
+    assert [r.action for r in s.records] == ["key_press", "click", "done"]
+    key, click = s.blocks
+    assert isinstance(key.steps[0].actions[0], rpc.KeyPress)
+    assert isinstance(click.steps[0].actions[0], rpc.Click)
+
+
 async def test_model_stop_redacts_reason(tmp_path: Path) -> None:
     path = tmp_path / "stop.jsonl"
     with JsonlTelemetry(path) as telemetry:

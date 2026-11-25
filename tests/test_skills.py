@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import fields, replace
 from pathlib import Path
+from time import perf_counter_ns
 from unittest.mock import Mock
 
 import pytest
@@ -446,6 +447,82 @@ async def test_release_beats_rejection() -> None:
     core.result = rpc.Rejected(rpc.RejectReason.STOPPING, "")
     result = await executor.execute_input(CLICK, before_frame=BEFORE, transform=TRANSFORM)
     assert result.release == rel and result.status == ExecutionStatus.CONTROL_RELEASED
+
+
+async def test_deadline_release_preserves_wait_and_settle() -> None:
+    quiet = replace(BEFORE, frame_number=9, capture_ns=2_000_000)
+    executor, _, frames = setup_executor(BEFORE, quiet)
+    rel = release(rpc.ReleaseReason.DEADLINE_EXPIRED)
+    async with asyncio.timeout(1):
+        waited = asyncio.create_task(executor.execute_wait(WaitProposal(100), before_frame=BEFORE))
+        settled = asyncio.create_task(executor.wait_for_settle())
+        await frames.read.wait()
+        executor.on_released(replace(rel, verification=rpc.ReleaseVerification.UNVERIFIED))
+        assert not executor.control_released
+        executor.on_released(rel)
+        assert executor.last_release is None
+        assert await settled == quiet
+        assert (await waited).status == ExecutionStatus.WAITED
+
+
+@pytest.mark.parametrize(
+    ("verification", "id_offset"),
+    [(rpc.ReleaseVerification.VERIFIED, 0), (rpc.ReleaseVerification.SUPERSEDED, 1)],
+)
+async def test_input_waits_for_deadline_verification(
+    verification: rpc.ReleaseVerification, id_offset: int
+) -> None:
+    executor, core, _ = setup_executor(AFTER, config=replace(FAST, receipt_timeout_s=1))
+    rel = release(rpc.ReleaseReason.DEADLINE_EXPIRED)
+    executor.on_released(replace(rel, verification=rpc.ReleaseVerification.UNVERIFIED))
+    executor.on_released(replace(rel, release_id=rel.release_id - 1))
+    task = asyncio.create_task(
+        executor.execute_input(KEY, before_frame=BEFORE, transform=TRANSFORM)
+    )
+    await asyncio.sleep(0)
+    verified_at = perf_counter_ns()
+    executor.on_released(
+        replace(rel, verification=verification, release_id=rel.release_id + id_offset)
+    )
+    assert (await asyncio.wait_for(task, 0.25)).status == ExecutionStatus.VERIFIED_CHANGED
+    (block,) = core.blocks
+    assert block.start_ns >= verified_at
+
+
+async def test_takeover_interrupts_pending_deadline_verification() -> None:
+    executor, core, _ = setup_executor(AFTER, config=replace(FAST, receipt_timeout_s=1))
+    rel = release(rpc.ReleaseReason.DEADLINE_EXPIRED)
+    executor.on_released(replace(rel, verification=rpc.ReleaseVerification.UNVERIFIED))
+    task = asyncio.create_task(
+        executor.execute_input(KEY, before_frame=BEFORE, transform=TRANSFORM)
+    )
+    await asyncio.sleep(0)
+    takeover = release(rpc.ReleaseReason.TAKEOVER)
+    executor.on_released(takeover)
+    result = await asyncio.wait_for(task, 0.25)
+    assert result.status == ExecutionStatus.CONTROL_RELEASED and result.release == takeover
+    assert not core.blocks
+
+
+@pytest.mark.parametrize(
+    "verification",
+    [
+        rpc.ReleaseVerification.UP_FAILED,
+        rpc.ReleaseVerification.RESIDUAL,
+        rpc.ReleaseVerification.UNAVAILABLE,
+    ],
+)
+async def test_deadline_verification_fault_latches_release(
+    verification: rpc.ReleaseVerification,
+) -> None:
+    executor, core, _ = setup_executor(AFTER)
+    rel = replace(release(rpc.ReleaseReason.DEADLINE_EXPIRED), verification=verification)
+    executor.on_released(replace(rel, verification=rpc.ReleaseVerification.UNVERIFIED))
+    executor.on_released(rel)
+    assert executor.control_released and executor.last_release == rel
+    result = await executor.execute_input(KEY, before_frame=BEFORE, transform=TRANSFORM)
+    assert result.status == ExecutionStatus.CONTROL_RELEASED and result.release == rel
+    assert not core.blocks
 
 
 @pytest.mark.parametrize("reason", RELEASE_REASONS)
