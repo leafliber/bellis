@@ -176,7 +176,7 @@ def write_session_info(info: SessionInfo, target: str = DEFAULT_SESSION_TARGET) 
         raise CredError(f"CredWriteW failed: {ctypes.WinError(ctypes.get_last_error())}")
 
 
-def read_session_info(target: str = DEFAULT_SESSION_TARGET) -> SessionInfo | None:
+def _read_cred_blob(target: str) -> bytes | None:
     _target_ok(target)
     ptr = _PCRED()
     if not _adv.CredReadW(target, _CRED_TYPE_GENERIC, 0, ctypes.byref(ptr)):
@@ -184,10 +184,26 @@ def read_session_info(target: str = DEFAULT_SESSION_TARGET) -> SessionInfo | Non
             return None
         raise CredError(f"CredReadW failed: {ctypes.WinError(ctypes.get_last_error())}")
     try:
-        raw = ctypes.string_at(ptr.contents.CredentialBlob, ptr.contents.CredentialBlobSize)
+        return ctypes.string_at(ptr.contents.CredentialBlob, ptr.contents.CredentialBlobSize)
     finally:
         _adv.CredFree(ptr)
-    return SessionInfo.from_utf16le(raw)
+
+
+def read_session_info(target: str = DEFAULT_SESSION_TARGET) -> SessionInfo | None:
+    raw = _read_cred_blob(target)
+    return None if raw is None else SessionInfo.from_utf16le(raw)
+
+
+def read_secret_text(target: str) -> str | None:
+    """Read UTF-16LE text from a generic credential, if present."""
+    raw = _read_cred_blob(target)
+    if raw is None:
+        return None
+    _check(len(raw) % 2 == 0, "credential UTF-16LE blob length is invalid")
+    try:
+        return raw.decode("utf-16-le").rstrip("\0")
+    except UnicodeDecodeError:
+        raise CredError("credential blob is not valid UTF-16LE") from None
 
 
 def delete_session_info(target: str = DEFAULT_SESSION_TARGET) -> bool:

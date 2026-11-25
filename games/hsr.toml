@@ -1,0 +1,39 @@
+game_id = "hsr"
+display_name = "Honkai: Star Rail"
+
+[window]
+process_name = "StarRail.exe"
+window_class = "UnityWndClass"
+
+[display]
+expected_width = 1920
+expected_height = 1080
+
+[vlm]
+base_url = "https://ark.cn-beijing.volces.com/api/plan/v3"
+model = "deepseek-v4.1-flash"
+reasoning_effort = "low"
+max_long_edge = 1024
+image_format = "jpeg"
+jpeg_quality = 85
+timeout_s = 30.0
+cred_targets = ["ark.bellis", "ark.bellis-game-runtime"]
+
+[input]
+click_buttons = ["left"]
+scroll = false
+press_duration_ms = 60
+max_rate = 3.0
+click_regions = [{ left = 0.01, top = 0.01, right = 0.99, bottom = 0.99 }]
+forbidden_zones = [{ left = 0.97, top = 0.0, right = 1.0, bottom = 0.025 }]
+
+[input.keys]
+esc = 1
+enter = 28
+f = 33
+m = 50
+space = 57
+f4 = 62
+
+[rois]
+full = { left = 0.0, top = 0.0, right = 1.0, bottom = 1.0 }
