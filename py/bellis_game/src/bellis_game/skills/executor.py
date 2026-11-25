@@ -51,9 +51,9 @@ class ExecutionConfig:
     poll_interval_s: float = 0.02
     min_changed_ratio: float = 0.005
     min_mean_abs_diff: float = 1.5
-    settle_window_s: float = 0.2
-    settle_max_changed_ratio: float = 0.004
-    settle_timeout_s: float = 1.2
+    settle_window_s: float = 0.25
+    settle_max_changed_ratio: float = 0.03
+    settle_timeout_s: float = 1.6
 
     def __post_init__(self) -> None:
         if not all(type(v) in (int, float) and isfinite(v) and v > 0 for v in astuple(self)):

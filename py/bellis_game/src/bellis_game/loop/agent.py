@@ -69,6 +69,8 @@ Output ONLY one flat JSON object with exactly the keys listed for the chosen act
 Include observation (nonempty visible evidence) and action (click | key_press | wait | done | stop).
 Omit unused fields. NO nested objects and NO extra keys (x, y, confidence, thought, etc.).
 Use the visible coordinate grid to click the exact center of the target icon or button.
+If a transition animation is still playing and menu icons are not visible yet, use wait instead \
+of clicking background; never repeat a click that returned to the previous screen.
 Major lines are every 0.1 (0.1..0.9), with fainter minor lines halfway between at 0.05 increments.
 Interior tags .x,.y mark (0.x, 0.y) intersections.
 Top/bottom nx ticks run 0.1..0.9 left to right. Left/right ny ticks run 0.1..0.9 top to bottom.
@@ -256,6 +258,10 @@ class FastLoop:
                         execution = await self._executor.execute_input(
                             proposal, before_frame=frame, transform=image.transform
                         )
+                        if execution.status == Status.VERIFIED_CHANGED:
+                            await self._executor.wait_for_settle()
+                            if (release := self._executor.last_release) is not None:
+                                execution = execution.with_release(release)
                     status = execution.status
                     ratio = execution.diff.changed_ratio if execution.diff else None
                     if status == Status.CONTROL_RELEASED:

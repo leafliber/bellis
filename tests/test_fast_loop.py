@@ -128,7 +128,12 @@ class Session:
             PROFILE,
             PRODUCER,
             config=ExecutionConfig(
-                post_action_delay_s=0.001, receipt_timeout_s=0.05, verify_timeout_s=0.05
+                post_action_delay_s=0.001,
+                receipt_timeout_s=0.05,
+                verify_timeout_s=0.05,
+                poll_interval_s=0.001,
+                settle_window_s=0.001,
+                settle_timeout_s=0.005,
             ),
         )
         self.loop = FastLoop(
@@ -216,6 +221,49 @@ async def test_completion_history_heartbeat_and_redaction(tmp_path: Path) -> Non
             diff_ratio=record.diff_ratio,
         )
     assert rows[-1]["attrs"] == {"outcome": "GoalCompleted", "reason": "done", "steps": 3}
+
+
+async def test_next_model_frame_follows_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = Session(KEY, DONE)
+    settling, finish = asyncio.Event(), asyncio.Event()
+
+    async def settle() -> RingFrame:
+        settling.set()
+        await finish.wait()
+        mid = s.frames.frame
+        assert mid is not None and mid.frame_number == 2
+        s.frames.frame = replace(
+            mid, frame_number=3, capture_ns=perf_counter_ns(), pixels=bytes(128)
+        )
+        return s.frames.frame
+
+    monkeypatch.setattr(s.executor, "wait_for_settle", settle)
+    async with asyncio.timeout(1):
+        goal = asyncio.create_task(s.loop.run_goal(GOAL))
+        await settling.wait()
+        assert len(s.model.prompts) == 1
+        finish.set()
+        assert await goal == GoalCompleted(GOAL.goal_id, SECRET, 2, 3)
+    assert [r.frame_number for r in s.records] == [1, 3]
+
+
+async def test_takeover_during_post_action_settle(monkeypatch: pytest.MonkeyPatch) -> None:
+    s = Session(KEY, DONE)
+    settling = asyncio.Event()
+    wait_for_settle = s.executor.wait_for_settle
+
+    async def settle() -> RingFrame | None:
+        settling.set()
+        return await wait_for_settle()
+
+    monkeypatch.setattr(s.executor, "wait_for_settle", settle)
+    async with asyncio.timeout(1):
+        goal = asyncio.create_task(s.loop.run_goal(GOAL))
+        await settling.wait()
+        s.executor.on_released(RELEASE)
+        assert await goal == ControlReleased(GOAL.goal_id, RELEASE.reason, RELEASE.verification, 1)
+    assert len(s.model.prompts) == len(s.blocks) == 1
+    assert s.revoked == [PRODUCER.generation]
 
 
 async def test_action_deadline_during_next_model_call_preserves_goal() -> None:
@@ -455,6 +503,8 @@ def test_system_prompt_scopes_actions_and_logical_keys() -> None:
         "nx ticks",
         "ny ticks",
         "Omit unused",
+        "menu icons are not visible yet, use wait instead of clicking background",
+        "never repeat a click that returned to the previous screen",
     ):
         assert rule in prompt
     assert "[0.0, 1.0]" in prompt and "click | key_press | wait | done | stop" in prompt
