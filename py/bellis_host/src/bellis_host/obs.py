@@ -57,6 +57,21 @@ def obs_auth_string(password: str, salt: str, challenge: str) -> str:
     return digest(digest(password + salt) + challenge)
 
 
+def _extract_obs_password(raw: str) -> str:
+    if raw.lstrip().startswith("{"):
+        try:
+            data = json.loads(raw)
+        except (ValueError, RecursionError):
+            return raw
+        if isinstance(data, dict):
+            fields = cast(dict[str, object], data)
+            if isinstance(password := fields.get("password"), str) and isinstance(
+                fields.get("url", ""), str
+            ):
+                return password
+    return raw
+
+
 def resolve_obs_password(config: ObsConfig, explicit: str | None = None) -> str:
     if explicit is not None:
         return explicit
@@ -64,7 +79,7 @@ def resolve_obs_password(config: ObsConfig, explicit: str | None = None) -> str:
         return value
     for target in config.cred_targets:
         if (value := read_secret_text(target)) is not None:
-            return value
+            return _extract_obs_password(value)
     return ""
 
 

@@ -119,12 +119,22 @@ def safety() -> Iterator[SafetyCore]:
 def test_credentials_and_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert obs_auth_string("password", "salt", "challenge") == AUTH
     config = ObsConfig(cred_targets=("unused", "obs.bellis"))
-    monkeypatch.setenv(config.password_env, "env")
+    legacy = '{"url": "ws://127.0.0.1:4455", "password": "secret"}'
+    monkeypatch.setenv(config.password_env, legacy)
     assert resolve_obs_password(config, "") == ""
-    assert resolve_obs_password(config) == "env"
+    assert resolve_obs_password(config) == legacy
     monkeypatch.delenv(config.password_env)
-    monkeypatch.setattr("bellis_host.obs.read_secret_text", {"obs.bellis": "credential"}.get)
-    assert resolve_obs_password(config) == "credential"
+    assert resolve_obs_password(config, legacy) == legacy
+    for raw, expected in (
+        (legacy, "secret"),
+        ('  {"password": ""}', ""),
+        ("credential", "credential"),
+        ("{literal", "{literal"),
+        ('{"url": null, "password": "x"}', '{"url": null, "password": "x"}'),
+        ('{"password": 1}', '{"password": 1}'),
+    ):
+        monkeypatch.setattr("bellis_host.obs.read_secret_text", {"obs.bellis": raw}.get)
+        assert resolve_obs_password(config) == expected
     assert resolve_obs_password(replace(config, cred_targets=())) == ""
     for url in (
         "wss://localhost:4455",

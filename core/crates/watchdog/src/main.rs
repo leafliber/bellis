@@ -46,6 +46,17 @@ fn credential(target: &str) -> Result<String, String> {
     result
 }
 
+fn extract_obs_password(raw: String) -> String {
+    if raw.trim_start().starts_with('{')
+        && let Ok(serde_json::Value::Object(data)) = serde_json::from_str(&raw)
+        && data.get("url").is_none_or(serde_json::Value::is_string)
+        && let Some(password) = data.get("password").and_then(serde_json::Value::as_str)
+    {
+        return password.to_owned();
+    }
+    raw
+}
+
 fn millis(value: &str) -> Result<Duration, String> {
     value
         .parse::<u32>()
@@ -91,7 +102,7 @@ fn start() -> Result<(), String> {
     let credentials = ChannelCredentials::decode(path, &key).map_err(|_| "invalid channel key")?;
     let password = match env::var("BELLIS_OBS_PASSWORD") {
         Ok(password) => password,
-        Err(env::VarError::NotPresent) => credential(&target)?,
+        Err(env::VarError::NotPresent) => extract_obs_password(credential(&target)?),
         Err(_) => return Err("invalid OBS password encoding".into()),
     };
     let obs = ObsEmergencyClient::new(url, password)?;
@@ -109,4 +120,13 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+#[test]
+fn obs_credential_formats() {
+    let legacy = r#"{"url":"ws://127.0.0.1:4455","password":"secret"}"#;
+    assert_eq!(extract_obs_password(legacy.into()), "secret");
+    assert_eq!(extract_obs_password(r#"{"password":""}"#.into()), "");
+    assert_eq!(extract_obs_password("plain".into()), "plain");
+    assert_eq!(extract_obs_password("{not-json".into()), "{not-json");
 }
