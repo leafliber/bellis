@@ -1,0 +1,17 @@
+[package]
+name = "bellis-watchdog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bellis-channel = { path = "../channel" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tungstenite = { workspace = true, features = ["handshake"] }
+windows = { workspace = true, features = ["Win32_Security_Credentials"] }
+
+[lints]
+workspace = true

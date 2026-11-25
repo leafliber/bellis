@@ -6,7 +6,11 @@ build-backend = "hatchling.build"
 name = "bellis-host"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = ["bellis-common"]
+dependencies = [
+    "bellis-common",
+    "openai>=3.59.0",
+    "websockets>=17.4",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bellis_host"]

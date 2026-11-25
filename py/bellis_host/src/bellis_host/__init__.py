@@ -1,5 +1,14 @@
 """Deterministic safety/media host and slow-loop agent for Bellis."""
 
+from .obs import (
+    EmergencyOutcome,
+    ObsClient,
+    ObsConfig,
+    ObsError,
+    ObsRequestResult,
+    obs_auth_string,
+    resolve_obs_password,
+)
 from .safety import (
     EmergencySummary,
     GateDecision,
@@ -22,10 +31,13 @@ from .store import (
     StoreError,
     payload_hash,
 )
+from .watchdog import WATCHDOG_ROLE, WatchdogLink, find_watchdog_executable
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "WATCHDOG_ROLE",
+    "EmergencyOutcome",
     "EmergencySummary",
     "EventRecord",
     "GateDecision",
@@ -37,11 +49,19 @@ __all__ = [
     "IntentState",
     "Lease",
     "LeaseUpdate",
+    "ObsClient",
+    "ObsConfig",
+    "ObsError",
+    "ObsRequestResult",
     "RateLimit",
     "SafetyConfig",
     "SafetyCore",
     "SafetyError",
     "SafetySnapshot",
     "StoreError",
+    "WatchdogLink",
+    "find_watchdog_executable",
+    "obs_auth_string",
     "payload_hash",
+    "resolve_obs_password",
 ]
