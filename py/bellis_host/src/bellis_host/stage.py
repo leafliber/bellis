@@ -111,7 +111,7 @@ class StageServer:
 
     def issue_stage_url(self) -> str:
         self._token = secrets.token_urlsafe(16)
-        return f"http://127.0.0.1:{self.port}/#t={self._token}"
+        return f"http://127.0.0.1:{self.port}/?n={secrets.token_hex(4)}#t={self._token}"
 
     def on_event(self, cb: Callable[[StageEvent], None]) -> Callable[[], None]:
         self._events.append(cb)
@@ -152,7 +152,8 @@ class StageServer:
             if req.headers.get_all("Origin") not in (["http://" + h] for h in hosts):
                 return ws.respond(403, "Forbidden")
             return None
-        name = "index.html" if req.path == "/" else req.path.removeprefix("/")
+        path = req.path.split("?", 1)[0]
+        name = "index.html" if path == "/" else path.removeprefix("/")
         if name not in _ASSETS:
             return ws.respond(404, "Not found")
         try:
@@ -302,12 +303,6 @@ class StageServer:
     async def truncate_sentence(self, sentence_id: str) -> None:
         if self._ws:
             await self._ws.send(json.dumps({"kind": "truncate", "sentenceId": sentence_id}))
-
-    async def set_presentation_delay(self, delay_ms: int) -> None:
-        _delay(delay_ms)
-        self._delay = delay_ms
-        if self._ws:
-            await self._ws.send(json.dumps({"kind": "presentation", "delayMs": delay_ms}))
 
     async def close(self) -> None:
         if self._server:

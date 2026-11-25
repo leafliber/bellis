@@ -63,12 +63,19 @@ async def run(config: Path | None, report: Path, work: Path) -> int:
         watchdog = find_watchdog_executable()
         async with ObsClient(cfg.obs) as obs:
             await obs.preflight()
+            monitor = await obs.request(
+                "GetInputAudioMonitorType", {"inputName": cfg.obs.stage_source}
+            )
+            monitor_type = monitor.data["monitorType"]
+            if monitor_type == "OBS_MONITORING_TYPE_NONE":
+                print("本机监听 Stage 音频时，请在 OBS「高级音频属性」中为该源选择「监听并输出」。")
             record(
                 "PASS",
                 watchdog=watchdog.name,
                 model=cfg.director.model,
                 safe_scene=cfg.obs.safe_scene,
                 stage_source=cfg.obs.stage_source,
+                monitor_type=monitor_type,
             )
             check = "launcher"
             cli = shutil.which("bellis-host", path=str(Path(sys.executable).parent))

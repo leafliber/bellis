@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import bellis_host as host_api
 import pytest
@@ -50,17 +51,26 @@ async def host() -> AsyncIterator[Host]:
 
 async def test_http_and_auth(host: Host) -> None:
     _, safety, stage = host
-    for path, marker in [
-        ("/", "subtitle-hidden"),
-        ("/worklet.js", "registerProcessor"),
-        ("/stage.css", "visibility: hidden"),
-        ("/missing", "404"),
+    urls = [urlsplit(stage.issue_stage_url()) for _ in range(2)]
+    assert all(
+        url.path == "/" and url.query.startswith("n=") and url.fragment.startswith("t=")
+        for url in urls
+    )
+    assert urls[0].query != urls[1].query
+    for path, status, marker in [
+        ("/", 200, "subtitle-hidden"),
+        ("/?n=abc12345", 200, "subtitle-hidden"),
+        ("/worklet.js", 200, "registerProcessor"),
+        ("/stage.css", 200, "visibility: hidden"),
+        ("/missing?n=1", 404, "Not found"),
+        ("/stage?x=1", 404, "Not found"),
     ]:
         reader, writer = await asyncio.open_connection("127.0.0.1", stage.port)
         writer.write(f"GET {path} HTTP/1.1\r\nHost: localhost:{stage.port}\r\n\r\n".encode())
         response = (await reader.read()).decode()
         writer.close()
         await writer.wait_closed()
+        assert response.startswith(f"HTTP/1.1 {status} ")
         assert marker in response and "Cache-Control: no-store" in response
         assert (
             "X-Content-Type-Options: nosniff" in response and "frame-ancestors 'none'" in response
