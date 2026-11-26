@@ -13,21 +13,24 @@ from bellis_common import cred
 from bellis_common.cred import DEFAULT_SESSION_TARGET, SessionInfo
 from bellis_common.wire_codec import ProtocolError
 from bellis_game.io import protocol as rpc
-from bellis_game.loop import GameSession, GameSessionConfig, LoopConfig, cli
+from bellis_game.loop import GameSession, GameSessionConfig, LoopConfig, LoopControl, cli
 from bellis_host import GameLinkConfig, HostGameLink
-from test_fast_loop import DONE, PROFILE, RELEASE, WAIT, Frames, Model
+from test_fast_loop import ASK, DONE, PROFILE, RELEASE, WAIT, Frames, Model
 
 GOAL = ev.GoalSet("map", "Open the map")
 COMPLETED = ev.GoalCompleted("map", "visible", 1, 1)
 STUCK = ev.GoalStuck("map", "stop", "unknown", 0, None)
 RELEASED = ev.ControlReleased("map", RELEASE.reason, RELEASE.verification, 0)
+NEEDED = ev.DecisionNeeded("map", "id", "Which route?", ("A", "B"))
+RESOLVED = ev.DecisionResolved("map", "id", 1, "B")
+HIGHLIGHT = ev.HighlightObserved("map", "Secret passage", 1, 1)
 ACK = ev.CommandAck(True)
 
 
 def test_event_contract() -> None:
-    for cmd in (GOAL, ev.GoalCancel(), ev.PacingPause(), ev.PacingResume()):
+    for cmd in (GOAL, ev.GoalCancel(), ev.PacingPause(), ev.PacingResume(), RESOLVED):
         assert ev.parse_slow_command(cmd.to_dict()) == cmd
-    for event in (COMPLETED, STUCK, RELEASED):
+    for event in (COMPLETED, STUCK, RELEASED, NEEDED, HIGHLIGHT):
         assert ev.parse_fast_event(event.to_dict()) == event
     for raw in (
         {"type": "unknown"},
@@ -35,6 +38,12 @@ def test_event_contract() -> None:
         dict(GOAL.to_dict(), extra=True),
         dict(GOAL.to_dict(), max_steps=True),
         dict(GOAL.to_dict(), timeout_s=-1),
+        *(dict(RESOLVED.to_dict(), chosen_index=i) for i in (-1, 4, True)),
+        *(
+            dict(RESOLVED.to_dict(), **{k: " "})
+            for k in ("goal_id", "decision_id", "chosen_option")
+        ),
+        dict(RESOLVED.to_dict(), reason=False),
     ):
         with pytest.raises(ProtocolError):
             ev.parse_slow_command(raw)
@@ -42,6 +51,16 @@ def test_event_contract() -> None:
         dict(STUCK.to_dict(), steps_taken=-1),
         dict(COMPLETED.to_dict(), last_frame=True),
         dict(RELEASED.to_dict(), verification="unknown"),
+        *(
+            dict(NEEDED.to_dict(), options=opts)
+            for opts in (["a"], ["a", " A "], ["a", ""], ["a", False], list("abcde"))
+        ),
+        *(dict(NEEDED.to_dict(), **{k: ""}) for k in ("question", "goal_id", "decision_id")),
+        dict(NEEDED.to_dict(), reason=2),
+        dict(HIGHLIGHT.to_dict(), summary=" "),
+        dict(HIGHLIGHT.to_dict(), goal_id=""),
+        dict(HIGHLIGHT.to_dict(), step=True),
+        dict(HIGHLIGHT.to_dict(), frame_number=-1),
     ):
         with pytest.raises(ProtocolError):
             ev.parse_fast_event(raw)
@@ -102,6 +121,86 @@ async def test_link_handshake_and_credential_ownership(
             await link.close()
         assert connections == [True, False] and not link.connected
         assert ("link" in store) == replaced
+
+
+async def test_nonterminal_events_before_command_ack() -> None:
+    events: list[ev.FastEvent] = []
+    link = HostGameLink(on_event=events.append)
+    await link.start()
+    peer = await connect(link)
+    second = replace(NEEDED, decision_id="second")
+
+    def command(raw: object) -> dict[str, object]:
+        cmd = ev.parse_slow_command(raw)
+        if cmd == GOAL:
+            messages = (HIGHLIGHT, NEEDED)
+        else:
+            assert cmd == RESOLVED
+            messages = (second, replace(HIGHLIGHT, goal_id="other", summary="stale"))
+        for event in messages:
+            peer.notify(ev.AgentLinkMethods.GAME_EVENT, event.to_dict())
+        return ACK.to_dict()
+
+    try:
+        peer.handle(ev.AgentLinkMethods.HOST_COMMAND, command)
+        await peer.request(
+            ev.AgentLinkMethods.AGENT_HELLO, ev.AgentHelloParams("hsr", "HSR").to_dict()
+        )
+        assert await link.set_goal(GOAL) == ACK
+        assert (
+            link.pending_decision == NEEDED and link.snapshot().last_highlight == HIGHLIGHT.summary
+        )
+        assert await link.resolve_decision(RESOLVED) == ACK
+        snap = link.snapshot()
+        assert snap.pending_decision == second and snap.active_goal_id == GOAL.goal_id
+        assert snap.last_highlight == HIGHLIGHT.summary and snap.last_outcome is None
+        assert events[:3] == [HIGHLIGHT, NEEDED, second] and events[-1].goal_id == "other"
+    finally:
+        await peer.close()
+        await link.close()
+    assert link.snapshot().last_highlight is None and link.pending_decision is None
+
+
+@pytest.mark.parametrize("cancel_request", [False, True])
+async def test_pending_decision_survives_failed_replacement(cancel_request: bool) -> None:
+    link = HostGameLink()
+    await link.start()
+    peer = await connect(link)
+    received, reply = asyncio.Event(), asyncio.Event()
+    replacement = replace(GOAL, goal_id="replacement")
+    rejected = ev.CommandAck(False, "rejected")
+
+    async def command(raw: object) -> dict[str, object]:
+        cmd = ev.parse_slow_command(raw)
+        if cmd == GOAL:
+            peer.notify(ev.AgentLinkMethods.GAME_EVENT, NEEDED.to_dict())
+            return ACK.to_dict()
+        assert cmd == replacement
+        received.set()
+        await reply.wait()
+        return rejected.to_dict()
+
+    try:
+        peer.handle(ev.AgentLinkMethods.HOST_COMMAND, command)
+        hello = ev.AgentHelloParams("hsr", "HSR")
+        await peer.request(ev.AgentLinkMethods.AGENT_HELLO, hello.to_dict())
+        assert await link.set_goal(GOAL) == ACK
+        async with asyncio.timeout(3), asyncio.TaskGroup() as tasks:
+            attempt = tasks.create_task(link.set_goal(replacement))
+            await received.wait()
+            assert link.snapshot().pending_decision == NEEDED
+            if cancel_request:
+                attempt.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await attempt
+            else:
+                reply.set()
+                assert await attempt == rejected
+        assert link.pending_decision == NEEDED and link.snapshot().active_goal_id == GOAL.goal_id
+    finally:
+        reply.set()
+        await peer.close()
+        await link.close()
 
 
 class Core:
@@ -186,6 +285,81 @@ async def test_cancel_during_inference(goal_id: str | None) -> None:
         assert await link.cancel_goal(goal_id, reason="changed") == ACK
         assert await events.get() == ev.GoalStuck("map", "cancelled", "changed", 1, 1)
         assert model.cancelled and core.revoked == [1]
+
+
+async def test_decision_parks_generation_and_budget() -> None:
+    model = Model((DONE, dict(ASK, highlight=HIGHLIGHT.summary), DONE))
+    async with running(model) as (link, core, events):
+        assert await link.resolve_decision(RESOLVED) == ev.CommandAck(False, "idle")
+        assert await link.set_goal(GOAL) == ACK
+        first = await events.get()
+        assert isinstance(first, ev.GoalCompleted)
+        goal = replace(GOAL, max_steps=2, timeout_s=0.6)
+        assert await link.set_goal(goal) == ACK
+        assert await events.get() == HIGHLIGHT
+        needed = await events.get()
+        assert isinstance(needed, ev.DecisionNeeded) and needed.options == NEEDED.options
+        snap = link.snapshot()
+        assert snap.active_goal_id == goal.goal_id and snap.last_highlight == HIGHLIGHT.summary
+        assert snap.pending_decision == needed and snap.last_outcome_detail == first.evidence
+        assert snap.last_outcome == ev.GoalCompleted.TAG and core.revoked == [1, 2]
+        assert await link.set_goal(replace(GOAL, goal_id="replacement")) == ev.CommandAck(
+            False, "busy"
+        )
+        assert link.pending_decision == needed
+        beats = core.beats.copy()
+        await asyncio.sleep(goal.timeout_s + 0.1)
+        assert core.beats == beats and events.empty()
+        resolved = replace(RESOLVED, decision_id=needed.decision_id)
+        for bad, reason in (
+            (replace(resolved, goal_id="other"), "goal_mismatch"),
+            (replace(resolved, decision_id="other"), "decision_mismatch"),
+            (replace(resolved, chosen_index=2), "invalid_option"),
+            (replace(resolved, chosen_option="A"), "invalid_option"),
+        ):
+            assert await link.resolve_decision(bad) == ev.CommandAck(False, reason)
+            assert link.pending_decision == needed
+        assert await link.pause_pacing() == ACK
+        assert await link.resolve_decision(resolved) == ACK
+        assert link.pending_decision is None and core.beats == beats
+        assert await link.resolve_decision(resolved) == ev.CommandAck(False, "no_pending_decision")
+        assert await link.resume_pacing() == ACK
+        outcome = await events.get()
+        assert isinstance(outcome, ev.GoalCompleted) and outcome.steps_taken == 2
+        assert core.revoked == [1, 2, 3] and core.beats[-1] == 3
+        (record,) = json.loads(model.prompts[-1])["history"]
+        assert (record["action"], record["summary"], record["status"]) == (
+            "decision",
+            "Which route? -> B",
+            "resolved",
+        )
+
+
+async def test_cancelled_decision_wait_clears_pending_choice() -> None:
+    control = LoopControl()
+    control.begin_decision(NEEDED)
+    waiter = asyncio.create_task(control.wait_decision())
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert control.pending_decision is None
+
+
+@pytest.mark.parametrize("takeover", [True, False])
+async def test_interrupt_parked_decision(takeover: bool) -> None:
+    async with running(Model((ASK,))) as (link, core, events):
+        assert await link.set_goal(GOAL) == ACK
+        assert isinstance(await events.get(), ev.DecisionNeeded)
+        assert await link.pause_pacing() == ACK
+        if takeover:
+            core.session.on_released(RELEASE)
+            assert await events.get() == replace(RELEASED, steps_taken=1)
+        else:
+            assert await link.cancel_goal() == ACK
+            assert await events.get() == ev.GoalStuck("map", "cancelled", "cancelled", 1, 1)
+        assert link.pending_decision is None and link.snapshot().active_goal_id is None
+        assert set(core.beats) == {1}
 
 
 async def test_pause_preserves_active_time_and_history() -> None:

@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections import deque
+from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import fields, replace
 from pathlib import Path
@@ -23,10 +24,12 @@ from bellis_game.io import protocol as rpc
 from bellis_game.loop import (
     ActionRecord,
     ControlReleased,
+    DecisionNeeded,
     FastLoop,
     GoalCompleted,
     GoalSet,
     GoalStuck,
+    HighlightObserved,
     LoopConfig,
     build_system_prompt,
     cli,
@@ -52,6 +55,11 @@ KEY: dict[str, object] = {"action": "key_press", "key": "esc"}
 CLICK: dict[str, object] = {"action": "click", "nx": 0.5, "ny": 0.5, "target": SECRET}
 DONE: dict[str, object] = {"action": "done", "evidence": SECRET}
 WAIT: dict[str, object] = {"action": "wait", "duration_ms": 100}
+ASK: dict[str, object] = {
+    "action": "ask_decision",
+    "question": "Which route?",
+    "options": ["A", "B"],
+}
 INVALID: dict[str, object] = {"action": "key_press", "scan_code": 1}
 ERROR = VlmError("network_error", SECRET)
 type Answer = dict[str, object] | VlmError
@@ -112,7 +120,11 @@ class Session:
     """Drive the production executor with controlled core receipts and post-action captures."""
 
     def __init__(
-        self, *answers: Answer, config: LoopConfig = CONFIG, telemetry: JsonlTelemetry | None = None
+        self,
+        *answers: Answer,
+        config: LoopConfig = CONFIG,
+        telemetry: JsonlTelemetry | None = None,
+        on_event: Callable[[DecisionNeeded | HighlightObserved], None] | None = None,
     ) -> None:
         self.frames, self.model = Frames(), Model(answers)
         self.beats: list[int] = []
@@ -146,6 +158,7 @@ class Session:
             config=config,
             telemetry=telemetry,
             on_step=self.records.append,
+            on_event=on_event,
         )
 
     def send_heartbeat(self, producer: rpc.Producer, seq: int) -> None:
@@ -221,6 +234,37 @@ async def test_completion_history_heartbeat_and_redaction(tmp_path: Path) -> Non
             diff_ratio=record.diff_ratio,
         )
     assert rows[-1]["attrs"] == {"outcome": "GoalCompleted", "reason": "done", "steps": 3}
+
+
+async def test_standalone_decision_unavailable() -> None:
+    session = Session(ASK)
+    outcome = await asyncio.wait_for(session.loop.run_goal(GOAL), 1)
+    assert outcome == GoalStuck(GOAL.goal_id, "decision_unavailable", "Which route?", 1, 1)
+    assert session.revoked == [PRODUCER.generation] and not session.blocks
+
+
+async def test_highlight_delivery_failure_preserves_action() -> None:
+    sink = Mock(side_effect=RuntimeError("unavailable"))
+    session = Session(dict(DONE, highlight="finished"), on_event=sink)
+    assert isinstance(await session.loop.run_goal(GOAL), GoalCompleted)
+    sink.assert_called_once_with(HighlightObserved(GOAL.goal_id, "finished", 1, 1))
+
+
+async def test_highlight_throttling() -> None:
+    events: list[DecisionNeeded | HighlightObserved] = []
+    session = Session(
+        dict(WAIT, highlight="first"),
+        dict(WAIT, highlight="adjacent"),
+        dict(WAIT, highlight="first"),
+        dict(DONE, highlight="x" * 170),
+        on_event=events.append,
+        config=replace(CONFIG, max_frame_age_s=5),
+    )
+    assert isinstance(await session.loop.run_goal(GOAL), GoalCompleted)
+    assert events == [
+        HighlightObserved(GOAL.goal_id, "first", 1, 1),
+        HighlightObserved(GOAL.goal_id, "x" * 160, 4, 1),
+    ]
 
 
 async def test_next_model_frame_follows_settle(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -503,11 +547,15 @@ def test_system_prompt_scopes_actions_and_logical_keys() -> None:
         "nx ticks",
         "ny ticks",
         "Omit unused",
+        "highlight",
+        "2 to 4 distinct short choices",
         "menu icons are not visible yet, use wait instead of clicking background",
         "never repeat a click that returned to the previous screen",
     ):
         assert rule in prompt
-    assert "[0.0, 1.0]" in prompt and "click | key_press | wait | done | stop" in prompt
+    assert (
+        "[0.0, 1.0]" in prompt and "click | key_press | wait | done | stop | ask_decision" in prompt
+    )
     click, done = (json.loads(line) for line in prompt.splitlines() if line.startswith("{"))
     assert (click["action"], done["action"]) == ("click", "done")
     assert set(click) == {"observation", "action", "nx", "ny", "target"}

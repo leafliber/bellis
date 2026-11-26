@@ -3,6 +3,9 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from time import perf_counter_ns
+from typing import cast
+
+from bellis_common.agent_events import valid_decision_options
 
 from bellis_game.io import RingFrame
 from bellis_game.io import protocol as rpc
@@ -73,16 +76,35 @@ class StopProposal:
         _text(self.reason, "reason")
 
 
-type ActionProposal = ClickProposal | KeyProposal | WaitProposal | DoneProposal | StopProposal
+@dataclass(frozen=True, slots=True)
+class AskDecisionProposal:
+    question: str
+    options: tuple[str, ...]
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        _text(self.question, "question")
+        _text(self.reason, "reason", optional=True)
+        if not valid_decision_options(self.options):
+            raise ProposalError("expected 2 to 4 distinct non-empty options")
+
+
+type ActionProposal = (
+    ClickProposal | KeyProposal | WaitProposal | DoneProposal | StopProposal | AskDecisionProposal
+)
 
 
 @dataclass(frozen=True, slots=True)
 class AgentDecision:
     observation: str
     proposal: ActionProposal
+    highlight: str = ""
 
     def __post_init__(self) -> None:
         _text(self.observation, "observation")
+        object.__setattr__(
+            self, "highlight", _text(self.highlight, "highlight", optional=True).strip()
+        )
 
 
 DECISION_REQUIRED_KEYS = frozenset({"observation", "action"})
@@ -90,10 +112,12 @@ _ACTION_FIELDS = {
     "click": {"nx", "ny", "target", "expected_effect"},
     "key_press": {"key", "reason", "expected_effect"},
     "wait": {"duration_ms", "reason"},
+    "ask_decision": {"question", "options", "reason"},
     "done": {"evidence"},
     "stop": {"reason", "detail"},
 }
-DECISION_ALLOWED_KEYS = DECISION_REQUIRED_KEYS.union(*_ACTION_FIELDS.values())
+_COMMON_KEYS = DECISION_REQUIRED_KEYS | {"highlight"}
+DECISION_ALLOWED_KEYS = _COMMON_KEYS.union(*_ACTION_FIELDS.values())
 _NULLABLE_KEYS = DECISION_ALLOWED_KEYS - DECISION_REQUIRED_KEYS
 
 
@@ -102,7 +126,7 @@ def parse_agent_decision(raw: Mapping[str, object]) -> AgentDecision:
     match raw:
         case {"observation": str() as observation, "action": str() as action}:
             allowed = _ACTION_FIELDS.get(action)
-            if allowed is None or raw.keys() - DECISION_REQUIRED_KEYS - allowed:
+            if allowed is None or raw.keys() - _COMMON_KEYS - allowed:
                 raise ProposalError("unknown action or unexpected action fields")
         case _:
             raise ProposalError("expected an observation and a supported action")
@@ -128,11 +152,20 @@ def parse_agent_decision(raw: Mapping[str, object]) -> AgentDecision:
             if type(duration) is not int:
                 raise ProposalError("duration_ms must be an integer")
             proposal = WaitProposal(duration, optional("reason"))
+        case "ask_decision":
+            options = raw.get("options")
+            if not isinstance(options, list):
+                raise ProposalError("expected options list")
+            proposal = AskDecisionProposal(
+                _text(raw.get("question"), "question"),
+                tuple(_text(item, "option").strip() for item in cast(list[object], options)),
+                optional("reason"),
+            )
         case "done":
             proposal = DoneProposal(_text(raw.get("evidence"), "evidence"))
         case _:
             proposal = StopProposal(_text(raw.get("reason"), "reason"), optional("detail"))
-    return AgentDecision(observation, proposal)
+    return AgentDecision(observation, proposal, optional("highlight"))
 
 
 @dataclass(frozen=True, slots=True)

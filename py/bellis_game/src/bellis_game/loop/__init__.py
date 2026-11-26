@@ -9,12 +9,27 @@ from .agent import (
     build_system_prompt,
     build_user_prompt,
 )
-from .events import ActionRecord, ControlReleased, GoalCompleted, GoalSet, GoalStuck, LoopOutcome
+from .events import (
+    ActionRecord,
+    ControlReleased,
+    DecisionNeeded,
+    DecisionResolved,
+    FastEvent,
+    GoalCompleted,
+    GoalSet,
+    GoalStuck,
+    HighlightObserved,
+    LoopOutcome,
+)
 from .session import GameSession, GameSessionConfig
 
 __all__ = [
     "ActionRecord",
     "ControlReleased",
+    "DecisionNeeded",
+    "DecisionResolved",
+    "FastEvent",
+    "HighlightObserved",
     "FastLoop",
     "GameSession",
     "GameSessionConfig",

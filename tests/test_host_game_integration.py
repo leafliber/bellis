@@ -1,7 +1,7 @@
 import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from contextlib import asynccontextmanager, closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,10 +22,10 @@ from bellis_host import (
     StageConfig,
     parse_game_directive,
 )
-from test_console_and_slow_agent import Browser, Model
-from test_fast_loop import DONE, PROFILE, Frames
+from test_console_and_slow_agent import Browser, Model, Player
+from test_fast_loop import ASK, DONE, PROFILE, WAIT, Frames
 from test_fast_loop import Model as Vision
-from test_game_agent_session import Core, connect
+from test_game_agent_session import NEEDED, RESOLVED, Core, connect
 from test_host_game_permit import pipe, respond, until
 from test_obs_and_watchdog import ObsServer, assert_batch
 from test_obs_and_watchdog import obs as obs
@@ -44,6 +44,11 @@ def test_parse_game_directives() -> None:
     assert isinstance(first, ev.GoalSet) and isinstance(second, ev.GoalSet)
     assert first.goal_id and first.goal_id != second.goal_id
     assert (first.description, first.max_steps, first.timeout_s) == (GOAL["description"], 8, 90.0)
+    directive = {"command": "resolve_decision", "chosen_index": 1}
+    assert parse_game_directive(directive, pending_decision=NEEDED) == RESOLVED
+    full = dict(directive, goal_id="map", decision_id="id", chosen_option="B")
+    assert parse_game_directive(full) == parse_game_directive(full, pending_decision=NEEDED)
+    assert parse_game_directive(full) == RESOLVED
     for steps, timeout in ((1, 5), (20, 180)):
         raw = dict(GOAL, goal_id="obs", max_steps=steps, timeout_s=timeout)
         assert parse_game_directive(raw) == ev.GoalSet("obs", GOAL["description"], steps, timeout)
@@ -68,10 +73,32 @@ def test_parse_game_directives() -> None:
     dict(GOAL, timeout_s=float("inf")), dict(GOAL, timeout_s=10**400),
     {"command": "cancel_goal", "goal_id": False}, {"command": "pause_pacing", "reason": 4},
     {"command": "resume_pacing", "goal_id": None},
+    {"command": "resolve_decision", "chosen_index": 1},
+    *(dict(command="resolve_decision", goal_id="a", decision_id="d", chosen_option="B",
+           chosen_index=i) for i in (True, -1, 4, 0.5)),
 ])  # fmt: skip
 def test_invalid_directive(raw: object) -> None:
     with pytest.raises(ValueError):
         parse_game_directive(raw)
+
+
+@pytest.mark.parametrize(
+    ("fields", "error"),
+    [
+        ({"goal_id": None}, "goal_mismatch"),
+        ({"decision_id": "old"}, "decision_mismatch"),
+        ({"chosen_index": 2}, "chosen_index out of range"),
+        ({"chosen_index": True}, "chosen_index"),
+        ({"chosen_option": "A"}, "option_mismatch"),
+        ({"reason": None}, "expected str"),
+        ({"extra": 1}, "key mismatch"),
+    ],
+)
+def test_invalid_pending_directive(fields: dict[str, object], error: str) -> None:
+    with pytest.raises(ValueError, match=error):
+        parse_game_directive(
+            {"command": "resolve_decision", "chosen_index": 1, **fields}, pending_decision=NEEDED
+        )
 
 
 @dataclass
@@ -115,7 +142,7 @@ async def studio(
 
 
 @asynccontextmanager
-async def agent(app: HostApp, vision: Vision) -> AsyncGenerator[GameSession]:
+async def agent(app: HostApp, vision: Vision, *, timeout: float = 6) -> AsyncGenerator[GameSession]:
     core = Core()  # Rejects every physical action block.
     config = GameSessionConfig(
         link_credentials=app.game_link.credentials, loop_config=LoopConfig(max_frame_age_s=30)
@@ -123,7 +150,7 @@ async def agent(app: HostApp, vision: Vision) -> AsyncGenerator[GameSession]:
     core.session = GameSession(core, Frames(), vision, PROFILE, config)
     run = asyncio.create_task(core.session.run())
     try:
-        async with asyncio.timeout(6):
+        async with asyncio.timeout(timeout):
             await app.game_link.wait_connected(2)
             yield core.session
     finally:
@@ -340,3 +367,173 @@ async def test_rate_limit_preserves_stop_controls(studio: Studio) -> None:
         with pytest.raises(SafetyError, match="rate_limited"):
             await app.game.set_goal(ev.GoalSet("observation", "查看画面"))
         assert (await app.game.pause_pacing()).accepted
+
+
+def assert_journaled_decision(app: HostApp, source: IntentSource) -> None:
+    with closing(sqlite3.connect(app.config.db_path)) as db:
+        assert db.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+        ((key,),) = db.execute("SELECT key FROM intents WHERE type='game.decision_resolved'")
+    record = app.store.get_intent(key)
+    assert record and record.source == source and record.capabilities == {"game.control"}
+    assert record.state == "succeeded" and record.result == ev.CommandAck(True).to_dict()
+
+
+async def test_operator_decision_and_highlight(studio: Studio) -> None:
+    app, api = studio.app, studio.browser.api
+    path = "/api/game/decision"
+    assert (await api(path, {"chosen_index": 0}))[0] == 503
+    vision = Vision((dict(WAIT, highlight="发现了岔路"), ASK, DONE))
+    async with agent(app, vision), page(app.stage) as ws:
+        app.safety.start_live()
+        studio.model.parts = [
+            json.dumps(dict(action="speak", text="前面有岔路。"), ensure_ascii=False)
+        ]
+        status, goal = await api("/api/game/goal", {"description": "查看路线"})
+        assert status == 200 and goal["ok"]
+        sid = await hear(ws, "前面有岔路。")
+        context = studio.context()["game"]
+        assert context["events"][0]["type"] == "highlight_observed"
+        assert context["snapshot"]["active_goal_id"] == goal["goal_id"]
+        studio.model.parts = ['{"action":"silence"}']
+        await acknowledge(ws, sid)
+        await until(lambda: app.game_link.pending_decision is not None)
+        snap = (await api("/api/status"))[1]["game_link"]
+        decision = snap["pending_decision"]
+        assert decision["question"] == ASK["question"] and decision["options"] == ["A", "B"]
+        assert snap["active_goal_id"] == goal["goal_id"] and snap["last_outcome"] is None
+        assert snap["last_highlight"] == "发现了岔路"
+        for invalid in (
+            {},
+            {"chosen_index": True},
+            {"chosen_index": 2},
+            {"chosen_index": 0.5},
+            {"chosen_index": 0, "reason": None},
+            {"chosen_index": 0, "decision_id": 1},
+            {"chosen_index": 0, "chosen_option": "A"},
+        ):
+            assert (await api(path, invalid))[0] == 400
+        args = {"chosen_index": 1, "decision_id": decision["decision_id"], "reason": "右侧"}
+        assert (await api(path, dict(args, decision_id="old")))[1]["reason"] == "decision_mismatch"
+        app.safety.pause_live(reason="test")
+        assert (await api(path, args))[0] == 409
+        app.safety.start_live()
+        assert await api(path, args) == (200, {"ok": True, "reason": ""})
+        await until(lambda: isinstance(app.game_link.last_event, ev.GoalCompleted))
+        assert json.loads(vision.prompts[-1])["history"][-1]["summary"] == "Which route? -> B"
+        assert app.game_link.pending_decision is None
+        assert (await api(path, args))[1]["reason"] == "no_pending_decision"
+        for index in (-1, 4, 99):
+            assert (await api(path, {"chosen_index": index}))[0] == 400
+        assert_journaled_decision(app, IntentSource.OPERATOR)
+
+
+async def test_vote_end_during_safe_stop_expires_with_decision(studio: Studio) -> None:
+    app = studio.app
+    async with agent(app, Vision((ASK,))):
+        app.safety.start_live()
+        assert (await app.game.set_goal(ev.GoalSet("fork", "Choose a route"))).accepted
+        await until(lambda: app.game_link.pending_decision is not None)
+        app.safety.pause_live(reason="operator")
+        app.director.notify_vote_ended()
+        assert (await app.game.cancel_goal()).accepted
+        await until(lambda: isinstance(app.game_link.last_event, ev.GoalStuck))
+        assert app.game_link.pending_decision is None
+        turns = len(studio.model.messages)
+        app.safety.start_live()
+        assert app.director.submit_danmaku("v", "viewer", "hello")
+        await until(lambda: len(studio.model.messages) > turns)
+        assert studio.context()["trigger"] == "danmaku"
+
+
+@pytest.mark.parametrize(
+    ("close", "ballots", "outcome"),
+    [
+        ("deadline", ["2"], "winner"),
+        ("manual", ["2"], "winner"),
+        ("manual", ["1", "2"], "tie"),
+        ("manual", [], "none"),
+    ],
+)
+async def test_vote_resolves_parked_decision(
+    studio: Studio, monkeypatch: pytest.MonkeyPatch, close: str, ballots: list[str], outcome: str
+) -> None:
+    app, api, model = studio.app, studio.browser.api, studio.model
+    vision = Vision((ASK, DONE))
+    voting_turn, release_turn = asyncio.Event(), asyncio.Event()
+    selected = 1 if outcome == "winner" else 0
+    line = f"那就走{NEEDED.options[selected]}吧。"
+    resolution_contexts: list[dict[str, Any]] = []
+
+    async def respond_to_context(
+        messages: Sequence[dict[str, str]], *, cancel: asyncio.Event | None = None
+    ) -> AsyncIterator[str]:
+        model.messages.append(messages)
+        context = studio.context()
+        game = context["game"]
+        pending = game["snapshot"]["pending_decision"]
+        if context["trigger"] == "vote_ended" and pending:
+            resolution_contexts.append(context)
+            winners = context["ended_vote"]["winners"]
+            yield json.dumps(
+                dict(
+                    action="speak",
+                    text=line,
+                    game={
+                        "command": "resolve_decision",
+                        "chosen_index": winners[0] if winners else 0,
+                    },
+                ),
+                ensure_ascii=False,
+            )
+        elif any(e["type"] == "decision_needed" for e in game["events"]):
+            yield json.dumps(
+                dict(
+                    action="vote",
+                    question=pending["question"],
+                    options=pending["options"],
+                    duration_s=10,
+                )
+            )
+        else:
+            if context["active_vote"] and close == "manual" and ballots:
+                voting_turn.set()
+                await release_turn.wait()
+            yield '{"action":"silence"}'
+
+    monkeypatch.setattr(model, "stream_chat", respond_to_context)
+    async with agent(app, vision, timeout=18), page(app.stage) as ws:
+        player = asyncio.create_task(Player().play(ws))
+        try:
+            app.safety.start_live()
+            assert (await api("/api/game/goal", {"description": "查看岔路"}))[1]["ok"]
+            await until(lambda: app.audience.active_vote() is not None)
+            for i, ballot in enumerate(ballots):
+                assert (
+                    await api(
+                        "/api/danmaku", dict(viewer_id=str(i), viewer_name="观众", text=ballot)
+                    )
+                )[1]["ok"]
+            if close == "manual":
+                if ballots:
+                    await voting_turn.wait()
+                assert (await api("/api/vote/close", {}))[1]["vote"]["outcome"] == outcome
+                release_turn.set()
+            else:
+                await asyncio.wait_for(_wait_for_vote_close(app), 12)
+            await until(lambda: isinstance(app.game_link.last_event, ev.GoalCompleted))
+            await until(lambda: line in app.speech.recent_heard())
+            (context,) = resolution_contexts
+            assert context["game"]["snapshot"]["pending_decision"]["options"] == ["A", "B"]
+            assert context["ended_vote"]["outcome"] == outcome and context["active_vote"] is None
+            (record,) = json.loads(vision.prompts[-1])["history"]
+            assert record["summary"] == f"Which route? -> {NEEDED.options[selected]}"
+            assert app.game_link.pending_decision is None
+            assert_journaled_decision(app, IntentSource.AGENT)
+        finally:
+            player.cancel()
+            await asyncio.gather(player, return_exceptions=True)
+
+
+async def _wait_for_vote_close(app: HostApp) -> None:
+    while app.audience.active_vote() is not None:
+        await asyncio.sleep(0.05)

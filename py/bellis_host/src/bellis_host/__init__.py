@@ -23,13 +23,8 @@ from .director import (
     build_messages,
     resolve_llm_api_key,
 )
-from .game_link import (
-    GameController,
-    GameLinkConfig,
-    GameLinkSnapshot,
-    HostGameLink,
-    parse_game_directive,
-)
+from .game_control import GameController, parse_game_directive
+from .game_link import GameLinkConfig, GameLinkSnapshot, HostGameLink
 from .game_permit import GamePermitConfig, GamePermitSnapshot, HostGamePermit
 from .obs import (
     EmergencyOutcome,

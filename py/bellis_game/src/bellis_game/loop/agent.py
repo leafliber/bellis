@@ -2,11 +2,12 @@
 
 import asyncio
 from collections import deque
-from collections.abc import Callable, Coroutine
-from contextlib import suppress
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Protocol
+from uuid import uuid4
 
 from bellis_common.channel import ChannelError, RpcError
 from bellis_common.telemetry import JsonlTelemetry, new_trace_id
@@ -65,6 +66,9 @@ class LoopControl:
         self.paused_event = asyncio.Event()
         self.resumed_event = asyncio.Event()
         self.resumed_event.set()
+        self.pending_decision: events.DecisionNeeded | None = None
+        self._decision_ready = asyncio.Event()
+        self._resolved: events.DecisionResolved | None = None
         self.cancel_reason = "cancelled"
         self._pause_requested = False
 
@@ -77,8 +81,39 @@ class LoopControl:
         return self.paused_event.is_set()
 
     def cancel(self, reason: str = "cancelled") -> None:
+        self.pending_decision = None
         self.cancel_reason = reason
         self.cancel_event.set()
+
+    def begin_decision(self, decision: events.DecisionNeeded) -> None:
+        self.pending_decision = decision
+        self._resolved = None
+        self._decision_ready.clear()
+
+    def resolve_decision(self, cmd: events.DecisionResolved) -> str | None:
+        pending = self.pending_decision
+        if pending is None:
+            return "no_pending_decision"
+        if cmd.goal_id != pending.goal_id:
+            return "goal_mismatch"
+        if cmd.decision_id != pending.decision_id:
+            return "decision_mismatch"
+        if not 0 <= cmd.chosen_index < len(pending.options) or (
+            cmd.chosen_option != pending.options[cmd.chosen_index]
+        ):
+            return "invalid_option"
+        self._resolved = cmd
+        self.pending_decision = None
+        self._decision_ready.set()
+        return None
+
+    async def wait_decision(self) -> events.DecisionResolved:
+        try:
+            await self._decision_ready.wait()
+        finally:
+            self.pending_decision = None
+        assert self._resolved is not None
+        return self._resolved
 
     def pause(self) -> None:
         self._pause_requested = True
@@ -113,10 +148,12 @@ class FastLoop:
         executor: skills.ActionExecutor, profile: vision.GameProfile, producer: Producer, *,
         config: LoopConfig | None = None, telemetry: JsonlTelemetry | None = None,
         on_step: Callable[[ActionRecord], None] | None = None,
+        on_event: Callable[[events.DecisionNeeded | events.HighlightObserved], None] | None = None,
     ) -> None:  # fmt: skip
         self._core, self._frames, self._vlm = core, frames, vlm
         self._executor, self._profile, self._producer = executor, profile, producer
         self._config = config or LoopConfig()
+        self._on_event = on_event
         self._telemetry, self._on_step = telemetry, on_step
         self._heartbeat: asyncio.Task[None] | None = None
         self._work: asyncio.Task[LoopOutcome | None] | None = None
@@ -138,8 +175,7 @@ class FastLoop:
         if self._heartbeat:
             self._heartbeat.cancel()
         try:
-            with suppress(ChannelError, RpcError):
-                await self._core.revoke_producer(self._producer.generation)
+            await self._core.revoke_producer(self._producer.generation)
         finally:
             if self._heartbeat:
                 await asyncio.gather(self._heartbeat, return_exceptions=True)
@@ -148,7 +184,8 @@ class FastLoop:
         if self._work:
             self._work.cancel()
         try:
-            await self._revoke()
+            with suppress(ChannelError, RpcError):
+                await self._revoke()
         finally:
             if self._work:
                 await asyncio.gather(self._work, return_exceptions=True)
@@ -225,12 +262,10 @@ class FastLoop:
                     await asyncio.sleep(self._config.frame_poll_interval_s)
         return None
 
+    @asynccontextmanager
     async def _hold(
-        self,
-        control: LoopControl,
-        next_producer: Callable[[], Producer] | None,
-        budget: asyncio.Timeout,
-    ) -> None:
+        self, control: LoopControl, advance: Callable[[], Producer] | None, budget: asyncio.Timeout
+    ) -> AsyncGenerator[None]:
         clock = asyncio.get_running_loop().time
         deadline = budget.when()
         assert deadline is not None
@@ -238,23 +273,20 @@ class FastLoop:
         budget.reschedule(None)
         self._executor.begin_pause()
         await self._revoke()
-        while control.take_pause():
+        yield
+        while not (self._executor.control_released or control.cancelled) and control.take_pause():
             await control.resumed_event.wait()
         if self._executor.control_released or control.cancelled:
             return
         old = self._producer
-        producer = next_producer() if next_producer else Producer(old.id, old.generation + 1)
+        producer = advance() if advance else Producer(old.id, old.generation + 1)
         self._executor.switch_producer(producer)
         self._producer = producer
         budget.reschedule(clock() + remaining)
         self._heartbeat = asyncio.create_task(self._beat())
 
     async def _observe(
-        self,
-        goal: GoalSet,
-        step: int,
-        history: deque[ActionRecord],
-        system: str,
+        self, goal: GoalSet, step: int, history: deque[ActionRecord], system: str
     ) -> tuple[RingFrame, vision.EncodedFrame, vision.VlmJsonResult] | GoalStuck:
         frame = await self._fresh_frame()
         if frame is None:
@@ -285,11 +317,13 @@ class FastLoop:
     ) -> LoopOutcome | None:
         history: deque[ActionRecord] = deque(maxlen=self._config.history_limit)
         errors = no_change = 0
+        last_highlight, highlight_step = "", -1
         system = build_system_prompt(self._profile)
         clock = asyncio.get_running_loop().time
         while self._steps < goal.max_steps:
             if control.take_pause():
-                await self._hold(control, next_producer, budget)
+                async with self._hold(control, next_producer, budget):
+                    pass
             if self._executor.control_released or control.cancelled:
                 return None
             deadline = budget.when()
@@ -334,9 +368,38 @@ class FastLoop:
                 errors = 0
                 if self._executor.control_released or control.cancelled or clock() >= deadline:
                     return None
+                highlight = decision.highlight[:160]
+                new_highlight = highlight and highlight != last_highlight
+                if self._on_event and new_highlight and step - highlight_step >= 2:
+                    event = events.HighlightObserved(goal.goal_id, highlight, step, number)
+                    with suppress(Exception):  # Commentary delivery cannot interrupt an action.
+                        self._on_event(event)
+                        last_highlight, highlight_step = highlight, step
                 proposal = decision.proposal
                 terminal: GoalCompleted | GoalStuck | None = None
-                if isinstance(proposal, skills.DoneProposal):
+                if isinstance(proposal, skills.AskDecisionProposal):
+                    action = "decision"
+                    if self._on_event is None:
+                        status = "decision_unavailable"
+                        return self._stuck(goal, status, proposal.question)
+                    async with self._hold(control, next_producer, budget):
+                        if self._executor.control_released or control.cancelled:
+                            return None
+                        needed = events.DecisionNeeded(
+                            goal.goal_id,
+                            uuid4().hex,
+                            proposal.question,
+                            proposal.options,
+                            proposal.reason,
+                        )
+                        control.begin_decision(needed)
+                        self._on_event(needed)
+                        resolved = await control.wait_decision()
+                    if self._executor.control_released or control.cancelled:
+                        return None
+                    no_change = 0
+                    summary, status = f"{needed.question} -> {resolved.chosen_option}", "resolved"
+                elif isinstance(proposal, skills.DoneProposal):
                     action = status = "done"
                     summary = proposal.evidence
                     terminal = GoalCompleted(goal.goal_id, summary, step, number)
@@ -387,11 +450,11 @@ class FastLoop:
             finally:
                 if self._executor.control_released:
                     status = Status.CONTROL_RELEASED
-                elif clock() >= deadline:
+                elif (deadline := budget.when()) is not None and clock() >= deadline:
                     status = "goal_timeout"
                 attrs = dict(
                     step=step, frame_number=number, action=action, status=status, diff_ratio=ratio
                 )
-                ok = status in ("done", Status.VERIFIED_CHANGED, Status.WAITED)
+                ok = status in ("done", "resolved", Status.VERIFIED_CHANGED, Status.WAITED)
                 self._span("loop.step", start, ok, **attrs)
         return self._stuck(goal, "max_steps_exceeded", "step budget exhausted")

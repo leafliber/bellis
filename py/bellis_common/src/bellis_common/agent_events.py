@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from math import isfinite
-from typing import Final
+from typing import Final, cast
 
 from .permit_messages import ReleaseReason, ReleaseVerification
 from .wire_codec import ProtocolError, TaggedModel, WireModel, decode_tagged
@@ -138,14 +138,83 @@ class ControlReleased(TaggedModel):
         _count(self.steps_taken)
 
 
-type SlowCommand = GoalSet | GoalCancel | PacingPause | PacingResume
-type FastEvent = GoalCompleted | GoalStuck | ControlReleased
-type LoopOutcome = FastEvent
+def valid_decision_options(options: object) -> bool:
+    if not isinstance(options, tuple):
+        return False
+    items = cast(tuple[object, ...], options)
+    if not 2 <= len(items) <= 4:
+        return False
+    distinct = {item.strip().casefold() for item in items if isinstance(item, str) and item.strip()}
+    return len(distinct) == len(items)
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionNeeded(TaggedModel):
+    TAG = "decision_needed"
+    goal_id: str
+    decision_id: str
+    question: str
+    options: tuple[str, ...]
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        _text(self.goal_id)
+        _text(self.decision_id)
+        _text(self.question)
+        if not valid_decision_options(self.options):
+            raise ProtocolError("expected 2 to 4 distinct non-empty options")
+        if not isinstance(self.reason, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ProtocolError("expected string reason")
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionResolved(TaggedModel):
+    TAG = "decision_resolved"
+    goal_id: str
+    decision_id: str
+    chosen_index: int
+    chosen_option: str
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        _text(self.goal_id)
+        _text(self.decision_id)
+        _text(self.chosen_option)
+        if type(self.chosen_index) is not int or not 0 <= self.chosen_index <= 3:
+            raise ProtocolError("chosen_index out of range")
+        if not isinstance(self.reason, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ProtocolError("expected string reason")
+
+
+@dataclass(frozen=True, slots=True)
+class HighlightObserved(TaggedModel):
+    TAG = "highlight_observed"
+    goal_id: str
+    summary: str
+    step: int
+    frame_number: int
+
+    def __post_init__(self) -> None:
+        _text(self.goal_id)
+        _text(self.summary)
+        _count(self.step)
+        _count(self.frame_number)
+
+
+type SlowCommand = GoalSet | GoalCancel | PacingPause | PacingResume | DecisionResolved
+type LoopOutcome = GoalCompleted | GoalStuck | ControlReleased
+type FastEvent = LoopOutcome | DecisionNeeded | HighlightObserved
 
 
 def parse_slow_command(raw: object) -> SlowCommand:
-    return decode_tagged(raw, (GoalSet, GoalCancel, PacingPause, PacingResume), "host.command")
+    return decode_tagged(
+        raw, (GoalSet, GoalCancel, PacingPause, PacingResume, DecisionResolved), "host.command"
+    )
 
 
 def parse_fast_event(raw: object) -> FastEvent:
-    return decode_tagged(raw, (GoalCompleted, GoalStuck, ControlReleased), "game.event")
+    return decode_tagged(
+        raw,
+        (GoalCompleted, GoalStuck, ControlReleased, DecisionNeeded, HighlightObserved),
+        "game.event",
+    )

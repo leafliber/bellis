@@ -129,18 +129,22 @@ class GameSession:
             self._executor = ActionExecutor(self._core, self._frames, self._profile, producer)
             loop = FastLoop(
                 self._core, self._frames, self._vlm, self._executor, self._profile, producer,
-                config=self._config.loop_config, telemetry=self._telemetry, on_step=self._on_step,
+                config=self._config.loop_config, telemetry=self._telemetry,
+                on_step=self._on_step, on_event=self._emit_event,
             )  # fmt: skip
             self._control = LoopControl()
             if self._paused:
                 self._control.pause()
             self._goal_id = cmd.goal_id
             self._goals.create_task(self._run_goal(cmd, loop, self._control))
-        elif isinstance(cmd, ev.GoalCancel):
+        elif isinstance(cmd, ev.GoalCancel | ev.DecisionResolved):
             if self._control is None:
                 return ev.CommandAck(False, "idle").to_dict()
             if cmd.goal_id is not None and cmd.goal_id != self._goal_id:
                 return ev.CommandAck(False, "goal_mismatch").to_dict()
+            if isinstance(cmd, ev.DecisionResolved):
+                error = self._control.resolve_decision(cmd)
+                return ev.CommandAck(error is None, error or "").to_dict()
             self._control.cancel(cmd.reason)
         else:
             self._paused = isinstance(cmd, ev.PacingPause)
@@ -158,9 +162,12 @@ class GameSession:
             outcome = ev.GoalStuck(goal.goal_id, "loop_error", type(exc).__name__, 0, None)
         finally:
             self._control = self._executor = self._goal_id = None
+        self._emit_event(outcome)
+
+    def _emit_event(self, event: ev.FastEvent) -> None:
         if self._peer and self._peer.connection.is_open:
             with suppress(ch.ChannelError):
-                self._peer.notify(Methods.GAME_EVENT, outcome.to_dict())
+                self._peer.notify(Methods.GAME_EVENT, event.to_dict())
 
     async def close(self) -> None:
         self._disconnect()

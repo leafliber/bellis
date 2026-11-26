@@ -3,11 +3,9 @@
 import asyncio
 import os
 import secrets
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from contextlib import AsyncExitStack, suppress
-from dataclasses import asdict, dataclass
-from typing import cast
-from uuid import uuid4
+from dataclasses import dataclass
 
 from bellis_common import agent_events as ev
 from bellis_common import channel as ch
@@ -15,42 +13,6 @@ from bellis_common import cred
 from bellis_common.agent_events import AgentLinkMethods as Methods
 from bellis_common.permit_messages import Empty
 from bellis_common.wire_codec import ProtocolError
-
-from .safety import EmergencySummary, IntentRequest, SafetyCore, SafetyError
-from .store import HostStore, IntentSource, IntentState
-
-
-def parse_game_directive(raw: object) -> ev.SlowCommand:
-    if not isinstance(raw, dict):
-        raise ValueError("expected game directive object")
-    if not all(isinstance(key, str) for key in cast(dict[object, object], raw)):
-        raise ValueError("expected string keys")
-    fields = cast(dict[str, object], raw).copy()
-    command = fields.pop("command", None)
-    if "type" in fields:
-        raise ValueError("invalid directive field")
-    for value in fields.values():
-        if isinstance(value, str):
-            value.encode("utf-8")
-    if command == "set_goal":
-        timeout = fields.get("timeout_s", 90.0)
-        if not isinstance(timeout, int | float) or not 5 <= timeout <= 180:
-            raise ValueError("timeout_s must be between 5 and 180")
-        fields.setdefault("goal_id", uuid4().hex)
-        fields.setdefault("max_steps", 8)
-        goal = ev.GoalSet.from_dict({"type": ev.GoalSet.TAG, "timeout_s": timeout, **fields})
-        if goal.max_steps > 20:
-            raise ValueError("max_steps must be between 1 and 20")
-        return goal
-    if command == "cancel_goal":
-        defaults = ev.GoalCancel().to_dict()
-    elif command == "pause_pacing":
-        defaults = ev.PacingPause().to_dict()
-    elif command == "resume_pacing":
-        defaults = ev.PacingResume().to_dict()
-    else:
-        raise ValueError("unknown game command")
-    return ev.parse_slow_command({**defaults, **fields})
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +39,8 @@ class GameLinkSnapshot:
     paused: bool
     last_outcome: str | None
     last_outcome_detail: str | None
+    pending_decision: ev.DecisionNeeded | None
+    last_highlight: str | None
 
 
 class HostGameLink:
@@ -100,6 +64,9 @@ class HostGameLink:
         self._hello: ev.AgentHelloParams | None = None
         self._goal: ev.GoalSet | None = None
         self._pending_goal: ev.GoalSet | None = None
+        self._pending_decision: ev.DecisionNeeded | None = None
+        self._last_highlight: str | None = None
+        self._last_outcome: ev.LoopOutcome | None = None
         self.last_event: ev.FastEvent | None = None
         self._paused = self._closed = False
         self._connected_event = asyncio.Event()
@@ -109,6 +76,10 @@ class HostGameLink:
     @property
     def connected(self) -> bool:
         return self._hello is not None and self._peer is not None and self._peer.connection.is_open
+
+    @property
+    def pending_decision(self) -> ev.DecisionNeeded | None:
+        return self._pending_decision
 
     async def start(self) -> cred.SessionInfo:
         async with self._lifecycle:
@@ -163,10 +134,21 @@ class HostGameLink:
         except ProtocolError:
             return
         self.last_event = event
-        if self._goal and self._goal.goal_id == event.goal_id:
-            self._goal = None
-        elif self._pending_goal and self._pending_goal.goal_id == event.goal_id:
-            self._pending_goal = None
+        active = self._goal and self._goal.goal_id == event.goal_id
+        starting = self._pending_goal and self._pending_goal.goal_id == event.goal_id
+        if isinstance(event, ev.GoalCompleted | ev.GoalStuck | ev.ControlReleased):
+            self._last_outcome = event
+            if active:
+                self._goal = None
+            if starting:
+                self._pending_goal = None
+            if self._pending_decision and self._pending_decision.goal_id == event.goal_id:
+                self._pending_decision = None
+        elif active or starting:
+            if isinstance(event, ev.DecisionNeeded):
+                self._pending_decision = event
+            else:
+                self._last_highlight = event.summary
         if self._on_event:
             self._on_event(event)
 
@@ -175,6 +157,7 @@ class HostGameLink:
             return
         had_hello = self._hello is not None
         self._peer = self._hello = self._goal = self._pending_goal = None
+        self._pending_decision = self._last_highlight = None
         self._paused = False
         self._connected_event.clear()
         if had_hello and self._on_connection:
@@ -186,16 +169,25 @@ class HostGameLink:
             if peer is None or not self.connected:
                 raise ch.ChannelError("closed", "game-agent is not connected")
             self._pending_goal = command if isinstance(command, ev.GoalSet) else None
+            if self._pending_goal and self._goal is None:
+                self._pending_decision = None
             try:
                 reply = await peer.request(Methods.HOST_COMMAND, command.to_dict())
                 ack = ev.CommandAck.from_dict(reply)
-                if (
-                    isinstance(command, ev.GoalCancel)
-                    and ack == ev.CommandAck(False, "idle")
-                    and peer is self._peer
+                if peer is not self._peer:
+                    return ack
+                pending = self._pending_decision
+                if isinstance(command, ev.GoalCancel) and (ack.accepted or ack.reason == "idle"):
+                    if ack.reason == "idle":
+                        self._goal = None
+                    if pending and command.goal_id in (None, pending.goal_id):
+                        self._pending_decision = None
+                if isinstance(command, ev.DecisionResolved) and (
+                    ack.reason in {"idle", "no_pending_decision"}
+                    or (ack.accepted and pending and pending.decision_id == command.decision_id)
                 ):
-                    self._goal = None
-                if ack.accepted and peer is self._peer:
+                    self._pending_decision = None
+                if ack.accepted:
                     if self._pending_goal:
                         self._goal = self._pending_goal
                     elif isinstance(command, (ev.PacingPause, ev.PacingResume)):
@@ -223,8 +215,11 @@ class HostGameLink:
     async def resume_pacing(self, *, reason: str = "resumed") -> ev.CommandAck:
         return await self.send_command(ev.PacingResume(reason))
 
+    async def resolve_decision(self, command: ev.DecisionResolved) -> ev.CommandAck:
+        return await self.send_command(command)
+
     def snapshot(self) -> GameLinkSnapshot:
-        hello, goal, event = self._hello, self._goal or self._pending_goal, self.last_event
+        hello, goal, event = self._hello, self._goal or self._pending_goal, self._last_outcome
         detail = None
         if isinstance(event, ev.GoalCompleted):
             detail = event.evidence
@@ -235,7 +230,7 @@ class HostGameLink:
         return GameLinkSnapshot(
             self.connected, hello and hello.game_id, hello and hello.display_name,
             goal and goal.goal_id, goal and goal.description, self._paused,
-            event and event.TAG, detail,
+            event and event.TAG, detail, self._pending_decision, self._last_highlight,
         )  # fmt: skip
 
     def _unpublish(self, target: str) -> None:
@@ -251,119 +246,3 @@ class HostGameLink:
                     await self._peer.close()
             finally:
                 await self._resources.aclose()
-
-
-class GameController:
-    def __init__(
-        self,
-        safety: SafetyCore,
-        store: HostStore,
-        link: HostGameLink,
-        *,
-        permit_armed: Callable[[], bool] | None = None,
-    ):
-        self._safety, self._store, self.link = safety, store, link
-        self._permit_armed = permit_armed
-        self._off: Callable[[], None] | None = None
-        self._stops: set[asyncio.Task[None]] = set()
-        self._cancel_task: asyncio.Task[None] | None = None
-        self._admission = asyncio.Lock()
-        self._closed = False
-
-    def start(self) -> None:
-        if self._off or self._closed:
-            return
-        loop = asyncio.get_running_loop()
-
-        def stop() -> None:
-            task = asyncio.create_task(self.cancel_for_stop("emergency"))
-            self._stops.add(task)
-            task.add_done_callback(self._stops.discard)
-
-        def emergency(_: EmergencySummary) -> None:
-            loop.call_soon_threadsafe(stop)
-
-        self._off = self._safety.on_emergency(emergency)
-
-    async def dispatch(
-        self,
-        command: ev.SlowCommand,
-        *,
-        source: IntentSource = IntentSource.AGENT,
-        holder: str = "director",
-    ) -> ev.CommandAck:
-        async with self._admission:
-            if not self.link.connected:
-                raise ch.ChannelError("closed", "game-agent is not connected")
-            if self._closed:
-                raise SafetyError("closed")
-            stopping = isinstance(command, ev.GoalCancel | ev.PacingPause)
-            caps = frozenset({"game.stop" if stopping else "game.control"})
-            request = IntentRequest(
-                holder,
-                f"game:{command.TAG}:{uuid4().hex}",
-                f"game.{command.TAG}",
-                "game.link",
-                command.to_dict(),
-                source,
-                caps,
-                time_sensitive=True,
-            )
-            decision = self._safety.authorize_intent(request)
-            if not decision.allowed or decision.intent is None:
-                raise SafetyError(decision.reason)
-            intent_id = decision.intent.id
-            self._store.mark_executing(intent_id)
-            try:
-                ack = await self.link.send_command(command)
-            except (ch.ChannelError, ch.RpcError, ProtocolError, asyncio.CancelledError) as exc:
-                self._store.finish_intent(intent_id, IntentState.UNKNOWN, error=type(exc).__name__)
-                raise
-            self._store.finish_intent(
-                intent_id,
-                IntentState.SUCCEEDED if ack.accepted else IntentState.FAILED,
-                result=ack.to_dict(),
-                error=None if ack.accepted else ack.reason,
-            )
-            return ack
-
-    async def set_goal(self, goal: ev.GoalSet) -> ev.CommandAck:
-        return await self.dispatch(goal)
-
-    async def cancel_goal(
-        self, goal_id: str | None = None, *, reason: str = "cancelled"
-    ) -> ev.CommandAck:
-        return await self.dispatch(ev.GoalCancel(goal_id, reason))
-
-    async def pause_pacing(self, *, reason: str = "pacing") -> ev.CommandAck:
-        return await self.dispatch(ev.PacingPause(reason))
-
-    async def resume_pacing(self, *, reason: str = "resumed") -> ev.CommandAck:
-        return await self.dispatch(ev.PacingResume(reason))
-
-    async def cancel_for_stop(self, reason: str = "host_stopped") -> None:
-        if self.link.connected and self.link.snapshot().active_goal_id is not None:
-            if self._cancel_task is None or self._cancel_task.done():
-                self._cancel_task = asyncio.create_task(self._cancel_goal(reason))
-            await asyncio.shield(self._cancel_task)
-
-    async def _cancel_goal(self, reason: str) -> None:
-        with suppress(ch.ChannelError, ch.RpcError, ProtocolError):
-            await self.link.cancel_goal(None, reason=reason)
-
-    def director_context(self, events: Sequence[ev.FastEvent]) -> dict[str, object]:
-        return {
-            "snapshot": asdict(self.link.snapshot()),
-            "permit_armed": bool(self._permit_armed and self._permit_armed()),
-            "events": [event.to_dict() for event in events],
-        }
-
-    async def close(self) -> None:
-        self._closed = True
-        if self._off:
-            self._off()
-            self._off = None
-        await asyncio.sleep(0)  # Admit queued emergency callbacks before closing the pipe.
-        await asyncio.gather(*self._stops, return_exceptions=True)
-        if self._cancel_task:
-            await asyncio.gather(self._cancel_task, return_exceptions=True)

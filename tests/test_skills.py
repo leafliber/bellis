@@ -16,6 +16,7 @@ from bellis_game.skills import (
     ActionPolicyError,
     ActionProposal,
     AgentDecision,
+    AskDecisionProposal,
     ClickProposal,
     DoneProposal,
     ExecutionConfig,
@@ -66,6 +67,12 @@ RELEASE_REASONS = [
         ),
         (dict(action="wait", duration_ms=100), WaitProposal(100)),
         (dict(action="wait", duration_ms=5000, reason="loading"), WaitProposal(5000, "loading")),
+        (
+            dict(
+                action="ask_decision", question="Where?", options=[" left ", "right"], reason="fork"
+            ),
+            AskDecisionProposal("Where?", ("left", "right"), "fork"),
+        ),
         (dict(action="done", evidence="menu visible"), DoneProposal("menu visible")),
         (
             dict(action="stop", reason="unknown", detail="new menu"),
@@ -86,6 +93,22 @@ def test_decision(payload: dict[str, object], expected: ActionProposal) -> None:
         {"action": None},
         {"action": []},
         {"action": "scroll"},
+        {"action": "ask_decision", "question": " ", "options": ["a", "b"]},
+        {"action": "ask_decision", "question": "?", "options": ["a", "b"], "reason": 1},
+        *(
+            {"action": "ask_decision", "question": "?", "options": opts}
+            for opts in (
+                [],
+                ["a"],
+                ["a", "b", "c", "d", "e"],
+                ["a", 2],
+                ["a", ""],
+                [" a", "A "],
+                ("a", "b"),
+                "ab",
+            )
+        ),
+        {"action": "done", "evidence": "proof", "highlight": False},
         {"action": "stop", "reason": "exit", "observation": " "},
         {"action": "done", "evidence": "proof", "observation": 1},
         {"action": "key_press"},
@@ -120,12 +143,15 @@ def test_invalid_decision(payload: dict[str, object]) -> None:
         dict(action="wait", duration_ms=100),
         dict(action="done", evidence="proof"),
         dict(action="stop", reason="unknown"),
+        dict(action="ask_decision", question="?", options=["a", "b"]),
     ],
 )
 def test_null_decision_fields(fields: dict[str, object]) -> None:
     required = {"observation": "screen", **fields}
     padded = {**dict.fromkeys(DECISION_ALLOWED_KEYS), **required}
     assert parse_agent_decision(padded) == parse_agent_decision(required)
+    assert parse_agent_decision(dict(required, highlight="  rare  ")).highlight == "rare"
+    assert parse_agent_decision(dict(required, highlight=None)).highlight == ""
     for field in (*required, "unknown"):
         with pytest.raises(ProposalError):
             parse_agent_decision({**padded, field: None})
@@ -139,16 +165,34 @@ def test_action_specific_fields() -> None:
         dict(action="wait", duration_ms=100, reason=""),
         dict(action="done", evidence="proof"),
         dict(action="stop", reason="unknown", detail=""),
+        dict(action="ask_decision", question="?", options=["a", "b"], reason=""),
     ]
-    assert DECISION_REQUIRED_KEYS.union(*payloads) == DECISION_ALLOWED_KEYS
+    assert DECISION_REQUIRED_KEYS.union({"highlight"}, *payloads) == DECISION_ALLOWED_KEYS
     for payload in payloads:
         for field in (
-            (DECISION_ALLOWED_KEYS | {"scan_code", "producer"}) - payload.keys() - {"observation"}
+            (DECISION_ALLOWED_KEYS | {"scan_code", "producer"})
+            - payload.keys()
+            - {"observation", "highlight"}
         ):
             with pytest.raises(ProposalError):
                 parse_agent_decision({"observation": "screen", **payload, field: "extra"})
         with pytest.raises(ProposalError):
             parse_agent_decision(payload)
+
+
+def test_decision_proposal_constructor() -> None:
+    proposal = AskDecisionProposal("Which route?", ("A", "B"))
+    for invalid in (
+        {"question": " "},
+        {"reason": False},
+        {"options": ["A", "B"]},
+        {"options": ("A", " a")},
+        {"options": ("A", 3)},
+    ):
+        with pytest.raises(ProposalError):
+            replace(proposal, **invalid)
+    with pytest.raises(ProposalError):
+        replace(AgentDecision("screen", proposal), highlight=123)
 
 
 def test_resolution() -> None:

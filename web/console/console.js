@@ -3,6 +3,7 @@ const el = id => document.getElementById(id);
 const modes = {live: "直播中", safe_stop: "已暂停", emergency_stop: "紧急停止"};
 let csrf = "";
 let sessionEnded = false;
+let renderedDecisionId = "";
 
 function setAuthenticated(value) {
   document.querySelectorAll("button").forEach(button => { button.disabled = !value; });
@@ -60,6 +61,24 @@ async function refresh() {
     game.display_name, game.paused ? "已暂缓" : game.active_goal_id ? "执行中" : "空闲",
     game.active_goal_description, outcomes[game.last_outcome], game.last_outcome_detail
   ].filter(Boolean).join(" · ") : "游戏端 未连接";
+  el("game-highlight").textContent = game?.last_highlight ? "最近亮点 · " + game.last_highlight : "";
+  const decision = game?.connected && game.pending_decision;
+  el("game-decision").hidden = !decision;
+  if (!decision) {
+    renderedDecisionId = "";
+  } else if (decision.decision_id !== renderedDecisionId) {
+    renderedDecisionId = decision.decision_id;
+    el("decision-question").textContent = decision.question;
+    el("decision-options").replaceChildren(...decision.options.map((option, i) => {
+      const button = document.createElement("button");
+      button.textContent = option;
+      button.disabled = sessionEnded;
+      button.addEventListener("click", () => command("game/decision", {
+        decision_id: decision.decision_id, chosen_index: i
+      }, button));
+      return button;
+    }));
+  }
   el("queue").textContent = "待处理弹幕 " + s.pending_danmaku;
   list("heard", s.recent_heard.length ? s.recent_heard.slice().reverse() : ["暂无播出记录"]);
   const vote = s.active_vote;

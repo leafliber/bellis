@@ -5,6 +5,7 @@ from .actions import DECISION_REQUIRED_KEYS as DECISION_REQUIRED_KEYS
 from .actions import ActionPolicyError as ActionPolicyError
 from .actions import ActionProposal as ActionProposal
 from .actions import AgentDecision as AgentDecision
+from .actions import AskDecisionProposal as AskDecisionProposal
 from .actions import ClickProposal as ClickProposal
 from .actions import DoneProposal as DoneProposal
 from .actions import KeyProposal as KeyProposal

@@ -28,7 +28,8 @@ from . import watchdog
 from .audience import AudienceHub
 from .console import ConsoleConfig, ConsoleServer
 from .director import DirectorConfig, LlmStreamer, OpenAiLlmClient, SlowDirector
-from .game_link import GameController, GameLinkConfig, HostGameLink
+from .game_control import GameController
+from .game_link import GameLinkConfig, HostGameLink
 from .game_permit import GamePermitConfig, HostGamePermit
 from .obs import ObsClient, ObsConfig, ObsError, resolve_obs_password
 from .safety import EmergencySummary, SafetyConfig, SafetyCore

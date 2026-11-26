@@ -21,7 +21,7 @@ from bellis_common.channel import ChannelError
 
 from .audience import AudienceHub, VoteSnapshot
 from .director import SlowDirector
-from .game_link import GameController, parse_game_directive
+from .game_control import GameController, parse_game_directive
 from .game_permit import HostGamePermit
 from .safety import SafetyCore, SafetyError
 from .speech import SpeechArbiter, SpeechPriority, SpeechRequest
@@ -194,6 +194,8 @@ class ConsoleServer:
     async def _end_vote(self, vote: VoteSnapshot) -> None:
         if self.audience and (end := await self.audience.close_at_deadline(vote)) and self.speech:
             await self._say(end[1])
+            if self.director:
+                self.director.notify_vote_ended()
 
     async def _api(self, method: str, path: str, data: Data) -> Data:
         if method == "GET" and path == "/api/status":
@@ -223,6 +225,29 @@ class ConsoleServer:
                     reason=_string(data, "reason", "operator_disarm")
                 )
             return {"ok": True, "token": token}
+        if path == "/api/game/decision":
+            if self.game is None:
+                raise _HttpError(503)
+            index, reason = data.get("chosen_index"), data.get("reason", "")
+            if (
+                data.keys() - {"chosen_index", "decision_id", "reason"}
+                or type(index) is not int
+                or not isinstance(reason, str)
+            ):
+                raise _HttpError(400)
+            decision_id = _string(data, "decision_id") if "decision_id" in data else None
+            reason.encode("utf-8")
+            try:
+                ack = await self.game.resolve_decision(
+                    index,
+                    decision_id=decision_id,
+                    reason=reason,
+                    source=IntentSource.OPERATOR,
+                    holder="operator",
+                )
+            except ChannelError:
+                raise _HttpError(503) from None
+            return {"ok": ack.accepted, "reason": ack.reason}
         if path in {"/api/game/goal", "/api/game/cancel", "/api/game/pause", "/api/game/resume"}:
             return await self._game_command(path.rsplit("/", 1)[1], data)
         if path == "/api/control/live":
@@ -275,6 +300,8 @@ class ConsoleServer:
                 vote, line = end
             if self.speech:
                 await self._say(line)
+            if self.director and path == "/api/vote/close":
+                self.director.notify_vote_ended()
             return {"ok": True, "vote": asdict(vote)}
         else:
             raise _HttpError(404)
