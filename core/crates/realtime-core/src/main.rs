@@ -37,6 +37,13 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let core = match launch.select_core(&options) {
+        Ok(core) => core,
+        Err(error) => {
+            say(format_args!("{error}\n{USAGE}"));
+            return ExitCode::from(2);
+        }
+    };
     let input = match launch.select_input(&options) {
         Ok(input) => input,
         Err(error) => {
@@ -44,7 +51,8 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match session::run(&options, &launch, input, io::stdin()) {
+    let stdin = core.uses_stdin_lifeline().then(io::stdin);
+    match session::run(&options, &core, &launch.role, input, stdin) {
         Ok(_) => ExitCode::SUCCESS,
         Err(error) => {
             say(format_args!("{error}"));

@@ -7,14 +7,18 @@ so they remain 100% deterministic even under locked screens or headless terminal
 from __future__ import annotations
 
 import asyncio
+import os
 import secrets
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
+from bellis_common import cred
 from bellis_common.channel import (
+    ChannelCredentials,
     ChannelError,
+    Connection,
     RpcError,
     RpcPeer,
     connect,
@@ -39,8 +43,12 @@ from bellis_game.io import (
     base_environment,
 )
 from bellis_game.io.protocol import (
+    PROTOCOL_VERSION,
     CaptureState,
     CoreErrorCode,
+    CoreHelloParams,
+    CoreHelloResult,
+    CoreMethods,
     Empty,
     HealthParams,
     InputPolicy,
@@ -223,6 +231,82 @@ async def test_core_client_exits_cleanly_on_stdin_eof(realtime_core_exe: Path) -
         assert returncode == 0
     finally:
         await client.stop()
+
+
+async def test_rust_core_starts_from_core_cred_and_exits_on_pipe_close(
+    realtime_core_exe: Path,
+) -> None:
+    session_id = f"c{secrets.token_hex(4)}"
+    target = f"test.core.{session_id}.bellis"
+    creds = ChannelCredentials(create_channel_path(session_id), create_session_key())
+    info = cred.SessionInfo.create(creds, session_id, launcher_pid=os.getpid())
+    connected: asyncio.Future[Connection] = asyncio.get_running_loop().create_future()
+    start_seen = asyncio.Event()
+    health_seen = asyncio.Event()
+
+    def on_conn(conn: Connection) -> None:
+        if not connected.done():
+            connected.set_result(conn)
+
+    server = await listen(
+        creds.path,
+        creds.key,
+        on_connection=on_conn,
+        on_rejected=lambda _e: None,
+        on_error=lambda _e: None,
+    )
+    cred.write_session_info(info, target)
+    proc: subprocess.Popen[bytes] | None = None
+    peer: RpcPeer | None = None
+    try:
+        # DEVNULL yields immediate stdin EOF; --core-cred must ignore stdin and rely on pipe close.
+        proc = subprocess.Popen(
+            [
+                str(realtime_core_exe),
+                "--core-cred",
+                target,
+                "--core-session-id",
+                session_id,
+                "--health-interval-ms",
+                "50",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=base_environment(),
+        )
+        conn = await asyncio.wait_for(connected, timeout=5.0)
+        assert conn.role == CORE_ROLE
+        peer = RpcPeer(conn, timeout=2.0)
+
+        def on_hello(raw: dict[str, Any]) -> dict[str, object]:
+            assert CoreHelloParams.from_dict(raw).protocol_version == PROTOCOL_VERSION
+            return CoreHelloResult(protocol_version=PROTOCOL_VERSION).to_dict()
+
+        def on_released(raw: dict[str, Any]) -> None:
+            if InputReleasedParams.from_dict(raw).reason is ReleaseReason.CORE_START:
+                start_seen.set()
+
+        peer.handle(CoreMethods.CORE_HELLO, on_hello)
+        peer.on_notification(CoreMethods.INPUT_RELEASED, on_released)
+        peer.on_notification(CoreMethods.HEALTH, lambda _raw: health_seen.set())
+
+        await asyncio.wait_for(start_seen.wait(), timeout=3.0)
+        await asyncio.wait_for(health_seen.wait(), timeout=3.0)
+        assert proc.poll() is None
+
+        await peer.close()
+        peer = None
+        rc = await asyncio.to_thread(proc.wait, 5)
+        assert rc == 0
+    finally:
+        cred.delete_session_info(target)
+        if peer is not None:
+            await peer.close()
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            await asyncio.to_thread(proc.wait, 5)
+        await server.close()
 
 
 def released(

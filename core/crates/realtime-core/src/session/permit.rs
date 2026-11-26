@@ -16,7 +16,7 @@ use bellis_channel::{
 };
 use serde_json::{Map, Value, json};
 
-use super::config::PermitSource;
+use super::config::ChannelSource;
 use super::cred::read_session_info;
 use super::queue::SendQueue;
 use crate::clock;
@@ -29,15 +29,18 @@ use crate::protocol::{
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// 按 [`PermitSource`] 解析许可控制连接的通道凭据。
+/// 按 [`ChannelSource`] 解析核通道或许可控制连接的通道凭据。
 ///
 /// # Errors
 ///
 /// 凭据管理器读取失败、内容非法或 `sessionId` 不匹配时返回 IO 错误。
-pub(crate) fn resolve_credentials(source: &PermitSource) -> io::Result<ChannelCredentials> {
+pub(crate) fn resolve_credentials(
+    source: &ChannelSource,
+    label: &str,
+) -> io::Result<ChannelCredentials> {
     match source {
-        PermitSource::Direct(credentials) => Ok(credentials.clone()),
-        PermitSource::CredMan {
+        ChannelSource::Direct(credentials) => Ok(credentials.clone()),
+        ChannelSource::CredMan {
             target,
             expected_session_id,
         } => {
@@ -48,7 +51,7 @@ pub(crate) fn resolve_credentials(source: &PermitSource) -> io::Result<ChannelCr
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "permit credential sessionId {:?} does not match expected {expected:?}",
+                        "{label} credential sessionId {:?} does not match expected {expected:?}",
                         session.id
                     ),
                 ));

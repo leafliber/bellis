@@ -20,7 +20,7 @@ use bellis_channel::{
 };
 use serde_json::{Value, json};
 
-use config::{HELLO_TIMEOUT, InputMode, Launch, Options};
+use config::{ChannelSource, HELLO_TIMEOUT, InputMode, Options};
 use handlers::build_handlers;
 use outbox::{Outbox, log_released};
 use permit::{PermitConnection, connect_permit, resolve_credentials};
@@ -69,6 +69,7 @@ impl fmt::Display for Ended {
 /// 启动失败或退出时物理释放核验未通过。
 #[derive(Debug)]
 pub enum StartError {
+    CoreCred(io::Error),
     Connect(ChannelError),
     PermitCred(io::Error),
     PermitConnect(ChannelError),
@@ -80,6 +81,7 @@ pub enum StartError {
 impl fmt::Display for StartError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CoreCred(error) => write!(f, "cannot load core credentials: {error}"),
             Self::Connect(error) => write!(f, "cannot connect to the main process: {error}"),
             Self::PermitCred(error) => write!(f, "cannot load permit credentials: {error}"),
             Self::PermitConnect(error) => write!(f, "cannot connect to the permit source: {error}"),
@@ -92,19 +94,21 @@ impl fmt::Display for StartError {
 
 impl std::error::Error for StartError {}
 
-/// 运行一次实时核会话，直到 `shutdown`、核连接断开或 `stdin` EOF。
+/// 运行一次实时核会话，直到 `shutdown`、核连接断开或（启用时）`stdin` EOF。
 ///
 /// # Errors
 ///
 /// 凭据加载、通道连接、握手、线程启动失败或退出时物理释放未通过核验时返回 [`StartError`]。
-pub fn run(
+pub fn run<R: Read + Send + 'static>(
     options: &Options,
-    launch: &Launch,
+    core: &ChannelSource,
+    role: &str,
     input: InputMode,
-    stdin: impl Read + Send + 'static,
+    stdin: Option<R>,
 ) -> Result<Ended, StartError> {
     let frames = Arc::new(FrameStatus::default());
-    let ((control, outbox, permit), connection) = open_session(options, launch, input, &frames)?;
+    let ((control, outbox, permit), connection) =
+        open_session(options, core, role, input, &frames)?;
 
     let invalidate_capture = {
         let (control, outbox) = (Arc::clone(&control), Arc::clone(&outbox));
@@ -134,8 +138,7 @@ pub fn run(
     };
     outbox.attach(&peer);
     log!(
-        "connected as {}; heartbeat timeout {}ms, health every {}ms, max frame age {}ms",
-        launch.role,
+        "connected as {role}; heartbeat timeout {}ms, health every {}ms, max frame age {}ms",
         options.heartbeat_timeout.as_millis(),
         options.health_interval.as_millis(),
         options.max_frame_age.as_millis()
@@ -187,10 +190,12 @@ type Started = (Arc<Control>, Arc<Outbox>, Option<PermitConnection>);
 
 fn open_session(
     options: &Options,
-    launch: &Launch,
+    core: &ChannelSource,
+    role: &str,
     input: InputMode,
     frames: &Arc<FrameStatus>,
 ) -> Result<(Started, Connection), StartError> {
+    let credentials = resolve_credentials(core, "core").map_err(StartError::CoreCred)?;
     let limits = Limits {
         heartbeat_timeout: options.heartbeat_timeout,
         max_frame_age: options.max_frame_age,
@@ -201,10 +206,9 @@ fn open_session(
     outbox.mirror_released(&startup_release);
 
     let opened = (|| {
-        let credentials = &launch.credentials;
         let connection = connect(
             &credentials.path,
-            &launch.role,
+            role,
             &credentials.key,
             &ConnectionOptions::default(),
         )
@@ -245,7 +249,7 @@ fn start_input(
             emergency,
         } => {
             let permit_credentials =
-                resolve_credentials(&source).map_err(StartError::PermitCred)?;
+                resolve_credentials(&source, "permit").map_err(StartError::PermitCred)?;
             let permit_queue = Arc::new(SendQueue::default());
             let outbox = Arc::new(Outbox::new(Some(Arc::clone(&permit_queue))));
             let target = Arc::new(TargetWindow::new(Arc::clone(frames)));
@@ -377,14 +381,14 @@ fn collect_health(control: &Control, audio: &AudioStatus) -> HealthParams {
     health
 }
 
-fn start_workers(
+fn start_workers<R: Read + Send + 'static>(
     control: &Arc<Control>,
     media: &Arc<Media>,
     outbox: &Arc<Outbox>,
     peer: &Arc<RpcPeer>,
     options: &Options,
     ended: &Sender<Ended>,
-    stdin: impl Read + Send + 'static,
+    stdin: Option<R>,
 ) -> io::Result<Vec<JoinHandle<()>>> {
     thread::Builder::new().name("core-sender".into()).spawn({
         let outbox = Arc::clone(outbox);
@@ -415,15 +419,17 @@ fn start_workers(
                 let _ = ended.send(Ended::ConnectionClosed(reason));
             }
         })?;
-    thread::Builder::new()
-        .name("stdin-lifeline".into())
-        .spawn({
-            let ended = ended.clone();
-            move || {
-                read_to_eof(stdin);
-                let _ = ended.send(Ended::StdinClosed);
-            }
-        })?;
+    if let Some(stdin) = stdin {
+        thread::Builder::new()
+            .name("stdin-lifeline".into())
+            .spawn({
+                let ended = ended.clone();
+                move || {
+                    read_to_eof(stdin);
+                    let _ = ended.send(Ended::StdinClosed);
+                }
+            })?;
+    }
     Ok(vec![scheduler, health])
 }
 

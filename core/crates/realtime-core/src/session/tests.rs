@@ -22,7 +22,7 @@ use windows::Win32::System::Pipes::{
 };
 use windows::core::PCWSTR;
 
-use super::config::{DEFAULT_CORE_ROLE, DEFAULT_PERMIT_ROLE, InputMode, Launch, Options};
+use super::config::{ChannelSource, DEFAULT_CORE_ROLE, DEFAULT_PERMIT_ROLE, InputMode, Options};
 use super::permit::{PermitConnection, connect_permit};
 use super::queue::SendQueue;
 use super::{Ended, run};
@@ -259,12 +259,7 @@ impl InputBackend for RecordingBackend {
 #[test]
 fn core_session_handshake_health_and_graceful_shutdown() {
     let (path, key, server_rx) = TestPipeServer::create("stop");
-    let launch = Launch {
-        credentials: ChannelCredentials { path, key },
-        role: DEFAULT_CORE_ROLE.to_owned(),
-        permit: None,
-        permit_role: DEFAULT_PERMIT_ROLE.to_owned(),
-    };
+    let core = ChannelSource::Direct(ChannelCredentials { path, key });
     let options = Options {
         health_interval: Duration::from_millis(50),
         ..Options::default()
@@ -273,9 +268,10 @@ fn core_session_handshake_health_and_graceful_shutdown() {
     let core_thread = thread::spawn(move || {
         run(
             &options,
-            &launch,
+            &core,
+            DEFAULT_CORE_ROLE,
             InputMode::ReadOnly,
-            BlockingStdin(stdin_rx),
+            Some(BlockingStdin(stdin_rx)),
         )
     });
 
@@ -330,12 +326,7 @@ fn core_session_handshake_health_and_graceful_shutdown() {
 #[test]
 fn core_session_exits_on_stdin_eof() {
     let (path, key, server_rx) = TestPipeServer::create("eof");
-    let launch = Launch {
-        credentials: ChannelCredentials { path, key },
-        role: DEFAULT_CORE_ROLE.to_owned(),
-        permit: None,
-        permit_role: DEFAULT_PERMIT_ROLE.to_owned(),
-    };
+    let core = ChannelSource::Direct(ChannelCredentials { path, key });
     let options = Options {
         health_interval: Duration::from_secs(10),
         ..Options::default()
@@ -344,9 +335,10 @@ fn core_session_exits_on_stdin_eof() {
     let core_thread = thread::spawn(move || {
         run(
             &options,
-            &launch,
+            &core,
+            DEFAULT_CORE_ROLE,
             InputMode::ReadOnly,
-            BlockingStdin(stdin_rx),
+            Some(BlockingStdin(stdin_rx)),
         )
     });
 
@@ -375,6 +367,39 @@ fn core_session_exits_on_stdin_eof() {
     let ended = core_thread.join().unwrap().unwrap();
     assert!(matches!(ended, Ended::StdinClosed));
     drop(server);
+}
+
+#[test]
+fn core_session_without_stdin_exits_on_connection_close() {
+    let (path, key, server_rx) = TestPipeServer::create("conn");
+    let core = ChannelSource::Direct(ChannelCredentials { path, key });
+    let options = Options {
+        health_interval: Duration::from_secs(10),
+        ..Options::default()
+    };
+    let core_thread = thread::spawn(move || {
+        run::<io::Empty>(
+            &options,
+            &core,
+            DEFAULT_CORE_ROLE,
+            InputMode::ReadOnly,
+            None,
+        )
+    });
+
+    let mut server = server_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let hello = server.recv_json().unwrap();
+    server.send_json(&json!({
+        "jsonrpc": "2.0",
+        "id": hello["id"],
+        "result": { "protocol_version": PROTOCOL_VERSION }
+    }));
+    let start_release = server.recv_json().unwrap();
+    assert_eq!(start_release["params"]["reason"], "core_start");
+
+    drop(server);
+    let ended = core_thread.join().unwrap().unwrap();
+    assert!(matches!(ended, Ended::ConnectionClosed(_)));
 }
 
 #[test]
