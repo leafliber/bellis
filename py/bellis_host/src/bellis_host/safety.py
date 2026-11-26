@@ -37,7 +37,7 @@ class RateLimit:
             raise ValueError("rate limit requires a positive count and finite positive window")
 
 
-_TTLS = {"stage.audio": 2.0, "obs.control": 2.0, "obs.stage-url": 2.0, "game.input": 0.5}
+_TTLS = {"stage.audio": 2.0, "obs.control": 2.0, "obs.stage-url": 2.0, "game.input": 2.0}
 _CAPS = {r: r for r in _TTLS} | {"stage.audio": "speech.output"}
 _LIMITS = {"speech.output": RateLimit(30, 60.0)}
 

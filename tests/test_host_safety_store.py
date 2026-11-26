@@ -173,7 +173,8 @@ def test_modes_and_leases(tmp_path: Path) -> None:
     now = 10.0
     path = tmp_path / "host.db"
     with HostStore(path) as journal:
-        core = SafetyCore(journal, clock=lambda: now)
+        config = SafetyConfig(lease_ttl_s={**SafetyConfig().lease_ttl_s, "obs.stage-url": 5.0})
+        core = SafetyCore(journal, config=config, clock=lambda: now)
         updates: list[LeaseUpdate] = []
         unsubscribe = core.on_lease_update(updates.append)
         assert core.snapshot().mode == HostMode.SAFE_STOP
@@ -190,7 +191,7 @@ def test_modes_and_leases(tmp_path: Path) -> None:
             core.renew_lease(lease.resource, "other", lease.token)
         now += 0.25
         renewal = core.renew_lease(lease.resource, lease.holder, lease.token)
-        assert renewal.token == lease.token and renewal.expires_at == 10.75
+        assert renewal.token == lease.token and renewal.expires_at == 12.25
         now = renewal.expires_at
         assert not core.is_lease_valid(lease.resource, lease.token)
         assert core.snapshot().active_leases == (url,)

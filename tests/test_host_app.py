@@ -6,9 +6,11 @@ import sys
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from bellis_host import HostApp, HostConfig, HostMode, ObsError
+from bellis_host import app as launcher
 from test_console_and_slow_agent import Browser, Model
 from test_obs_and_watchdog import SCENE, ObsServer, assert_batch
 from test_obs_and_watchdog import obs as obs
@@ -180,7 +182,8 @@ def test_config(tmp_path: Path) -> None:
         "enable_watchdog=false\nwatchdog_heartbeat_s=0.1\nwatchdog_timeout_ms=550\n"
         '[obs]\nsafe_scene="Offline"\ncred_targets=["custom"]\n'
         '[stage]\nstatic_dir="assets"\n[console]\nport=0\n[tts]\nvoice_id="test"\n'
-        "[director]\nbatch_window_s=0.5\n",
+        "[director]\nbatch_window_s=0.5\n"
+        '[permit]\ncred_target=""\nrenew_interval_s=0.25\n',
         encoding="utf-8",
     )
     cfg = HostConfig.from_toml(path)
@@ -193,10 +196,32 @@ def test_config(tmp_path: Path) -> None:
     assert cfg.stage.port == 18765 and cfg.stage.static_dir == tmp_path / "assets"
     assert cfg.console.port == 0 and HostConfig().console.port == 18766
     assert cfg.tts.voice_id == "test" and cfg.director.batch_window_s == 0.5
+    assert cfg.permit.cred_target is None and cfg.permit.renew_interval_s == 0.25
     assert cfg.director.max_tokens == 2048
     path.write_text('[obs]\nstop_stream="false"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="booleans"):
         HostConfig.from_toml(path)
+
+
+@pytest.mark.parametrize(("section", "options", "expected"), [
+    ("", [], "session.bellis"), ('cred_target="custom"', [], "custom"),
+    ('cred_target=""', [], None), ('cred_target="a"', ["--permit-cred=b"], "b"),
+    ('cred_target="a"', ["--permit-cred="], None),
+    ('cred_target="a"', ["--no-permit-cred", "--permit-cred=b"], None),
+])  # fmt: skip
+def test_permit_cli_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    options: list[str],
+    expected: str | None,
+) -> None:
+    config = tmp_path / "host.toml"
+    config.write_text("[permit]\n" + section, encoding="utf-8")
+    serve = AsyncMock(return_value=0)
+    monkeypatch.setattr(launcher, "_serve", serve)
+    assert launcher.main(["serve", "--config", str(config), *options]) == 0
+    assert serve.await_args and serve.await_args.args[0].permit.cred_target == expected
 
 
 async def test_live_siblings_after_host_crash(
@@ -213,6 +238,7 @@ async def test_live_siblings_after_host_crash(
         "-m",
         "bellis_host.app",
         "live",
+        "--no-permit-cred",
         "--config",
         str(config),
         "--db",

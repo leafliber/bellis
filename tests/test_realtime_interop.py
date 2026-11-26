@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import secrets
 import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
@@ -226,6 +225,18 @@ async def test_core_client_exits_cleanly_on_stdin_eof(realtime_core_exe: Path) -
         await client.stop()
 
 
+def released(
+    peer: RpcPeer,
+    reason: ReleaseReason,
+    verification: ReleaseVerification = ReleaseVerification.VERIFIED,
+    token: int | None = None,
+    release_id: int = 8,
+) -> InputReleasedParams:
+    rel = InputReleasedParams(release_id, token, reason, None, 100, verification, ())
+    peer.notify(PermitMethods.INPUT_RELEASED, rel.to_dict())
+    return rel
+
+
 async def test_permit_server_unified_5_method_rpc_state_machine() -> None:
     events: list[str] = []
     server = PermitServer(
@@ -254,17 +265,8 @@ async def test_permit_server_unified_5_method_rpc_state_machine() -> None:
             params = LeaseRevokeParams.from_dict(raw)
             revoke_calls.append(params)
             next_release_id += 1
-            peer.notify(
-                PermitMethods.INPUT_RELEASED,
-                InputReleasedParams(
-                    release_id=next_release_id,
-                    token=params.token,
-                    reason=ReleaseReason.LEASE_REVOKED,
-                    producer=None,
-                    released_at_ns=1_000,
-                    verification=ReleaseVerification.VERIFIED,
-                    residual_items=(),
-                ).to_dict(),
+            released(
+                peer, ReleaseReason.LEASE_REVOKED, token=params.token, release_id=next_release_id
             )
             return Empty().to_dict()
 
@@ -273,18 +275,7 @@ async def test_permit_server_unified_5_method_rpc_state_machine() -> None:
             params = InputStopParams.from_dict(raw)
             stop_calls.append(params)
             next_release_id += 1
-            peer.notify(
-                PermitMethods.INPUT_RELEASED,
-                InputReleasedParams(
-                    release_id=next_release_id,
-                    token=None,
-                    reason=ReleaseReason.INPUT_STOP,
-                    producer=None,
-                    released_at_ns=2_000,
-                    verification=ReleaseVerification.VERIFIED,
-                    residual_items=(),
-                ).to_dict(),
-            )
+            released(peer, ReleaseReason.INPUT_STOP, release_id=next_release_id)
             return InputStopResult(release_id=next_release_id).to_dict()
 
         peer.handle(PermitMethods.LEASE_RENEW, handle_renew)
@@ -313,18 +304,7 @@ async def test_permit_server_unified_5_method_rpc_state_machine() -> None:
         # 3. Second start increments monotonically to token 2; takeover notification clears lease.
         tok2 = await server.grant_start()
         assert tok2 == 2 and server.active_token == 2
-        peer.notify(
-            PermitMethods.INPUT_RELEASED,
-            InputReleasedParams(
-                release_id=99,
-                token=2,
-                reason=ReleaseReason.TAKEOVER,
-                producer=None,
-                released_at_ns=3_000,
-                verification=ReleaseVerification.VERIFIED,
-                residual_items=(),
-            ).to_dict(),
-        )
+        released(peer, ReleaseReason.TAKEOVER, token=2, release_id=99)
         await asyncio.sleep(0.05)
         assert server.active_token is None
         assert server.last_released is not None
@@ -365,100 +345,33 @@ async def test_permit_server_unified_5_method_rpc_state_machine() -> None:
 
 
 async def test_permit_server_close_waits_for_final_verification_not_unverified() -> None:
-    server = PermitServer(cred_target=None, lease_ttl_s=1.0, renew_interval_s=0.2)
+    notices: asyncio.Queue[InputReleasedParams] = asyncio.Queue()
+    server = PermitServer(cred_target=None, on_released=notices.put_nowait)
     await server.start()
     peer: RpcPeer | None = None
-    delayed_tasks: list[asyncio.Task[None]] = []
     try:
-        conn = await connect(
-            server.credentials.path, PERMIT_ROLE, server.credentials.key, handshake_timeout=2.0
-        )
-        peer = RpcPeer(conn, timeout=2.0)
-        final_sent = False
-        peer_open_for_final = False
+        cred = server.credentials
+        peer = RpcPeer(await connect(cred.path, PERMIT_ROLE, cred.key), timeout=2)
 
-        def handle_renew(raw: dict[str, Any]) -> dict[str, object]:
-            LeaseRenewParams.from_dict(raw)
-            return Empty().to_dict()
+        def handle_stop(raw: dict[str, Any]) -> object:
+            assert peer is not None and InputStopParams.from_dict(raw).through_token is None
+            released(peer, ReleaseReason.INPUT_STOP, ReleaseVerification.UNVERIFIED, release_id=7)
+            return InputStopResult(7).to_dict()
 
-        def handle_stop(raw: dict[str, Any]) -> dict[str, object]:
-            InputStopParams.from_dict(raw)
-            assert peer is not None
-            # 1) Immediate unverified notification (must NOT wake close() early).
-            peer.notify(
-                PermitMethods.INPUT_RELEASED,
-                InputReleasedParams(
-                    release_id=7,
-                    token=None,
-                    reason=ReleaseReason.INPUT_STOP,
-                    producer=None,
-                    released_at_ns=10_000,
-                    verification=ReleaseVerification.UNVERIFIED,
-                    residual_items=(),
-                ).to_dict(),
-            )
-
-            async def _send_delayed_verifications() -> None:
-                nonlocal final_sent, peer_open_for_final
-                assert peer is not None
-                # Unrelated older release_id=6 verified must also NOT wake wait for release_id=7.
-                await asyncio.sleep(0.02)
-                if peer.connection.is_open:
-                    peer.notify(
-                        PermitMethods.INPUT_RELEASED,
-                        InputReleasedParams(
-                            release_id=6,
-                            token=None,
-                            reason=ReleaseReason.LEASE_REVOKED,
-                            producer=None,
-                            released_at_ns=11_000,
-                            verification=ReleaseVerification.VERIFIED,
-                            residual_items=(),
-                        ).to_dict(),
-                    )
-                await asyncio.sleep(0.05)
-                peer_open_for_final = peer.connection.is_open
-                if peer_open_for_final:
-                    peer.notify(
-                        PermitMethods.INPUT_RELEASED,
-                        InputReleasedParams(
-                            release_id=7,
-                            token=None,
-                            reason=ReleaseReason.INPUT_STOP,
-                            producer=None,
-                            released_at_ns=12_000,
-                            verification=ReleaseVerification.VERIFIED,
-                            residual_items=(),
-                        ).to_dict(),
-                    )
-                    final_sent = True
-
-            delayed_tasks.append(
-                asyncio.get_running_loop().create_task(_send_delayed_verifications())
-            )
-            return InputStopResult(release_id=7).to_dict()
-
-        peer.handle(PermitMethods.LEASE_RENEW, handle_renew)
+        peer.handle(PermitMethods.LEASE_RENEW, lambda _: Empty().to_dict())
         peer.handle(PermitMethods.INPUT_STOP, handle_stop)
-
-        await server.wait_connected(timeout=2.0)
+        await server.wait_connected(2)
         await server.grant_start()
-
-        started = time.perf_counter()
-        await server.close(release_wait_s=0.5)
-        elapsed = time.perf_counter() - started
-
-        assert peer_open_for_final, (
-            "close() disconnected before final verified notification arrived"
-        )
-        assert final_sent
-        assert 0.025 <= elapsed < 0.4
-        assert server.last_released is not None
-        assert server.last_released.release_id == 7
-        assert server.last_released.verification is ReleaseVerification.VERIFIED
+        async with asyncio.timeout(3):
+            closing = asyncio.create_task(server.close(release_wait_s=2))
+            assert (await notices.get()).verification == ReleaseVerification.UNVERIFIED
+            unrelated = released(peer, ReleaseReason.LEASE_REVOKED, release_id=6)
+            assert await notices.get() == unrelated
+            assert not closing.done() and peer.connection.is_open
+            final = released(peer, ReleaseReason.INPUT_STOP, release_id=7)
+            await asyncio.wait_for(closing, 0.4)
+            assert server.last_released == final
     finally:
-        for task in delayed_tasks:
-            task.cancel()
         if peer is not None:
             await peer.close()
         await server.close()

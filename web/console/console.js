@@ -47,6 +47,13 @@ async function refresh() {
   el("lamp").dataset.mode = s.mode;
   el("reason").textContent = [s.emergency_reason, s.watchdog_acted && "看门狗已触发"].filter(Boolean).join(" · ");
   el("stage").textContent = "Stage " + (s.stage_connected ? "已连接" : "未连接");
+  const permit = s.game_permit;
+  let state = "未连接";
+  if (permit?.connected) state = permit.armed ? "已授权 #" + permit.active_token : "已连接·未授权";
+  if (permit?.last_release_reason) {
+    state += " · " + permit.last_release_reason + " / " + permit.last_release_verification;
+  }
+  el("game-permit").textContent = "游戏核 " + state;
   el("queue").textContent = "待处理弹幕 " + s.pending_danmaku;
   list("heard", s.recent_heard.length ? s.recent_heard.slice().reverse() : ["暂无播出记录"]);
   const vote = s.active_vote;

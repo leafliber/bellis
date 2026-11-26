@@ -23,6 +23,7 @@ from .director import (
     build_messages,
     resolve_llm_api_key,
 )
+from .game_permit import GamePermitConfig, GamePermitSnapshot, HostGamePermit
 from .obs import (
     EmergencyOutcome,
     ObsClient,
@@ -102,9 +103,12 @@ __all__ = [
     "EmergencyOutcome",
     "EmergencySummary",
     "EventRecord",
+    "GamePermitConfig",
+    "GamePermitSnapshot",
     "GateDecision",
     "HostApp",
     "HostConfig",
+    "HostGamePermit",
     "HostMode",
     "HostStore",
     "IntentRecord",

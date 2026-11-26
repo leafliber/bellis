@@ -15,14 +15,21 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Self
 
+from bellis_common.cred import (
+    DEFAULT_SESSION_TARGET,
+    CredError,
+    delete_session_info,
+    read_session_info,
+)
 from bellis_common.telemetry import JsonlTelemetry
 
 from . import watchdog
 from .audience import AudienceHub
 from .console import ConsoleConfig, ConsoleServer
 from .director import DirectorConfig, LlmStreamer, OpenAiLlmClient, SlowDirector
+from .game_permit import GamePermitConfig, HostGamePermit
 from .obs import ObsClient, ObsConfig, ObsError, resolve_obs_password
-from .safety import EmergencySummary, SafetyCore
+from .safety import EmergencySummary, SafetyConfig, SafetyCore
 from .speech import SpeechArbiter, TtsSynthesizer
 from .stage import StageConfig, StageServer
 from .store import HostStore
@@ -44,12 +51,16 @@ class HostConfig:
     watchdog_heartbeat_s: float = 0.25
     watchdog_timeout_ms: int = 1000
     enable_watchdog: bool = True
+    permit: GamePermitConfig = GamePermitConfig()
 
     @classmethod
-    def from_toml(cls, path: Path) -> Self:
+    def from_toml(cls, path: Path, *, default_permit_cred: str | None = None) -> Self:
         with path.open("rb") as stream:
             values = tomllib.load(stream)
         defaults = cls()
+        permit = values.pop("permit", {})
+        target = permit.pop("cred_target", default_permit_cred)
+        values["permit"] = GamePermitConfig(cred_target=None if target == "" else target, **permit)
         for key in ("db_path", "telemetry_path"):
             if key in values:
                 values[key] = path.parent / values[key]
@@ -112,7 +123,10 @@ class HostApp:
         telemetry = None
         if cfg.telemetry_path:
             telemetry = stack.enter_context(JsonlTelemetry(cfg.telemetry_path))
-        self.safety = _HostSafety(self.store, telemetry=telemetry)
+        ttls = {**SafetyConfig().lease_ttl_s, "game.input": cfg.permit.lease_ttl_s}
+        self.safety = _HostSafety(
+            self.store, config=SafetyConfig(lease_ttl_s=ttls), telemetry=telemetry
+        )
         stack.callback(self.safety.close)
         self.watchdog = None
         if cfg.enable_watchdog:
@@ -150,9 +164,12 @@ class HostApp:
             self.safety, self.audience, self.speech, model, config=cfg.director
         )
         stack.push_async_callback(self.director.close)
+        self.game_permit = HostGamePermit(self.safety, cfg.permit)
+        stack.push_async_callback(self.game_permit.close)
         self.console = ConsoleServer(
             self.safety,
             director=self.director,
+            game_permit=self.game_permit,
             config=cfg.console,
             on_emergency_obs=self._console_emergency if self.obs else None,
         )
@@ -194,6 +211,7 @@ class HostApp:
                 return self._info
             try:
                 self._wire()
+                await self.game_permit.start()
                 if self.obs:
                     await self.obs.connect()
                     await self.obs.preflight()
@@ -255,6 +273,13 @@ def _finish(proc: subprocess.Popen[bytes], timeout: float) -> int:
         return proc.wait()
 
 
+def _cleanup_host_cred(target: str, host_pid: int) -> None:
+    with suppress(CredError):
+        info = read_session_info(target)
+        if info is not None and info.launcher_pid == host_pid:
+            delete_session_info(target)
+
+
 def _live(cfg: HostConfig, args: argparse.Namespace) -> int:
     cred = watchdog.new_credentials()
     env = os.environ.copy()
@@ -269,6 +294,8 @@ def _live(cfg: HostConfig, args: argparse.Namespace) -> int:
         command.append("--stop-stream")
     options = [f"--db={cfg.db_path}", f"--console-port={cfg.console.port}",
                f"--stage-port={cfg.stage.port}"]  # fmt: skip
+    target = cfg.permit.cred_target
+    options.append(f"--permit-cred={target}" if target else "--no-permit-cred")
     if args.config:
         options.append(f"--config={args.config}")
     if not cfg.enable_obs:
@@ -294,6 +321,8 @@ def _live(cfg: HostConfig, args: argparse.Namespace) -> int:
             assert host.stdin
             host.stdin.close()
             status = _finish(host, 10)
+            if target:
+                _cleanup_host_cred(target, host.pid)
         return status or wd.returncode
     finally:
         _finish(wd, 15)  # Allow the Rust peer to finish its OBS batch after Host loss.
@@ -305,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("serve", "live"):
         sub = commands.add_parser(name)
         sub.add_argument("--config", type=Path)
+        sub.add_argument("--permit-cred")
+        sub.add_argument("--no-permit-cred", action="store_true")
         sub.add_argument("--db", type=Path)
         sub.add_argument("--no-obs", action="store_true")
         sub.add_argument("--console-port", type=int)
@@ -315,7 +346,14 @@ def main(argv: list[str] | None = None) -> int:
             sub.add_argument("--watchdog-timeout-ms", type=int)
     args = parser.parse_args(argv)
     try:
-        cfg = HostConfig.from_toml(args.config) if args.config else HostConfig()
+        cfg = (
+            HostConfig.from_toml(args.config, default_permit_cred=DEFAULT_SESSION_TARGET)
+            if args.config
+            else HostConfig(permit=GamePermitConfig(cred_target=DEFAULT_SESSION_TARGET))
+        )
+        if args.no_permit_cred or args.permit_cred is not None:
+            target = None if args.no_permit_cred else args.permit_cred or None
+            cfg = replace(cfg, permit=replace(cfg.permit, cred_target=target))
         cfg = replace(
             cfg, db_path=args.db or cfg.db_path, enable_obs=cfg.enable_obs and not args.no_obs
         )

@@ -16,8 +16,11 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
+from bellis_common.channel import ChannelError
+
 from .audience import AudienceHub, VoteSnapshot
 from .director import SlowDirector
+from .game_permit import HostGamePermit
 from .safety import SafetyCore, SafetyError
 from .speech import SpeechArbiter, SpeechPriority, SpeechRequest
 from .stage import StageServer
@@ -77,9 +80,11 @@ class ConsoleServer:
         speech: SpeechArbiter | None = None,
         audience: AudienceHub | None = None,
         director: SlowDirector | None = None,
+        game_permit: HostGamePermit | None = None,
         on_emergency_obs: Callable[[], Awaitable[object]] | None = None,
         config: ConsoleConfig = ConsoleConfig(),
     ):
+        self.game_permit = game_permit
         self.safety, self.director = safety, director
         self.speech = speech or (director and director.speech)
         self.stage = stage or (self.speech and self.speech.stage)
@@ -191,6 +196,7 @@ class ConsoleServer:
             vote = self.audience and self.audience.active_vote()
             return {
                 **asdict(self.safety.snapshot()),
+                "game_permit": asdict(self.game_permit.snapshot()) if self.game_permit else None,
                 "stage_connected": bool(self.stage and self.stage.connected),
                 "pending_danmaku": self.audience.pending_count() if self.audience else 0,
                 "active_vote": vote and asdict(vote),
@@ -199,6 +205,19 @@ class ConsoleServer:
         if method != "POST":
             raise _HttpError(405)
         controls = self.director or self.speech
+        if path in {"/api/game/arm", "/api/game/disarm"}:
+            if self.game_permit is None:
+                raise _HttpError(503)
+            if path == "/api/game/arm":
+                try:
+                    token = await self.game_permit.arm_input(actor="operator")
+                except ChannelError:
+                    raise _HttpError(503) from None
+            else:
+                token = await self.game_permit.disarm_input(
+                    reason=_string(data, "reason", "operator_disarm")
+                )
+            return {"ok": True, "token": token}
         if path == "/api/control/live":
             self.safety.start_live(actor="operator")
         elif path == "/api/control/pause":
@@ -210,11 +229,17 @@ class ConsoleServer:
             self.safety.trigger_emergency(
                 _string(data, "reason", "operator_emergency"), source="operator"
             )
-            if self._obs:
-                try:
+            stop = (
+                asyncio.create_task(self.game_permit.emergency_stop()) if self.game_permit else None
+            )
+            try:
+                if self._obs:
                     await self._obs()
-                except Exception:
-                    raise _HttpError(502) from None
+            except Exception:
+                raise _HttpError(502) from None
+            finally:
+                if stop:
+                    await stop
         elif path == "/api/control/clear-emergency":
             self.safety.clear_emergency(actor="operator")
         elif path == "/api/speech/say":

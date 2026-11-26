@@ -21,6 +21,7 @@ from typing import IO, Any, Final, Self
 
 from bellis_common import channel as ch
 from bellis_common.cred import is_session_id
+from bellis_common.permit import PERMIT_ROLE as PERMIT_ROLE
 
 from . import protocol as proto
 from .audio_ring import AudioRing
@@ -29,7 +30,6 @@ from .frame_ring import FrameRing
 logger = logging.getLogger(__name__)
 
 CORE_ROLE: Final = "realtime-core.core"
-PERMIT_ROLE: Final = "realtime-core.permit"
 ENV_CHANNEL_PATH: Final = "BELLIS_CHANNEL_PATH"
 ENV_CHANNEL_KEY: Final = "BELLIS_CHANNEL_KEY"
 ENV_ROLE: Final = "BELLIS_ROLE"

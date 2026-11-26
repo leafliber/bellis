@@ -6,7 +6,39 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import ClassVar, Final, cast
 
-from ._codec import F64, I32, U16, U32, U64, ProtocolError, TaggedModel, WireModel, decode_tagged
+from bellis_common.permit import (
+    CaptureState,
+    Empty,
+    HealthParams,
+    HeldAxis,
+    HeldInput,
+    HeldKey,
+    HeldMouseButton,
+    InputReleasedParams,
+    InputStopParams,
+    InputStopResult,
+    LatestAudio,
+    LatestFrame,
+    LeaseRenewParams,
+    LeaseRevokeParams,
+    LeaseStatus,
+    MouseButton,
+    PermitMethods,
+    Producer,
+    ReleaseReason,
+    ReleaseVerification,
+)
+from bellis_common.wire_codec import (
+    F64,
+    I32,
+    U16,
+    U32,
+    U64,
+    ProtocolError,
+    TaggedModel,
+    WireModel,
+    decode_tagged,
+)
 
 PROTOCOL_VERSION: Final = 1
 
@@ -27,14 +59,6 @@ class CoreMethods:
     SHUTDOWN: Final = "shutdown"
 
 
-class PermitMethods:
-    LEASE_RENEW: Final = "lease.renew"
-    LEASE_REVOKE: Final = "lease.revoke"
-    INPUT_STOP: Final = "input.stop"
-    INPUT_RELEASED: Final = "input.released"
-    HEALTH: Final = "health"
-
-
 class CoreErrorCode:
     PROTOCOL_VERSION_MISMATCH: Final = -32001
     FRAME_RING_MISMATCH: Final = -32002
@@ -42,58 +66,6 @@ class CoreErrorCode:
     LEASE_REFUSED: Final = -32004
     AUDIO_RING_MISMATCH: Final = -32005
     INPUT_POLICY_CONFLICT: Final = -32006
-
-
-class MouseButton(StrEnum):
-    LEFT = "left"
-    RIGHT = "right"
-    MIDDLE = "middle"
-
-
-class ReleaseVerification(StrEnum):
-    UNVERIFIED = "unverified"
-    UP_FAILED = "up_failed"
-    VERIFIED = "verified"
-    RESIDUAL = "residual"
-    UNAVAILABLE = "unavailable"
-    SUPERSEDED = "superseded"
-
-
-class ReleaseReason(StrEnum):
-    CORE_START = "core_start"
-    GENERATION_REVOKED = "generation_revoked"
-    PRODUCER_CHANGED = "producer_changed"
-    HEARTBEAT_TIMEOUT = "heartbeat_timeout"
-    DEADLINE_EXPIRED = "deadline_expired"
-    FRAME_STALE = "frame_stale"
-    LEASE_EXPIRED = "lease_expired"
-    LEASE_REVOKED = "lease_revoked"
-    INPUT_STOP = "input_stop"
-    LEASE_SOURCE_LOST = "lease_source_lost"
-    NO_LEASE = "no_lease"
-    FOCUS_LOST = "focus_lost"
-    TAKEOVER = "takeover"
-    EMERGENCY_STOP = "emergency_stop"
-    INJECTION_BLOCKED = "injection_blocked"
-    HOOK_LOST = "hook_lost"
-    MAX_HOLD = "max_hold"
-    SHUTDOWN = "shutdown"
-    CORE_CONNECTION_LOST = "core_connection_lost"
-    STDIN_CLOSED = "stdin_closed"
-
-
-class LeaseStatus(StrEnum):
-    NOT_GRANTED = "not_granted"
-    VALID = "valid"
-    EXPIRED = "expired"
-    REVOKED = "revoked"
-    SOURCE_LOST = "source_lost"
-
-
-class CaptureState(StrEnum):
-    IDLE = "idle"
-    SEARCHING = "searching"
-    CAPTURING = "capturing"
 
 
 class RejectReason(StrEnum):
@@ -115,32 +87,19 @@ class DropReason(StrEnum):
     RATE_LIMITED = "rate_limited"
 
 
-class _Msg(WireModel):
-    pass
-
-
-class _Tagged(TaggedModel):
-    pass
-
-
 @dataclass(frozen=True, slots=True)
-class Empty(_Msg):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class CoreHelloParams(_Msg):
+class CoreHelloParams(WireModel):
     protocol_version: U32
     core_version: str
 
 
 @dataclass(frozen=True, slots=True)
-class CoreHelloResult(_Msg):
+class CoreHelloResult(WireModel):
     protocol_version: U32
 
 
 @dataclass(frozen=True, slots=True)
-class FrameRingAttachParams(_Msg):
+class FrameRingAttachParams(WireModel):
     name: str
     size_bytes: U64
     layout_version: U32
@@ -151,7 +110,7 @@ class FrameRingAttachParams(_Msg):
 
 
 @dataclass(frozen=True, slots=True)
-class AudioRingAttachParams(_Msg):
+class AudioRingAttachParams(WireModel):
     name: str
     size_bytes: U64
     layout_version: U32
@@ -164,57 +123,30 @@ class AudioRingAttachParams(_Msg):
 
 
 @dataclass(frozen=True, slots=True)
-class WindowTargetParams(_Msg):
+class WindowTargetParams(WireModel):
     process_name: str
     window_class: str | None = None
     title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class Producer(_Msg):
-    id: str
-    generation: U64
-
-
-@dataclass(frozen=True, slots=True)
-class ProducerHeartbeatParams(_Msg):
+class ProducerHeartbeatParams(WireModel):
     producer: Producer
     seq: U64
 
 
 @dataclass(frozen=True, slots=True)
-class ProducerRevokeParams(_Msg):
+class ProducerRevokeParams(WireModel):
     generation: U64
 
 
 @dataclass(frozen=True, slots=True)
-class ProducerRevokeResult(_Msg):
+class ProducerRevokeResult(WireModel):
     release_id: U64 | None
 
 
 @dataclass(frozen=True, slots=True)
-class LeaseRenewParams(_Msg):
-    token: U64
-    expires_ns: U64
-
-
-@dataclass(frozen=True, slots=True)
-class LeaseRevokeParams(_Msg):
-    token: U64
-
-
-@dataclass(frozen=True, slots=True)
-class InputStopParams(_Msg):
-    through_token: U64 | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InputStopResult(_Msg):
-    release_id: U64 | None
-
-
-@dataclass(frozen=True, slots=True)
-class NormRect(_Msg):
+class NormRect(WireModel):
     left: F64
     top: F64
     right: F64
@@ -222,7 +154,7 @@ class NormRect(_Msg):
 
 
 @dataclass(frozen=True, slots=True)
-class InputPolicy(_Msg):
+class InputPolicy(WireModel):
     click_buttons: tuple[MouseButton, ...]
     press_keys: tuple[U16, ...]
     scroll: bool
@@ -236,29 +168,7 @@ class InputPolicy(_Msg):
 
 
 @dataclass(frozen=True, slots=True)
-class HeldKey(_Tagged):
-    TAG: ClassVar[str] = "key"
-    scan_code: U16
-
-
-@dataclass(frozen=True, slots=True)
-class HeldMouseButton(_Tagged):
-    TAG: ClassVar[str] = "mouse_button"
-    button: MouseButton
-
-
-@dataclass(frozen=True, slots=True)
-class HeldAxis(_Tagged):
-    TAG: ClassVar[str] = "axis"
-    axis: str
-    value: F64
-
-
-type HeldInput = HeldKey | HeldMouseButton | HeldAxis
-
-
-@dataclass(frozen=True, slots=True)
-class Click(_Tagged):
+class Click(TaggedModel):
     TAG: ClassVar[str] = "click"
     id: U64
     x: U32
@@ -267,14 +177,14 @@ class Click(_Tagged):
 
 
 @dataclass(frozen=True, slots=True)
-class KeyPress(_Tagged):
+class KeyPress(TaggedModel):
     TAG: ClassVar[str] = "key_press"
     id: U64
     scan_code: U16
 
 
 @dataclass(frozen=True, slots=True)
-class Scroll(_Tagged):
+class Scroll(TaggedModel):
     TAG: ClassVar[str] = "scroll"
     id: U64
     x: U32
@@ -283,7 +193,7 @@ class Scroll(_Tagged):
 
 
 @dataclass(frozen=True, slots=True)
-class MouseMove(_Tagged):
+class MouseMove(TaggedModel):
     TAG: ClassVar[str] = "mouse_move"
     id: U64
     dx: I32
@@ -294,14 +204,14 @@ type Action = Click | KeyPress | Scroll | MouseMove
 
 
 @dataclass(frozen=True, slots=True)
-class ControlStep(_Msg):
+class ControlStep(WireModel):
     offset_ns: U64
     held: tuple[HeldInput, ...] = ()
     actions: tuple[Action, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
-class ActionBlock(_Msg):
+class ActionBlock(WireModel):
     producer: Producer
     seq: U64
     base_frame: U64
@@ -321,12 +231,12 @@ class ActionBlock(_Msg):
 
 
 @dataclass(frozen=True, slots=True)
-class Accepted(_Tagged):
+class Accepted(TaggedModel):
     TAG: ClassVar[str] = "accepted"
 
 
 @dataclass(frozen=True, slots=True)
-class Rejected(_Tagged):
+class Rejected(TaggedModel):
     TAG: ClassVar[str] = "rejected"
     reason: RejectReason
     message: str
@@ -342,21 +252,21 @@ def parse_action_submit_result(raw: object) -> ActionSubmitResult:
 
 
 @dataclass(frozen=True, slots=True)
-class Executed(_Tagged):
+class Executed(TaggedModel):
     TAG: ClassVar[str] = "executed"
     id: U64
     at_ns: U64
 
 
 @dataclass(frozen=True, slots=True)
-class Dropped(_Tagged):
+class Dropped(TaggedModel):
     TAG: ClassVar[str] = "dropped"
     id: U64
     reason: DropReason
 
 
 @dataclass(frozen=True, slots=True)
-class Uncertain(_Tagged):
+class Uncertain(TaggedModel):
     TAG: ClassVar[str] = "uncertain"
     id: U64
     at_ns: U64
@@ -366,50 +276,11 @@ type ActionOutcome = Executed | Dropped | Uncertain
 
 
 @dataclass(frozen=True, slots=True)
-class ActionReceiptParams(_Msg):
+class ActionReceiptParams(WireModel):
     producer: Producer
     block_seq: U64
     outcomes: tuple[ActionOutcome, ...]
 
-
-@dataclass(frozen=True, slots=True)
-class InputReleasedParams(_Msg):
-    release_id: U64
-    token: U64 | None
-    reason: ReleaseReason
-    producer: Producer | None
-    released_at_ns: U64
-    verification: ReleaseVerification
-    residual_items: tuple[HeldInput, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class LatestFrame(_Msg):
-    frame_number: U64
-    capture_ns: U64
-
-
-@dataclass(frozen=True, slots=True)
-class LatestAudio(_Msg):
-    block_number: U64
-    capture_ns: U64
-
-
-@dataclass(frozen=True, slots=True)
-class HealthParams(_Msg):
-    now_ns: U64
-    capture: CaptureState
-    audio: CaptureState
-    inputs_held: bool
-    producer: Producer | None
-    latest_frame: LatestFrame | None
-    latest_audio: LatestAudio | None
-    lease: LeaseStatus
-    queue_depth: U32
-
-
-_Msg._NS = globals()  # pyright: ignore[reportPrivateUsage]
-_Tagged._NS = globals()  # pyright: ignore[reportPrivateUsage]
 
 __all__ = [
     "PROTOCOL_VERSION",

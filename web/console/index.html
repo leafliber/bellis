@@ -20,10 +20,12 @@
       <div class="controls">
         <button class="stop" data-control="control/emergency" disabled>紧急停止</button>
         <button data-control="control/live" disabled>开始直播</button>
+        <button data-control="game/arm" disabled>开启游戏操作</button>
+        <button data-control="game/disarm" disabled>暂停游戏操作</button>
         <button data-control="control/pause" disabled>暂停直播</button>
         <button data-control="control/clear-emergency" disabled>解除急停</button>
       </div>
-      <div class="metrics"><span id="stage">Stage —</span><span id="queue">待处理弹幕 —</span></div>
+      <div class="metrics"><span id="stage">Stage —</span><span id="game-permit">游戏核 —</span><span id="queue">待处理弹幕 —</span></div>
     </section>
     <p id="feedback" role="status" aria-live="polite"></p>
     <div class="panels">
