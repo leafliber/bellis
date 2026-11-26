@@ -10,6 +10,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from uuid import uuid4
 
+from bellis_common import agent_events as ev
 from bellis_common.agent_events import DEFAULT_GAME_LINK_TARGET, GAME_AGENT_ROLE
 from bellis_common.cred import DEFAULT_SESSION_TARGET
 from bellis_common.telemetry import JsonlTelemetry
@@ -146,17 +147,42 @@ async def _resources(
     return telemetry, vlm, ring
 
 
+def _log_json(label: str, data: dict[str, object]) -> None:
+    print(label, json.dumps(data, ensure_ascii=False), flush=True)
+
+
+def _log_command(cmd: ev.SlowCommand, ack: ev.CommandAck) -> None:
+    fields = ("goal_id", "description", "decision_id", "chosen_index", "chosen_option")
+    data = {key: value for key, value in cmd.to_dict().items() if key in fields}
+    if isinstance(cmd, ev.GoalSet) and len(cmd.description) > 80:
+        data["description"] = cmd.description[:79] + "…"
+    data["accepted"] = ack.accepted
+    if ack.reason:
+        data["reason"] = ack.reason
+    _log_json(f"[command] {cmd.TAG}", data)
+
+
 async def _serve(args: argparse.Namespace) -> int:
     profile = load_game_profile(args.profile)
+    print(f"[game-agent] starting {profile.game_id} ({profile.window.process_name})", flush=True)
     async with AsyncExitStack() as stack:
         telemetry, vlm, ring = await _resources(stack, args, profile)
 
         core = _core_client(core_options(args), lambda: session)
         config = GameSessionConfig(link_cred_target=args.link_cred)
-        session = GameSession(core, ring, vlm, profile, config, telemetry=telemetry)
+        session = GameSession(
+            core, ring, vlm, profile, config, telemetry=telemetry,
+            on_connected=lambda: print(
+                f"[game-agent] connected host ({args.link_cred})", flush=True
+            ),
+            on_command=_log_command,
+            on_step=lambda record: _log_json("[step]", record.to_prompt_dict()),
+            on_event=lambda event: _log_json(f"[event] {event.TAG}", event.to_dict()),
+        )  # fmt: skip
         await _start_core(stack, core, ring, profile)
         stack.push_async_callback(session.close)
         await session.run()
+        print("[game-agent] disconnected", flush=True)
     return 0
 
 

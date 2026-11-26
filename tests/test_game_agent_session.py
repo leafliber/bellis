@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from bellis_common import agent_events as ev
@@ -13,7 +13,14 @@ from bellis_common import cred
 from bellis_common.cred import DEFAULT_SESSION_TARGET, SessionInfo
 from bellis_common.wire_codec import ProtocolError
 from bellis_game.io import protocol as rpc
-from bellis_game.loop import GameSession, GameSessionConfig, LoopConfig, LoopControl, cli
+from bellis_game.loop import (
+    ActionRecord,
+    GameSession,
+    GameSessionConfig,
+    LoopConfig,
+    LoopControl,
+    cli,
+)
 from bellis_host import GameLinkConfig, HostGameLink
 from test_fast_loop import ASK, DONE, PROFILE, RELEASE, WAIT, Frames, Model
 
@@ -233,6 +240,7 @@ class Core:
 @asynccontextmanager
 async def running(
     model: Model,
+    observer: Mock | None = None,
 ) -> AsyncGenerator[tuple[HostGameLink, Core, asyncio.Queue[ev.FastEvent]]]:
     events: asyncio.Queue[ev.FastEvent] = asyncio.Queue()
     link = HostGameLink(on_event=events.put_nowait)
@@ -241,7 +249,17 @@ async def running(
     config = GameSessionConfig(
         link_credentials=link.credentials, loop_config=LoopConfig(max_frame_age_s=30)
     )
-    core.session = GameSession(core, Frames(), model, PROFILE, config)
+    core.session = GameSession(
+        core,
+        Frames(),
+        model,
+        PROFILE,
+        config,
+        on_connected=observer,
+        on_command=observer,
+        on_step=observer,
+        on_event=observer,
+    )
     run = asyncio.create_task(core.session.run())
     try:
         async with asyncio.timeout(5):
@@ -477,3 +495,60 @@ def test_serve_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     args = runner.call_args.args[0]
     assert (args.link_cred, args.permit_cred) == ("link", "permit")
     assert (args.profile, args.emergency_hotkey) == (Path("custom.toml"), "ctrl+f12")
+
+
+async def test_session_survives_failing_observers() -> None:
+    observer = Mock(side_effect=RuntimeError("logging failed"))
+    model = Model((dict(DONE, highlight=HIGHLIGHT.summary),))
+    async with running(model, observer) as (link, _, events):
+        rejected = ev.CommandAck(False, "idle")
+        assert await link.resolve_decision(RESOLVED) == rejected
+        assert await link.set_goal(GOAL) == ACK
+        assert await events.get() == HIGHLIGHT
+        outcome = await events.get()
+        assert isinstance(outcome, ev.GoalCompleted)
+    connected, reject, accept, highlight, step, terminal = observer.call_args_list
+    assert (connected, reject, accept) == (call(), call(RESOLVED, rejected), call(GOAL, ACK))
+    assert (highlight, terminal) == (call(HIGHLIGHT), call(outcome))
+    assert isinstance(step.args[0], ActionRecord) and step.args[0].action == "done"
+
+
+def test_serve_stdout(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    session = Mock(run=AsyncMock(), close=AsyncMock())
+    factory = Mock(return_value=session)
+    goal = replace(GOAL, description="地图\n" + "x" * 100)
+    record = ActionRecord(1, 2, "地图", "done", "visible", "ok")
+
+    async def run() -> None:
+        callbacks = factory.call_args.kwargs
+        callbacks["on_connected"]()
+        callbacks["on_command"](goal, ACK)
+        callbacks["on_command"](RESOLVED, ev.CommandAck(False, "idle"))
+        callbacks["on_step"](record)
+        callbacks["on_event"](COMPLETED)
+
+    session.run.side_effect = run
+    monkeypatch.setattr(cli, "GameSession", factory)
+    monkeypatch.setattr(cli, "_resources", AsyncMock(return_value=(None, Model(()), Frames())))
+    monkeypatch.setattr(cli, "_start_core", AsyncMock())
+    assert cli.main(["serve", "--core-exe", "core.exe", "--link-cred", "link"]) == 0
+    start, connected, accepted, rejected, step, event, end = capsys.readouterr().out.splitlines()
+    assert start == f"[game-agent] starting {PROFILE.game_id} ({PROFILE.window.process_name})"
+    assert connected == "[game-agent] connected host (link)"
+    assert "地图" in accepted
+    assert json.loads(accepted.removeprefix(f"[command] {goal.TAG} ")) == {
+        "accepted": True,
+        "goal_id": goal.goal_id,
+        "description": goal.description[:79] + "…",
+    }
+    assert json.loads(rejected.removeprefix(f"[command] {RESOLVED.TAG} ")) == {
+        "accepted": False,
+        "reason": "idle",
+        "goal_id": RESOLVED.goal_id,
+        "decision_id": RESOLVED.decision_id,
+        "chosen_index": 1,
+        "chosen_option": "B",
+    }
+    assert json.loads(step.removeprefix("[step] ")) == record.to_prompt_dict()
+    assert json.loads(event.removeprefix(f"[event] {COMPLETED.TAG} ")) == COMPLETED.to_dict()
+    assert end == "[game-agent] disconnected"

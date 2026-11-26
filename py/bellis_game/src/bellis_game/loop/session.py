@@ -21,6 +21,12 @@ from .agent import FastLoop, LoopConfig, LoopControl, LoopCore, VisionModel
 from .events import ActionRecord
 
 
+def _observe[**P](callback: Callable[P, None] | None, *args: P.args, **kwargs: P.kwargs) -> None:
+    if callback is not None:
+        with suppress(Exception):
+            callback(*args, **kwargs)
+
+
 @dataclass(frozen=True, slots=True)
 class GameSessionConfig:
     link_cred_target: str | None = ev.DEFAULT_GAME_LINK_TARGET
@@ -58,9 +64,13 @@ class GameSession:
         *,
         telemetry: JsonlTelemetry | None = None,
         on_step: Callable[[ActionRecord], None] | None = None,
+        on_connected: Callable[[], None] | None = None,
+        on_command: Callable[[ev.SlowCommand, ev.CommandAck], None] | None = None,
+        on_event: Callable[[ev.FastEvent], None] | None = None,
     ) -> None:
         self._core, self._frames, self._vlm, self._profile = core, frames, vlm, profile
         self._config, self._telemetry, self._on_step = config, telemetry, on_step
+        self._on_connected, self._on_command, self._on_event = on_connected, on_command, on_event
         self._generation = 0
         self._executor: ActionExecutor | None = None
         self._control: LoopControl | None = None
@@ -105,6 +115,7 @@ class GameSession:
                     if self._closed:
                         return
                     raise
+                _observe(self._on_connected)
                 await asyncio.shield(peer.closed)
         finally:
             self._closed = True
@@ -120,17 +131,23 @@ class GameSession:
             cmd = ev.parse_slow_command(raw)
         except ProtocolError as exc:
             raise ch.RpcError(ch.RpcErrorCode.INVALID_PARAMS, str(exc)) from exc
+        ack = self._apply_command(cmd)
+        _observe(self._on_command, cmd, ack)
+        return ack.to_dict()
+
+    def _apply_command(self, cmd: ev.SlowCommand) -> ev.CommandAck:
         if self._closed:
-            return ev.CommandAck(False, "closed").to_dict()
+            return ev.CommandAck(False, "closed")
         if isinstance(cmd, ev.GoalSet):
             if self._control:
-                return ev.CommandAck(False, "busy").to_dict()
+                return ev.CommandAck(False, "busy")
             producer = self._next_producer()
             self._executor = ActionExecutor(self._core, self._frames, self._profile, producer)
             loop = FastLoop(
                 self._core, self._frames, self._vlm, self._executor, self._profile, producer,
                 config=self._config.loop_config, telemetry=self._telemetry,
-                on_step=self._on_step, on_event=self._emit_event,
+                on_step=lambda record: _observe(self._on_step, record),
+                on_event=self._emit_event,
             )  # fmt: skip
             self._control = LoopControl()
             if self._paused:
@@ -139,12 +156,12 @@ class GameSession:
             self._goals.create_task(self._run_goal(cmd, loop, self._control))
         elif isinstance(cmd, ev.GoalCancel | ev.DecisionResolved):
             if self._control is None:
-                return ev.CommandAck(False, "idle").to_dict()
+                return ev.CommandAck(False, "idle")
             if cmd.goal_id is not None and cmd.goal_id != self._goal_id:
-                return ev.CommandAck(False, "goal_mismatch").to_dict()
+                return ev.CommandAck(False, "goal_mismatch")
             if isinstance(cmd, ev.DecisionResolved):
                 error = self._control.resolve_decision(cmd)
-                return ev.CommandAck(error is None, error or "").to_dict()
+                return ev.CommandAck(error is None, error or "")
             self._control.cancel(cmd.reason)
         else:
             self._paused = isinstance(cmd, ev.PacingPause)
@@ -153,7 +170,7 @@ class GameSession:
                     self._control.pause()
                 else:
                     self._control.resume()
-        return ev.CommandAck(True).to_dict()
+        return ev.CommandAck(True)
 
     async def _run_goal(self, goal: ev.GoalSet, loop: FastLoop, control: LoopControl) -> None:
         try:
@@ -168,6 +185,7 @@ class GameSession:
         if self._peer and self._peer.connection.is_open:
             with suppress(ch.ChannelError):
                 self._peer.notify(Methods.GAME_EVENT, event.to_dict())
+        _observe(self._on_event, event)
 
     async def close(self) -> None:
         self._disconnect()
