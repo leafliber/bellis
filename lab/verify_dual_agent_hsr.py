@@ -153,6 +153,7 @@ class Verification:
         self.args, self.db = args, db
         self.stack = AsyncExitStack()
         self.host_pid: int | None = None
+        self.game_proc: asyncio.subprocess.Process | None = None
         self.logged_in = self.connected = False
         self.evidence: Data = {}
 
@@ -238,10 +239,27 @@ class Verification:
         self.evidence.update(host_pid=self.host_pid, watchdog_pid=watchdog_pid, mode="safe_stop")
 
     async def game_agent_connect(self) -> None:
-        profile = str(self.args.profile.resolve()).replace("'", "''")
-        hotkey = self.args.emergency_hotkey.replace("'", "''")
-        cmd = f"uv run game-agent serve --profile '{profile}' --emergency-hotkey '{hotkey}'"
-        print("请在仓库的管理员 PowerShell 中运行：", cmd, sep="\n", flush=True)
+        if self.args.core_task:
+            cli = shutil.which("game-agent", path=str(ROOT / ".venv/Scripts"))
+            cmd = [cli] if cli else [sys.executable, "-m", "bellis_game.loop.cli"]
+            cmd.extend([
+                "serve",
+                "--profile",
+                str(self.args.profile.resolve()),
+                "--core-task",
+                self.args.core_task,
+                "--emergency-hotkey",
+                self.args.emergency_hotkey,
+            ])
+            self.game_proc = await asyncio.create_subprocess_exec(
+                *cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+            )
+            self.evidence["core_task"] = self.args.core_task
+        else:
+            profile = str(self.args.profile.resolve()).replace("'", "''")
+            hotkey = self.args.emergency_hotkey.replace("'", "''")
+            cmd = f"uv run game-agent serve --profile '{profile}' --emergency-hotkey '{hotkey}'"
+            print("请在仓库的管理员 PowerShell 中运行：", cmd, sep="\n", flush=True)
         await self.api.until(lambda s: all(connections(s)), self.args.connect_timeout, "双通道连接")
         self.connected = True
 
@@ -414,11 +432,20 @@ class Verification:
             if not failed:
                 require(all(connections(status)), "热拔出前通道已断开")
             if any(connections(status)):
-                print("请在管理员 game-agent serve 窗口按 Ctrl+C，等待两条通道断开。", flush=True)
+                if self.game_proc is not None:
+                    if self.game_proc.returncode is None:
+                        self.game_proc.send_signal(signal.CTRL_BREAK_EVENT)
+                        with suppress(TimeoutError):
+                            await asyncio.wait_for(self.game_proc.wait(), 15)
+                else:
+                    print("请在管理员 game-agent serve 窗口按 Ctrl+C，等待两条通道断开。", flush=True)
                 await self.api.until(lambda s: not any(connections(s)), 60, "双通道断开")
                 await self.api.call()
                 self.evidence["host_survived"] = self.connected
         finally:
+            if self.game_proc is not None and self.game_proc.returncode is None:
+                self.game_proc.kill()
+                await self.game_proc.wait()
             await self.stack.aclose()
 
 
@@ -477,6 +504,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path)
     parser.add_argument("--profile", type=Path, default=ROOT / "games/hsr.toml")
+    parser.add_argument("--core-task", help="按需提权计划任务名（如 BellisRealtimeCore）")
     parser.add_argument("--only", help="3,4,5a,5b,6,7a,7b")
     parser.add_argument("--skip-hotkey", action="store_true")
     parser.add_argument("--emergency-hotkey", default="ctrl+shift+f12")

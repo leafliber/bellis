@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import signal
 import sys
 import threading
 
@@ -98,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--role", default=PERMIT_ROLE)
     parser.add_argument("--lease-ttl", type=float, default=DEFAULT_LEASE_TTL_S)
     parser.add_argument("--renew-interval", type=float, default=DEFAULT_RENEW_INTERVAL_S)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
     try:
         return asyncio.run(_run_console(parser.parse_args(argv)))
     except KeyboardInterrupt:

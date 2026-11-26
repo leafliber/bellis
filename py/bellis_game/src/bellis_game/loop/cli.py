@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import signal
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import AsyncExitStack
@@ -220,6 +221,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parser.parse_args(args_list[1:] if serve else args_list)
     except SystemExit as exc:
         return 1 if exc.code else 0
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
     try:
         return asyncio.run(_serve(args) if serve else _run(args))
     except KeyboardInterrupt:

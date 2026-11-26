@@ -14,6 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
+bellis = "bellis_common.launcher:main"
 bellis-host = "bellis_host.app:main"
 check = "tools.check:main"
 permit-console = "bellis_game.console:main"
