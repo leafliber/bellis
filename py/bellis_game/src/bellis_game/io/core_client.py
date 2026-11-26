@@ -8,22 +8,38 @@ import logging
 import math
 import os
 import secrets
-import subprocess
-import sys
-import threading
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import StrEnum
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Any, Final, Self
+from typing import Any, Final, Self
 
 from bellis_common import channel as ch
-from bellis_common.cred import is_session_id
+from bellis_common import cred
+from bellis_common.cred import DEFAULT_CORE_TARGET, is_session_id
 from bellis_common.permit import PERMIT_ROLE as PERMIT_ROLE
+from bellis_common.task_xml import trigger_task, valid_task_name
 
 from . import protocol as proto
+from ._process import (
+    ManagedProcess as ManagedProcess,
+)
+from ._process import (
+    Redirect as Redirect,
+)
+from ._process import (
+    StopResult as StopResult,
+)
+from ._process import (
+    StopStage as StopStage,
+)
+from ._process import (
+    StopTimeouts as StopTimeouts,
+)
+from ._process import (
+    base_environment as base_environment,
+)
 from .audio_ring import AudioRing
 from .frame_ring import FrameRing
 
@@ -37,135 +53,9 @@ ENV_PERMIT_PATH: Final = "BELLIS_PERMIT_PATH"
 ENV_PERMIT_KEY: Final = "BELLIS_PERMIT_KEY"
 ENV_PERMIT_ROLE: Final = "BELLIS_PERMIT_ROLE"
 
-_WIN_ENV_KEYS = frozenset((
-    "APPDATA", "COMPUTERNAME", "COMSPEC", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA",
-    "NUMBER_OF_PROCESSORS", "OS", "PATH", "PATHEXT", "PROCESSOR_ARCHITECTURE",
-    "PROGRAMDATA", "PROGRAMFILES", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP", "TMP",
-    "USERDOMAIN", "USERNAME", "USERPROFILE", "WINDIR",
-))  # fmt: skip
-
 
 def _ms(seconds: float) -> str:
     return str(max(1, math.ceil(seconds * 1000)))
-
-
-def base_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
-    env = os.environ if source is None else source
-    return {k: v for k, v in env.items() if k.upper() in _WIN_ENV_KEYS}
-
-
-class StopStage(StrEnum):
-    ALREADY_EXITED = "already-exited"
-    SHUTDOWN = "shutdown"
-    STDIN_EOF = "stdin-eof"
-    KILLED = "killed"
-
-
-@dataclass(frozen=True, slots=True)
-class StopTimeouts:
-    shutdown: float = 2.0
-    stdin: float = 2.0
-    kill: float = 5.0
-
-    def __post_init__(self) -> None:
-        if min(self.shutdown, self.stdin, self.kill) <= 0:
-            raise ValueError("stop timeouts must be positive")
-
-
-@dataclass(frozen=True, slots=True)
-class StopResult:
-    stage: StopStage
-    returncode: int | None
-
-
-type Redirect = int | IO[Any] | None
-
-
-class ManagedProcess:
-    """Direct-argv subprocess with stdin lifeline and RPC -> stdin EOF -> kill stop sequence."""
-
-    def __init__(self, name: str, popen: subprocess.Popen[bytes]) -> None:
-        self.name = name
-        self._popen = popen
-        self._loop = asyncio.get_running_loop()
-        self.exited: asyncio.Future[int] = self._loop.create_future()
-        threading.Thread(target=self._wait, name=f"{name}-exit", daemon=True).start()
-
-    @classmethod
-    def start(
-        cls,
-        name: str,
-        argv: Sequence[str],
-        env: Mapping[str, str],
-        *,
-        stdout: Redirect = None,
-        stderr: Redirect = None,
-    ) -> ManagedProcess:
-        flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-        popen = subprocess.Popen(
-            list(argv),
-            stdin=subprocess.PIPE,
-            stdout=stdout,
-            stderr=stderr,
-            env=dict(env),
-            creationflags=flags,
-        )
-        return cls(name, popen)
-
-    @property
-    def pid(self) -> int:
-        return self._popen.pid
-
-    def close_stdin(self) -> None:
-        if self._popen.stdin is not None and not self._popen.stdin.closed:
-            with contextlib.suppress(OSError):
-                self._popen.stdin.close()
-
-    async def stop(
-        self,
-        shutdown: Callable[[], Awaitable[object]] | None = None,
-        timeouts: StopTimeouts | None = None,
-    ) -> StopResult:
-        t = timeouts or StopTimeouts()
-        if self.exited.done():
-            return StopResult(StopStage.ALREADY_EXITED, self.exited.result())
-        if shutdown is not None:
-            deadline = self._loop.time() + t.shutdown
-            try:
-                async with asyncio.timeout_at(deadline):
-                    await shutdown()
-            except Exception as err:
-                logger.info("%s shutdown RPC did not finish: %s", self.name, err)
-            if await self._wait_exit(deadline - self._loop.time()):
-                return StopResult(StopStage.SHUTDOWN, self.exited.result())
-        self.close_stdin()
-        if await self._wait_exit(t.stdin):
-            return StopResult(StopStage.STDIN_EOF, self.exited.result())
-        self.kill()
-        if await self._wait_exit(t.kill):
-            return StopResult(StopStage.KILLED, self.exited.result())
-        return StopResult(StopStage.KILLED, None)
-
-    def kill(self) -> None:
-        if not self.exited.done():
-            with contextlib.suppress(OSError):
-                self._popen.kill()
-
-    async def _wait_exit(self, seconds: float) -> bool:
-        if not self.exited.done() and seconds > 0:
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(asyncio.shield(self.exited), seconds)
-        return self.exited.done()
-
-    def _wait(self) -> None:
-        rc = self._popen.wait()
-        self.close_stdin()
-        with contextlib.suppress(RuntimeError):
-            self._loop.call_soon_threadsafe(self._finish, rc)
-
-    def _finish(self, rc: int) -> None:
-        if not self.exited.done():
-            self.exited.set_result(rc)
 
 
 class CoreStartError(RuntimeError):
@@ -183,7 +73,7 @@ def find_core_executable(repo_root: Path | None = None) -> Path:
 
 @dataclass(frozen=True, slots=True)
 class CoreClientOptions:
-    executable: Path
+    executable: Path | None = None
     heartbeat_timeout: float = 0.5
     health_interval: float = 1.0
     max_frame_age: float = 0.5
@@ -196,6 +86,9 @@ class CoreClientOptions:
     permit_cred: str | None = None
     permit_session_id: str | None = None
     emergency_hotkey: str | None = None
+    core_task: str | None = None
+    core_cred: str = DEFAULT_CORE_TARGET
+    task_runner: Callable[[str], None] | None = None
     stdout: Redirect = None
     stderr: Redirect = None
 
@@ -206,6 +99,12 @@ class CoreClientOptions:
         )  # fmt: skip
         if min(times) <= 0:
             raise ValueError("CoreClientOptions timeouts must be positive")
+        if (self.executable is None) == (self.core_task is None):
+            raise ValueError("specify either executable or core_task, not both")
+        if self.core_task is not None:
+            valid_task_name(self.core_task)
+            if not self.core_cred or "\0" in self.core_cred:
+                raise ValueError("invalid core_cred")
         if self.permit_credentials is not None and self.permit_cred is not None:
             raise ValueError("specify either permit_credentials or permit_cred, not both")
         if self.permit_session_id is not None and (
@@ -214,10 +113,16 @@ class CoreClientOptions:
             raise ValueError("permit_session_id requires valid id and permit_cred")
         if self.permit_cred is not None and (not self.permit_cred or "\0" in self.permit_cred):
             raise ValueError("invalid permit_cred")
-        if self.emergency_hotkey is not None and not (self.permit_credentials or self.permit_cred):
+        if (
+            self.core_task is None
+            and self.emergency_hotkey is not None
+            and not (self.permit_credentials or self.permit_cred)
+        ):
             raise ValueError("emergency_hotkey requires a permit source")
 
     def argv(self) -> list[str]:
+        if self.executable is None:
+            raise RuntimeError("argv() is only valid for direct subprocess launch")
         args = [
             str(self.executable), "--heartbeat-timeout-ms", _ms(self.heartbeat_timeout),
             "--health-interval-ms", _ms(self.health_interval),
@@ -264,6 +169,8 @@ class CoreClient:
         self._on_health = on_health
         self._server: ch.ChannelServer | None = None
         self._process: ManagedProcess | None = None
+        self._task_active = False
+        self._core_info: cred.SessionInfo | None = None
         self._peer: ch.RpcPeer | None = None
         self._creds: contextlib.ExitStack | None = None
         self._ready: asyncio.Future[None] | None = None
@@ -276,37 +183,51 @@ class CoreClient:
 
     @property
     def running(self) -> bool:
-        return self._process is not None and not self._process.exited.done()
+        if self._process is not None:
+            return not self._process.exited.done()
+        return self._task_active and self._peer is not None and self._peer.connection.is_open
 
     @property
     def process(self) -> ManagedProcess | None:
         return self._process
 
+    def _clear_core_cred(self) -> None:
+        info, self._core_info = self._core_info, None
+        if info is None:
+            return
+        with contextlib.suppress(cred.CredError):
+            if cred.read_session_info(self._options.core_cred) == info:
+                cred.delete_session_info(self._options.core_cred)
+
     async def start(self) -> None:
-        if self._process is not None:
+        if self._process is not None or self._task_active:
             raise RuntimeError("CoreClient already started")
         ready: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        self._ready = ready
-        self._hello_done = False
+        self._ready, self._hello_done = ready, False
         stack = contextlib.ExitStack()
+        sid = f"core{secrets.token_hex(4)}"
+        proc: ManagedProcess | None = None
         try:
-            creds = stack.enter_context(ch.session_credentials(f"core{secrets.token_hex(4)}"))
+            creds = stack.enter_context(ch.session_credentials(sid))
             server = await ch.listen(
-                creds.path,
-                creds.key,
-                on_connection=self._on_connection,
+                creds.path, creds.key, on_connection=self._on_connection,
                 on_rejected=lambda e: logger.warning("rejected core connection: %s", e),
                 on_error=lambda e: logger.error("core connection error: %s", e),
-            )
+            )  # fmt: skip
             try:
-                proc = ManagedProcess.start(
-                    "realtime-core",
-                    self._options.argv(),
-                    self._options.child_env(creds),
-                    stdout=self._options.stdout,
-                    stderr=self._options.stderr,
-                )
+                if (task_name := self._options.core_task) is not None:
+                    info = cred.SessionInfo.create(creds, sid, launcher_pid=os.getpid())
+                    cred.write_session_info(info, self._options.core_cred)
+                    self._core_info = info
+                    runner = self._options.task_runner or trigger_task
+                    await asyncio.to_thread(runner, task_name)
+                else:
+                    proc = ManagedProcess.start(
+                        "realtime-core", self._options.argv(), self._options.child_env(creds),
+                        stdout=self._options.stdout, stderr=self._options.stderr,
+                    )  # fmt: skip
             except BaseException:
+                self._clear_core_cred()
                 await server.close()
                 raise
         except BaseException:
@@ -315,17 +236,21 @@ class CoreClient:
             raise
 
         self._creds, self._server, self._process = stack, server, proc
+        self._task_active = proc is None
+        waiters: set[asyncio.Future[Any]] = {ready, proc.exited} if proc else {ready}
         try:
             async with asyncio.timeout(self._options.start_timeout):
-                await asyncio.wait({ready, proc.exited}, return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
         except TimeoutError:
             pass
         except BaseException:
-            proc.kill()
+            if proc is not None:
+                proc.kill()
             await self._cleanup()
             raise
+        self._clear_core_cred()
         if not ready.done() or ready.cancelled():
-            rc = proc.exited.result() if proc.exited.done() else None
+            rc = proc.exited.result() if proc is not None and proc.exited.done() else None
             await self.stop()
             raise CoreStartError(f"realtime-core did not become ready (returncode={rc})")
 
@@ -370,11 +295,7 @@ class CoreClient:
         )
 
     async def stop(self) -> StopResult:
-        proc = self._process
-        if proc is None:
-            await self._cleanup()
-            return StopResult(StopStage.ALREADY_EXITED, self._last_rc)
-        peer = self._peer
+        proc, peer = self._process, self._peer
 
         async def _rpc_shutdown() -> None:
             if peer is None or not peer.connection.is_open:
@@ -384,6 +305,23 @@ class CoreClient:
                     proto.CoreMethods.SHUTDOWN, {}, timeout=self._options.stop.shutdown
                 )
             )
+
+        if proc is None:
+            if not self._task_active:
+                await self._cleanup()
+                return StopResult(StopStage.ALREADY_EXITED, self._last_rc)
+            stage, rc = StopStage.ALREADY_EXITED, 0
+            if peer is not None and peer.connection.is_open:
+                try:
+                    await _rpc_shutdown()
+                    await asyncio.wait_for(asyncio.shield(peer.closed), self._options.stop.shutdown)
+                    stage = StopStage.SHUTDOWN
+                except Exception as err:
+                    logger.info("elevated realtime-core shutdown RPC did not finish: %s", err)
+                    stage = StopStage.STDIN_EOF
+            self._last_rc = rc
+            await self._cleanup()
+            return StopResult(stage, rc)
 
         res = await proc.stop(_rpc_shutdown, self._options.stop)
         self._last_rc = res.returncode
@@ -469,7 +407,9 @@ class CoreClient:
         server, self._server = self._server, None
         creds, self._creds = self._creds, None
         self._process = None
+        self._task_active = False
         self._ready = None
+        self._clear_core_cred()
         if peer is not None:
             with contextlib.suppress(Exception):
                 await peer.close()

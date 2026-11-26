@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from bellis_common import agent_events as ev
 from bellis_common.agent_events import DEFAULT_GAME_LINK_TARGET, GAME_AGENT_ROLE
-from bellis_common.cred import DEFAULT_SESSION_TARGET
+from bellis_common.cred import DEFAULT_CORE_TARGET, DEFAULT_SESSION_TARGET
 from bellis_common.telemetry import JsonlTelemetry
 
 from bellis_game.io import CoreClient, CoreClientOptions, FrameRing, find_core_executable
@@ -33,6 +33,8 @@ def _runtime_parser() -> argparse.ArgumentParser:
     parser.add_argument("--emergency-hotkey", default="ctrl+shift+f12")
     parser.add_argument("--telemetry", type=Path)
     parser.add_argument("--core-exe", type=Path)
+    parser.add_argument("--core-task")
+    parser.add_argument("--core-cred", default=DEFAULT_CORE_TARGET)
     parser.add_argument("--base-url")
     parser.add_argument("--model")
     parser.add_argument("--max-width", type=int, default=3840)
@@ -57,6 +59,14 @@ def build_serve_parser() -> argparse.ArgumentParser:
 
 
 def core_options(args: argparse.Namespace) -> CoreClientOptions:
+    if args.core_task:
+        return CoreClientOptions(
+            core_task=args.core_task,
+            core_cred=args.core_cred,
+            permit_cred=args.permit_cred,
+            permit_session_id=args.permit_session_id,
+            emergency_hotkey=args.emergency_hotkey,
+        )
     return CoreClientOptions(
         executable=args.core_exe or find_core_executable(),
         permit_cred=args.permit_cred,

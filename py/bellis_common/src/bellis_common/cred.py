@@ -14,6 +14,8 @@ from typing import Any, Final, cast
 from bellis_common.channel import wire
 
 DEFAULT_SESSION_TARGET: Final = "session.bellis"
+DEFAULT_CORE_TARGET: Final = "core.bellis"
+DEFAULT_OBS_TARGET: Final = "obs.bellis"
 _SESSION_ID_RE = re.compile(r"[a-z0-9]{1,16}")
 _RFC3339_RE = re.compile(
     r"(?P<y>\d{4})-(?P<m>\d{2})-(?P<d>\d{2})[Tt]"
@@ -151,11 +153,14 @@ class _CredW(ctypes.Structure):
 
 
 _PCRED = ctypes.POINTER(_CredW)
+_PPCRED = ctypes.POINTER(_PCRED)
 if _adv is not None:
     _adv.CredWriteW.argtypes, _adv.CredWriteW.restype = (_PCRED, _DW), _BOOL
     _adv.CredReadW.argtypes = (_CWSTR, _DW, _DW, ctypes.POINTER(_PCRED))
     _adv.CredReadW.restype = _BOOL
     _adv.CredDeleteW.argtypes, _adv.CredDeleteW.restype = (_CWSTR, _DW, _DW), _BOOL
+    _adv.CredEnumerateW.argtypes = (_CWSTR, _DW, ctypes.POINTER(_DW), ctypes.POINTER(_PPCRED))
+    _adv.CredEnumerateW.restype = _BOOL
     _adv.CredFree.argtypes, _adv.CredFree.restype = (ctypes.c_void_p,), None
 
 
@@ -163,17 +168,26 @@ def _target_ok(target: str) -> None:
     _check(_adv is not None and bool(target) and "\0" not in target, "invalid CredMan target")
 
 
-def write_session_info(info: SessionInfo, target: str = DEFAULT_SESSION_TARGET) -> None:
+def _write_cred_blob(target: str, blob: bytes) -> None:
     _target_ok(target)
-    blob = info.to_utf16le()
-    buf = (ctypes.c_byte * len(blob)).from_buffer_copy(blob)
+    buf = (ctypes.c_byte * len(blob)).from_buffer_copy(blob) if blob else None
+    ptr = ctypes.cast(buf, _PBYTE) if buf is not None else _PBYTE()
     cred = _CredW(
         Type=_CRED_TYPE_GENERIC, TargetName=target, CredentialBlobSize=len(blob),
-        CredentialBlob=ctypes.cast(buf, _PBYTE), Persist=_CRED_PERSIST_ENTERPRISE,
-        UserName="bellis",
+        CredentialBlob=ptr, Persist=_CRED_PERSIST_ENTERPRISE, UserName="bellis",
     )  # fmt: skip
     if not _adv.CredWriteW(ctypes.byref(cred), 0):
         raise CredError(f"CredWriteW failed: {ctypes.WinError(ctypes.get_last_error())}")
+
+
+def write_session_info(info: SessionInfo, target: str = DEFAULT_SESSION_TARGET) -> None:
+    _write_cred_blob(target, info.to_utf16le())
+
+
+def write_secret_text(target: str, value: str) -> None:
+    """Write UTF-16LE text to a generic Windows credential (never logs values)."""
+    _check("\0" not in value, "secret value must not contain NUL")
+    _write_cred_blob(target, value.encode("utf-16-le"))
 
 
 def _read_cred_blob(target: str) -> bytes | None:
@@ -206,6 +220,28 @@ def read_secret_text(target: str) -> str | None:
         raise CredError("credential blob is not valid UTF-16LE") from None
 
 
+def list_secret_targets(suffix: str = ".bellis") -> list[str]:
+    """List matching generic credential target names without reading secret blobs."""
+    if _adv is None or "\0" in suffix:
+        raise CredError("invalid CredMan filter")
+    pattern: str | None = f"*{suffix}" if suffix else None
+    count = _DW(0)
+    array = _PPCRED()
+    if not _adv.CredEnumerateW(pattern, 0, ctypes.byref(count), ctypes.byref(array)):
+        if ctypes.get_last_error() == _ERROR_NOT_FOUND:
+            return []
+        raise CredError(f"CredEnumerateW failed: {ctypes.WinError(ctypes.get_last_error())}")
+    try:
+        names: list[str] = []
+        for idx in range(count.value):
+            entry = array[idx].contents
+            if entry.Type == _CRED_TYPE_GENERIC and entry.TargetName:
+                names.append(entry.TargetName)
+        return sorted(names)
+    finally:
+        _adv.CredFree(array)
+
+
 def delete_session_info(target: str = DEFAULT_SESSION_TARGET) -> bool:
     _target_ok(target)
     if not _adv.CredDeleteW(target, _CRED_TYPE_GENERIC, 0):
@@ -213,3 +249,6 @@ def delete_session_info(target: str = DEFAULT_SESSION_TARGET) -> bool:
             return False
         raise CredError(f"CredDeleteW failed: {ctypes.WinError(ctypes.get_last_error())}")
     return True
+
+
+delete_secret = delete_session_info
