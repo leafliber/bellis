@@ -154,12 +154,6 @@ class ActionExecutor:
     def last_release(self) -> rpc.InputReleasedParams | None:
         return self._last_release
 
-    def reset_release(self) -> None:
-        if self.control_released:
-            self._last_release = self._signal = None
-        self._pending_deadline_id = None
-        self._deadline_clear.set()
-
     def release_signal(self) -> asyncio.Future[rpc.InputReleasedParams]:
         if self._signal is None:
             self._signal = asyncio.get_running_loop().create_future()

@@ -198,9 +198,6 @@ class AudioRing:
             sample_format=SAMPLE_FORMAT_F32,
         )
 
-    def latest_block_number(self) -> int:
-        return self._open_views().header.write_seq
-
     def read_recent(
         self, duration_ns: int, *, after: int = 0, max_attempts: int = DEFAULT_READ_ATTEMPTS
     ) -> AudioRead:

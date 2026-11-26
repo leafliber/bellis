@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import ctypes
 import json
 import sys
 from contextlib import AsyncExitStack, suppress
@@ -21,13 +22,29 @@ from bellis_game.io.protocol import ReleaseVerification
 from bellis_game.loop import ActionRecord, GoalSet, LoopConfig
 from bellis_game.loop.cli import open_loop, report_outcome, vlm_config
 from bellis_game.perception import VlmClient, load_game_profile, resolve_vlm_api_key
-from verify_hsr_io import REPO_ROOT, _countdown, _is_admin
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_GOAL = (
     "从大世界打开手机菜单（按 esc 键），点击进入「星际和平指南」，确认当前停留在「每日实训」页签"
     "（若在其他页签则点击左侧「每日实训」切过去并确认可见每日实训活跃度或任务列表），"
     "达成后立即回报 done 停止。严禁点击商城、跃迁、充值、设置或任何消耗资源/不可逆按钮。"
 )
+
+
+def _is_admin() -> bool:
+    if sys.platform != "win32":
+        return False
+    with suppress(Exception):
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    return False
+
+
+async def _countdown(seconds: float, prompt: str) -> None:
+    print(f"\n>>> {prompt}", flush=True)
+    for rem in range(max(1, int(round(seconds))), 0, -1):
+        print(f"    {rem}...", flush=True)
+        await asyncio.sleep(1.0)
 
 
 def _log_step(record: ActionRecord) -> None:

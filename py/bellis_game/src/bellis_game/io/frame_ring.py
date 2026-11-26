@@ -185,9 +185,6 @@ class FrameRing:
             max_height=self.max_height,
         )
 
-    def latest_frame_number(self) -> int:
-        return self._open_views().header.write_seq
-
     def read_latest(self, *, max_attempts: int = DEFAULT_READ_ATTEMPTS) -> RingFrame | None:
         if max_attempts < 1:
             raise ValueError(f"max_attempts must be >= 1, got {max_attempts}")

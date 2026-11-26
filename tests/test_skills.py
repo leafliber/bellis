@@ -406,7 +406,7 @@ async def test_receipt_correlation_and_late_duplicate() -> None:
 
 
 @pytest.mark.parametrize("reason", RELEASE_REASONS)
-async def test_latched_release_and_rearm(reason: rpc.ReleaseReason) -> None:
+async def test_latched_release(reason: rpc.ReleaseReason) -> None:
     executor, core, frames = setup_executor(AFTER)
     rel = release(reason)
     executor.on_released(rel)
@@ -417,9 +417,6 @@ async def test_latched_release_and_rearm(reason: rpc.ReleaseReason) -> None:
         and result.release == executor.last_release == rel
     )
     assert executor.control_released and not core.blocks and frames.reads == 0
-    executor.reset_release()
-    result = await executor.execute_input(CLICK, before_frame=BEFORE, transform=TRANSFORM)
-    assert not executor.control_released and result.status == ExecutionStatus.VERIFIED_CHANGED
 
 
 @pytest.mark.parametrize("reason", RELEASE_REASONS)
@@ -582,7 +579,6 @@ async def test_release_wakes_wait_and_settle(reason: rpc.ReleaseReason) -> None:
         await frames.read.wait()
         rel = release(reason)
         executor.on_released(rel)
-        executor.reset_release()
         result = await waited
         assert await settled is None
     assert result.status == ExecutionStatus.CONTROL_RELEASED and result.release == rel
