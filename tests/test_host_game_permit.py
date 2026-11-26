@@ -25,8 +25,8 @@ from test_obs_and_watchdog import obs as obs
 from test_realtime_interop import released
 
 
-async def until(predicate: Callable[[], bool]) -> None:
-    async with asyncio.timeout(3):
+async def until(predicate: Callable[[], bool], timeout: float = 3) -> None:
+    async with asyncio.timeout(timeout):
         while not predicate():
             await asyncio.sleep(0)
 
@@ -38,7 +38,7 @@ async def pipe(server: permit.PermitServer | HostGamePermit) -> AsyncGenerator[c
         await channel.connect(cred.path, permit.PERMIT_ROLE, cred.key), timeout=2
     )
     try:
-        await server.wait_connected(2)
+        await until(lambda: server.connected, 2)
         yield peer
     finally:
         await peer.close()

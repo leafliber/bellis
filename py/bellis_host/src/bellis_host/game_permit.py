@@ -117,9 +117,6 @@ class HostGamePermit:
             await self.close()
             raise
 
-    async def wait_connected(self, timeout: float | None = None) -> None:
-        await self._server.wait_connected(timeout)
-
     async def arm_input(self, *, actor: str = "operator") -> int:
         if not isinstance(actor, str) or not actor.strip():  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError("actor must be non-empty")

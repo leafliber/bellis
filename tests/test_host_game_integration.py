@@ -151,7 +151,7 @@ async def agent(app: HostApp, vision: Vision, *, timeout: float = 6) -> AsyncGen
     run = asyncio.create_task(core.session.run())
     try:
         async with asyncio.timeout(timeout):
-            await app.game_link.wait_connected(2)
+            await until(lambda: app.game_link.connected, 2)
             yield core.session
     finally:
         await core.session.close()
@@ -319,7 +319,7 @@ async def test_emergency_cancels_active_game_and_speech(
         assert (await turn).action == "interrupted" and app.game_permit.active_token is None
         assert app.safety.snapshot().mode == HostMode.EMERGENCY_STOP
         with pytest.raises(SafetyError, match="emergency_stop"):
-            await app.game.cancel_goal()
+            await app.game.dispatch(ev.GoalCancel())
 
 
 async def test_emergency_during_unacknowledged_goal(studio: Studio) -> None:
@@ -363,10 +363,10 @@ async def test_rate_limit_preserves_stop_controls(studio: Studio) -> None:
     app.safety.start_live()
     async with agent(app, Vision(())):
         for _ in range(20):
-            assert (await app.game.resume_pacing()).accepted
+            assert (await app.game.dispatch(ev.PacingResume())).accepted
         with pytest.raises(SafetyError, match="rate_limited"):
-            await app.game.set_goal(ev.GoalSet("observation", "查看画面"))
-        assert (await app.game.pause_pacing()).accepted
+            await app.game.dispatch(ev.GoalSet("observation", "查看画面"))
+        assert (await app.game.dispatch(ev.PacingPause())).accepted
 
 
 def assert_journaled_decision(app: HostApp, source: IntentSource) -> None:
@@ -431,11 +431,11 @@ async def test_vote_end_during_safe_stop_expires_with_decision(studio: Studio) -
     app = studio.app
     async with agent(app, Vision((ASK,))):
         app.safety.start_live()
-        assert (await app.game.set_goal(ev.GoalSet("fork", "Choose a route"))).accepted
+        assert (await app.game.dispatch(ev.GoalSet("fork", "Choose a route"))).accepted
         await until(lambda: app.game_link.pending_decision is not None)
         app.safety.pause_live(reason="operator")
         app.director.notify_vote_ended()
-        assert (await app.game.cancel_goal()).accepted
+        assert (await app.game.dispatch(ev.GoalCancel())).accepted
         await until(lambda: isinstance(app.game_link.last_event, ev.GoalStuck))
         assert app.game_link.pending_decision is None
         turns = len(studio.model.messages)

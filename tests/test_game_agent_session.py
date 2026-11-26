@@ -23,6 +23,7 @@ from bellis_game.loop import (
 )
 from bellis_host import GameLinkConfig, HostGameLink
 from test_fast_loop import ASK, DONE, PROFILE, RELEASE, WAIT, Frames, Model
+from test_host_game_permit import until
 
 GOAL = ev.GoalSet("map", "Open the map")
 COMPLETED = ev.GoalCompleted("map", "visible", 1, 1)
@@ -105,10 +106,10 @@ async def test_link_handshake_and_credential_ownership(
                 await peer.request(ev.AgentLinkMethods.AGENT_HELLO, {})
             assert not link.connected and link.last_event is None
             with pytest.raises(ch.ChannelError, match="not connected"):
-                await link.set_goal(GOAL)
+                await link.send_command(GOAL)
             hello = ev.AgentHelloParams("hsr", "HSR")
             await peer.request(ev.AgentLinkMethods.AGENT_HELLO, hello.to_dict())
-            await link.wait_connected(1)
+            await until(lambda: link.connected, 1)
             await (await connect(link)).closed
 
             def complete_before_ack(raw: object) -> dict[str, object]:
@@ -118,7 +119,7 @@ async def test_link_handshake_and_credential_ownership(
                 return ACK.to_dict()
 
             peer.handle(ev.AgentLinkMethods.HOST_COMMAND, complete_before_ack)
-            assert await link.set_goal(GOAL) == ACK
+            assert await link.send_command(GOAL) == ACK
             assert link.last_event == COMPLETED and link.snapshot().active_goal_id is None
             assert store["link"] == info
             if replaced:
@@ -153,11 +154,11 @@ async def test_nonterminal_events_before_command_ack() -> None:
         await peer.request(
             ev.AgentLinkMethods.AGENT_HELLO, ev.AgentHelloParams("hsr", "HSR").to_dict()
         )
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         assert (
             link.pending_decision == NEEDED and link.snapshot().last_highlight == HIGHLIGHT.summary
         )
-        assert await link.resolve_decision(RESOLVED) == ACK
+        assert await link.send_command(RESOLVED) == ACK
         snap = link.snapshot()
         assert snap.pending_decision == second and snap.active_goal_id == GOAL.goal_id
         assert snap.last_highlight == HIGHLIGHT.summary and snap.last_outcome is None
@@ -191,9 +192,9 @@ async def test_pending_decision_survives_failed_replacement(cancel_request: bool
         peer.handle(ev.AgentLinkMethods.HOST_COMMAND, command)
         hello = ev.AgentHelloParams("hsr", "HSR")
         await peer.request(ev.AgentLinkMethods.AGENT_HELLO, hello.to_dict())
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         async with asyncio.timeout(3), asyncio.TaskGroup() as tasks:
-            attempt = tasks.create_task(link.set_goal(replacement))
+            attempt = tasks.create_task(link.send_command(replacement))
             await received.wait()
             assert link.snapshot().pending_decision == NEEDED
             if cancel_request:
@@ -263,7 +264,7 @@ async def running(
     run = asyncio.create_task(core.session.run())
     try:
         async with asyncio.timeout(5):
-            await link.wait_connected(2)
+            await until(lambda: link.connected, 2)
             snap = link.snapshot()
             assert (snap.game_id, snap.display_name) == (PROFILE.game_id, PROFILE.display_name)
             yield link, core, events
@@ -276,15 +277,15 @@ async def running(
 async def test_successive_goals_and_disconnect() -> None:
     model = Model((DONE, {"action": "stop", "reason": "unknown", "detail": "menu"}))
     async with running(model) as (link, core, events):
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         assert isinstance(await events.get(), ev.GoalCompleted)
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         assert await events.get() == ev.GoalStuck("map", "unknown", "menu", 1, 1)
         assert link.snapshot().last_outcome_detail == "unknown: menu"
         assert core.revoked == [1, 2]
         model.called.clear()
         model.gate = asyncio.Event()
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         await model.called.wait()
         assert link.snapshot().active_goal_description == GOAL.description
     assert model.cancelled and core.revoked == [1, 2, 3]
@@ -295,12 +296,14 @@ async def test_cancel_during_inference(goal_id: str | None) -> None:
     model = Model((DONE,))
     model.gate = asyncio.Event()
     async with running(model) as (link, core, events):
-        assert await link.cancel_goal() == ev.CommandAck(False, "idle")
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(ev.GoalCancel()) == ev.CommandAck(False, "idle")
+        assert await link.send_command(GOAL) == ACK
         await model.called.wait()
-        assert await link.set_goal(GOAL) == ev.CommandAck(False, "busy")
-        assert await link.cancel_goal("other") == ev.CommandAck(False, "goal_mismatch")
-        assert await link.cancel_goal(goal_id, reason="changed") == ACK
+        assert await link.send_command(GOAL) == ev.CommandAck(False, "busy")
+        assert await link.send_command(ev.GoalCancel("other")) == ev.CommandAck(
+            False, "goal_mismatch"
+        )
+        assert await link.send_command(ev.GoalCancel(goal_id, "changed")) == ACK
         assert await events.get() == ev.GoalStuck("map", "cancelled", "changed", 1, 1)
         assert model.cancelled and core.revoked == [1]
 
@@ -308,12 +311,12 @@ async def test_cancel_during_inference(goal_id: str | None) -> None:
 async def test_decision_parks_generation_and_budget() -> None:
     model = Model((DONE, dict(ASK, highlight=HIGHLIGHT.summary), DONE))
     async with running(model) as (link, core, events):
-        assert await link.resolve_decision(RESOLVED) == ev.CommandAck(False, "idle")
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(RESOLVED) == ev.CommandAck(False, "idle")
+        assert await link.send_command(GOAL) == ACK
         first = await events.get()
         assert isinstance(first, ev.GoalCompleted)
         goal = replace(GOAL, max_steps=2, timeout_s=0.6)
-        assert await link.set_goal(goal) == ACK
+        assert await link.send_command(goal) == ACK
         assert await events.get() == HIGHLIGHT
         needed = await events.get()
         assert isinstance(needed, ev.DecisionNeeded) and needed.options == NEEDED.options
@@ -321,7 +324,7 @@ async def test_decision_parks_generation_and_budget() -> None:
         assert snap.active_goal_id == goal.goal_id and snap.last_highlight == HIGHLIGHT.summary
         assert snap.pending_decision == needed and snap.last_outcome_detail == first.evidence
         assert snap.last_outcome == ev.GoalCompleted.TAG and core.revoked == [1, 2]
-        assert await link.set_goal(replace(GOAL, goal_id="replacement")) == ev.CommandAck(
+        assert await link.send_command(replace(GOAL, goal_id="replacement")) == ev.CommandAck(
             False, "busy"
         )
         assert link.pending_decision == needed
@@ -335,13 +338,13 @@ async def test_decision_parks_generation_and_budget() -> None:
             (replace(resolved, chosen_index=2), "invalid_option"),
             (replace(resolved, chosen_option="A"), "invalid_option"),
         ):
-            assert await link.resolve_decision(bad) == ev.CommandAck(False, reason)
+            assert await link.send_command(bad) == ev.CommandAck(False, reason)
             assert link.pending_decision == needed
-        assert await link.pause_pacing() == ACK
-        assert await link.resolve_decision(resolved) == ACK
+        assert await link.send_command(ev.PacingPause()) == ACK
+        assert await link.send_command(resolved) == ACK
         assert link.pending_decision is None and core.beats == beats
-        assert await link.resolve_decision(resolved) == ev.CommandAck(False, "no_pending_decision")
-        assert await link.resume_pacing() == ACK
+        assert await link.send_command(resolved) == ev.CommandAck(False, "no_pending_decision")
+        assert await link.send_command(ev.PacingResume()) == ACK
         outcome = await events.get()
         assert isinstance(outcome, ev.GoalCompleted) and outcome.steps_taken == 2
         assert core.revoked == [1, 2, 3] and core.beats[-1] == 3
@@ -367,14 +370,14 @@ async def test_cancelled_decision_wait_clears_pending_choice() -> None:
 @pytest.mark.parametrize("takeover", [True, False])
 async def test_interrupt_parked_decision(takeover: bool) -> None:
     async with running(Model((ASK,))) as (link, core, events):
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         assert isinstance(await events.get(), ev.DecisionNeeded)
-        assert await link.pause_pacing() == ACK
+        assert await link.send_command(ev.PacingPause()) == ACK
         if takeover:
             core.session.on_released(RELEASE)
             assert await events.get() == replace(RELEASED, steps_taken=1)
         else:
-            assert await link.cancel_goal() == ACK
+            assert await link.send_command(ev.GoalCancel()) == ACK
             assert await events.get() == ev.GoalStuck("map", "cancelled", "cancelled", 1, 1)
         assert link.pending_decision is None and link.snapshot().active_goal_id is None
         assert set(core.beats) == {1}
@@ -384,18 +387,18 @@ async def test_pause_preserves_active_time_and_history() -> None:
     model = Model((WAIT, DONE))
     async with running(model) as (link, core, events):
         goal = replace(GOAL, max_steps=2, timeout_s=1)
-        assert await link.set_goal(goal) == ACK
+        assert await link.send_command(goal) == ACK
         await model.called.wait()
         model.called.clear()
         model.gate = asyncio.Event()
         await model.called.wait()
-        assert await link.pause_pacing() == ACK
+        assert await link.send_command(ev.PacingPause()) == ACK
         await core.release.wait()
         assert model.cancelled and link.snapshot().paused
         await asyncio.sleep(goal.timeout_s)
         assert events.empty() and set(core.beats) == {1} and core.revoked == [1]
         model.gate.set()
-        assert await link.resume_pacing() == ACK
+        assert await link.send_command(ev.PacingResume()) == ACK
         result = await events.get()
         assert isinstance(result, ev.GoalCompleted) and result.steps_taken == 2
         assert not link.snapshot().paused and core.revoked == [1, 2]
@@ -420,12 +423,12 @@ async def test_revocation_after_resume(
     model = Model((DONE,))
     model.gate = asyncio.Event()
     async with running(model) as (link, core, events):
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         await model.called.wait()
-        assert await link.pause_pacing() == ACK
+        assert await link.send_command(ev.PacingPause()) == ACK
         await core.release.wait()
         model.called.clear()
-        assert await link.resume_pacing() == ACK
+        assert await link.send_command(ev.PacingResume()) == ACK
         await model.called.wait()
         assert core.beats[-1] == 2
 
@@ -447,11 +450,11 @@ async def test_session_accepts_next_goal_after_loop_error(monkeypatch: pytest.Mo
     async with running(model) as (link, core, events):
         with monkeypatch.context() as patch:
             patch.setattr(model, "complete_json", AsyncMock(side_effect=RuntimeError("private")))
-            assert await link.set_goal(GOAL) == ACK
+            assert await link.send_command(GOAL) == ACK
             assert await events.get() == ev.GoalStuck(
                 GOAL.goal_id, "loop_error", "RuntimeError", 0, None
             )
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(GOAL) == ACK
         assert isinstance(await events.get(), ev.GoalCompleted)
         assert core.revoked == [1, 2]
 
@@ -463,11 +466,11 @@ async def test_session_accepts_next_goal_after_loop_error(monkeypatch: pytest.Mo
 async def test_interrupt_sticky_pause(release: rpc.InputReleasedParams | None) -> None:
     model = Model((DONE,))
     async with running(model) as (link, core, events):
-        assert await link.pause_pacing() == ACK
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(ev.PacingPause()) == ACK
+        assert await link.send_command(GOAL) == ACK
         await core.release.wait()
         if release is None:
-            assert await link.cancel_goal() == ACK
+            assert await link.send_command(ev.GoalCancel()) == ACK
             assert await events.get() == ev.GoalStuck("map", "cancelled", "cancelled", 0, None)
         else:
             core.session.on_released(release)
@@ -502,8 +505,8 @@ async def test_session_survives_failing_observers() -> None:
     model = Model((dict(DONE, highlight=HIGHLIGHT.summary),))
     async with running(model, observer) as (link, _, events):
         rejected = ev.CommandAck(False, "idle")
-        assert await link.resolve_decision(RESOLVED) == rejected
-        assert await link.set_goal(GOAL) == ACK
+        assert await link.send_command(RESOLVED) == rejected
+        assert await link.send_command(GOAL) == ACK
         assert await events.get() == HIGHLIGHT
         outcome = await events.get()
         assert isinstance(outcome, ev.GoalCompleted)

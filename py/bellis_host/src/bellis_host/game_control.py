@@ -130,10 +130,7 @@ class GameController:
             intent_id = decision.intent.id
             self._store.mark_executing(intent_id)
             try:
-                if isinstance(command, ev.DecisionResolved):
-                    ack = await self.link.resolve_decision(command)
-                else:
-                    ack = await self.link.send_command(command)
+                ack = await self.link.send_command(command)
             except (ch.ChannelError, ch.RpcError, ProtocolError, asyncio.CancelledError) as exc:
                 self._store.finish_intent(intent_id, IntentState.UNKNOWN, error=type(exc).__name__)
                 raise
@@ -176,20 +173,6 @@ class GameController:
         )
         return await self.dispatch(command, source=source, holder=holder)
 
-    async def set_goal(self, goal: ev.GoalSet) -> ev.CommandAck:
-        return await self.dispatch(goal)
-
-    async def cancel_goal(
-        self, goal_id: str | None = None, *, reason: str = "cancelled"
-    ) -> ev.CommandAck:
-        return await self.dispatch(ev.GoalCancel(goal_id, reason))
-
-    async def pause_pacing(self, *, reason: str = "pacing") -> ev.CommandAck:
-        return await self.dispatch(ev.PacingPause(reason))
-
-    async def resume_pacing(self, *, reason: str = "resumed") -> ev.CommandAck:
-        return await self.dispatch(ev.PacingResume(reason))
-
     async def cancel_for_stop(self, reason: str = "host_stopped") -> None:
         if self.link.connected and self.link.snapshot().active_goal_id is not None:
             if self._cancel_task is None or self._cancel_task.done():
@@ -198,7 +181,7 @@ class GameController:
 
     async def _cancel_goal(self, reason: str) -> None:
         with suppress(ch.ChannelError, ch.RpcError, ProtocolError):
-            await self.link.cancel_goal(None, reason=reason)
+            await self.link.send_command(ev.GoalCancel(None, reason))
 
     def director_context(self, events: Sequence[ev.FastEvent]) -> dict[str, object]:
         return {

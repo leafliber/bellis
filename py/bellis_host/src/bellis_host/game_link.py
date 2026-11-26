@@ -69,7 +69,6 @@ class HostGameLink:
         self._last_outcome: ev.LoopOutcome | None = None
         self.last_event: ev.FastEvent | None = None
         self._paused = self._closed = False
-        self._connected_event = asyncio.Event()
         self._commands = asyncio.Lock()
         self._lifecycle = asyncio.Lock()
 
@@ -101,10 +100,6 @@ class HostGameLink:
             self.session_info = self._info
             return self._info
 
-    async def wait_connected(self, timeout: float | None = None) -> None:
-        async with asyncio.timeout(timeout):
-            await self._connected_event.wait()
-
     def _accept(self, conn: ch.Connection) -> None:
         if self._closed or conn.role != ev.GAME_AGENT_ROLE or self._peer is not None:
             conn.abort()
@@ -121,7 +116,6 @@ class HostGameLink:
             self._hello = ev.AgentHelloParams.from_dict(raw)
         except ProtocolError as exc:
             raise ch.RpcError(ch.RpcErrorCode.INVALID_PARAMS, str(exc)) from exc
-        self._connected_event.set()
         if self._on_connection:
             self._on_connection(True)
         return Empty().to_dict()
@@ -159,7 +153,6 @@ class HostGameLink:
         self._peer = self._hello = self._goal = self._pending_goal = None
         self._pending_decision = self._last_highlight = None
         self._paused = False
-        self._connected_event.clear()
         if had_hello and self._on_connection:
             self._on_connection(False)
 
@@ -200,23 +193,6 @@ class HostGameLink:
                 raise
             finally:
                 self._pending_goal = None
-
-    async def set_goal(self, goal: ev.GoalSet) -> ev.CommandAck:
-        return await self.send_command(goal)
-
-    async def cancel_goal(
-        self, goal_id: str | None = None, *, reason: str = "cancelled"
-    ) -> ev.CommandAck:
-        return await self.send_command(ev.GoalCancel(goal_id, reason))
-
-    async def pause_pacing(self, *, reason: str = "pacing") -> ev.CommandAck:
-        return await self.send_command(ev.PacingPause(reason))
-
-    async def resume_pacing(self, *, reason: str = "resumed") -> ev.CommandAck:
-        return await self.send_command(ev.PacingResume(reason))
-
-    async def resolve_decision(self, command: ev.DecisionResolved) -> ev.CommandAck:
-        return await self.send_command(command)
 
     def snapshot(self) -> GameLinkSnapshot:
         hello, goal, event = self._hello, self._goal or self._pending_goal, self._last_outcome
