@@ -16,10 +16,12 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
+from bellis_common.agent_events import GoalSet
 from bellis_common.channel import ChannelError
 
 from .audience import AudienceHub, VoteSnapshot
 from .director import SlowDirector
+from .game_link import GameController, parse_game_directive
 from .game_permit import HostGamePermit
 from .safety import SafetyCore, SafetyError
 from .speech import SpeechArbiter, SpeechPriority, SpeechRequest
@@ -81,10 +83,12 @@ class ConsoleServer:
         audience: AudienceHub | None = None,
         director: SlowDirector | None = None,
         game_permit: HostGamePermit | None = None,
+        game: GameController | None = None,
         on_emergency_obs: Callable[[], Awaitable[object]] | None = None,
         config: ConsoleConfig = ConsoleConfig(),
     ):
         self.game_permit = game_permit
+        self.game = game
         self.safety, self.director = safety, director
         self.speech = speech or (director and director.speech)
         self.stage = stage or (self.speech and self.speech.stage)
@@ -197,6 +201,7 @@ class ConsoleServer:
             return {
                 **asdict(self.safety.snapshot()),
                 "game_permit": asdict(self.game_permit.snapshot()) if self.game_permit else None,
+                "game_link": asdict(self.game.link.snapshot()) if self.game else None,
                 "stage_connected": bool(self.stage and self.stage.connected),
                 "pending_danmaku": self.audience.pending_count() if self.audience else 0,
                 "active_vote": vote and asdict(vote),
@@ -218,6 +223,8 @@ class ConsoleServer:
                     reason=_string(data, "reason", "operator_disarm")
                 )
             return {"ok": True, "token": token}
+        if path in {"/api/game/goal", "/api/game/cancel", "/api/game/pause", "/api/game/resume"}:
+            return await self._game_command(path.rsplit("/", 1)[1], data)
         if path == "/api/control/live":
             self.safety.start_live(actor="operator")
         elif path == "/api/control/pause":
@@ -225,21 +232,21 @@ class ConsoleServer:
             self.safety.pause_live(reason=reason)
             if controls:
                 controls.interrupt(reason)
+            if self.game:
+                await self.game.cancel_for_stop(reason)
         elif path == "/api/control/emergency":
-            self.safety.trigger_emergency(
-                _string(data, "reason", "operator_emergency"), source="operator"
-            )
-            stop = (
-                asyncio.create_task(self.game_permit.emergency_stop()) if self.game_permit else None
-            )
-            try:
-                if self._obs:
-                    await self._obs()
-            except Exception:
-                raise _HttpError(502) from None
-            finally:
-                if stop:
-                    await stop
+            reason = _string(data, "reason", "operator_emergency")
+            self.safety.trigger_emergency(reason, source="operator")
+            stops: list[Awaitable[object]] = []
+            if self._obs:
+                stops.append(self._obs())
+            if self.game_permit:
+                stops.append(self.game_permit.emergency_stop())
+            if self.game:
+                stops.append(self.game.cancel_for_stop(reason))
+            results = await asyncio.gather(*stops, return_exceptions=True)
+            if any(isinstance(result, BaseException) for result in results):
+                raise _HttpError(502)
         elif path == "/api/control/clear-emergency":
             self.safety.clear_emergency(actor="operator")
         elif path == "/api/speech/say":
@@ -272,6 +279,29 @@ class ConsoleServer:
         else:
             raise _HttpError(404)
         return {"ok": True}
+
+    async def _game_command(self, action: str, data: Data) -> Data:
+        if self.game is None:
+            raise _HttpError(503)
+        if action == "goal":
+            if data.keys() - {"description", "max_steps", "timeout_s"}:
+                raise _HttpError(400)
+            command = parse_game_directive({"command": "set_goal", **data})
+        else:
+            if data.keys() - {"reason"}:
+                raise _HttpError(400)
+            name = {"cancel": "cancel_goal", "pause": "pause_pacing", "resume": "resume_pacing"}
+            command = parse_game_directive(
+                {"command": name[action], "reason": data.get("reason", f"operator_{action}")}
+            )
+        try:
+            ack = await self.game.dispatch(command, source=IntentSource.OPERATOR, holder="operator")
+        except ChannelError:
+            raise _HttpError(503) from None
+        result: Data = {"ok": ack.accepted, "reason": ack.reason}
+        if isinstance(command, GoalSet):
+            result["goal_id"] = command.goal_id
+        return result
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()

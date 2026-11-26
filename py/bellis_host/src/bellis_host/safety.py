@@ -39,7 +39,7 @@ class RateLimit:
 
 _TTLS = {"stage.audio": 2.0, "obs.control": 2.0, "obs.stage-url": 2.0, "game.input": 2.0}
 _CAPS = {r: r for r in _TTLS} | {"stage.audio": "speech.output"}
-_LIMITS = {"speech.output": RateLimit(30, 60.0)}
+_LIMITS = {"speech.output": RateLimit(30, 60.0), "game.control": RateLimit(20, 60.0)}
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class SafetyConfig:
     lease_ttl_s: Mapping[str, float] = field(default_factory=_TTLS.copy)
     lease_capabilities: Mapping[str, str] = field(default_factory=_CAPS.copy)
     rate_limits: Mapping[str, RateLimit] = field(default_factory=_LIMITS.copy)
-    safe_stop_exempt_capabilities: frozenset[str] = frozenset({"obs.stage-url"})
+    safe_stop_exempt_capabilities: frozenset[str] = frozenset({"obs.stage-url", "game.stop"})
 
 
 @dataclass(frozen=True)

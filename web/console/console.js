@@ -54,6 +54,12 @@ async function refresh() {
     state += " · " + permit.last_release_reason + " / " + permit.last_release_verification;
   }
   el("game-permit").textContent = "游戏核 " + state;
+  const game = s.game_link;
+  const outcomes = {goal_completed: "目标已完成", goal_stuck: "目标已停止", control_released: "控制已释放"};
+  el("game-status").textContent = game?.connected ? [
+    game.display_name, game.paused ? "已暂缓" : game.active_goal_id ? "执行中" : "空闲",
+    game.active_goal_description, outcomes[game.last_outcome], game.last_outcome_detail
+  ].filter(Boolean).join(" · ") : "游戏端 未连接";
   el("queue").textContent = "待处理弹幕 " + s.pending_danmaku;
   list("heard", s.recent_heard.length ? s.recent_heard.slice().reverse() : ["暂无播出记录"]);
   const vote = s.active_vote;
@@ -74,7 +80,8 @@ async function command(path, data, button) {
   try {
     const result = await api(path, data);
     const outcomes = {completed: "播报完成", interrupted: "播报已打断", denied: "播报未获授权", failed: "播报失败"};
-    el("feedback").textContent = outcomes[result.status] || (result.ok === false ? "弹幕已过滤" : "操作已完成");
+    const denied = path === "danmaku" ? "弹幕已过滤" : "操作未执行" + (result.reason ? " · " + result.reason : "");
+    el("feedback").textContent = outcomes[result.status] || (result.ok === false ? denied : "操作已完成");
     if (path === "logout") endSession();
     else await refresh();
   } catch (error) {
@@ -88,10 +95,11 @@ document.querySelectorAll("[data-control]").forEach(button => {
   button.addEventListener("click", () => command(button.dataset.control, {}, button));
 });
 el("logout").addEventListener("click", () => command("logout", {}, el("logout")));
-for (const [id, path] of [["say", "speech/say"], ["danmaku", "danmaku"], ["vote", "vote/start"]]) {
+for (const [id, path] of [["say", "speech/say"], ["danmaku", "danmaku"], ["vote", "vote/start"], ["game-goal", "game/goal"]]) {
   el(id).addEventListener("submit", event => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.target));
+    if (id === "game-goal") data.max_steps = Number(data.max_steps);
     if (id === "vote") {
       data.options = data.options.split("\n").map(s => s.trim()).filter(Boolean);
       data.duration_s = Number(data.duration_s);

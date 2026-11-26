@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Self
 
+from bellis_common.agent_events import DEFAULT_GAME_LINK_TARGET, FastEvent
 from bellis_common.cred import (
     DEFAULT_SESSION_TARGET,
     CredError,
@@ -27,6 +28,7 @@ from . import watchdog
 from .audience import AudienceHub
 from .console import ConsoleConfig, ConsoleServer
 from .director import DirectorConfig, LlmStreamer, OpenAiLlmClient, SlowDirector
+from .game_link import GameController, GameLinkConfig, HostGameLink
 from .game_permit import GamePermitConfig, HostGamePermit
 from .obs import ObsClient, ObsConfig, ObsError, resolve_obs_password
 from .safety import EmergencySummary, SafetyConfig, SafetyCore
@@ -52,15 +54,28 @@ class HostConfig:
     watchdog_timeout_ms: int = 1000
     enable_watchdog: bool = True
     permit: GamePermitConfig = GamePermitConfig()
+    game_link: GameLinkConfig = GameLinkConfig()
 
     @classmethod
-    def from_toml(cls, path: Path, *, default_permit_cred: str | None = None) -> Self:
+    def from_toml(
+        cls,
+        path: Path,
+        *,
+        default_permit_cred: str | None = None,
+        default_link_cred: str | None = None,
+    ) -> Self:
         with path.open("rb") as stream:
             values = tomllib.load(stream)
         defaults = cls()
-        permit = values.pop("permit", {})
-        target = permit.pop("cred_target", default_permit_cred)
-        values["permit"] = GamePermitConfig(cred_target=None if target == "" else target, **permit)
+        for section, fallback in (
+            ("permit", default_permit_cred),
+            ("game_link", default_link_cred),
+        ):
+            options = values.pop(section, {})
+            target = options.pop("cred_target", fallback)
+            values[section] = replace(
+                getattr(defaults, section), cred_target=None if target == "" else target, **options
+            )
         for key in ("db_path", "telemetry_path"):
             if key in values:
                 values[key] = path.parent / values[key]
@@ -160,20 +175,30 @@ class HostApp:
         if model is None:
             model = OpenAiLlmClient(cfg.director)
             stack.push_async_callback(model.close)
-        self.director = SlowDirector(
-            self.safety, self.audience, self.speech, model, config=cfg.director
-        )
-        stack.push_async_callback(self.director.close)
         self.game_permit = HostGamePermit(self.safety, cfg.permit)
         stack.push_async_callback(self.game_permit.close)
+        self.game_link = HostGameLink(cfg.game_link, on_event=self._on_game_event)
+        stack.push_async_callback(self.game_link.close)
+        self.game = GameController(
+            self.safety, self.store, self.game_link, permit_armed=lambda: self.game_permit.armed
+        )
+        stack.push_async_callback(self.game.close)
+        self.director = SlowDirector(
+            self.safety, self.audience, self.speech, model, config=cfg.director, game=self.game
+        )
+        stack.push_async_callback(self.director.close)
         self.console = ConsoleServer(
             self.safety,
             director=self.director,
             game_permit=self.game_permit,
+            game=self.game,
             config=cfg.console,
             on_emergency_obs=self._console_emergency if self.obs else None,
         )
         stack.push_async_callback(self.console.close)
+
+    def _on_game_event(self, event: FastEvent) -> None:
+        self.director.submit_game_event(event)
 
     async def _obs_action(self, refresh: bool = False) -> None:
         assert self.obs
@@ -211,6 +236,8 @@ class HostApp:
                 return self._info
             try:
                 self._wire()
+                self.game.start()
+                await self.game_link.start()
                 await self.game_permit.start()
                 if self.obs:
                     await self.obs.connect()
@@ -296,6 +323,8 @@ def _live(cfg: HostConfig, args: argparse.Namespace) -> int:
                f"--stage-port={cfg.stage.port}"]  # fmt: skip
     target = cfg.permit.cred_target
     options.append(f"--permit-cred={target}" if target else "--no-permit-cred")
+    link_target = cfg.game_link.cred_target
+    options.append(f"--link-cred={link_target}" if link_target else "--no-link-cred")
     if args.config:
         options.append(f"--config={args.config}")
     if not cfg.enable_obs:
@@ -323,6 +352,8 @@ def _live(cfg: HostConfig, args: argparse.Namespace) -> int:
             status = _finish(host, 10)
             if target:
                 _cleanup_host_cred(target, host.pid)
+            if link_target:
+                _cleanup_host_cred(link_target, host.pid)
         return status or wd.returncode
     finally:
         _finish(wd, 15)  # Allow the Rust peer to finish its OBS batch after Host loss.
@@ -336,6 +367,8 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_argument("--config", type=Path)
         sub.add_argument("--permit-cred")
         sub.add_argument("--no-permit-cred", action="store_true")
+        sub.add_argument("--link-cred")
+        sub.add_argument("--no-link-cred", action="store_true")
         sub.add_argument("--db", type=Path)
         sub.add_argument("--no-obs", action="store_true")
         sub.add_argument("--console-port", type=int)
@@ -347,13 +380,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         cfg = (
-            HostConfig.from_toml(args.config, default_permit_cred=DEFAULT_SESSION_TARGET)
+            HostConfig.from_toml(
+                args.config,
+                default_permit_cred=DEFAULT_SESSION_TARGET,
+                default_link_cred=DEFAULT_GAME_LINK_TARGET,
+            )
             if args.config
-            else HostConfig(permit=GamePermitConfig(cred_target=DEFAULT_SESSION_TARGET))
+            else HostConfig(
+                permit=GamePermitConfig(cred_target=DEFAULT_SESSION_TARGET),
+                game_link=GameLinkConfig(cred_target=DEFAULT_GAME_LINK_TARGET),
+            )
         )
         if args.no_permit_cred or args.permit_cred is not None:
             target = None if args.no_permit_cred else args.permit_cred or None
             cfg = replace(cfg, permit=replace(cfg.permit, cred_target=target))
+        if args.no_link_cred or args.link_cred is not None:
+            target = None if args.no_link_cred else args.link_cred or None
+            cfg = replace(cfg, game_link=replace(cfg.game_link, cred_target=target))
         cfg = replace(
             cfg, db_path=args.db or cfg.db_path, enable_obs=cfg.enable_obs and not args.no_obs
         )

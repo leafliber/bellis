@@ -183,7 +183,8 @@ def test_config(tmp_path: Path) -> None:
         '[obs]\nsafe_scene="Offline"\ncred_targets=["custom"]\n'
         '[stage]\nstatic_dir="assets"\n[console]\nport=0\n[tts]\nvoice_id="test"\n'
         "[director]\nbatch_window_s=0.5\n"
-        '[permit]\ncred_target=""\nrenew_interval_s=0.25\n',
+        '[permit]\ncred_target=""\nrenew_interval_s=0.25\n'
+        '[game_link]\ncred_target=""\nrpc_timeout_s=1.5\n',
         encoding="utf-8",
     )
     cfg = HostConfig.from_toml(path)
@@ -197,6 +198,7 @@ def test_config(tmp_path: Path) -> None:
     assert cfg.console.port == 0 and HostConfig().console.port == 18766
     assert cfg.tts.voice_id == "test" and cfg.director.batch_window_s == 0.5
     assert cfg.permit.cred_target is None and cfg.permit.renew_interval_s == 0.25
+    assert cfg.game_link.cred_target is None and cfg.game_link.rpc_timeout_s == 1.5
     assert cfg.director.max_tokens == 2048
     path.write_text('[obs]\nstop_stream="false"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="booleans"):
@@ -209,19 +211,26 @@ def test_config(tmp_path: Path) -> None:
     ('cred_target="a"', ["--permit-cred="], None),
     ('cred_target="a"', ["--no-permit-cred", "--permit-cred=b"], None),
 ])  # fmt: skip
-def test_permit_cli_target(
+@pytest.mark.parametrize("link", [False, True], ids=["permit", "game_link"])
+def test_cli_credential_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     section: str,
     options: list[str],
     expected: str | None,
+    link: bool,
 ) -> None:
     config = tmp_path / "host.toml"
-    config.write_text("[permit]\n" + section, encoding="utf-8")
+    name = "game_link" if link else "permit"
+    config.write_text(f"[{name}]\n" + section, encoding="utf-8")
+    if link:
+        options = [option.replace("permit-cred", "link-cred") for option in options]
+        if not section:
+            expected = "game-link.bellis"
     serve = AsyncMock(return_value=0)
     monkeypatch.setattr(launcher, "_serve", serve)
     assert launcher.main(["serve", "--config", str(config), *options]) == 0
-    assert serve.await_args and serve.await_args.args[0].permit.cred_target == expected
+    assert serve.await_args and getattr(serve.await_args.args[0], name).cred_target == expected
 
 
 async def test_live_siblings_after_host_crash(
@@ -239,6 +248,7 @@ async def test_live_siblings_after_host_crash(
         "bellis_host.app",
         "live",
         "--no-permit-cred",
+        "--no-link-cred",
         "--config",
         str(config),
         "--db",

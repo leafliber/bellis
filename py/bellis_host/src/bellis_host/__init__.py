@@ -23,7 +23,13 @@ from .director import (
     build_messages,
     resolve_llm_api_key,
 )
-from .game_link import GameLinkConfig, GameLinkSnapshot, HostGameLink
+from .game_link import (
+    GameController,
+    GameLinkConfig,
+    GameLinkSnapshot,
+    HostGameLink,
+    parse_game_directive,
+)
 from .game_permit import GamePermitConfig, GamePermitSnapshot, HostGamePermit
 from .obs import (
     EmergencyOutcome,
@@ -104,6 +110,7 @@ __all__ = [
     "EmergencyOutcome",
     "EmergencySummary",
     "EventRecord",
+    "GameController",
     "GameLinkConfig",
     "GameLinkSnapshot",
     "GamePermitConfig",
@@ -160,6 +167,7 @@ __all__ = [
     "looks_like_injection",
     "normalize_ballot",
     "obs_auth_string",
+    "parse_game_directive",
     "payload_hash",
     "resolve_llm_api_key",
     "resolve_minimax_api_key",
