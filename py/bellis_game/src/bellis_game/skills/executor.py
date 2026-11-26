@@ -90,6 +90,8 @@ class ActionExecutor:
     ) -> None:
         self._core, self._frames, self._profile, self._producer = core, frames, profile, producer
         self._cfg = config or ExecutionConfig()
+        self._paused_through: int = 0
+        self._paused_active: bool = False
         self._seq = 0
         self._receipts: dict[int, asyncio.Future[rpc.ActionReceiptParams]] = {}
         self._last_release: rpc.InputReleasedParams | None = None
@@ -105,19 +107,39 @@ class ActionExecutor:
         if waiter is not None and not waiter.done() and rec.outcomes[0].id == rec.block_seq:
             waiter.set_result(rec)
 
+    def begin_pause(self) -> None:
+        self._paused_through = max(self._paused_through, self._producer.generation)
+        self._paused_active = True
+
+    def switch_producer(self, producer: rpc.Producer) -> None:
+        if producer.generation <= self._producer.generation:
+            raise ValueError("producer generation must advance")
+        self._producer = producer
+        self._seq = 0
+        self._paused_active = False
+
     def on_released(self, rel: rpc.InputReleasedParams) -> None:
-        if rel.reason == rpc.ReleaseReason.CORE_START:
-            return
-        deadline_expired = rel.reason == rpc.ReleaseReason.DEADLINE_EXPIRED
-        if deadline_expired and rel.verification not in _FATAL_VERIFICATIONS:
-            pending = self._pending_deadline_id
-            if rel.verification == rpc.ReleaseVerification.UNVERIFIED:
-                self._pending_deadline_id = rel.release_id
-                self._deadline_clear.clear()
-            elif pending is not None and rel.release_id >= pending:
-                self._pending_deadline_id = None
-                self._deadline_clear.set()
-            return
+        if rel.verification not in _FATAL_VERIFICATIONS:
+            if rel.reason == rpc.ReleaseReason.CORE_START:
+                return
+            if rel.reason == rpc.ReleaseReason.GENERATION_REVOKED:
+                # Tagged verification can arrive after the replacement producer starts.
+                expected = (
+                    self._paused_active
+                    if rel.producer is None
+                    else rel.producer.generation <= self._paused_through
+                )
+                if expected:
+                    return
+            if rel.reason == rpc.ReleaseReason.DEADLINE_EXPIRED:
+                pending = self._pending_deadline_id
+                if rel.verification == rpc.ReleaseVerification.UNVERIFIED:
+                    self._pending_deadline_id = rel.release_id
+                    self._deadline_clear.clear()
+                elif pending is not None and rel.release_id >= pending:
+                    self._pending_deadline_id = None
+                    self._deadline_clear.set()
+                return
         self._last_release = rel
         if self._signal is not None and not self._signal.done():
             self._signal.set_result(rel)

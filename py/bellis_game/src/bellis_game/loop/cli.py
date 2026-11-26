@@ -1,4 +1,4 @@
-"""Run a single game goal using an externally authorized realtime core."""
+"""Run game goals using an externally authorized realtime core."""
 
 import argparse
 import asyncio
@@ -10,25 +10,23 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from uuid import uuid4
 
+from bellis_common.agent_events import DEFAULT_GAME_LINK_TARGET, GAME_AGENT_ROLE
 from bellis_common.cred import DEFAULT_SESSION_TARGET
 from bellis_common.telemetry import JsonlTelemetry
 
 from bellis_game.io import CoreClient, CoreClientOptions, FrameRing, find_core_executable
-from bellis_game.io.protocol import ActionReceiptParams, InputReleasedParams, Producer
+from bellis_game.io.protocol import Producer
 from bellis_game.perception import GameProfile, VlmClient, VlmConfig, load_game_profile
 from bellis_game.skills import ActionExecutor
 
 from .agent import FastLoop
 from .events import ActionRecord, ControlReleased, GoalCompleted, GoalSet, LoopOutcome
+from .session import GameSession, GameSessionConfig
 
 
-def build_parser() -> argparse.ArgumentParser:
+def _runtime_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", type=Path, default=Path("games/hsr.toml"))
-    parser.add_argument("--goal", required=True)
-    parser.add_argument("--goal-id")
-    parser.add_argument("--max-steps", type=int, default=8)
-    parser.add_argument("--timeout", type=float, default=90.0)
     parser.add_argument("--permit-cred", default=DEFAULT_SESSION_TARGET)
     parser.add_argument("--permit-session-id")
     parser.add_argument("--emergency-hotkey", default="ctrl+shift+f12")
@@ -38,6 +36,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model")
     parser.add_argument("--max-width", type=int, default=3840)
     parser.add_argument("--max-height", type=int, default=2160)
+    return parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = _runtime_parser()
+    parser.add_argument("--goal", required=True)
+    parser.add_argument("--goal-id")
+    parser.add_argument("--max-steps", type=int, default=8)
+    parser.add_argument("--timeout", type=float, default=90.0)
+    return parser
+
+
+def build_serve_parser() -> argparse.ArgumentParser:
+    parser = _runtime_parser()
+    parser.prog += " serve"
+    parser.add_argument("--link-cred", default=DEFAULT_GAME_LINK_TARGET)
     return parser
 
 
@@ -59,6 +73,16 @@ def vlm_config(profile: GameProfile, base_url: str | None, model: str | None) ->
     )
 
 
+def _core_client(
+    options: CoreClientOptions, receiver: Callable[[], ActionExecutor | GameSession]
+) -> CoreClient:
+    return CoreClient(
+        options,
+        on_receipt=lambda rec: receiver().on_receipt(rec),
+        on_released=lambda rel: receiver().on_released(rel),
+    )
+
+
 async def open_loop(
     stack: AsyncExitStack,
     options: CoreClientOptions,
@@ -69,17 +93,25 @@ async def open_loop(
     *,
     on_step: Callable[[ActionRecord], None] | None = None,
 ) -> FastLoop:
-    producer = Producer("game-agent", generation=1)
+    producer = Producer(GAME_AGENT_ROLE, generation=1)
 
-    def on_receipt(receipt: ActionReceiptParams) -> None:
-        executor.on_receipt(receipt)
-
-    def on_released(release: InputReleasedParams) -> None:
-        executor.on_released(release)
-
-    core = CoreClient(options, on_receipt=on_receipt, on_released=on_released)
+    core = _core_client(options, lambda: executor)
     executor = ActionExecutor(core, ring, profile, producer)
 
+    await _start_core(stack, core, ring, profile)
+    loop = FastLoop(
+        core, ring, vlm, executor, profile, producer, telemetry=telemetry, on_step=on_step
+    )
+    stack.push_async_callback(loop.close)
+    return loop
+
+
+async def _start_core(
+    stack: AsyncExitStack,
+    core: CoreClient,
+    ring: FrameRing,
+    profile: GameProfile,
+) -> None:
     async def stop_core() -> None:
         result = await core.stop()
         if result.returncode != 0:
@@ -92,11 +124,6 @@ async def open_loop(
     await core.attach_frame_ring(ring)
     await core.set_capture_target(profile.window)
     await core.configure_input(profile.input_policy)
-    loop = FastLoop(
-        core, ring, vlm, executor, profile, producer, telemetry=telemetry, on_step=on_step
-    )
-    stack.push_async_callback(loop.close)
-    return loop
 
 
 def report_outcome(outcome: LoopOutcome) -> int:
@@ -104,6 +131,33 @@ def report_outcome(outcome: LoopOutcome) -> int:
     if isinstance(outcome, GoalCompleted):
         return 0
     return 2 if isinstance(outcome, ControlReleased) else 1
+
+
+async def _resources(
+    stack: AsyncExitStack,
+    args: argparse.Namespace,
+    profile: GameProfile,
+) -> tuple[JsonlTelemetry | None, VlmClient, FrameRing]:
+    telemetry = stack.enter_context(JsonlTelemetry(args.telemetry)) if args.telemetry else None
+    vlm = await stack.enter_async_context(
+        VlmClient(vlm_config(profile, args.base_url, args.model), telemetry=telemetry)
+    )
+    ring = stack.enter_context(FrameRing.create(args.max_width, args.max_height))
+    return telemetry, vlm, ring
+
+
+async def _serve(args: argparse.Namespace) -> int:
+    profile = load_game_profile(args.profile)
+    async with AsyncExitStack() as stack:
+        telemetry, vlm, ring = await _resources(stack, args, profile)
+
+        core = _core_client(core_options(args), lambda: session)
+        config = GameSessionConfig(link_cred_target=args.link_cred)
+        session = GameSession(core, ring, vlm, profile, config, telemetry=telemetry)
+        await _start_core(stack, core, ring, profile)
+        stack.push_async_callback(session.close)
+        await session.run()
+    return 0
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -116,11 +170,7 @@ async def _run(args: argparse.Namespace) -> int:
     profile = load_game_profile(args.profile)
     options = core_options(args)
     async with AsyncExitStack() as stack:
-        telemetry = stack.enter_context(JsonlTelemetry(args.telemetry)) if args.telemetry else None
-        vlm = await stack.enter_async_context(
-            VlmClient(vlm_config(profile, args.base_url, args.model), telemetry=telemetry)
-        )
-        ring = stack.enter_context(FrameRing.create(args.max_width, args.max_height))
+        telemetry, vlm, ring = await _resources(stack, args, profile)
         loop = await open_loop(stack, options, ring, profile, vlm, telemetry)
         outcome = await loop.run_goal(goal)
     return report_outcome(outcome)
@@ -128,11 +178,14 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     try:
-        args = build_parser().parse_args(argv)
+        args_list = list(sys.argv[1:] if argv is None else argv)
+        serve = args_list[:1] == ["serve"]
+        parser = build_serve_parser() if serve else build_parser()
+        args = parser.parse_args(args_list[1:] if serve else args_list)
     except SystemExit as exc:
         return 1 if exc.code else 0
     try:
-        return asyncio.run(_run(args))
+        return asyncio.run(_serve(args) if serve else _run(args))
     except KeyboardInterrupt:
         return 1
     except Exception as exc:
