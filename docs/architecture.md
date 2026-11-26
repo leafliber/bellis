@@ -11,7 +11,7 @@ bellis/
 ├── AGENTS.md           # 唯一规则入口与防失控红线
 ├── docs/               # 精简架构与垂直切片路线图
 ├── core/               # Rust workspace：realtime-core、channel、watchdog
-├── py/                 # 唯一 Python uv workspace：bellis_common、bellis_host、bellis_game、tts_local
+├── py/                 # 唯一 Python uv workspace：bellis_common、bellis_host、bellis_game
 ├── web/                # OBS Stage 与本机操作台纯原生 HTML/JS
 ├── games/              # 游戏适配声明与极简模板配置
 ├── tests/              # 全部测试、假替身与跨语言 JSON 往返夹具（生产目录零 sim*）
@@ -32,7 +32,7 @@ bellis/
 │   安全核（闸门 · 单调 Lease 令牌 · 监督模式 · 急停） · SQLite WAL      │
 │   操作台 / CLI（直连安全核） · OBS 应急连接 · 媒体管线(TTS→Stage→VTS)  │
 │ 【慢主 Agent 事件流循环（~0.2–1Hz / 事件驱动）】                        │
-│   弹幕/投票 · 公开记忆(Iris) · 播放游标回执 · 游戏离散事件              │
+│   弹幕/投票 · 公开记忆（SQLite 轻量表） · 播放游标回执 · 游戏离散事件   │
 │   ──► 口播文本流(→媒体管线) · 游戏高层目标/暂停/选项决策(→快循环)        │
 └────────────────────────┬─────────────────────────────▲────────────────┘
                          │ 极简本机通道(Py↔Py)          │ 许可续约/急停直连
@@ -59,7 +59,7 @@ bellis/
 
 - **启动模式**：统一由极简启动入口支持 3 种模式：`game`（独立练游戏：`Game Agent` + `Realtime Core` + 独立许可控制台）、`live`（纯直播：`Host` + `Watchdog`）、`all`（边玩边播：四进程齐开）。
 - **进程拉起与连接交付**：`Watchdog` 由启动器并列拉起（不做 Host 子进程）；`Realtime Core` 不提权时直接拉起，游戏需要提权时沿用已验证的按需计划任务；跨进程一次性会话密钥与管道名经 Windows 凭据管理器交付。
-- **本地 TTS（可选降级）**：启用本地 PyTorch TTS 时以独立子进程按需拉起，隔离 CUDA 依赖。
+- **本地 TTS（后续切换）**：保持薄 `TtsSynthesizer` 接口，现阶段使用云端 MiniMax，后续按需对接本机 TTS API 服务，不向仓库引入 PyTorch/CUDA 依赖。
 
 ## 三、不可妥协的 5 条安全底线
 
@@ -99,5 +99,5 @@ bellis/
 
 | 类别 | 处置 | 范围 |
 | --- | --- | --- |
-| **白名单移植（底层已验证叶子）** | 摘取并适配新接口 | Rust WGC 采集、WASAPI 回环、共享内存环、QPC 时钟、SendInput + 低层钩子 + 残留核验；Stage 网页与 AudioWorklet 游标对齐；OBS/B 站/GLM/MiniMax/Iris 协议要点与 SQLite WAL 思路 |
+| **白名单移植（底层已验证叶子）** | 摘取并适配新接口 | Rust WGC 采集、WASAPI 回环、共享内存环、QPC 时钟、SendInput + 低层钩子 + 残留核验；Stage 网页与 AudioWorklet 游标对齐；OBS/B 站/VTS/GLM/MiniMax 协议要点与 SQLite WAL 思路 |
 | **坚决废弃（不迁回）** | 留在 `dev-1` | TS/Py 两套插件内核、Profile/Patch DSL、双版本游戏桥、GR-38 假设备任务账本、`game-bridge-protocol` 重复 RPC、视觉小说 `step_control`/`narrative`/`planner`、生产内嵌 `sim*` 与 `TraceService`、历史 `spikes/` |
