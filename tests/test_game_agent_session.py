@@ -162,7 +162,11 @@ async def test_nonterminal_events_before_command_ack() -> None:
         snap = link.snapshot()
         assert snap.pending_decision == second and snap.active_goal_id == GOAL.goal_id
         assert snap.last_highlight == HIGHLIGHT.summary and snap.last_outcome is None
-        assert events[:3] == [HIGHLIGHT, NEEDED, second] and events[-1].goal_id == "other"
+        assert (
+            events[:3] == [HIGHLIGHT, NEEDED, second]
+            and isinstance(events[-1], ev.HighlightObserved)
+            and events[-1].goal_id == "other"
+        )
     finally:
         await peer.close()
         await link.close()
@@ -532,7 +536,9 @@ def test_serve_stdout(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFix
 
     session.run.side_effect = run
     monkeypatch.setattr(cli, "GameSession", factory)
-    monkeypatch.setattr(cli, "_resources", AsyncMock(return_value=(None, Model(()), Frames())))
+    monkeypatch.setattr(
+        cli, "_resources", AsyncMock(return_value=(None, Model(()), Frames(), None))
+    )
     monkeypatch.setattr(cli, "_start_core", AsyncMock())
     assert cli.main(["serve", "--core-exe", "core.exe", "--link-cred", "link"]) == 0
     start, connected, accepted, rejected, step, event, end = capsys.readouterr().out.splitlines()

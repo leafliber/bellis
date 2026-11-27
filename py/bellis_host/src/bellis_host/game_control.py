@@ -183,6 +183,10 @@ class GameController:
         with suppress(ch.ChannelError, ch.RpcError, ProtocolError):
             await self.link.send_command(ev.GoalCancel(None, reason))
 
+    @property
+    def voice_busy(self) -> bool:
+        return self.link.voice_busy
+
     def director_context(self, events: Sequence[ev.FastEvent]) -> dict[str, object]:
         return {
             "snapshot": asdict(self.link.snapshot()),

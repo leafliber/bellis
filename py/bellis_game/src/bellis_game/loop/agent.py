@@ -2,11 +2,10 @@
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Protocol
+from typing import Protocol
 from uuid import uuid4
 
 from bellis_common.channel import ChannelError, RpcError
@@ -19,7 +18,20 @@ from bellis_game.io.protocol import Producer, ProducerRevokeResult
 from bellis_game.skills import ExecutionStatus as Status
 
 from . import events
-from .events import ActionRecord, ControlReleased, GoalCompleted, GoalSet, GoalStuck, LoopOutcome
+from .events import (
+    ActionRecord,
+    ControlReleased,
+    GoalCompleted,
+    GoalSet,
+    GoalStuck,
+    LoopOutcome,
+)
+from .events import (
+    LoopConfig as LoopConfig,
+)
+from .events import (
+    LoopControl as LoopControl,
+)
 from .events import build_system_prompt as build_system_prompt
 from .events import build_user_prompt as build_user_prompt
 
@@ -37,109 +49,10 @@ class VisionModel(Protocol):
     ) -> vision.VlmJsonResult: ...  # fmt: skip
 
 
-@dataclass(frozen=True, slots=True)
-class LoopConfig:
-    heartbeat_interval_s: float = 0.1
-    max_frame_age_s: float = 0.5
-    frame_wait_timeout_s: float = 3.0
-    frame_poll_interval_s: float = 0.02
-    max_no_change: int = 2
-    max_vlm_errors: int = 2
-    history_limit: int = 6
-    overlay_grid: bool = True
-
-    def __post_init__(self) -> None:
-        if type(self.overlay_grid) is not bool:
-            raise ValueError("overlay_grid must be a boolean")
-        times = (self.heartbeat_interval_s, self.frame_poll_interval_s,
-                 self.max_frame_age_s, self.frame_wait_timeout_s)  # fmt: skip
-        if not all(map(events.positive_time, times)):
-            raise ValueError("loop timeouts and intervals must be finite and positive")
-        counts = (self.max_no_change, self.max_vlm_errors, self.history_limit)
-        if not all(map(events.positive_count, counts)):
-            raise ValueError("loop limits must be positive integers")
-
-
-class LoopControl:
-    def __init__(self) -> None:
-        self.cancel_event = asyncio.Event()
-        self.paused_event = asyncio.Event()
-        self.resumed_event = asyncio.Event()
-        self.resumed_event.set()
-        self.pending_decision: events.DecisionNeeded | None = None
-        self._decision_ready = asyncio.Event()
-        self._resolved: events.DecisionResolved | None = None
-        self.cancel_reason = "cancelled"
-        self._pause_requested = False
-
+class VoiceMonitor(Protocol):
     @property
-    def cancelled(self) -> bool:
-        return self.cancel_event.is_set()
-
-    @property
-    def paused(self) -> bool:
-        return self.paused_event.is_set()
-
-    def cancel(self, reason: str = "cancelled") -> None:
-        self.pending_decision = None
-        self.cancel_reason = reason
-        self.cancel_event.set()
-
-    def begin_decision(self, decision: events.DecisionNeeded) -> None:
-        self.pending_decision = decision
-        self._resolved = None
-        self._decision_ready.clear()
-
-    def resolve_decision(self, cmd: events.DecisionResolved) -> str | None:
-        pending = self.pending_decision
-        if pending is None:
-            return "no_pending_decision"
-        if cmd.goal_id != pending.goal_id:
-            return "goal_mismatch"
-        if cmd.decision_id != pending.decision_id:
-            return "decision_mismatch"
-        if not 0 <= cmd.chosen_index < len(pending.options) or (
-            cmd.chosen_option != pending.options[cmd.chosen_index]
-        ):
-            return "invalid_option"
-        self._resolved = cmd
-        self.pending_decision = None
-        self._decision_ready.set()
-        return None
-
-    async def wait_decision(self) -> events.DecisionResolved:
-        try:
-            await self._decision_ready.wait()
-        finally:
-            self.pending_decision = None
-        assert self._resolved is not None
-        return self._resolved
-
-    def pause(self) -> None:
-        self._pause_requested = True
-        self.resumed_event.clear()
-        self.paused_event.set()
-
-    def resume(self) -> None:
-        self.paused_event.clear()
-        self.resumed_event.set()
-
-    def take_pause(self) -> bool:
-        # A resume during an already-submitted action still owes a generation revocation.
-        requested = self._pause_requested or self.paused
-        self._pause_requested = False
-        return requested
-
-    async def until_pause[T](self, inference: Coroutine[Any, Any, T]) -> T | None:
-        work = asyncio.create_task(inference)
-        paused = asyncio.create_task(self.paused_event.wait())
-        try:
-            await asyncio.wait((work, paused), return_when=asyncio.FIRST_COMPLETED)
-        finally:
-            work.cancel()
-            paused.cancel()
-            await asyncio.gather(work, paused, return_exceptions=True)
-        return None if self._pause_requested or self.paused else work.result()
+    def busy(self) -> bool: ...
+    async def wait_not_busy(self, timeout_s: float) -> bool: ...
 
 
 class FastLoop:
@@ -147,12 +60,13 @@ class FastLoop:
         self, core: LoopCore, frames: skills.FrameReader, vlm: VisionModel,
         executor: skills.ActionExecutor, profile: vision.GameProfile, producer: Producer, *,
         config: LoopConfig | None = None, telemetry: JsonlTelemetry | None = None,
+        voice: VoiceMonitor | None = None,
         on_step: Callable[[ActionRecord], None] | None = None,
         on_event: Callable[[events.DecisionNeeded | events.HighlightObserved], None] | None = None,
     ) -> None:  # fmt: skip
         self._core, self._frames, self._vlm = core, frames, vlm
         self._executor, self._profile, self._producer = executor, profile, producer
-        self._config = config or LoopConfig()
+        self._config, self._voice = config or LoopConfig(), voice
         self._on_event = on_event
         self._telemetry, self._on_step = telemetry, on_step
         self._heartbeat: asyncio.Task[None] | None = None
@@ -317,6 +231,29 @@ class FastLoop:
         )  # fmt: skip
         return frame, image, result
 
+    async def _wait_voice(self, control: LoopControl, budget: asyncio.Timeout) -> None:
+        if self._voice is None or not self._voice.busy:
+            return
+        deadline = budget.when()
+        assert deadline is not None
+        remaining = min(
+            self._config.max_voice_wait_s, max(0.0, deadline - asyncio.get_running_loop().time())
+        )
+        if remaining <= 0:
+            return
+        idle = asyncio.create_task(self._voice.wait_not_busy(remaining))
+        paused = asyncio.create_task(control.paused_event.wait())
+        cancelled = asyncio.create_task(control.cancel_event.wait())
+        try:
+            await asyncio.wait(
+                (idle, paused, cancelled, self._executor.release_signal()),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for task in (idle, paused, cancelled):
+                task.cancel()
+            await asyncio.gather(idle, paused, cancelled, return_exceptions=True)
+
     async def _drive(
         self,
         goal: GoalSet,
@@ -326,6 +263,7 @@ class FastLoop:
     ) -> LoopOutcome | None:
         history: deque[ActionRecord] = deque(maxlen=self._config.history_limit)
         errors = no_change = 0
+        voice_waited = False
         last_highlight, highlight_step = "", -1
         system = build_system_prompt(self._profile)
         clock = asyncio.get_running_loop().time
@@ -422,6 +360,19 @@ class FastLoop:
                         action, summary = "wait", f"{proposal.duration_ms} ms"
                         execution = await self._executor.execute_wait(proposal, before_frame=frame)
                     else:
+                        if not voice_waited and self._voice is not None and self._voice.busy:
+                            await self._wait_voice(control, budget)
+                            voice_waited = True
+                            if (
+                                self._executor.control_released
+                                or control.cancelled
+                                or clock() >= deadline
+                            ):
+                                return None
+                            self._steps = step - 1
+                            status = "paused" if control.paused else "voice_wait"
+                            continue
+                        voice_waited = False
                         if isinstance(proposal, skills.ClickProposal):
                             action = "click"
                             summary = f"{proposal.target} ({proposal.nx}, {proposal.ny})"

@@ -1,14 +1,17 @@
-"""Discrete goal events shared with callers of the game loop."""
+"""Discrete goal events and pacing control shared with callers of the game loop."""
 
+import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import Coroutine, Sequence
 from dataclasses import asdict, dataclass
+from typing import Any
 
 from bellis_common.agent_events import (
     ControlReleased,
     DecisionNeeded,
     DecisionResolved,
     FastEvent,
+    GameVoiceChanged,
     GoalCompleted,
     GoalSet,
     GoalStuck,
@@ -21,10 +24,122 @@ from bellis_common.agent_events import (
 from bellis_game.perception import GameProfile
 
 __all__ = [
-    "ActionRecord", "ControlReleased", "GoalCompleted", "GoalSet", "GoalStuck",
-    "DecisionNeeded", "DecisionResolved", "FastEvent", "HighlightObserved",
-    "LoopOutcome", "build_system_prompt", "build_user_prompt", "positive_count", "positive_time",
+    "ActionRecord", "ControlReleased", "DecisionNeeded", "DecisionResolved", "FastEvent",
+    "GameVoiceChanged", "GoalCompleted", "GoalSet", "GoalStuck", "HighlightObserved",
+    "LoopConfig", "LoopControl", "LoopOutcome", "build_system_prompt", "build_user_prompt",
+    "positive_count", "positive_time",
 ]  # fmt: skip
+
+
+@dataclass(frozen=True, slots=True)
+class LoopConfig:
+    heartbeat_interval_s: float = 0.1
+    max_frame_age_s: float = 0.5
+    frame_wait_timeout_s: float = 3.0
+    frame_poll_interval_s: float = 0.02
+    max_voice_wait_s: float = 12.0
+    max_no_change: int = 2
+    max_vlm_errors: int = 2
+    history_limit: int = 6
+    overlay_grid: bool = True
+
+    def __post_init__(self) -> None:
+        if type(self.overlay_grid) is not bool:
+            raise ValueError("overlay_grid must be a boolean")
+        times = (
+            self.heartbeat_interval_s,
+            self.frame_poll_interval_s,
+            self.max_frame_age_s,
+            self.frame_wait_timeout_s,
+            self.max_voice_wait_s,
+        )
+        if not all(map(positive_time, times)):
+            raise ValueError("loop timeouts and intervals must be finite and positive")
+        counts = (self.max_no_change, self.max_vlm_errors, self.history_limit)
+        if not all(map(positive_count, counts)):
+            raise ValueError("loop limits must be positive integers")
+
+
+class LoopControl:
+    def __init__(self) -> None:
+        self.cancel_event = asyncio.Event()
+        self.paused_event = asyncio.Event()
+        self.resumed_event = asyncio.Event()
+        self.resumed_event.set()
+        self.pending_decision: DecisionNeeded | None = None
+        self._decision_ready = asyncio.Event()
+        self._resolved: DecisionResolved | None = None
+        self.cancel_reason = "cancelled"
+        self._pause_requested = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self.cancel_event.is_set()
+
+    @property
+    def paused(self) -> bool:
+        return self.paused_event.is_set()
+
+    def cancel(self, reason: str = "cancelled") -> None:
+        self.pending_decision = None
+        self.cancel_reason = reason
+        self.cancel_event.set()
+
+    def begin_decision(self, decision: DecisionNeeded) -> None:
+        self.pending_decision = decision
+        self._resolved = None
+        self._decision_ready.clear()
+
+    def resolve_decision(self, cmd: DecisionResolved) -> str | None:
+        pending = self.pending_decision
+        if pending is None:
+            return "no_pending_decision"
+        if cmd.goal_id != pending.goal_id:
+            return "goal_mismatch"
+        if cmd.decision_id != pending.decision_id:
+            return "decision_mismatch"
+        if not 0 <= cmd.chosen_index < len(pending.options) or (
+            cmd.chosen_option != pending.options[cmd.chosen_index]
+        ):
+            return "invalid_option"
+        self._resolved = cmd
+        self.pending_decision = None
+        self._decision_ready.set()
+        return None
+
+    async def wait_decision(self) -> DecisionResolved:
+        try:
+            await self._decision_ready.wait()
+        finally:
+            self.pending_decision = None
+        assert self._resolved is not None
+        return self._resolved
+
+    def pause(self) -> None:
+        self._pause_requested = True
+        self.resumed_event.clear()
+        self.paused_event.set()
+
+    def resume(self) -> None:
+        self.paused_event.clear()
+        self.resumed_event.set()
+
+    def take_pause(self) -> bool:
+        # A resume during an already-submitted action still owes a generation revocation.
+        requested = self._pause_requested or self.paused
+        self._pause_requested = False
+        return requested
+
+    async def until_pause[T](self, inference: Coroutine[Any, Any, T]) -> T | None:
+        work = asyncio.create_task(inference)
+        paused = asyncio.create_task(self.paused_event.wait())
+        try:
+            await asyncio.wait((work, paused), return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            work.cancel()
+            paused.cancel()
+            await asyncio.gather(work, paused, return_exceptions=True)
+        return None if self._pause_requested or self.paused else work.result()
 
 
 @dataclass(frozen=True, slots=True)

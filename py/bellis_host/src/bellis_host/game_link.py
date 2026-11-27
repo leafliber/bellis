@@ -41,6 +41,7 @@ class GameLinkSnapshot:
     last_outcome_detail: str | None
     pending_decision: ev.DecisionNeeded | None
     last_highlight: str | None
+    voice_state: str = "unknown"
 
 
 class HostGameLink:
@@ -67,6 +68,7 @@ class HostGameLink:
         self._pending_decision: ev.DecisionNeeded | None = None
         self._last_highlight: str | None = None
         self._last_outcome: ev.LoopOutcome | None = None
+        self._voice_state = "unknown"
         self.last_event: ev.FastEvent | None = None
         self._paused = self._closed = False
         self._commands = asyncio.Lock()
@@ -79,6 +81,10 @@ class HostGameLink:
     @property
     def pending_decision(self) -> ev.DecisionNeeded | None:
         return self._pending_decision
+
+    @property
+    def voice_busy(self) -> bool:
+        return self._voice_state == "busy"
 
     async def start(self) -> cred.SessionInfo:
         async with self._lifecycle:
@@ -128,6 +134,11 @@ class HostGameLink:
         except ProtocolError:
             return
         self.last_event = event
+        if isinstance(event, ev.GameVoiceChanged):
+            self._voice_state = event.state
+            if self._on_event:
+                self._on_event(event)
+            return
         active = self._goal and self._goal.goal_id == event.goal_id
         starting = self._pending_goal and self._pending_goal.goal_id == event.goal_id
         if isinstance(event, ev.GoalCompleted | ev.GoalStuck | ev.ControlReleased):
@@ -152,6 +163,7 @@ class HostGameLink:
         had_hello = self._hello is not None
         self._peer = self._hello = self._goal = self._pending_goal = None
         self._pending_decision = self._last_highlight = None
+        self._voice_state = "unknown"
         self._paused = False
         if had_hello and self._on_connection:
             self._on_connection(False)
@@ -207,6 +219,7 @@ class HostGameLink:
             self.connected, hello and hello.game_id, hello and hello.display_name,
             goal and goal.goal_id, goal and goal.description, self._paused,
             event and event.TAG, detail, self._pending_decision, self._last_highlight,
+            self._voice_state,
         )  # fmt: skip
 
     def _unpublish(self, target: str) -> None:

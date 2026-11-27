@@ -17,7 +17,7 @@ from bellis_game.io.protocol import ActionReceiptParams
 from bellis_game.perception import GameProfile
 from bellis_game.skills import ActionExecutor, FrameReader
 
-from .agent import FastLoop, LoopConfig, LoopControl, LoopCore, VisionModel
+from .agent import FastLoop, LoopConfig, LoopControl, LoopCore, VisionModel, VoiceMonitor
 from .events import ActionRecord
 
 
@@ -63,13 +63,15 @@ class GameSession:
         config: GameSessionConfig = GameSessionConfig(),
         *,
         telemetry: JsonlTelemetry | None = None,
+        voice: VoiceMonitor | None = None,
         on_step: Callable[[ActionRecord], None] | None = None,
         on_connected: Callable[[], None] | None = None,
         on_command: Callable[[ev.SlowCommand, ev.CommandAck], None] | None = None,
         on_event: Callable[[ev.FastEvent], None] | None = None,
     ) -> None:
         self._core, self._frames, self._vlm, self._profile = core, frames, vlm, profile
-        self._config, self._telemetry, self._on_step = config, telemetry, on_step
+        self._config, self._telemetry, self._voice = config, telemetry, voice
+        self._on_step = on_step
         self._on_connected, self._on_command, self._on_event = on_connected, on_command, on_event
         self._generation = 0
         self._executor: ActionExecutor | None = None
@@ -92,6 +94,9 @@ class GameSession:
     def on_released(self, rel: InputReleasedParams) -> None:
         if self._executor:
             self._executor.on_released(rel)
+
+    def on_voice_changed(self, state: str, reason: str = "") -> None:
+        self._emit_event(ev.GameVoiceChanged(state, reason))
 
     async def run(self) -> None:
         if self._closed or not self._finished.is_set():
@@ -145,7 +150,7 @@ class GameSession:
             self._executor = ActionExecutor(self._core, self._frames, self._profile, producer)
             loop = FastLoop(
                 self._core, self._frames, self._vlm, self._executor, self._profile, producer,
-                config=self._config.loop_config, telemetry=self._telemetry,
+                config=self._config.loop_config, telemetry=self._telemetry, voice=self._voice,
                 on_step=lambda record: _observe(self._on_step, record),
                 on_event=self._emit_event,
             )  # fmt: skip

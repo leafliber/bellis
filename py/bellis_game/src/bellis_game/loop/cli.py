@@ -6,7 +6,7 @@ import json
 import signal
 import sys
 from collections.abc import Callable, Sequence
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from dataclasses import asdict, replace
 from pathlib import Path
 from uuid import uuid4
@@ -16,14 +16,28 @@ from bellis_common.agent_events import DEFAULT_GAME_LINK_TARGET, GAME_AGENT_ROLE
 from bellis_common.cred import DEFAULT_CORE_TARGET, DEFAULT_SESSION_TARGET
 from bellis_common.telemetry import JsonlTelemetry
 
-from bellis_game.io import CoreClient, CoreClientOptions, FrameRing, find_core_executable
+from bellis_game.io import AudioRing, CoreClient, CoreClientOptions, FrameRing, find_core_executable
 from bellis_game.io.protocol import Producer
-from bellis_game.perception import GameProfile, VlmClient, VlmConfig, load_game_profile
+from bellis_game.perception import (
+    GameProfile,
+    VlmClient,
+    VlmConfig,
+    VoiceActivityMonitor,
+    VoiceSnapshot,
+    default_vad_model_path,
+    load_default_vad_model,
+    load_game_profile,
+)
 from bellis_game.skills import ActionExecutor
 
-from .agent import FastLoop
+from .agent import FastLoop, VoiceMonitor
 from .events import ActionRecord, ControlReleased, GoalCompleted, GoalSet, LoopOutcome
 from .session import GameSession, GameSessionConfig
+
+_AUDIO_SAMPLE_RATE = 48_000
+_AUDIO_CHANNELS = 2
+_AUDIO_BLOCK_CAPACITY = 9600
+_AUDIO_BLOCK_COUNT = 32
 
 
 def _runtime_parser() -> argparse.ArgumentParser:
@@ -38,6 +52,8 @@ def _runtime_parser() -> argparse.ArgumentParser:
     parser.add_argument("--core-cred", default=DEFAULT_CORE_TARGET)
     parser.add_argument("--base-url")
     parser.add_argument("--model")
+    parser.add_argument("--vad-model", type=Path)
+    parser.add_argument("--no-audio", action="store_true")
     parser.add_argument("--max-width", type=int, default=3840)
     parser.add_argument("--max-height", type=int, default=2160)
     return parser
@@ -103,6 +119,8 @@ async def open_loop(
     vlm: VlmClient,
     telemetry: JsonlTelemetry | None,
     *,
+    audio_ring: AudioRing | None = None,
+    voice: VoiceMonitor | None = None,
     on_step: Callable[[ActionRecord], None] | None = None,
 ) -> FastLoop:
     producer = Producer(GAME_AGENT_ROLE, generation=1)
@@ -110,9 +128,17 @@ async def open_loop(
     core = _core_client(options, lambda: executor)
     executor = ActionExecutor(core, ring, profile, producer)
 
-    await _start_core(stack, core, ring, profile)
+    await _start_core(stack, core, ring, profile, audio_ring=audio_ring)
     loop = FastLoop(
-        core, ring, vlm, executor, profile, producer, telemetry=telemetry, on_step=on_step
+        core,
+        ring,
+        vlm,
+        executor,
+        profile,
+        producer,
+        telemetry=telemetry,
+        voice=voice,
+        on_step=on_step,
     )
     stack.push_async_callback(loop.close)
     return loop
@@ -123,6 +149,8 @@ async def _start_core(
     core: CoreClient,
     ring: FrameRing,
     profile: GameProfile,
+    *,
+    audio_ring: AudioRing | None = None,
 ) -> None:
     async def stop_core() -> None:
         result = await core.stop()
@@ -135,6 +163,9 @@ async def _start_core(
     stack.push_async_callback(stop_core)
     await core.attach_frame_ring(ring)
     await core.set_capture_target(profile.window)
+    if audio_ring is not None:
+        await core.attach_audio_ring(audio_ring)
+        await core.set_audio_target(profile.window)
     await core.configure_input(profile.input_policy)
 
 
@@ -145,17 +176,65 @@ def report_outcome(outcome: LoopOutcome) -> int:
     return 2 if isinstance(outcome, ControlReleased) else 1
 
 
+def _build_voice_monitor(
+    audio_ring: AudioRing | None,
+    vad_model_path: Path | None,
+    on_change: Callable[[VoiceSnapshot], None] | None = None,
+) -> VoiceActivityMonitor | None:
+    if audio_ring is None:
+        return None
+    try:
+        model = load_default_vad_model(vad_model_path)
+    except Exception as exc:
+        print(f"[game-agent] VAD model unavailable: {exc}", flush=True)
+        model = None
+    if model is None:
+        expected = vad_model_path or default_vad_model_path()
+        print(
+            f"[game-agent] VAD disabled (missing {expected}); "
+            "run 'uv run python -m bellis_game.perception.voice fetch'",
+            flush=True,
+        )
+        return VoiceActivityMonitor(audio_ring, None, on_change=on_change)
+    return VoiceActivityMonitor(audio_ring, model, on_change=on_change)
+
+
+def _start_voice_monitor(stack: AsyncExitStack, monitor: VoiceActivityMonitor | None) -> None:
+    if monitor is None:
+        return
+    task = asyncio.create_task(monitor.run())
+
+    async def stop_monitor() -> None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    stack.push_async_callback(stop_monitor)
+
+
 async def _resources(
     stack: AsyncExitStack,
     args: argparse.Namespace,
     profile: GameProfile,
-) -> tuple[JsonlTelemetry | None, VlmClient, FrameRing]:
+) -> tuple[JsonlTelemetry | None, VlmClient, FrameRing, AudioRing | None]:
     telemetry = stack.enter_context(JsonlTelemetry(args.telemetry)) if args.telemetry else None
     vlm = await stack.enter_async_context(
         VlmClient(vlm_config(profile, args.base_url, args.model), telemetry=telemetry)
     )
     ring = stack.enter_context(FrameRing.create(args.max_width, args.max_height))
-    return telemetry, vlm, ring
+    audio_ring = (
+        None
+        if getattr(args, "no_audio", False)
+        else stack.enter_context(
+            AudioRing.create(
+                _AUDIO_SAMPLE_RATE,
+                _AUDIO_CHANNELS,
+                block_capacity=_AUDIO_BLOCK_CAPACITY,
+                block_count=_AUDIO_BLOCK_COUNT,
+            )
+        )
+    )
+    return telemetry, vlm, ring, audio_ring
 
 
 def _log_json(label: str, data: dict[str, object]) -> None:
@@ -177,12 +256,17 @@ async def _serve(args: argparse.Namespace) -> int:
     profile = load_game_profile(args.profile)
     print(f"[game-agent] starting {profile.game_id} ({profile.window.process_name})", flush=True)
     async with AsyncExitStack() as stack:
-        telemetry, vlm, ring = await _resources(stack, args, profile)
+        telemetry, vlm, ring, audio_ring = await _resources(stack, args, profile)
 
         core = _core_client(core_options(args), lambda: session)
         config = GameSessionConfig(link_cred_target=args.link_cred)
+        voice = _build_voice_monitor(
+            audio_ring,
+            args.vad_model,
+            on_change=lambda snap: session.on_voice_changed(snap.state.value, snap.reason),
+        )
         session = GameSession(
-            core, ring, vlm, profile, config, telemetry=telemetry,
+            core, ring, vlm, profile, config, telemetry=telemetry, voice=voice,
             on_connected=lambda: print(
                 f"[game-agent] connected host ({args.link_cred})", flush=True
             ),
@@ -190,7 +274,8 @@ async def _serve(args: argparse.Namespace) -> int:
             on_step=lambda record: _log_json("[step]", record.to_prompt_dict()),
             on_event=lambda event: _log_json(f"[event] {event.TAG}", event.to_dict()),
         )  # fmt: skip
-        await _start_core(stack, core, ring, profile)
+        await _start_core(stack, core, ring, profile, audio_ring=audio_ring)
+        _start_voice_monitor(stack, voice)
         stack.push_async_callback(session.close)
         await session.run()
         print("[game-agent] disconnected", flush=True)
@@ -207,8 +292,12 @@ async def _run(args: argparse.Namespace) -> int:
     profile = load_game_profile(args.profile)
     options = core_options(args)
     async with AsyncExitStack() as stack:
-        telemetry, vlm, ring = await _resources(stack, args, profile)
-        loop = await open_loop(stack, options, ring, profile, vlm, telemetry)
+        telemetry, vlm, ring, audio_ring = await _resources(stack, args, profile)
+        voice = _build_voice_monitor(audio_ring, args.vad_model)
+        loop = await open_loop(
+            stack, options, ring, profile, vlm, telemetry, audio_ring=audio_ring, voice=voice
+        )
+        _start_voice_monitor(stack, voice)
         outcome = await loop.run_goal(goal)
     return report_outcome(outcome)
 

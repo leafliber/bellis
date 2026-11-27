@@ -201,9 +201,25 @@ class HighlightObserved(TaggedModel):
         _count(self.frame_number)
 
 
+VALID_VOICE_STATES: Final = frozenset({"busy", "idle", "unknown"})
+
+
+@dataclass(frozen=True, slots=True)
+class GameVoiceChanged(TaggedModel):
+    TAG = "game_voice_changed"
+    state: str
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.state) is not str or self.state not in VALID_VOICE_STATES:
+            raise ProtocolError("expected voice state busy, idle, or unknown")
+        if not isinstance(self.reason, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ProtocolError("expected string reason")
+
+
 type SlowCommand = GoalSet | GoalCancel | PacingPause | PacingResume | DecisionResolved
 type LoopOutcome = GoalCompleted | GoalStuck | ControlReleased
-type FastEvent = LoopOutcome | DecisionNeeded | HighlightObserved
+type FastEvent = LoopOutcome | DecisionNeeded | HighlightObserved | GameVoiceChanged
 
 
 def parse_slow_command(raw: object) -> SlowCommand:
@@ -215,6 +231,13 @@ def parse_slow_command(raw: object) -> SlowCommand:
 def parse_fast_event(raw: object) -> FastEvent:
     return decode_tagged(
         raw,
-        (GoalCompleted, GoalStuck, ControlReleased, DecisionNeeded, HighlightObserved),
+        (
+            GoalCompleted,
+            GoalStuck,
+            ControlReleased,
+            DecisionNeeded,
+            HighlightObserved,
+            GameVoiceChanged,
+        ),
         "game.event",
     )

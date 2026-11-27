@@ -8,6 +8,8 @@ version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "bellis-common",
+    "numpy>=2.5.5",
+    "onnxruntime>=1.32.0",
     "openai>=3.59.0",
     "pillow>=13.0.0",
 ]
