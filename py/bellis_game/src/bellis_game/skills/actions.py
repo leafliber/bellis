@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import cast
 
-from bellis_common.agent_events import valid_decision_options
+from bellis_common.agent_events import VALID_SCREEN_KINDS, valid_decision_options
 
 from bellis_game.io import RingFrame
 from bellis_game.io import protocol as rpc
@@ -125,11 +125,22 @@ class AgentDecision:
     observation: str
     proposal: ActionProposal
     highlight: str = ""
+    screen_kind: str = ""
+    dialogue_line: str = ""
 
     def __post_init__(self) -> None:
         _text(self.observation, "observation")
         object.__setattr__(
             self, "highlight", _text(self.highlight, "highlight", optional=True).strip()
+        )
+        kind = _text(self.screen_kind, "screen_kind", optional=True).strip().casefold()
+        if kind and kind not in VALID_SCREEN_KINDS:
+            raise ProposalError("invalid screen_kind")
+        object.__setattr__(self, "screen_kind", kind)
+        object.__setattr__(
+            self,
+            "dialogue_line",
+            _text(self.dialogue_line, "dialogue_line", optional=True).strip()[:200],
         )
 
 
@@ -144,7 +155,7 @@ _ACTION_FIELDS = {
     "done": {"evidence"},
     "stop": {"reason", "detail"},
 }
-_COMMON_KEYS = DECISION_REQUIRED_KEYS | {"highlight"}
+_COMMON_KEYS = DECISION_REQUIRED_KEYS | {"highlight", "screen_kind", "dialogue_line"}
 DECISION_ALLOWED_KEYS = _COMMON_KEYS.union(*_ACTION_FIELDS.values())
 _NULLABLE_KEYS = DECISION_ALLOWED_KEYS - DECISION_REQUIRED_KEYS
 
@@ -214,7 +225,13 @@ def parse_agent_decision(raw: Mapping[str, object]) -> AgentDecision:
             proposal = DoneProposal(_text(raw.get("evidence"), "evidence"))
         case _:
             proposal = StopProposal(_text(raw.get("reason"), "reason"), optional("detail"))
-    return AgentDecision(observation, proposal, optional("highlight"))
+    return AgentDecision(
+        observation,
+        proposal,
+        optional("highlight"),
+        optional("screen_kind"),
+        optional("dialogue_line"),
+    )
 
 
 @dataclass(frozen=True, slots=True)

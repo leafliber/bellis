@@ -204,6 +204,7 @@ class ConsoleServer:
                 **asdict(self.safety.snapshot()),
                 "game_permit": asdict(self.game_permit.snapshot()) if self.game_permit else None,
                 "game_link": asdict(self.game.link.snapshot()) if self.game else None,
+                "game_objective": self.game.objective_snapshot() if self.game else None,
                 "stage_connected": bool(self.stage and self.stage.connected),
                 "pending_danmaku": self.audience.pending_count() if self.audience else 0,
                 "active_vote": vote and asdict(vote),
@@ -250,6 +251,25 @@ class ConsoleServer:
             return {"ok": ack.accepted, "reason": ack.reason}
         if path in {"/api/game/goal", "/api/game/cancel", "/api/game/pause", "/api/game/resume"}:
             return await self._game_command(path.rsplit("/", 1)[1], data)
+        if path == "/api/game/objective":
+            if self.game is None:
+                raise _HttpError(503)
+            if data.keys() - {"description", "auto_continue", "max_auto_steps", "clear"}:
+                raise _HttpError(400)
+            desc = data.get("description", "")
+            if data.get("clear") is True or (isinstance(desc, str) and not desc.strip()):
+                self.game.clear_objective()
+                return {"ok": True, "objective": None}
+            auto_continue = data.get("auto_continue", True)
+            max_auto = data.get("max_auto_steps", 12)
+            if type(auto_continue) is not bool or type(max_auto) is not int:
+                raise _HttpError(400)
+            obj = self.game.set_objective(
+                _string(data, "description"),
+                auto_continue=auto_continue,
+                max_auto_steps=max_auto,
+            )
+            return {"ok": True, "objective": asdict(obj)}
         if path == "/api/control/live":
             self.safety.start_live(actor="operator")
         elif path == "/api/control/pause":

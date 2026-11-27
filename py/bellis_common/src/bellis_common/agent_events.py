@@ -202,6 +202,9 @@ class HighlightObserved(TaggedModel):
 
 
 VALID_VOICE_STATES: Final = frozenset({"busy", "idle", "unknown"})
+VALID_SCREEN_KINDS: Final = frozenset(
+    {"dialogue", "choice", "menu", "overworld", "combat", "loading", "cutscene", "unknown"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,9 +220,28 @@ class GameVoiceChanged(TaggedModel):
             raise ProtocolError("expected string reason")
 
 
+@dataclass(frozen=True, slots=True)
+class SceneObserved(TaggedModel):
+    TAG = "scene_observed"
+    goal_id: str
+    screen_kind: str
+    dialogue_line: str = ""
+    step: int = 0
+    frame_number: int = 0
+
+    def __post_init__(self) -> None:
+        _text(self.goal_id)
+        if type(self.screen_kind) is not str or self.screen_kind not in VALID_SCREEN_KINDS:
+            raise ProtocolError("invalid screen_kind")
+        if not isinstance(self.dialogue_line, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ProtocolError("expected string dialogue_line")
+        _count(self.step)
+        _count(self.frame_number)
+
+
 type SlowCommand = GoalSet | GoalCancel | PacingPause | PacingResume | DecisionResolved
 type LoopOutcome = GoalCompleted | GoalStuck | ControlReleased
-type FastEvent = LoopOutcome | DecisionNeeded | HighlightObserved | GameVoiceChanged
+type FastEvent = LoopOutcome | DecisionNeeded | HighlightObserved | GameVoiceChanged | SceneObserved
 
 
 def parse_slow_command(raw: object) -> SlowCommand:
@@ -238,6 +260,7 @@ def parse_fast_event(raw: object) -> FastEvent:
             DecisionNeeded,
             HighlightObserved,
             GameVoiceChanged,
+            SceneObserved,
         ),
         "game.event",
     )

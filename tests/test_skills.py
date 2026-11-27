@@ -205,12 +205,15 @@ def test_action_specific_fields() -> None:
         dict(action="stop", reason="unknown", detail=""),
         dict(action="ask_decision", question="?", options=["a", "b"], reason=""),
     ]
-    assert DECISION_REQUIRED_KEYS.union({"highlight"}, *payloads) == DECISION_ALLOWED_KEYS
+    assert (
+        DECISION_REQUIRED_KEYS.union({"highlight", "screen_kind", "dialogue_line"}, *payloads)
+        == DECISION_ALLOWED_KEYS
+    )
     for payload in payloads:
         for field in (
             (DECISION_ALLOWED_KEYS | {"scan_code", "producer"})
             - payload.keys()
-            - {"observation", "highlight"}
+            - {"observation", "highlight", "screen_kind", "dialogue_line"}
         ):
             with pytest.raises(ProposalError):
                 parse_agent_decision({"observation": "screen", **payload, field: "extra"})

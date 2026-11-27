@@ -62,7 +62,10 @@ class FastLoop:
         config: LoopConfig | None = None, telemetry: JsonlTelemetry | None = None,
         voice: VoiceMonitor | None = None,
         on_step: Callable[[ActionRecord], None] | None = None,
-        on_event: Callable[[events.DecisionNeeded | events.HighlightObserved], None] | None = None,
+        on_event: Callable[
+            [events.DecisionNeeded | events.HighlightObserved | events.SceneObserved], None
+        ]
+        | None = None,
     ) -> None:  # fmt: skip
         self._core, self._frames, self._vlm = core, frames, vlm
         self._executor, self._profile, self._producer = executor, profile, producer
@@ -208,10 +211,27 @@ class FastLoop:
         budget.reschedule(clock() + remaining)
         self._heartbeat = asyncio.create_task(self._beat())
 
+    async def _stable_frame(self) -> RingFrame | None:
+        frame = await self._fresh_frame()
+        if frame is None or vision.detect_transition(frame) is None:
+            return frame
+        clock = asyncio.get_running_loop().time
+        deadline = clock() + self._config.max_transition_wait_s
+        prev = frame
+        while clock() < deadline:
+            await asyncio.sleep(min(0.15, max(0.0, deadline - clock())))
+            nxt = await self._fresh_frame()
+            if nxt is None:
+                return None
+            if vision.detect_transition(nxt, prev) is None:
+                return nxt
+            prev = nxt
+        return prev
+
     async def _observe(
         self, goal: GoalSet, step: int, history: deque[ActionRecord], system: str
     ) -> tuple[RingFrame, vision.EncodedFrame, vision.VlmJsonResult] | GoalStuck:
-        frame = await self._fresh_frame()
+        frame = await self._stable_frame()
         if frame is None:
             return self._stuck(goal, "no_fresh_frame", "no fresh capture")
         self._steps, self._last_frame = step, frame.frame_number
@@ -265,6 +285,7 @@ class FastLoop:
         errors = no_change = 0
         voice_waited = False
         last_highlight, highlight_step = "", -1
+        last_scene: tuple[str, str] | None = None
         system = build_system_prompt(self._profile)
         clock = asyncio.get_running_loop().time
         while self._steps < goal.max_steps:
@@ -315,6 +336,16 @@ class FastLoop:
                 errors = 0
                 if self._executor.control_released or control.cancelled or clock() >= deadline:
                     return None
+                if self._on_event and (decision.screen_kind or decision.dialogue_line):
+                    scene_kind = decision.screen_kind or "unknown"
+                    scene_key = (scene_kind, decision.dialogue_line)
+                    if scene_key != last_scene:
+                        scene_event = events.SceneObserved(
+                            goal.goal_id, scene_kind, decision.dialogue_line, step, number
+                        )
+                        with suppress(Exception):
+                            self._on_event(scene_event)
+                            last_scene = scene_key
                 highlight = decision.highlight[:160]
                 new_highlight = highlight and highlight != last_highlight
                 if self._on_event and new_highlight and step - highlight_step >= 2:

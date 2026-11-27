@@ -20,6 +20,7 @@ from bellis_common.agent_events import (
     DecisionNeeded,
     FastEvent,
     GameVoiceChanged,
+    SceneObserved,
 )
 from bellis_common.channel import ChannelError, RpcError
 from bellis_common.wire_codec import ProtocolError
@@ -151,6 +152,10 @@ def build_messages(
             "不要下发需要键鼠点击或按键的操作目标。"
             "当 game.snapshot.voice_state 为 busy 时说明游戏角色正在配音，"
             "非紧急闲聊应尽量简短或沉默避让，不要抢话。"
+            "解说时可结合 game.snapshot.screen_kind 与 recent_narrative 保持与画面台词一致，"
+            "绝不编造未出现的剧情。当 game.objective 非空且 auto_continue 为 true、"
+            "当前无活动目标且 game.permit_armed 为 true 时，可在收到 goal_completed 后"
+            "拆解并下发下一步有界短目标（set_goal）继续推进总目标；遇异常或已完成则停止。"
         )
     encoded = json.dumps(context, default=asdict, ensure_ascii=False)
     body = encoded.replace("<", "\\u003c").replace(">", "\\u003e")
@@ -253,11 +258,15 @@ class SlowDirector:
     def submit_game_event(self, event: FastEvent) -> bool:
         if self._closed:
             return False
+        if self.game is not None:
+            self.game.on_game_event(event)
         if isinstance(event, GameVoiceChanged):
             if event.state != "busy" and (
                 self.audience.pending_count() or self._game_events or self._vote_ended
             ):
                 self._wake_if_live()
+            return True
+        if isinstance(event, SceneObserved):
             return True
         with self._events_lock:
             self._game_events.append(event)

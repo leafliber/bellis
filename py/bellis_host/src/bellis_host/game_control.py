@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Callable, Sequence
 from contextlib import suppress
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, replace
 from typing import cast
 from uuid import uuid4
 
@@ -14,6 +14,25 @@ from bellis_common.wire_codec import ProtocolError
 from .game_link import HostGameLink
 from .safety import EmergencySummary, IntentRequest, SafetyCore, SafetyError
 from .store import HostStore, IntentSource, IntentState
+
+
+@dataclass(frozen=True, slots=True)
+class SessionObjective:
+    description: str
+    auto_continue: bool = True
+    completed_steps: int = 0
+    max_auto_steps: int = 12
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.description, str) or not self.description.strip():  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ValueError("objective description must be non-empty")
+        self.description.encode("utf-8")
+        if type(self.auto_continue) is not bool:
+            raise ValueError("auto_continue must be a boolean")
+        if type(self.max_auto_steps) is not int or not 1 <= self.max_auto_steps <= 30:
+            raise ValueError("max_auto_steps must be an integer in [1, 30]")
+        if type(self.completed_steps) is not int or self.completed_steps < 0:
+            raise ValueError("completed_steps must be non-negative")
 
 
 def parse_game_directive(
@@ -83,6 +102,7 @@ class GameController:
         self._stops: set[asyncio.Task[None]] = set()
         self._cancel_task: asyncio.Task[None] | None = None
         self._admission = asyncio.Lock()
+        self._objective: SessionObjective | None = None
         self._closed = False
 
     def start(self) -> None:
@@ -173,7 +193,40 @@ class GameController:
         )
         return await self.dispatch(command, source=source, holder=holder)
 
+    def set_objective(
+        self, description: str, *, auto_continue: bool = True, max_auto_steps: int = 12
+    ) -> SessionObjective:
+        self._objective = SessionObjective(
+            description.strip(), auto_continue=auto_continue, max_auto_steps=max_auto_steps
+        )
+        return self._objective
+
+    def clear_objective(self) -> None:
+        self._objective = None
+
+    def halt_auto_continue(self) -> None:
+        if self._objective is not None and self._objective.auto_continue:
+            self._objective = replace(self._objective, auto_continue=False)
+
+    def objective_snapshot(self) -> dict[str, object] | None:
+        return None if self._objective is None else asdict(self._objective)
+
+    def on_game_event(self, event: ev.FastEvent) -> None:
+        obj = self._objective
+        if obj is None:
+            return
+        if isinstance(event, ev.GoalCompleted):
+            completed = obj.completed_steps + 1
+            self._objective = replace(
+                obj,
+                completed_steps=completed,
+                auto_continue=obj.auto_continue and completed < obj.max_auto_steps,
+            )
+        elif isinstance(event, ev.GoalStuck | ev.ControlReleased):
+            self.halt_auto_continue()
+
     async def cancel_for_stop(self, reason: str = "host_stopped") -> None:
+        self.halt_auto_continue()
         if self.link.connected and self.link.snapshot().active_goal_id is not None:
             if self._cancel_task is None or self._cancel_task.done():
                 self._cancel_task = asyncio.create_task(self._cancel_goal(reason))
@@ -191,6 +244,7 @@ class GameController:
         return {
             "snapshot": asdict(self.link.snapshot()),
             "permit_armed": bool(self._permit_armed and self._permit_armed()),
+            "objective": self.objective_snapshot(),
             "events": [event.to_dict() for event in events],
         }
 

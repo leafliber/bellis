@@ -209,3 +209,42 @@ def frame_diff(
     histogram = ImageChops.lighter(ImageChops.lighter(r, g), b).histogram()
     ratio = sum(histogram[channel_threshold + 1 :]) / (diff.width * diff.height)
     return FrameDiff(ratio, sum(ImageStat.Stat(diff).mean) / 3, *diff.size)
+
+
+@dataclass(frozen=True, slots=True)
+class FrameLuma:
+    mean_luma: float
+    is_dark: bool
+    is_bright: bool
+
+
+def frame_luma(
+    frame: RingFrame,
+    *,
+    sample_long_edge: int = 96,
+    dark_threshold: float = 12.0,
+    bright_threshold: float = 245.0,
+) -> FrameLuma:
+    """Measure downsampled luminance to detect black/white fade or loading transitions."""
+    gray = _region(frame, None, sample_long_edge)[0].convert("L")
+    mean = float(ImageStat.Stat(gray).mean[0])
+    return FrameLuma(mean, mean <= dark_threshold, mean >= bright_threshold)
+
+
+def detect_transition(
+    frame: RingFrame,
+    previous: RingFrame | None = None,
+    *,
+    motion_threshold: float = 0.45,
+) -> str | None:
+    """Return a transition reason for dark/bright fades or rapid full-screen motion."""
+    if frame.width < 64 or frame.height < 64:
+        return None
+    luma = frame_luma(frame)
+    if luma.is_dark:
+        return "dark_transition"
+    if luma.is_bright:
+        return "bright_transition"
+    if previous is not None and frame_diff(previous, frame).changed_ratio >= motion_threshold:
+        return "fast_motion"
+    return None

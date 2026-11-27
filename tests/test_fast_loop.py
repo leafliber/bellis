@@ -31,6 +31,7 @@ from bellis_game.loop import (
     GoalStuck,
     HighlightObserved,
     LoopConfig,
+    SceneObserved,
     build_system_prompt,
     cli,
 )
@@ -124,7 +125,8 @@ class Session:
         *answers: Answer,
         config: LoopConfig = CONFIG,
         telemetry: JsonlTelemetry | None = None,
-        on_event: Callable[[DecisionNeeded | HighlightObserved], None] | None = None,
+        on_event: Callable[[DecisionNeeded | HighlightObserved | SceneObserved], None]
+        | None = None,
     ) -> None:
         self.frames, self.model = Frames(), Model(answers)
         self.beats: list[int] = []
@@ -251,7 +253,7 @@ async def test_highlight_delivery_failure_preserves_action() -> None:
 
 
 async def test_highlight_throttling() -> None:
-    events: list[DecisionNeeded | HighlightObserved] = []
+    events: list[DecisionNeeded | HighlightObserved | SceneObserved] = []
     session = Session(
         dict(WAIT, highlight="first"),
         dict(WAIT, highlight="adjacent"),

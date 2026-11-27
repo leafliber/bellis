@@ -57,11 +57,21 @@ async function refresh() {
   el("game-permit").textContent = "游戏核 " + state;
   const game = s.game_link;
   const outcomes = {goal_completed: "目标已完成", goal_stuck: "目标已停止", control_released: "控制已释放"};
+  const voice = game?.voice_state && game.voice_state !== "unknown" ? "配音 " + game.voice_state : "";
+  const screen = game?.screen_kind && game.screen_kind !== "unknown" ? "画面 " + game.screen_kind : "";
   el("game-status").textContent = game?.connected ? [
     game.display_name, game.paused ? "已暂缓" : game.active_goal_id ? "执行中" : "空闲",
-    game.active_goal_description, outcomes[game.last_outcome], game.last_outcome_detail
+    voice, screen, game.active_goal_description, outcomes[game.last_outcome], game.last_outcome_detail
   ].filter(Boolean).join(" · ") : "游戏端 未连接";
+  const obj = s.game_objective;
+  el("game-objective-status").textContent = obj ? [
+    "总目标 · " + obj.description,
+    obj.auto_continue ? "自动推进中" : "自动推进已停",
+    obj.completed_steps + "/" + obj.max_auto_steps
+  ].join(" · ") : "";
   el("game-highlight").textContent = game?.last_highlight ? "最近亮点 · " + game.last_highlight : "";
+  const lines = game?.recent_narrative || [];
+  el("game-narrative").textContent = lines.length ? "最近台词 · " + lines[lines.length - 1] : "";
   const decision = game?.connected && game.pending_decision;
   el("game-decision").hidden = !decision;
   if (!decision) {
@@ -114,16 +124,24 @@ document.querySelectorAll("[data-control]").forEach(button => {
   button.addEventListener("click", () => command(button.dataset.control, {}, button));
 });
 el("logout").addEventListener("click", () => command("logout", {}, el("logout")));
-for (const [id, path] of [["say", "speech/say"], ["danmaku", "danmaku"], ["vote", "vote/start"], ["game-goal", "game/goal"]]) {
+for (const [id, path] of [
+  ["say", "speech/say"], ["danmaku", "danmaku"], ["vote", "vote/start"],
+  ["game-goal", "game/goal"], ["game-objective", "game/objective"]
+]) {
   el(id).addEventListener("submit", event => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.target));
+    const form = event.target;
+    const data = Object.fromEntries(new FormData(form));
     if (id === "game-goal") data.max_steps = Number(data.max_steps);
+    if (id === "game-objective") {
+      data.auto_continue = Boolean(form.querySelector("[name=auto_continue]")?.checked);
+      data.max_auto_steps = Number(data.max_auto_steps);
+    }
     if (id === "vote") {
       data.options = data.options.split("\n").map(s => s.trim()).filter(Boolean);
       data.duration_s = Number(data.duration_s);
     }
-    command(path, data, event.submitter || event.target.querySelector("button"));
+    command(path, data, event.submitter || form.querySelector("button"));
   });
 }
 

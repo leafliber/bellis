@@ -3,6 +3,7 @@
 import asyncio
 import os
 import secrets
+from collections import deque
 from collections.abc import Callable
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ class GameLinkSnapshot:
     pending_decision: ev.DecisionNeeded | None
     last_highlight: str | None
     voice_state: str = "unknown"
+    screen_kind: str = "unknown"
+    recent_narrative: tuple[str, ...] = ()
 
 
 class HostGameLink:
@@ -69,6 +72,8 @@ class HostGameLink:
         self._last_highlight: str | None = None
         self._last_outcome: ev.LoopOutcome | None = None
         self._voice_state = "unknown"
+        self._screen_kind = "unknown"
+        self._narrative: deque[str] = deque(maxlen=8)
         self.last_event: ev.FastEvent | None = None
         self._paused = self._closed = False
         self._commands = asyncio.Lock()
@@ -152,6 +157,11 @@ class HostGameLink:
         elif active or starting:
             if isinstance(event, ev.DecisionNeeded):
                 self._pending_decision = event
+            elif isinstance(event, ev.SceneObserved):
+                self._screen_kind = event.screen_kind
+                line = event.dialogue_line.strip()[:200]
+                if line and (not self._narrative or self._narrative[-1] != line):
+                    self._narrative.append(line)
             else:
                 self._last_highlight = event.summary
         if self._on_event:
@@ -163,7 +173,8 @@ class HostGameLink:
         had_hello = self._hello is not None
         self._peer = self._hello = self._goal = self._pending_goal = None
         self._pending_decision = self._last_highlight = None
-        self._voice_state = "unknown"
+        self._voice_state = self._screen_kind = "unknown"
+        self._narrative.clear()
         self._paused = False
         if had_hello and self._on_connection:
             self._on_connection(False)
@@ -219,7 +230,7 @@ class HostGameLink:
             self.connected, hello and hello.game_id, hello and hello.display_name,
             goal and goal.goal_id, goal and goal.description, self._paused,
             event and event.TAG, detail, self._pending_decision, self._last_highlight,
-            self._voice_state,
+            self._voice_state, self._screen_kind, tuple(self._narrative),
         )  # fmt: skip
 
     def _unpublish(self, target: str) -> None:

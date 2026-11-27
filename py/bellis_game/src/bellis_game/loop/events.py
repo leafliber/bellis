@@ -17,6 +17,7 @@ from bellis_common.agent_events import (
     GoalStuck,
     HighlightObserved,
     LoopOutcome,
+    SceneObserved,
     positive_count,
     positive_time,
 )
@@ -26,8 +27,8 @@ from bellis_game.perception import GameProfile
 __all__ = [
     "ActionRecord", "ControlReleased", "DecisionNeeded", "DecisionResolved", "FastEvent",
     "GameVoiceChanged", "GoalCompleted", "GoalSet", "GoalStuck", "HighlightObserved",
-    "LoopConfig", "LoopControl", "LoopOutcome", "build_system_prompt", "build_user_prompt",
-    "positive_count", "positive_time",
+    "LoopConfig", "LoopControl", "LoopOutcome", "SceneObserved", "build_system_prompt",
+    "build_user_prompt", "positive_count", "positive_time",
 ]  # fmt: skip
 
 
@@ -38,6 +39,7 @@ class LoopConfig:
     frame_wait_timeout_s: float = 3.0
     frame_poll_interval_s: float = 0.02
     max_voice_wait_s: float = 12.0
+    max_transition_wait_s: float = 4.0
     max_no_change: int = 2
     max_vlm_errors: int = 2
     history_limit: int = 6
@@ -52,6 +54,7 @@ class LoopConfig:
             self.max_frame_age_s,
             self.frame_wait_timeout_s,
             self.max_voice_wait_s,
+            self.max_transition_wait_s,
         )
         if not all(map(positive_time, times)):
             raise ValueError("loop timeouts and intervals must be finite and positive")
@@ -203,6 +206,9 @@ ask_decision: question, options (array of 2 to 4 distinct short choices); option
 Use only for an unspecified branch visible on screen for the host or viewers to choose.
 Never ask for risky or irreversible actions.
 On any action, include a short highlight string for a notable on-screen moment; omit otherwise.
+Optionally include screen_kind \
+(dialogue|choice|menu|overworld|combat|loading|cutscene|unknown) and dialogue_line \
+(short visible subtitle/dialogue text, if any); omit otherwise.
 {{"observation":"Map icon visible","action":"click","nx":0.42,"ny":0.58,"target":"Map"}}
 {{"observation":"Map open","action":"done","evidence":"Map title visible"}}"""
 

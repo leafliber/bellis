@@ -65,11 +65,24 @@
       <section>
         <h2>游戏目标</h2>
         <p id="game-status" role="status">游戏端 未连接</p>
+        <p id="game-objective-status" role="status"></p>
         <p id="game-highlight" role="status"></p>
+        <p id="game-narrative" role="status"></p>
         <div id="game-decision" hidden>
           <p id="decision-question"></p>
           <div id="decision-options" class="controls"></div>
         </div>
+        <form id="game-objective">
+          <label>连续总目标<input name="description" maxlength="200" placeholder="例如：完成今日每日实训或推进当前主线剧情"></label>
+          <div class="pair">
+            <label><input type="checkbox" name="auto_continue" checked> 自动推进下一步</label>
+            <label>自动步数上限<input name="max_auto_steps" type="number" min="1" max="30" value="12"></label>
+          </div>
+          <div class="controls">
+            <button type="submit" disabled>设定总目标</button>
+            <button type="button" data-control="game/objective" disabled>清除总目标</button>
+          </div>
+        </form>
         <form id="game-goal">
           <label>目标描述<textarea name="description" rows="2" required></textarea></label>
           <label>最大步数<input name="max_steps" type="number" min="1" max="20" value="8" required></label>
