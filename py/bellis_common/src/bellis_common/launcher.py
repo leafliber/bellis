@@ -35,11 +35,22 @@ def _find_core_exe(repo_root: Path | None = None) -> Path:
     return root / "core" / "target" / "release" / "realtime-core.exe"
 
 
+def _emit_line(line: str) -> None:
+    print(line, flush=True)
+
+
+def _base_python() -> str:
+    if sys.platform == "win32":
+        cand = Path(sys.base_prefix) / "python.exe"
+        if cand.is_file():
+            return str(cand)
+    return str(getattr(sys, "_base_executable", sys.executable))
+
+
 def _python_cmd(module: str, args: Sequence[str]) -> tuple[list[str], str, dict[str, str]]:
     env = os.environ.copy()
     env["__PYVENV_LAUNCHER__"] = sys.executable
-    base_exe = getattr(sys, "_base_executable", sys.executable)
-    return [sys.executable, "-m", module, *args], base_exe, env
+    return [sys.executable, "-m", module, *args], _base_python(), env
 
 
 def _spawn_python(
@@ -70,12 +81,21 @@ def _stop_process(proc: subprocess.Popen[bytes], *, timeout: float) -> int:
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
             proc.terminate()
-    try:
-        return proc.wait(timeout)
-    except subprocess.TimeoutExpired:
-        with suppress(OSError):
-            proc.kill()
-        return proc.wait()
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            with suppress(OSError):
+                proc.kill()
+            return proc.wait()
+        try:
+            return proc.wait(remaining)
+        except subprocess.TimeoutExpired:
+            with suppress(OSError):
+                proc.kill()
+            return proc.wait()
+        except KeyboardInterrupt:
+            continue
 
 
 def _cleanup_cred_for_pid(target: str | None, pid: int) -> None:
@@ -187,7 +207,7 @@ def _game_common_args(args: argparse.Namespace) -> list[str]:
 def _run_task(
     args: argparse.Namespace,
     *,
-    emit: Callable[[str], None] = print,
+    emit: Callable[[str], None] = _emit_line,
     query: Callable[[str], task_xml.TaskReadback] = task_xml.query_task,
 ) -> int:
     name = task_xml.valid_task_name(args.task_name)
@@ -293,7 +313,7 @@ def _run_game(
     *,
     popen: PopenFactory = subprocess.Popen,
     read_info: Callable[[str], cred.SessionInfo | None] = cred.read_session_info,
-    emit: Callable[[str], None] = print,
+    emit: Callable[[str], None] = _emit_line,
 ) -> int:
     permit_proc = _spawn_python(
         "bellis_game.console", ["--cred-target", args.permit_cred], popen=popen
@@ -334,7 +354,7 @@ def _run_all(
     *,
     popen: PopenFactory = subprocess.Popen,
     read_info: Callable[[str], cred.SessionInfo | None] = cred.read_session_info,
-    emit: Callable[[str], None] = print,
+    emit: Callable[[str], None] = _emit_line,
 ) -> int:
     host_proc = _spawn_python(
         "bellis_host.app", _host_live_args(args), stdout=subprocess.PIPE, popen=popen

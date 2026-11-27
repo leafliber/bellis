@@ -223,3 +223,25 @@ def test_game_mode_waits_for_permit_cred_and_launches_goal() -> None:
     assert "bellis_game.console" in spawned[0]
     assert "bellis_game.loop.cli" in spawned[1] and "open map" in spawned[1]
     assert any(e.endswith(":permit") for e in events)
+
+
+def test_stop_process_survives_second_keyboard_interrupt() -> None:
+    class _InterruptOnce(_FakeProc):
+        def __init__(self) -> None:
+            super().__init__(4001, ["python"], label="host")
+            self.waits = 0
+
+        def send_signal(self, _sig: int) -> None:
+            self._events.append("signal:host")
+
+        def wait(self, _timeout: float | None = None) -> int:
+            self.waits += 1
+            if self.waits == 1:
+                raise KeyboardInterrupt
+            self.returncode = 0
+            return 0
+
+    proc = _InterruptOnce()
+    rc = launcher._stop_process(proc, timeout=5.0)  # type: ignore[arg-type]  # pyright: ignore[reportPrivateUsage]
+    assert rc == 0 and proc.waits == 2 and proc._events == ["signal:host"]  # pyright: ignore[reportPrivateUsage]
+    assert Path(launcher._base_python()).is_file()  # pyright: ignore[reportPrivateUsage]

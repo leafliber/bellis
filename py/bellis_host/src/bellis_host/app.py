@@ -334,10 +334,17 @@ def _live(cfg: HostConfig, args: argparse.Namespace) -> int:
     wd_env = {**env, watchdog.ENV_OBS_PASSWORD: resolve_obs_password(obs)}
     wd = subprocess.Popen(command, env=wd_env, creationflags=group)
     try:
-        # Use CPython's Windows venv handoff so the Host PID owns the interpreter.
+        # Use CPython's Windows venv handoff so the Host PID owns the interpreter,
+        # even when bellis-host live is itself launched via __PYVENV_LAUNCHER__.
+        base_py = Path(sys.base_prefix) / "python.exe"
+        host_exe = (
+            str(base_py)
+            if sys.platform == "win32" and base_py.is_file()
+            else getattr(sys, "_base_executable", sys.executable)
+        )
         host = subprocess.Popen(
             [sys.executable, "-m", "bellis_host.app", "serve", *options],
-            executable=getattr(sys, "_base_executable", sys.executable),
+            executable=host_exe,
             stdin=subprocess.PIPE,
             env={**env, "__PYVENV_LAUNCHER__": sys.executable, "BELLIS_LAUNCHER_STDIN": "1"},
             creationflags=group,
