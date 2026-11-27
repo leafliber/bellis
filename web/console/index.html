@@ -3,104 +3,167 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>贝莉 · 直播操作台</title>
+  <title>贝莉 · 直播与游戏操作台</title>
   <link rel="stylesheet" href="/console.css">
   <script defer src="/console.js"></script>
 </head>
 <body>
   <header>
-    <div class="brand"><span aria-hidden="true">✳</span> BELLIS</div>
-    <button id="logout" disabled>退出登录</button>
+    <div class="brand"><span aria-hidden="true">✳</span> BELLIS <small>操作台</small></div>
+    <button id="logout" type="button" disabled>退出登录</button>
   </header>
   <main>
-    <h1>直播操作台</h1>
-    <section class="transport" aria-label="直播控制">
-      <div class="mode"><span id="lamp"></span><strong id="mode">连接中…</strong></div>
-      <p id="reason" role="status"></p>
-      <div class="controls">
-        <button class="stop" data-control="control/emergency" disabled>紧急停止</button>
-        <button data-control="control/live" disabled>开始直播</button>
-        <button id="arm-delay" type="button" disabled>开启游戏操作（5秒切窗）</button>
-        <button data-control="game/arm" disabled>立即授权</button>
-        <button data-control="game/disarm" disabled>暂停游戏操作</button>
-        <button data-control="control/pause" disabled>暂停直播</button>
-        <button data-control="control/clear-emergency" disabled>解除急停</button>
+    <section class="transport" aria-label="全局直播总控">
+      <div class="transport-head">
+        <div class="mode-wrap">
+          <div class="mode"><span id="lamp"></span><strong id="mode">连接中…</strong></div>
+          <p id="reason" role="status"></p>
+        </div>
+        <div class="controls">
+          <button id="btn-live" class="primary" type="button" data-control="control/live" disabled>开始直播</button>
+          <button id="btn-pause" type="button" data-control="control/pause" disabled>暂停直播</button>
+          <button id="btn-clear" type="button" data-control="control/clear-emergency" disabled>解除急停</button>
+          <button id="btn-emergency" class="stop" type="button" data-control="control/emergency" disabled>紧急停止</button>
+        </div>
       </div>
-      <div class="controls">
-        <label><input type="checkbox" id="auto-resume-toggle" disabled> 接管/切窗空闲自动恢复</label>
-        <label>空闲秒数 <input type="number" id="auto-resume-idle" value="5" min="2" max="60" step="1"></label>
+      <div class="health-strip" aria-label="系统连接健康">
+        <span class="pill" id="pill-stage" data-state="off">OBS Stage · —</span>
+        <span class="pill" id="pill-core" data-state="off">游戏核 · —</span>
+        <span class="pill" id="pill-agent" data-state="off">游戏端 · —</span>
+        <span class="pill" id="pill-window" data-state="off">游戏窗口 · —</span>
       </div>
-      <div class="metrics"><span id="stage">Stage —</span><span id="game-permit">游戏核 —</span><span id="queue">待处理弹幕 —</span></div>
     </section>
-    <p id="feedback" role="status" aria-live="polite"></p>
-    <div class="panels">
-      <section>
-        <h2>手动发声</h2>
-        <form id="say">
-          <label>口播内容<textarea name="text" rows="3" required></textarea></label>
-          <div class="controls"><button class="primary" disabled>播报</button>
-            <button type="button" data-control="speech/interrupt" disabled>打断发声</button></div>
-        </form>
-        <h3>最近实际播出</h3>
-        <ol id="heard"><li>暂无播出记录</li></ol>
-      </section>
-      <section>
-        <h2>观众投票</h2>
-        <p id="vote-status" role="status">暂无进行中的投票</p>
-        <ol id="counts"></ol>
-        <form id="vote">
-          <label>问题<input name="question" maxlength="120" required></label>
-          <label>选项（每行一个，共 2–4 个）<textarea name="options" rows="3" required></textarea></label>
-          <label>时长（秒）<input type="number" name="duration_s" value="30" min="10" max="300" required></label>
-          <div class="controls"><button class="primary" disabled>开始投票</button>
-            <button type="button" data-control="vote/close" disabled>结束投票</button></div>
-        </form>
-      </section>
-      <section>
-        <h2>测试弹幕</h2>
-        <form id="danmaku">
-          <div class="pair">
-            <label>观众 ID<input name="viewer_id" value="operator-test" required></label>
-            <label>昵称<input name="viewer_name" value="观众" required></label>
+
+    <p id="feedback" role="status" aria-live="polite" data-tone="info"></p>
+
+    <section class="hero-game" aria-label="游戏操控与实时进度">
+      <div class="game-col">
+        <h2>游戏操控与任务</h2>
+
+        <div class="permit-box">
+          <div class="permit-head">
+            <div>
+              <span class="badge" id="permit-badge" data-state="off">未开启</span>
+              <span id="permit-detail" class="muted">等待连接游戏核…</span>
+            </div>
+            <button id="btn-permit" class="primary" type="button" disabled>开启代打</button>
           </div>
-          <label>弹幕内容<input name="text" maxlength="120" required></label>
-          <button disabled>发送测试弹幕</button>
+          <label class="inline-row">
+            <input type="checkbox" id="auto-resume-toggle" disabled>
+            <span>真人接管后，切回游戏空闲</span>
+            <input type="number" id="auto-resume-idle" class="num-sm" value="5" min="2" max="60" step="1">
+            <span>秒自动接回</span>
+          </label>
+        </div>
+
+        <form id="game-task" class="task-form">
+          <div class="mode-switch" role="radiogroup" aria-label="任务模式">
+            <label class="radio-pill">
+              <input type="radio" name="task_mode" value="continuous" checked>
+              <span>连续游玩（自动拆解）</span>
+            </label>
+            <label class="radio-pill">
+              <input type="radio" name="task_mode" value="single">
+              <span>单步直达（快循环）</span>
+            </label>
+          </div>
+
+          <div class="presets" aria-label="常用快捷任务">
+            <button type="button" class="chip" data-preset="daily-open">打开每日实训</button>
+            <button type="button" class="chip" data-preset="daily-auto">连续推进日常</button>
+            <button type="button" class="chip" data-preset="observe">只读观察画面</button>
+          </div>
+
+          <label>
+            游玩目标
+            <textarea id="task-desc" name="description" rows="2" maxlength="200" placeholder="例如：打开星际和平指南查看今日每日实训" required></textarea>
+          </label>
+
+          <div class="task-opts">
+            <label class="inline-row">
+              <span id="steps-label">最多推进轮数</span>
+              <input id="task-steps" name="steps" class="num-sm" type="number" min="1" max="30" value="12" required>
+            </label>
+            <label class="inline-row">
+              <input type="checkbox" id="task-auto-arm" checked>
+              <span>同时开启代打（切回游戏自动生效）</span>
+            </label>
+          </div>
+
+          <div class="controls">
+            <button id="btn-task-start" type="submit" class="primary" disabled>开始执行</button>
+            <button id="btn-task-stop" type="button" disabled>停止任务</button>
+          </div>
         </form>
-      </section>
-      <section>
-        <h2>游戏目标</h2>
-        <p id="game-status" role="status">游戏端 未连接</p>
-        <p id="game-objective-status" role="status"></p>
-        <p id="game-highlight" role="status"></p>
-        <p id="game-narrative" role="status"></p>
-        <div id="game-decision" hidden>
+      </div>
+
+      <div class="game-col live-col">
+        <h2>实时执行进度</h2>
+        <div class="stage-card">
+          <div class="stage-top">
+            <span class="badge" id="live-badge" data-state="off">空闲</span>
+            <span id="live-step-count" class="muted"></span>
+          </div>
+          <p id="live-goal" class="goal-line">当前无活动任务</p>
+          <p id="live-outcome" class="muted"></p>
+          <p id="game-highlight" class="note"></p>
+          <p id="game-narrative" class="note"></p>
+        </div>
+
+        <div id="game-decision" class="decision-box" hidden>
+          <strong>需要人工选择</strong>
           <p id="decision-question"></p>
           <div id="decision-options" class="controls"></div>
         </div>
-        <form id="game-objective">
-          <label>连续总目标<input name="description" maxlength="200" placeholder="例如：完成今日每日实训或推进当前主线剧情"></label>
-          <div class="pair">
-            <label><input type="checkbox" name="auto_continue" checked> 自动推进下一步</label>
-            <label>自动步数上限<input name="max_auto_steps" type="number" min="1" max="30" value="12"></label>
-          </div>
+
+        <h3>最近步骤记录</h3>
+        <ol id="game-steps" class="step-list"><li class="muted">暂无步骤记录</li></ol>
+      </div>
+    </section>
+
+    <div class="panels">
+      <section>
+        <h2>手动口播</h2>
+        <form id="say">
+          <label>口播内容<textarea name="text" rows="2" required></textarea></label>
           <div class="controls">
-            <button type="submit" disabled>设定总目标</button>
-            <button type="button" data-control="game/objective" disabled>清除总目标</button>
+            <button id="btn-say" type="submit" class="primary" disabled>播报</button>
+            <button id="btn-interrupt" type="button" data-control="speech/interrupt" disabled>打断发声</button>
           </div>
         </form>
-        <form id="game-goal">
-          <label>目标描述<textarea name="description" rows="2" required></textarea></label>
-          <label>最大步数<input name="max_steps" type="number" min="1" max="20" value="8" required></label>
+        <h3>最近实际播出</h3>
+        <ol id="heard"><li class="muted">暂无播出记录</li></ol>
+      </section>
+
+      <section>
+        <h2>观众投票</h2>
+        <p id="vote-status" role="status" class="muted">暂无进行中的投票</p>
+        <ol id="counts"></ol>
+        <form id="vote">
+          <label>问题<input name="question" maxlength="120" required></label>
+          <label>选项（每行一个，2–4 个）<textarea name="options" rows="2" required></textarea></label>
           <div class="controls">
-            <button type="submit" class="primary" disabled>下发目标</button>
-            <button type="button" id="goal-arm-delay" disabled>5秒切窗授权并下发</button>
-            <button type="button" data-control="game/pause" disabled>暂缓执行</button>
-            <button type="button" data-control="game/resume" disabled>恢复执行</button>
-            <button type="button" data-control="game/cancel" disabled>取消目标</button>
+            <label class="inline-row">时长(秒)
+              <input name="duration_s" class="num-sm" type="number" value="30" min="10" max="300" required>
+            </label>
+            <button id="btn-vote-start" type="submit" class="primary" disabled>开始投票</button>
+            <button id="btn-vote-close" type="button" data-control="vote/close" disabled>结束投票</button>
           </div>
         </form>
       </section>
     </div>
+
+    <details class="debug-drawer">
+      <summary>调试工具 · 模拟观众弹幕（<span id="queue">待处理 0 条</span>）</summary>
+      <form id="danmaku" class="debug-form">
+        <div class="pair">
+          <label>观众 ID<input name="viewer_id" value="operator-test" required></label>
+          <label>昵称<input name="viewer_name" value="观众" required></label>
+        </div>
+        <label>弹幕内容<input name="text" maxlength="120" required></label>
+        <button id="btn-danmaku" type="submit" disabled>发送测试弹幕</button>
+      </form>
+    </details>
   </main>
 </body>
 </html>
