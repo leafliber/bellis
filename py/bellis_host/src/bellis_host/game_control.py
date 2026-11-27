@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from bellis_common import agent_events as ev
 from bellis_common import channel as ch
+from bellis_common.permit import FATAL_VERIFICATIONS, ReleaseReason
 from bellis_common.wire_codec import ProtocolError
 
 from .game_link import HostGameLink
@@ -103,6 +104,7 @@ class GameController:
         self._cancel_task: asyncio.Task[None] | None = None
         self._admission = asyncio.Lock()
         self._objective: SessionObjective | None = None
+        self._paused_for_takeover = False
         self._closed = False
 
     def start(self) -> None:
@@ -196,12 +198,14 @@ class GameController:
     def set_objective(
         self, description: str, *, auto_continue: bool = True, max_auto_steps: int = 12
     ) -> SessionObjective:
+        self._paused_for_takeover = False
         self._objective = SessionObjective(
             description.strip(), auto_continue=auto_continue, max_auto_steps=max_auto_steps
         )
         return self._objective
 
     def clear_objective(self) -> None:
+        self._paused_for_takeover = False
         self._objective = None
 
     def halt_auto_continue(self) -> None:
@@ -209,23 +213,47 @@ class GameController:
             self._objective = replace(self._objective, auto_continue=False)
 
     def objective_snapshot(self) -> dict[str, object] | None:
-        return None if self._objective is None else asdict(self._objective)
+        if self._objective is None:
+            return None
+        return {**asdict(self._objective), "paused_for_takeover": self._paused_for_takeover}
+
+    def resume_objective_after_takeover(self) -> bool:
+        obj = self._objective
+        if obj is None or obj.completed_steps >= obj.max_auto_steps:
+            self._paused_for_takeover = False
+            return False
+        if self._paused_for_takeover:
+            self._paused_for_takeover = False
+            self._objective = replace(obj, auto_continue=True)
+            return True
+        return obj.auto_continue and self.link.snapshot().active_goal_id is None
 
     def on_game_event(self, event: ev.FastEvent) -> None:
         obj = self._objective
         if obj is None:
             return
         if isinstance(event, ev.GoalCompleted):
+            self._paused_for_takeover = False
             completed = obj.completed_steps + 1
             self._objective = replace(
                 obj,
                 completed_steps=completed,
                 auto_continue=obj.auto_continue and completed < obj.max_auto_steps,
             )
-        elif isinstance(event, ev.GoalStuck | ev.ControlReleased):
+        elif isinstance(event, ev.ControlReleased):
+            recoverable = (
+                event.reason in (ReleaseReason.TAKEOVER, ReleaseReason.FOCUS_LOST)
+                and event.verification not in FATAL_VERIFICATIONS
+                and obj.auto_continue
+            )
+            self._paused_for_takeover = recoverable
+            self.halt_auto_continue()
+        elif isinstance(event, ev.GoalStuck):
+            self._paused_for_takeover = False
             self.halt_auto_continue()
 
     async def cancel_for_stop(self, reason: str = "host_stopped") -> None:
+        self._paused_for_takeover = False
         self.halt_auto_continue()
         if self.link.connected and self.link.snapshot().active_goal_id is not None:
             if self._cancel_task is None or self._cancel_task.done():

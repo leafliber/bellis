@@ -154,8 +154,9 @@ def build_messages(
             "非紧急闲聊应尽量简短或沉默避让，不要抢话。"
             "解说时可结合 game.snapshot.screen_kind 与 recent_narrative 保持与画面台词一致，"
             "绝不编造未出现的剧情。当 game.objective 非空且 auto_continue 为 true、"
-            "当前无活动目标且 game.permit_armed 为 true 时，可在收到 goal_completed 后"
-            "拆解并下发下一步有界短目标（set_goal）继续推进总目标；遇异常或已完成则停止。"
+            "当前无活动目标且 game.permit_armed 为 true 时，可在收到 goal_completed 或 "
+            "objective_resumed 后拆解并下发下一步有界短目标（set_goal）继续推进总目标；"
+            "遇异常或已完成则停止。"
         )
     encoded = json.dumps(context, default=asdict, ensure_ascii=False)
     body = encoded.replace("<", "\\u003c").replace(">", "\\u003e")
@@ -237,6 +238,7 @@ class SlowDirector:
         self._game_events: deque[FastEvent] = deque(maxlen=8)
         self._events_lock = Lock()
         self._vote_ended = False
+        self._objective_resumed = False
         self._turn: asyncio.Task[DirectorResult] | None = None
         self._timer: asyncio.Task[None] | None = None
         self._votes: set[asyncio.Task[None]] = set()
@@ -286,6 +288,16 @@ class SlowDirector:
             self._vote_ended = True
             self._wake_if_live()
 
+    def notify_objective_resumed(self) -> None:
+        if (
+            not self._closed
+            and self.game
+            and self.game.link.connected
+            and self.game.link.snapshot().active_goal_id is None
+        ):
+            self._objective_resumed = True
+            self._wake_if_live()
+
     def _wake_if_live(self) -> None:
         if self.safety.snapshot().mode == HostMode.LIVE:
             if self._loop and self._thread != get_ident():
@@ -324,6 +336,9 @@ class SlowDirector:
             self._vote_ended = False
             if self.game and self.game.link.pending_decision is not None:
                 trigger = "vote_ended"
+        elif self._objective_resumed:
+            self._objective_resumed = False
+            trigger = "objective_resumed"
         self._turn = asyncio.create_task(self._respond(trigger, self._cancel))
         try:
             return await self._turn
@@ -333,7 +348,12 @@ class SlowDirector:
             return DirectorResult("error", reason=type(exc).__name__)
         finally:
             self._turn = None
-            if self.audience.pending_count() or self._game_events or self._vote_ended:
+            if (
+                self.audience.pending_count()
+                or self._game_events
+                or self._vote_ended
+                or self._objective_resumed
+            ):
                 self._wake_if_live()
 
     async def _respond(self, trigger: str, cancel: asyncio.Event) -> DirectorResult:

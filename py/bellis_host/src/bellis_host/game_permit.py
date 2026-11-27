@@ -63,11 +63,22 @@ class GamePermitSnapshot:
     last_release_reason: str | None
     last_release_verification: str | None
     last_release_id: int | None
+    target_focused: bool = False
+    human_idle_ms: int | None = None
+    auto_resume: bool = False
+    auto_resume_idle_s: float = 5.0
 
 
 class HostGamePermit:
-    def __init__(self, safety: SafetyCore, config: GamePermitConfig = GamePermitConfig()):
+    def __init__(
+        self,
+        safety: SafetyCore,
+        config: GamePermitConfig = GamePermitConfig(),
+        *,
+        on_auto_resumed: Callable[[], None] | None = None,
+    ):
         self._safety, self._config = safety, config
+        self._on_auto_resumed = on_auto_resumed
         self._server = permit.PermitServer(
             cred_target=config.cred_target,
             lease_ttl_s=config.lease_ttl_s,
@@ -84,9 +95,13 @@ class HostGamePermit:
         self._local = ContextVar("permit_transition", default=False)
         self._tasks: set[asyncio.Task[object]] = set()
         self._stop: asyncio.Task[InputReleasedParams | None] | None = None
+        self._auto_arm: asyncio.Task[None] | None = None
         self._emergency_release: int | None = None
         self._last_release: InputReleasedParams | None = None
         self._revocation_latched = False
+        self._auto_resume = False
+        self._auto_resume_idle_s = 5.0
+        self._auto_resume_eligible = False
         self._issued = 0
         self._closed = False
 
@@ -176,12 +191,37 @@ class HostGamePermit:
                 return await self._server.pause()
         return None
 
+    def set_auto_resume(self, enabled: bool, *, idle_s: float | None = None) -> tuple[bool, float]:
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be a boolean")
+        if idle_s is not None:
+            if type(idle_s) not in (int, float) or not (
+                math.isfinite(idle_s) and 2 <= idle_s <= 60
+            ):
+                raise ValueError("idle_s must be between 2 and 60 seconds")
+            self._auto_resume_idle_s = float(idle_s)
+        self._auto_resume = enabled
+        if enabled:
+            rel = self._last_release
+            blocked = rel is not None and (
+                rel.reason in _EMERGENCIES or rel.verification in permit.FATAL_VERIFICATIONS
+            )
+            self._auto_resume_eligible = (
+                self._safety.snapshot().mode == HostMode.LIVE and not blocked
+            )
+            self._maybe_auto_resume()
+        else:
+            self._auto_resume_eligible = False
+        return self._auto_resume, self._auto_resume_idle_s
+
     async def disarm_input(self, *, reason: str = "operator_disarm") -> int | None:
+        self._auto_resume = self._auto_resume_eligible = False
         async with self._lock:
             self._revoke(reason)
             return await self._pause(self._issued)
 
     async def emergency_stop(self, *, timeout_s: float | None = None) -> InputReleasedParams | None:
+        self._auto_resume = self._auto_resume_eligible = False
         self._server.cancel_renewal()
         if any(lease.resource == _RESOURCE for lease in self._safety.snapshot().active_leases):
             self._revoke("game_permit:emergency_stop")
@@ -210,10 +250,12 @@ class HostGamePermit:
             and not self._local.get()
             and self._safety.snapshot().mode != HostMode.EMERGENCY_STOP
         ):
+            self._auto_resume = self._auto_resume_eligible = False
             token = self._issued
             self._schedule(lambda: self._pause(token))
 
     def _emergency(self, _: EmergencySummary) -> None:
+        self._auto_resume = self._auto_resume_eligible = False
         if not self._local.get():
             self._schedule(self.emergency_stop)
 
@@ -233,6 +275,7 @@ class HostGamePermit:
             return
         reason = f"game_permit:{rel.reason.value}"
         if rel.reason in _EMERGENCIES or fatal:
+            self._auto_resume = self._auto_resume_eligible = False
             self._revocation_latched = True
             if (
                 self._emergency_release == rel.release_id
@@ -250,15 +293,21 @@ class HostGamePermit:
             rel.reason in permit.REVOKING_REASONS or rel.reason == ReleaseReason.FOCUS_LOST
         ):
             self._revocation_latched = True
+            if rel.reason in {ReleaseReason.TAKEOVER, ReleaseReason.FOCUS_LOST}:
+                self._auto_resume_eligible = self._auto_resume
+            else:
+                self._auto_resume_eligible = False
             self._revoke(reason)
             if rel.reason == ReleaseReason.FOCUS_LOST:
                 self._server.cancel_renewal()
                 token = self._issued
                 self._schedule(lambda: self._pause(token))
+        self._maybe_auto_resume()
 
     def _connection(self, connected: bool) -> None:
         self._health = self._emergency_release = None
         self._revocation_latched = False
+        self._auto_resume_eligible = False
         if connected:
             self._last_release = None
         elif not self._closed:
@@ -266,6 +315,49 @@ class HostGamePermit:
 
     def _health_update(self, health: HealthParams) -> None:
         self._health = health
+        self._maybe_auto_resume()
+
+    def _can_auto_resume(self) -> bool:
+        if (
+            self._closed
+            or not self._auto_resume
+            or not self._auto_resume_eligible
+            or not self.connected
+            or self.armed
+            or self._safety.snapshot().mode != HostMode.LIVE
+            or (self._stop is not None and not self._stop.done())
+        ):
+            return False
+        health = self._health
+        if (
+            health is None
+            or health.capture != permit.CaptureState.CAPTURING
+            or not health.target_focused
+            or health.human_idle_ms is None
+            or health.human_idle_ms < int(self._auto_resume_idle_s * 1000)
+        ):
+            return False
+        rel = self._last_release
+        return rel is None or (
+            rel.verification != permit.ReleaseVerification.UNVERIFIED
+            and rel.verification not in permit.FATAL_VERIFICATIONS
+            and rel.reason not in _EMERGENCIES
+        )
+
+    def _maybe_auto_resume(self) -> None:
+        if not self._can_auto_resume():
+            return
+        if self._auto_arm is None or self._auto_arm.done():
+            self._auto_arm = asyncio.create_task(self._run_auto_resume())
+
+    async def _run_auto_resume(self) -> None:
+        if not self._can_auto_resume():
+            return
+        with suppress(SafetyError, *_RPC_ERRORS):
+            await self.arm_input(actor="operator_auto_resume")
+            if self.armed and self._on_auto_resumed is not None:
+                with suppress(Exception):
+                    self._on_auto_resumed()
 
     def snapshot(self) -> GamePermitSnapshot:
         health, rel = self._health, self._last_release
@@ -279,16 +371,24 @@ class HostGamePermit:
             rel and rel.reason.value,
             rel and rel.verification.value,
             rel and rel.release_id,
+            bool(health and health.target_focused),
+            health.human_idle_ms if health else None,
+            self._auto_resume,
+            self._auto_resume_idle_s,
         )
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        self._auto_resume = self._auto_resume_eligible = False
         try:
             for unsubscribe in self._unsubscribe:
                 unsubscribe()
             self._revoke("game_permit:closed")
+            if self._auto_arm and not self._auto_arm.done():
+                self._auto_arm.cancel()
+                await asyncio.gather(self._auto_arm, return_exceptions=True)
             if self.active_token is not None:
                 await self.emergency_stop()
             await asyncio.sleep(0)  # Admit callbacks already queued by the safety thread.

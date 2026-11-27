@@ -39,6 +39,14 @@ pub trait InputBackend: Send {
         false
     }
 
+    fn target_focused(&self) -> bool {
+        false
+    }
+
+    fn human_idle_ms(&self, _now_ns: u64) -> Option<u64> {
+        None
+    }
+
     fn configured(&mut self, policy: &InputPolicy) {
         let _ = policy;
     }
@@ -103,6 +111,20 @@ impl InputLedger {
     #[must_use]
     pub fn has_transient(&self) -> bool {
         !self.transients.is_empty()
+    }
+
+    #[must_use]
+    pub fn target_focused(&self) -> bool {
+        self.backend
+            .as_ref()
+            .is_some_and(|backend| backend.target_focused())
+    }
+
+    #[must_use]
+    pub fn human_idle_ms(&self, now_ns: u64) -> Option<u64> {
+        self.backend
+            .as_ref()
+            .and_then(|backend| backend.human_idle_ms(now_ns))
     }
 
     /// 抬起身份不在 `keep` 中的每一项持续状态。

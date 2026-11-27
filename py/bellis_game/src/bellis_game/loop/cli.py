@@ -83,12 +83,14 @@ def core_options(args: argparse.Namespace) -> CoreClientOptions:
             permit_cred=args.permit_cred,
             permit_session_id=args.permit_session_id,
             emergency_hotkey=args.emergency_hotkey,
+            health_interval=0.5,
         )
     return CoreClientOptions(
         executable=args.core_exe or find_core_executable(),
         permit_cred=args.permit_cred,
         permit_session_id=args.permit_session_id,
         emergency_hotkey=args.emergency_hotkey,
+        health_interval=0.5,
     )
 
 

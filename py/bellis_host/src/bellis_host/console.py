@@ -226,6 +226,23 @@ class ConsoleServer:
                     reason=_string(data, "reason", "operator_disarm")
                 )
             return {"ok": True, "token": token}
+        if path == "/api/game/auto-resume":
+            if self.game_permit is None:
+                raise _HttpError(503)
+            if data.keys() - {"enabled", "idle_s"}:
+                raise _HttpError(400)
+            enabled = data.get("enabled")
+            raw_idle = data.get("idle_s")
+            if type(enabled) is not bool:
+                raise _HttpError(400)
+            idle_s: float | None = None
+            if raw_idle is not None:
+                if type(raw_idle) is int or type(raw_idle) is float:
+                    idle_s = float(raw_idle)
+                else:
+                    raise _HttpError(400)
+            active, wait_s = self.game_permit.set_auto_resume(enabled, idle_s=idle_s)
+            return {"ok": True, "auto_resume": active, "auto_resume_idle_s": wait_s}
         if path == "/api/game/decision":
             if self.game is None:
                 raise _HttpError(503)

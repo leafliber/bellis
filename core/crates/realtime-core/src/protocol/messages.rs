@@ -213,6 +213,8 @@ pub struct HealthParams {
     pub latest_audio: Option<LatestAudio>,
     pub lease: LeaseStatus,
     pub queue_depth: u32,
+    pub target_focused: bool,
+    pub human_idle_ms: Option<u64>,
 }
 
 /// 最近写进帧环的一帧。

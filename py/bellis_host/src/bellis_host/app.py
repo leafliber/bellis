@@ -176,7 +176,9 @@ class HostApp:
         if model is None:
             model = OpenAiLlmClient(cfg.director)
             stack.push_async_callback(model.close)
-        self.game_permit = HostGamePermit(self.safety, cfg.permit)
+        self.game_permit = HostGamePermit(
+            self.safety, cfg.permit, on_auto_resumed=self._on_permit_auto_resumed
+        )
         stack.push_async_callback(self.game_permit.close)
         self.game_link = HostGameLink(cfg.game_link, on_event=self._on_game_event)
         stack.push_async_callback(self.game_link.close)
@@ -200,6 +202,10 @@ class HostApp:
 
     def _on_game_event(self, event: FastEvent) -> None:
         self.director.submit_game_event(event)
+
+    def _on_permit_auto_resumed(self) -> None:
+        if self.game.resume_objective_after_takeover():
+            self.director.notify_objective_resumed()
 
     async def _obs_action(self, refresh: bool = False) -> None:
         assert self.obs

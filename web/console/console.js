@@ -56,6 +56,8 @@ function scheduleArm(seconds, afterArm, doneMessage) {
 
 function setAuthenticated(value) {
   document.querySelectorAll("button").forEach(button => { button.disabled = !value; });
+  const toggle = el("auto-resume-toggle");
+  if (toggle) toggle.disabled = !value;
 }
 
 async function api(path, data) {
@@ -102,11 +104,24 @@ async function refresh() {
   el("stage").textContent = "Stage " + (s.stage_connected ? "已连接" : "未连接");
   const permit = s.game_permit;
   let state = "未连接";
-  if (permit?.connected) state = permit.armed ? "已授权 #" + permit.active_token : "已连接·未授权";
+  if (permit?.connected) {
+    state = permit.armed ? "已授权 #" + permit.active_token : "已连接·未授权";
+    state += permit.target_focused ? " · 游戏前台" : " · 未聚焦";
+    if (!permit.armed && permit.auto_resume && permit.human_idle_ms != null) {
+      const idle = Math.floor(permit.human_idle_ms / 1000);
+      state += " · 自动恢复(" + idle + "/" + Math.round(permit.auto_resume_idle_s) + "s)";
+    }
+  }
   if (permit?.last_release_reason) {
     state += " · " + permit.last_release_reason + " / " + permit.last_release_verification;
   }
   el("game-permit").textContent = "游戏核 " + state;
+  const arToggle = el("auto-resume-toggle");
+  const arIdle = el("auto-resume-idle");
+  if (arToggle && permit) arToggle.checked = Boolean(permit.auto_resume);
+  if (arIdle && permit && document.activeElement !== arIdle) {
+    arIdle.value = String(Math.round(permit.auto_resume_idle_s));
+  }
   const game = s.game_link;
   const outcomes = {goal_completed: "目标已完成", goal_stuck: "目标已停止", control_released: "控制已释放"};
   const voice = game?.voice_state && game.voice_state !== "unknown" ? "配音 " + game.voice_state : "";
@@ -118,7 +133,7 @@ async function refresh() {
   const obj = s.game_objective;
   el("game-objective-status").textContent = obj ? [
     "总目标 · " + obj.description,
-    obj.auto_continue ? "自动推进中" : "自动推进已停",
+    obj.auto_continue ? "自动推进中" : (obj.paused_for_takeover ? "接管暂缓（空闲后自动恢复）" : "自动推进已停"),
     obj.completed_steps + "/" + obj.max_auto_steps
   ].join(" · ") : "";
   el("game-highlight").textContent = game?.last_highlight ? "最近亮点 · " + game.last_highlight : "";
@@ -181,6 +196,15 @@ document.querySelectorAll("[data-control]").forEach(button => {
 el("arm-delay").addEventListener("click", () => {
   if (armTimer) cancelArmCountdown("已取消授权倒计时");
   else scheduleArm(5, null, "已开启游戏操作");
+});
+const syncAutoResume = () => {
+  const toggle = el("auto-resume-toggle");
+  const idle = Number(el("auto-resume-idle").value || 5);
+  command("game/auto-resume", {enabled: Boolean(toggle.checked), idle_s: idle}, toggle);
+};
+el("auto-resume-toggle").addEventListener("change", syncAutoResume);
+el("auto-resume-idle").addEventListener("change", () => {
+  if (el("auto-resume-toggle").checked) syncAutoResume();
 });
 el("goal-arm-delay").addEventListener("click", () => {
   const form = el("game-goal");

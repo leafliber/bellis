@@ -215,6 +215,8 @@ impl Control {
             latest_audio: None,
             lease: state.lease.status(now_ns),
             queue_depth,
+            target_focused: state.ledger.target_focused(),
+            human_idle_ms: state.ledger.human_idle_ms(now_ns),
         }
     }
 

@@ -421,7 +421,9 @@
           "latest_frame": null,
           "latest_audio": null,
           "lease": "not_granted",
-          "queue_depth": 0
+          "queue_depth": 0,
+          "target_focused": false,
+          "human_idle_ms": null
         }
       }
     },

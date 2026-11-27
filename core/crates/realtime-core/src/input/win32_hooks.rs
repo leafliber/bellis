@@ -49,6 +49,7 @@ pub(crate) struct HookGlobals {
     pub(crate) combo: Combo,
     pub(crate) lease_valid: AtomicBool,
     pub(crate) seen: Arc<AtomicU64>,
+    pub(crate) last_human_ns: Arc<AtomicU64>,
     pub(crate) state: Mutex<HookState>,
     pub(crate) worker: Sender<Class>,
 }
@@ -119,19 +120,32 @@ fn mouse_move(info: &MSLLHOOKSTRUCT) -> RawEvent {
     RawEvent::MouseMove { dx, dy }
 }
 
+fn is_human_activity(raw: RawEvent) -> bool {
+    match raw {
+        RawEvent::MouseMove { dx, dy } => dx.unsigned_abs().saturating_add(dy.unsigned_abs()) >= 2,
+        RawEvent::Other => false,
+        _ => true,
+    }
+}
+
 pub(crate) fn classify_and_dispatch(
     globals: &HookGlobals,
     raw: RawEvent,
     injected: bool,
     extra_info: usize,
 ) {
+    let own = injected && extra_info == globals.marker;
+    if !own && is_human_activity(raw) {
+        globals
+            .last_human_ns
+            .store(crate::clock::now_ns(), Ordering::Release);
+    }
     let lease_valid = globals.lease_valid.load(Ordering::Acquire);
     let class = {
         let mut state = globals
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let own = injected && extra_info == globals.marker;
         state.classify(raw, injected, own, &globals.combo, lease_valid)
     };
     match class {
@@ -230,6 +244,7 @@ pub(crate) fn build_backend(
     let marker = session_marker(getrandom::u32);
     let injected = Arc::new(AtomicU64::new(0));
     let seen = Arc::new(AtomicU64::new(0));
+    let last_human_ns = Arc::new(AtomicU64::new(crate::clock::now_ns()));
     let verify_keys = Arc::new(Mutex::new(VerifyKeys::default()));
     let win32: Arc<dyn Win32> = Arc::new(RealWin32 {
         marker,
@@ -243,6 +258,7 @@ pub(crate) fn build_backend(
         combo,
         lease_valid: AtomicBool::new(false),
         seen: Arc::clone(&seen),
+        last_human_ns: Arc::clone(&last_human_ns),
         state: Mutex::new(HookState::default()),
         worker: worker_tx,
     })
@@ -254,6 +270,7 @@ pub(crate) fn build_backend(
         Arc::clone(&win32),
         verify_tx,
         Arc::clone(&verify_keys),
+        last_human_ns,
     ));
     Ok((
         backend,

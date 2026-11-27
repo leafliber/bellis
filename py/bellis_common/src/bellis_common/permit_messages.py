@@ -157,3 +157,5 @@ class HealthParams(WireModel):
     latest_audio: LatestAudio | None
     lease: LeaseStatus
     queue_depth: U32
+    target_focused: bool = False
+    human_idle_ms: U64 | None = None

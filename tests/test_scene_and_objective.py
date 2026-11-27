@@ -183,7 +183,7 @@ async def test_narrative_history_objective_continuation_and_fail_closed_halt(
         assert game_ctx["snapshot"]["recent_narrative"] == ["开拓者，出发吧！"]
         assert any(cmd.get("description") == "第二步任务" for cmd in sent_commands)
 
-        # ControlReleased / GoalStuck immediately disables auto_continue (Fail-Closed)
+        # ControlReleased (takeover) halts auto_continue immediately, marking paused_for_takeover
         app.game_link._receive_event(  # pyright: ignore[reportPrivateUsage]
             ev.ControlReleased(
                 "g2", ReleaseReason.TAKEOVER, ReleaseVerification.VERIFIED, 1
@@ -191,6 +191,23 @@ async def test_narrative_history_objective_continuation_and_fail_closed_halt(
         )
         obj = app.game.objective_snapshot()
         assert obj is not None and obj["auto_continue"] is False
+        assert obj["paused_for_takeover"] is True
+
+        # When permit auto-resumes after takeover, objective resumes & triggers director
+        llm.called.clear()
+        app.game_link._goal = None  # pyright: ignore[reportPrivateUsage]
+        app._on_permit_auto_resumed()  # pyright: ignore[reportPrivateUsage]
+        obj = app.game.objective_snapshot()
+        assert obj is not None and obj["auto_continue"] is True
+        await asyncio.wait_for(llm.called.wait(), timeout=1.0)
+
+        # Emergency stop permanently clears paused_for_takeover (never auto-resumes)
+        app.game_link._receive_event(  # pyright: ignore[reportPrivateUsage]
+            ev.ControlReleased(
+                "g3", ReleaseReason.EMERGENCY_STOP, ReleaseVerification.VERIFIED, 1
+            ).to_dict()
+        )
+        assert app.game.resume_objective_after_takeover() is False
 
         # Console clear removes objective
         code, cleared = await browser.api("/api/game/objective", {"clear": True})

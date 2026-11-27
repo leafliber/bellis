@@ -26,6 +26,10 @@
         <button data-control="control/pause" disabled>暂停直播</button>
         <button data-control="control/clear-emergency" disabled>解除急停</button>
       </div>
+      <div class="controls">
+        <label><input type="checkbox" id="auto-resume-toggle" disabled> 接管/切窗空闲自动恢复</label>
+        <label>空闲秒数 <input type="number" id="auto-resume-idle" value="5" min="2" max="60" step="1"></label>
+      </div>
       <div class="metrics"><span id="stage">Stage —</span><span id="game-permit">游戏核 —</span><span id="queue">待处理弹幕 —</span></div>
     </section>
     <p id="feedback" role="status" aria-live="polite"></p>

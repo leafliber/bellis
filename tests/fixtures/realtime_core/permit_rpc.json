@@ -209,7 +209,9 @@
             "capture_ns": 1234569940000
           },
           "lease": "valid",
-          "queue_depth": 2
+          "queue_depth": 2,
+          "target_focused": true,
+          "human_idle_ms": 4200
         }
       }
     }

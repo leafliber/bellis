@@ -3,6 +3,7 @@
 //! 全部注入构造、前台双重核对、左右键交换、绝对坐标换算与残留补发逻辑均不直接依赖 Win32 FFI，
 //! 可经替身 `Win32` 在无桌面单元测试中完整验证。
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
@@ -251,6 +252,7 @@ pub struct SendInputBackend {
     win32: Arc<dyn Win32>,
     verify: Sender<VerifyRequest>,
     verify_keys: Arc<Mutex<VerifyKeys>>,
+    last_human_ns: Arc<AtomicU64>,
     startup: Option<VerifyRequest>,
     configured_swap: Option<bool>,
 }
@@ -261,11 +263,13 @@ impl SendInputBackend {
         win32: Arc<dyn Win32>,
         verify: Sender<VerifyRequest>,
         verify_keys: Arc<Mutex<VerifyKeys>>,
+        last_human_ns: Arc<AtomicU64>,
     ) -> Self {
         Self {
             win32,
             verify,
             verify_keys,
+            last_human_ns,
             startup: None,
             configured_swap: None,
         }
@@ -377,6 +381,15 @@ impl InputBackend for SendInputBackend {
 
     fn verifies_release(&self) -> bool {
         true
+    }
+
+    fn target_focused(&self) -> bool {
+        self.win32.foreground_target().is_some()
+    }
+
+    fn human_idle_ms(&self, now_ns: u64) -> Option<u64> {
+        let last = self.last_human_ns.load(Ordering::Acquire);
+        Some(now_ns.saturating_sub(last) / 1_000_000)
     }
 
     fn released_all(&mut self, reason: ReleaseReason, release_id: u64) {

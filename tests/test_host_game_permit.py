@@ -317,6 +317,69 @@ async def test_post_revocation_generation_cleanup_preserves_release_cause(
         )
 
 
+async def test_auto_resume_after_takeover_requires_focus_and_idle(
+    running: tuple[HostApp, Browser],
+) -> None:
+    app, browser = running
+    game = app.game_permit
+    app.safety.start_live()
+    async with pipe(game) as peer:
+        renew = respond(peer, PermitMethods.LEASE_RENEW)
+        revoke = respond(peer, PermitMethods.LEASE_REVOKE)
+        token = await game.arm_input()
+        code, body = await browser.api("/api/game/auto-resume", {"enabled": True, "idle_s": 5})
+        assert code == 200 and body == {"ok": True, "auto_resume": True, "auto_resume_idle_s": 5.0}
+
+        # Takeover revokes lease, but keeps auto_resume enabled & eligible.
+        released(peer, ReleaseReason.TAKEOVER, ReleaseVerification.VERIFIED, token, release_id=30)
+        await until(lambda: not game.armed)
+        assert game.snapshot().auto_resume is True
+
+        cap, aud = permit.CaptureState.CAPTURING, permit.CaptureState.IDLE
+        lease = permit.LeaseStatus.REVOKED
+        # Not focused -> stays disarmed even if idle >= 5s
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(
+                1, cap, aud, False, None, None, None, lease, 0, False, 6000
+            ).to_dict(),
+        )
+        await asyncio.sleep(0.05)
+        assert not game.armed
+
+        # Focused, but idle < 5s -> stays disarmed
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(
+                2, cap, aud, False, None, None, None, lease, 0, True, 4500
+            ).to_dict(),
+        )
+        await asyncio.sleep(0.05)
+        assert not game.armed
+
+        # Focused + idle >= 5s + capturing -> automatically re-arms!
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(
+                3, cap, aud, False, None, None, None, lease, 0, True, 5100
+            ).to_dict(),
+        )
+        await until(lambda: game.armed)
+        assert renew.call_count >= 2 and game.snapshot().target_focused is True
+
+        # Manual disarm permanently disables auto_resume (must never fight operator!)
+        await game.disarm_input()
+        assert revoke.called and not game.armed and game.snapshot().auto_resume is False
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(
+                4, cap, aud, False, None, None, None, lease, 0, True, 9000
+            ).to_dict(),
+        )
+        await asyncio.sleep(0.05)
+        assert not game.armed
+
+
 @pytest.mark.parametrize(
     ("reason", "verification"),
     [

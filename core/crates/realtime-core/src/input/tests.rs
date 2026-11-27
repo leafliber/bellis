@@ -151,7 +151,9 @@ fn sendinput_backend_checks_foreground_before_and_after_and_detects_blocking() {
     ]);
     let (tx, _rx) = mpsc::channel();
     let keys = Arc::new(Mutex::new(VerifyKeys::default()));
-    let mut backend = SendInputBackend::new(win32.clone(), tx, keys);
+    let last_human = Arc::new(AtomicU64::new(1_000_000_000));
+    let mut backend = SendInputBackend::new(win32.clone(), tx, keys, Arc::clone(&last_human));
+    assert_eq!(backend.human_idle_ms(6_500_000_000), Some(5_500));
 
     // 注入前失焦：零注入。
     assert_eq!(
@@ -254,11 +256,13 @@ fn session_marker_roundtrips_through_win32_inputs_and_hook_dispatch() {
     assert_eq!(marker, 0x8000_0001);
 
     let (worker, classes) = mpsc::channel();
+    let last_human_ns = Arc::new(AtomicU64::new(42));
     let globals = HookGlobals {
         marker,
         combo: Combo::default_hotkey(),
         lease_valid: AtomicBool::new(true),
         seen: Arc::new(AtomicU64::new(0)),
+        last_human_ns: Arc::clone(&last_human_ns),
         state: Mutex::new(HookState::default()),
         worker,
     };
@@ -290,8 +294,13 @@ fn session_marker_roundtrips_through_win32_inputs_and_hook_dispatch() {
         classify_and_dispatch(&globals, raw, true, (extra as u32) as usize);
     }
     assert_eq!(globals.seen.load(Ordering::Acquire), 2);
+    assert_eq!(last_human_ns.load(Ordering::Acquire), 42);
+    classify_and_dispatch(&globals, RawEvent::MouseMove { dx: 1, dy: 0 }, false, 0);
+    assert_eq!(last_human_ns.load(Ordering::Acquire), 42);
+    classify_and_dispatch(&globals, RawEvent::KeyDown { vk: 0x57 }, false, 0);
+    assert!(last_human_ns.load(Ordering::Acquire) > 42);
     assert_eq!(self_check_count(&events, 3), 2);
-    assert_eq!(classes.try_recv(), Err(mpsc::TryRecvError::Empty));
+    assert_eq!(classes.try_recv(), Ok(Class::Takeover));
 }
 
 #[test]
@@ -304,6 +313,7 @@ fn residual_verification_repairs_stuck_keys_and_rechecks() {
         win32.clone(),
         tx,
         Arc::clone(&verify_keys),
+        Arc::new(AtomicU64::new(0)),
     ));
     let control = Control::new(
         Limits {
