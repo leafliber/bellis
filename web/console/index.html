@@ -20,7 +20,8 @@
       <div class="controls">
         <button class="stop" data-control="control/emergency" disabled>紧急停止</button>
         <button data-control="control/live" disabled>开始直播</button>
-        <button data-control="game/arm" disabled>开启游戏操作</button>
+        <button id="arm-delay" type="button" disabled>开启游戏操作（5秒切窗）</button>
+        <button data-control="game/arm" disabled>立即授权</button>
         <button data-control="game/disarm" disabled>暂停游戏操作</button>
         <button data-control="control/pause" disabled>暂停直播</button>
         <button data-control="control/clear-emergency" disabled>解除急停</button>
@@ -88,6 +89,7 @@
           <label>最大步数<input name="max_steps" type="number" min="1" max="20" value="8" required></label>
           <div class="controls">
             <button type="submit" class="primary" disabled>下发目标</button>
+            <button type="button" id="goal-arm-delay" disabled>5秒切窗授权并下发</button>
             <button type="button" data-control="game/pause" disabled>暂缓执行</button>
             <button type="button" data-control="game/resume" disabled>恢复执行</button>
             <button type="button" data-control="game/cancel" disabled>取消目标</button>

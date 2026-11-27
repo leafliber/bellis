@@ -4,6 +4,55 @@ const modes = {live: "直播中", safe_stop: "已暂停", emergency_stop: "紧�
 let csrf = "";
 let sessionEnded = false;
 let renderedDecisionId = "";
+let currentMode = "";
+let armTimer = 0;
+let armEndAt = 0;
+
+function cancelArmCountdown(message) {
+  if (armTimer) {
+    window.clearInterval(armTimer);
+    armTimer = 0;
+    armEndAt = 0;
+  }
+  const btn = el("arm-delay");
+  if (btn) btn.textContent = "开启游戏操作（5秒切窗）";
+  if (message) el("feedback").textContent = message;
+}
+
+function scheduleArm(seconds, afterArm, doneMessage) {
+  if (sessionEnded) return;
+  if (currentMode && currentMode !== "live") {
+    el("feedback").textContent = "请先点击「开始直播」再开启游戏操作";
+    return;
+  }
+  cancelArmCountdown("");
+  armEndAt = Date.now() + seconds * 1000;
+  const update = left => {
+    el("arm-delay").textContent = "取消倒计时 (" + left + "s)";
+    el("feedback").textContent = "请在 " + left + " 秒内切到游戏窗口并松开键鼠…";
+  };
+  update(seconds);
+  armTimer = window.setInterval(async () => {
+    if (sessionEnded) { cancelArmCountdown(""); return; }
+    const left = Math.ceil((armEndAt - Date.now()) / 1000);
+    if (left > 0) { update(left); return; }
+    cancelArmCountdown("");
+    try {
+      await api("game/arm", {});
+      if (afterArm) {
+        const res = await afterArm();
+        el("feedback").textContent = res.ok === false
+          ? "已授权，但目标未下发" + (res.reason ? " · " + res.reason : "")
+          : doneMessage;
+      } else {
+        el("feedback").textContent = doneMessage;
+      }
+      await refresh();
+    } catch (error) {
+      el("feedback").textContent = error.message;
+    }
+  }, 250);
+}
 
 function setAuthenticated(value) {
   document.querySelectorAll("button").forEach(button => { button.disabled = !value; });
@@ -26,6 +75,7 @@ async function api(path, data) {
 }
 
 function endSession() {
+  cancelArmCountdown("");
   csrf = "";
   sessionEnded = true;
   setAuthenticated(false);
@@ -44,6 +94,8 @@ function list(id, lines) {
 async function refresh() {
   const s = await api("status");
   if (sessionEnded) return;
+  currentMode = s.mode;
+  if (armTimer && s.mode !== "live") cancelArmCountdown("直播已暂停或急停，已取消授权倒计时");
   el("mode").textContent = modes[s.mode] || s.mode;
   el("lamp").dataset.mode = s.mode;
   el("reason").textContent = [s.emergency_reason, s.watchdog_acted && "看门狗已触发"].filter(Boolean).join(" · ");
@@ -105,6 +157,9 @@ async function poll() {
 }
 
 async function command(path, data, button) {
+  if (["control/emergency", "control/pause", "game/disarm", "game/arm", "logout"].includes(path)) {
+    cancelArmCountdown("");
+  }
   button.disabled = true;
   try {
     const result = await api(path, data);
@@ -122,6 +177,17 @@ async function command(path, data, button) {
 
 document.querySelectorAll("[data-control]").forEach(button => {
   button.addEventListener("click", () => command(button.dataset.control, {}, button));
+});
+el("arm-delay").addEventListener("click", () => {
+  if (armTimer) cancelArmCountdown("已取消授权倒计时");
+  else scheduleArm(5, null, "已开启游戏操作");
+});
+el("goal-arm-delay").addEventListener("click", () => {
+  const form = el("game-goal");
+  if (!form.reportValidity()) return;
+  const data = Object.fromEntries(new FormData(form));
+  data.max_steps = Number(data.max_steps);
+  scheduleArm(5, () => api("game/goal", data), "已开启游戏操作并下发目标");
 });
 el("logout").addEventListener("click", () => command("logout", {}, el("logout")));
 for (const [id, path] of [
