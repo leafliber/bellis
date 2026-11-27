@@ -249,6 +249,74 @@ async def test_game_only_releases_and_disconnect(running: tuple[HostApp, Browser
     assert app.safety.snapshot().mode == HostMode.LIVE
 
 
+async def test_post_revocation_generation_cleanup_preserves_release_cause(
+    running: tuple[HostApp, Browser],
+) -> None:
+    app, _ = running
+    game = app.game_permit
+    app.safety.start_live()
+    async with pipe(game) as peer:
+        respond(peer, PermitMethods.LEASE_RENEW)
+        token = await game.arm_input()
+        released(peer, ReleaseReason.TAKEOVER, ReleaseVerification.UNVERIFIED, token, release_id=20)
+        await until(lambda: game.snapshot().last_release_id == 20)
+        released(peer, ReleaseReason.TAKEOVER, ReleaseVerification.VERIFIED, token, release_id=20)
+        await until(lambda: game.snapshot().last_release_verification == "verified")
+        # FastLoop quiesce revokes producer after verification; must not hide takeover.
+        released(
+            peer,
+            ReleaseReason.GENERATION_REVOKED,
+            ReleaseVerification.UNVERIFIED,
+            None,
+            release_id=21,
+        )
+        released(
+            peer,
+            ReleaseReason.GENERATION_REVOKED,
+            ReleaseVerification.VERIFIED,
+            None,
+            release_id=21,
+        )
+        await until(
+            lambda: (
+                game._server.last_released is not None  # pyright: ignore[reportPrivateUsage]
+                and game._server.last_released.release_id == 21  # pyright: ignore[reportPrivateUsage]
+            )
+        )
+        snap = game.snapshot()
+        assert (snap.last_release_reason, snap.last_release_verification, snap.last_release_id) == (
+            "takeover",
+            "verified",
+            20,
+        )
+        # Re-arming clears the latched cause so routine releases update normally.
+        token = await game.arm_input()
+        released(
+            peer,
+            ReleaseReason.GENERATION_REVOKED,
+            ReleaseVerification.VERIFIED,
+            token,
+            release_id=22,
+        )
+        await until(lambda: game.snapshot().last_release_id == 22)
+        assert game.snapshot().last_release_reason == "generation_revoked"
+        # A fatal cleanup release still overrides and triggers emergency stop.
+        released(peer, ReleaseReason.TAKEOVER, ReleaseVerification.VERIFIED, token, release_id=23)
+        await until(lambda: game.snapshot().last_release_id == 23)
+        released(
+            peer,
+            ReleaseReason.GENERATION_REVOKED,
+            ReleaseVerification.RESIDUAL,
+            None,
+            release_id=24,
+        )
+        await until(lambda: app.safety.snapshot().mode == HostMode.EMERGENCY_STOP)
+        assert (game.snapshot().last_release_reason, game.snapshot().last_release_verification) == (
+            "generation_revoked",
+            "residual",
+        )
+
+
 @pytest.mark.parametrize(
     ("reason", "verification"),
     [

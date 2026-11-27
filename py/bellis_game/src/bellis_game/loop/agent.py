@@ -171,6 +171,12 @@ class FastLoop:
                 self._core.send_heartbeat(self._producer, seq)
             await asyncio.sleep(self._config.heartbeat_interval_s)
 
+    def _cancel_active(self) -> None:
+        if self._work:
+            self._work.cancel()
+        if self._heartbeat:
+            self._heartbeat.cancel()
+
     async def _revoke(self) -> None:
         if self._heartbeat:
             self._heartbeat.cancel()
@@ -230,7 +236,10 @@ class FastLoop:
                         (self._work, signal, cancelled), return_when=asyncio.FIRST_COMPLETED
                     )
             if signal.done():
-                rel = self._executor.last_release or signal.result()
+                self._cancel_active()
+                rel = await self._executor.wait_release_final(
+                    self._executor.last_release or signal.result()
+                )
                 outcome = ControlReleased(goal.goal_id, rel.reason, rel.verification, self._steps)
             elif control.cancelled:
                 outcome = self._stuck(goal, "cancelled", control.cancel_reason)

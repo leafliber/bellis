@@ -23,6 +23,14 @@ _EMERGENCIES = {
     ReleaseReason.HOOK_LOST,
     ReleaseReason.INJECTION_BLOCKED,
 }
+_ROUTINE_CLEANUP = frozenset(
+    (
+        ReleaseReason.GENERATION_REVOKED,
+        ReleaseReason.HEARTBEAT_TIMEOUT,
+        ReleaseReason.PRODUCER_CHANGED,
+        ReleaseReason.DEADLINE_EXPIRED,
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -77,6 +85,8 @@ class HostGamePermit:
         self._tasks: set[asyncio.Task[object]] = set()
         self._stop: asyncio.Task[InputReleasedParams | None] | None = None
         self._emergency_release: int | None = None
+        self._last_release: InputReleasedParams | None = None
+        self._revocation_latched = False
         self._issued = 0
         self._closed = False
 
@@ -143,6 +153,7 @@ class HostGamePermit:
                 self._revoke("permit_grant_failed")
                 await self._pause(lease.token)
                 raise
+            self._revocation_latched = False
             return lease.token
 
     def _on_renew(self, token: int) -> float | None:
@@ -207,10 +218,22 @@ class HostGamePermit:
             self._schedule(self.emergency_stop)
 
     def _released(self, rel: InputReleasedParams) -> None:
+        fatal = rel.verification in permit.FATAL_VERIFICATIONS
+        routine_after_revoke = (
+            self._revocation_latched
+            and rel.token is None
+            and not fatal
+            and rel.reason in _ROUTINE_CLEANUP
+        )
+        if not routine_after_revoke and (
+            self._last_release is None or rel.release_id >= self._last_release.release_id
+        ):
+            self._last_release = rel
         if self._closed or rel.reason == ReleaseReason.CORE_START:
             return
         reason = f"game_permit:{rel.reason.value}"
-        if rel.reason in _EMERGENCIES or rel.verification in permit.FATAL_VERIFICATIONS:
+        if rel.reason in _EMERGENCIES or fatal:
+            self._revocation_latched = True
             if (
                 self._emergency_release == rel.release_id
                 and self._safety.snapshot().mode == HostMode.EMERGENCY_STOP
@@ -226,6 +249,7 @@ class HostGamePermit:
         elif (rel.token is None or rel.token >= self._issued) and (
             rel.reason in permit.REVOKING_REASONS or rel.reason == ReleaseReason.FOCUS_LOST
         ):
+            self._revocation_latched = True
             self._revoke(reason)
             if rel.reason == ReleaseReason.FOCUS_LOST:
                 self._server.cancel_renewal()
@@ -234,14 +258,17 @@ class HostGamePermit:
 
     def _connection(self, connected: bool) -> None:
         self._health = self._emergency_release = None
-        if not connected and not self._closed:
+        self._revocation_latched = False
+        if connected:
+            self._last_release = None
+        elif not self._closed:
             self._revoke("game_permit:disconnected")
 
     def _health_update(self, health: HealthParams) -> None:
         self._health = health
 
     def snapshot(self) -> GamePermitSnapshot:
-        health, rel = self._health, self._server.last_released
+        health, rel = self._health, self._last_release
         return GamePermitSnapshot(
             self.connected,
             self.armed,

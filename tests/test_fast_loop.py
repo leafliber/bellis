@@ -473,6 +473,52 @@ async def test_release_preempts_active_work(when: str) -> None:
     assert s.model.cancelled == (when == "model")
 
 
+async def test_unverified_release_waits_for_verification_before_revoke() -> None:
+    s = Session({"action": "wait", "duration_ms": 5000})
+    async with asyncio.timeout(1):
+        work = asyncio.create_task(s.loop.run_goal(GOAL))
+        await s.model.called.wait()
+        await asyncio.sleep(0.02)
+        unverified = replace(
+            RELEASE, release_id=11, verification=rpc.ReleaseVerification.UNVERIFIED
+        )
+        s.executor.on_released(unverified)
+        await asyncio.sleep(0.03)
+        # Must not supersede realtime-core's in-flight verification before VERIFIED arrives.
+        assert not s.revoked and not work.done()
+        s.executor.on_released(replace(unverified, verification=rpc.ReleaseVerification.VERIFIED))
+        result = await work
+    assert result == ControlReleased(
+        GOAL.goal_id, rpc.ReleaseReason.TAKEOVER, rpc.ReleaseVerification.VERIFIED, 1
+    )
+    assert s.revoked == [PRODUCER.generation]
+
+
+async def test_superseded_release_follows_newer_escalation() -> None:
+    s = Session({"action": "wait", "duration_ms": 5000})
+    async with asyncio.timeout(1):
+        work = asyncio.create_task(s.loop.run_goal(GOAL))
+        await s.model.called.wait()
+        takeover = replace(RELEASE, release_id=11, verification=rpc.ReleaseVerification.UNVERIFIED)
+        emergency = replace(
+            takeover,
+            release_id=12,
+            reason=rpc.ReleaseReason.EMERGENCY_STOP,
+        )
+        s.executor.on_released(takeover)
+        await asyncio.sleep(0.01)
+        s.executor.on_released(emergency)
+        s.executor.on_released(replace(takeover, verification=rpc.ReleaseVerification.SUPERSEDED))
+        await asyncio.sleep(0.01)
+        assert not s.revoked and not work.done()
+        s.executor.on_released(replace(emergency, verification=rpc.ReleaseVerification.VERIFIED))
+        result = await work
+    assert result == ControlReleased(
+        GOAL.goal_id, rpc.ReleaseReason.EMERGENCY_STOP, rpc.ReleaseVerification.VERIFIED, 1
+    )
+    assert s.revoked == [PRODUCER.generation]
+
+
 @pytest.mark.parametrize("stale", [True, False])
 async def test_frame_timeout(stale: bool) -> None:
     s = Session(config=replace(CONFIG, frame_wait_timeout_s=0.03))

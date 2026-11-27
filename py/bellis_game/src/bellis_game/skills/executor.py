@@ -1,6 +1,7 @@
 """Submit one authorized input and verify its effect on independently captured pixels."""
 
 import asyncio
+from contextlib import suppress
 from dataclasses import astuple, dataclass, replace
 from enum import StrEnum, auto
 from math import isfinite
@@ -96,6 +97,8 @@ class ActionExecutor:
         self._receipts: dict[int, asyncio.Future[rpc.ActionReceiptParams]] = {}
         self._last_release: rpc.InputReleasedParams | None = None
         self._signal: asyncio.Future[rpc.InputReleasedParams] | None = None
+        self._final_releases: dict[int, rpc.InputReleasedParams] = {}
+        self._release_updated = asyncio.Event()
         self._pending_deadline_id: int | None = None
         self._deadline_clear = asyncio.Event()
         self._deadline_clear.set()
@@ -140,11 +143,36 @@ class ActionExecutor:
                     self._pending_deadline_id = None
                     self._deadline_clear.set()
                 return
-        self._last_release = rel
+        if rel.verification != rpc.ReleaseVerification.UNVERIFIED:
+            self._final_releases[rel.release_id] = rel
+            if len(self._final_releases) > 32:
+                del self._final_releases[next(iter(self._final_releases))]
+        if self._last_release is None or rel.release_id >= self._last_release.release_id:
+            self._last_release = rel
         if self._signal is not None and not self._signal.done():
             self._signal.set_result(rel)
         self._signal = None
         self._deadline_clear.set()
+        self._release_updated.set()
+        self._release_updated.clear()
+
+    async def wait_release_final(
+        self,
+        rel: rpc.InputReleasedParams,
+        *,
+        timeout_s: float = 0.3,
+    ) -> rpc.InputReleasedParams:
+        """Wait briefly for an unverified release to receive its physical verification."""
+        with suppress(TimeoutError):
+            async with asyncio.timeout(timeout_s):
+                while True:
+                    current = self._last_release or rel
+                    if current.verification != rpc.ReleaseVerification.UNVERIFIED:
+                        return current
+                    if (final := self._final_releases.get(current.release_id)) is not None:
+                        return final
+                    await self._release_updated.wait()
+        return self._last_release or rel
 
     @property
     def control_released(self) -> bool:
