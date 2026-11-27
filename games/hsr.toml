@@ -21,7 +21,9 @@ cred_targets = ["ark.bellis", "ark.bellis-game-runtime"]
 
 [input]
 click_buttons = ["left"]
-scroll = false
+scroll = true
+hold_keys = ["w", "a", "s", "d"]
+max_hold_ms = 1800
 press_duration_ms = 60
 max_rate = 3.0
 click_regions = [{ left = 0.01, top = 0.01, right = 0.99, bottom = 0.99 }]
@@ -29,8 +31,20 @@ forbidden_zones = [{ left = 0.97, top = 0.0, right = 1.0, bottom = 0.025 }]
 
 [input.keys]
 esc = 1
+"1" = 2
+"2" = 3
+"3" = 4
+"4" = 5
+q = 16
+w = 17
+e = 18
+r = 19
 enter = 28
+a = 30
+s = 31
+d = 32
 f = 33
+v = 47
 m = 50
 space = 57
 f4 = 62

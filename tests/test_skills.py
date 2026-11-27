@@ -21,10 +21,14 @@ from bellis_game.skills import (
     DoneProposal,
     ExecutionConfig,
     ExecutionStatus,
+    HoldKeyProposal,
     KeyProposal,
     ProposalError,
     ResolvedClick,
+    ResolvedHoldKey,
     ResolvedKeyPress,
+    ResolvedScroll,
+    ScrollProposal,
     StopProposal,
     WaitProposal,
     parse_agent_decision,
@@ -38,6 +42,8 @@ AFTER = replace(BEFORE, frame_number=9, capture_ns=2000, pixels=bytes([255]) * 3
 TRANSFORM = encode_frame(BEFORE).transform
 CLICK = ClickProposal(0.5, 0.5, "confirm")
 KEY = KeyProposal("EsC")
+SCROLL = ScrollProposal(0.5, 0.5, -3, "quest list")
+HOLD = HoldKeyProposal("w", 200, "walk forward")
 FAST = ExecutionConfig(
     receipt_timeout_s=0.04,
     post_action_delay_s=0.001,
@@ -64,6 +70,27 @@ RELEASE_REASONS = [
         (
             dict(action="key_press", key="enter", reason="ready", expected_effect="next"),
             KeyProposal("enter", "ready", "next"),
+        ),
+        (
+            dict(
+                action="scroll",
+                nx=0.5,
+                ny=0.5,
+                notches=-3,
+                target="quest list",
+                expected_effect="more rows",
+            ),
+            ScrollProposal(0.5, 0.5, -3, "quest list", "more rows"),
+        ),
+        (
+            dict(
+                action="hold_key",
+                key="w",
+                duration_ms=400,
+                reason="walk",
+                expected_effect="closer",
+            ),
+            HoldKeyProposal("w", 400, "walk", "closer"),
         ),
         (dict(action="wait", duration_ms=100), WaitProposal(100)),
         (dict(action="wait", duration_ms=5000, reason="loading"), WaitProposal(5000, "loading")),
@@ -93,6 +120,13 @@ def test_decision(payload: dict[str, object], expected: ActionProposal) -> None:
         {"action": None},
         {"action": []},
         {"action": "scroll"},
+        {"action": "scroll", "nx": 0.5, "ny": 0.5, "notches": 0, "target": "list"},
+        {"action": "scroll", "nx": 0.5, "ny": 0.5, "notches": 11, "target": "list"},
+        {"action": "scroll", "nx": 0.5, "ny": 0.5, "notches": True, "target": "list"},
+        {"action": "hold_key", "key": "w", "duration_ms": 99},
+        {"action": "hold_key", "key": "w", "duration_ms": 1501},
+        {"action": "hold_key", "key": "w", "duration_ms": True},
+        {"action": "hold_key", "key": " ", "duration_ms": 200},
         {"action": "ask_decision", "question": " ", "options": ["a", "b"]},
         {"action": "ask_decision", "question": "?", "options": ["a", "b"], "reason": 1},
         *(
@@ -140,6 +174,8 @@ def test_invalid_decision(payload: dict[str, object]) -> None:
     [
         dict(action="click", nx=0, ny=1, target="ok"),
         dict(action="key_press", key="esc"),
+        dict(action="scroll", nx=0.5, ny=0.5, notches=-2, target="list"),
+        dict(action="hold_key", key="w", duration_ms=300),
         dict(action="wait", duration_ms=100),
         dict(action="done", evidence="proof"),
         dict(action="stop", reason="unknown"),
@@ -162,6 +198,8 @@ def test_action_specific_fields() -> None:
     payloads = [
         dict(action="click", nx=0, ny=0, target="ok", expected_effect="open"),
         dict(action="key_press", key="esc", reason="", expected_effect="exit"),
+        dict(action="scroll", nx=0.5, ny=0.5, notches=-2, target="list", expected_effect="down"),
+        dict(action="hold_key", key="w", duration_ms=300, reason="", expected_effect="move"),
         dict(action="wait", duration_ms=100, reason=""),
         dict(action="done", evidence="proof"),
         dict(action="stop", reason="unknown", detail=""),
@@ -204,11 +242,22 @@ def test_resolution() -> None:
         500, 550, rpc.MouseButton.LEFT, 0.5, 0.5, "confirm"
     )
     assert resolve_input_action(KEY, profile=PROFILE, transform=crop) == ResolvedKeyPress("EsC", 1)
+    assert resolve_input_action(SCROLL, profile=PROFILE, transform=crop) == ResolvedScroll(
+        500, 550, -3, 0.5, 0.5, "quest list"
+    )
+    assert resolve_input_action(HOLD, profile=PROFILE, transform=crop) == ResolvedHoldKey(
+        "w", 17, 200
+    )
     full = replace(transform, crop=replace(transform.crop, right=1000, bottom=1000))
     policy = PROFILE.input_policy
     cases = [
         (KEY, replace(policy, press_keys=()), "key_not_allowed"),
         (KeyProposal("unknown"), policy, "unknown_key"),
+        (SCROLL, replace(policy, scroll=False), "scroll_not_allowed"),
+        (replace(SCROLL, nx=0), policy, "point_not_allowed"),
+        (HoldKeyProposal("esc", 200), policy, "hold_not_allowed"),
+        (HoldKeyProposal("unknown", 200), policy, "unknown_key"),
+        (HoldKeyProposal("w", 200), replace(policy, max_hold_ms=250), "hold_too_long"),
         (CLICK, replace(policy, click_buttons=(rpc.MouseButton.RIGHT,)), "button_not_allowed"),
         (replace(CLICK, nx=0), policy, "point_not_allowed"),
         (replace(CLICK, nx=0.975, ny=0.02), policy, "point_not_allowed"),
@@ -312,6 +361,40 @@ async def test_atomic_inputs() -> None:
     first, second = core.blocks
     assert first.seq < second.seq and first.steps[0].actions[0].id < second.steps[0].actions[0].id
     assert frames.reads == 3
+
+
+async def test_scroll_and_hold_key_execution() -> None:
+    executor, core, _ = setup_executor(BEFORE, AFTER)
+    scroll_out = await executor.execute_input(SCROLL, before_frame=BEFORE, transform=TRANSFORM)
+    assert scroll_out.status == ExecutionStatus.VERIFIED_CHANGED
+    assert core.blocks[-1].steps[0].actions == (rpc.Scroll(1, 2, 1, -3),)
+
+    # Hold key submits 2 steps with empty actions (no receipt emitted by realtime-core).
+    core.respond = None
+    hold_out = await executor.execute_input(
+        HoldKeyProposal("w", 100), before_frame=BEFORE, transform=TRANSFORM
+    )
+    assert hold_out.status == ExecutionStatus.VERIFIED_CHANGED
+    assert hold_out.receipt is None and hold_out.after_frame == AFTER
+    hold_block = core.blocks[-1]
+    assert len(hold_block.steps) == 2
+    assert hold_block.steps[0] == rpc.ControlStep(0, held=(rpc.HeldKey(17),))
+    assert hold_block.steps[1] == rpc.ControlStep(100_000_000, held=())
+    assert hold_block.deadline_ns >= hold_block.start_ns + 100_000_000
+
+    # Takeover preempts an active hold wait immediately.
+    executor2, core2, _ = setup_executor(BEFORE, AFTER)
+    core2.respond = None
+    task = asyncio.create_task(
+        executor2.execute_input(
+            HoldKeyProposal("w", 1500), before_frame=BEFORE, transform=TRANSFORM
+        )
+    )
+    await core2.submitted.wait()
+    rel = release(rpc.ReleaseReason.TAKEOVER)
+    executor2.on_released(rel)
+    preempted = await asyncio.wait_for(task, timeout=0.5)
+    assert preempted.status == ExecutionStatus.CONTROL_RELEASED and preempted.release == rel
 
 
 @pytest.mark.parametrize(

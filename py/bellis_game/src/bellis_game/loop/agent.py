@@ -376,6 +376,13 @@ class FastLoop:
                         if isinstance(proposal, skills.ClickProposal):
                             action = "click"
                             summary = f"{proposal.target} ({proposal.nx}, {proposal.ny})"
+                        elif isinstance(proposal, skills.ScrollProposal):
+                            action = "scroll"
+                            coords = f"{proposal.nx}, {proposal.ny}, {proposal.notches:+d}"
+                            summary = f"{proposal.target} ({coords})"
+                        elif isinstance(proposal, skills.HoldKeyProposal):
+                            action = "hold_key"
+                            summary = f"{proposal.key} ({proposal.duration_ms} ms)"
                         else:
                             action, summary = "key_press", proposal.key
                         execution = await self._executor.execute_input(

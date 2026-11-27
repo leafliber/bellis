@@ -566,6 +566,29 @@ async def test_goal_deadline_preempts_frame_or_action_wait(waiting_for_frame: bo
     assert s.revoked == [PRODUCER.generation] and not s.blocks
 
 
+async def test_scroll_and_hold_key_in_fast_loop() -> None:
+    scroll: dict[str, object] = {
+        "action": "scroll",
+        "nx": 0.5,
+        "ny": 0.5,
+        "notches": -2,
+        "target": "list",
+    }
+    hold: dict[str, object] = {
+        "action": "hold_key",
+        "key": "w",
+        "duration_ms": 100,
+        "reason": "walk",
+    }
+    s = Session(scroll, hold, DONE)
+    result = await asyncio.wait_for(s.loop.run_goal(GOAL), 2)
+    assert isinstance(result, GoalCompleted)
+    assert [r.action for r in s.records] == ["scroll", "hold_key", "done"]
+    assert isinstance(s.blocks[0].steps[0].actions[0], rpc.Scroll)
+    assert s.blocks[1].steps[0].held == (rpc.HeldKey(17),)
+    assert s.blocks[1].steps[1].held == ()
+
+
 def test_system_prompt_scopes_actions_and_logical_keys() -> None:
     prompt = build_system_prompt(replace(PROFILE, key_scan_codes={"custom-key": 42}))
     assert '["custom-key"]' in prompt and '"esc"' not in prompt
@@ -600,7 +623,17 @@ def test_system_prompt_scopes_actions_and_logical_keys() -> None:
     ):
         assert rule in prompt
     assert (
-        "[0.0, 1.0]" in prompt and "click | key_press | wait | done | stop | ask_decision" in prompt
+        "[0.0, 1.0]" in prompt
+        and "click | key_press | scroll | hold_key | wait | done | stop | ask_decision" in prompt
+        and '["a", "d", "s", "w"]' in prompt
+    )
+    restricted = replace(
+        PROFILE,
+        input_policy=replace(PROFILE.input_policy, scroll=False, hold_keys=(), max_hold_ms=None),
+        hold_key_names=frozenset(),
+    )
+    assert "click | key_press | wait | done | stop | ask_decision" in build_system_prompt(
+        restricted
     )
     click, done = (json.loads(line) for line in prompt.splitlines() if line.startswith("{"))
     assert (click["action"], done["action"]) == ("click", "done")

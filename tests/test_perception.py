@@ -164,8 +164,13 @@ def test_hsr_profile() -> None:
     assert p.scan_code_for("EsC") == 1 and p.scan_code_for("unknown") is None
     policy = p.input_policy
     assert policy.click_buttons == (MouseButton.LEFT,)
-    assert policy.press_keys == (1, 28, 33, 50, 57, 62) and not policy.hold_keys
-    assert (policy.scroll, policy.press_duration_ms, policy.max_rate) == (False, 60, 3)
+    assert policy.press_keys == (
+        1, 2, 3, 4, 5, 16, 17, 18, 19, 28, 30, 31, 32, 33, 47, 50, 57, 62,
+    )  # fmt: skip
+    assert 61 not in policy.press_keys  # F3 (Warp/Gacha) strictly excluded
+    assert policy.hold_keys == (17, 30, 31, 32) and policy.max_hold_ms == 1800
+    assert p.hold_key_names == frozenset({"w", "a", "s", "d"})
+    assert (policy.scroll, policy.press_duration_ms, policy.max_rate) == (True, 60, 3)
     assert p.point_allowed(10, 10, 1000, 1000)
     assert p.point_allowed(970, 25, 1000, 1000)
     for x, y in [(9, 10), (990, 500), (500, 990), (970, 24), (1000, 50), (-1, 10)]:
@@ -197,7 +202,12 @@ def test_profile_without_reasoning_effort(tmp_path: Path) -> None:
         ("esc = 1", "esc = true"),
         ("esc = 1", "ESC = 2\nesc = 1"),
         ('["left"]', '["other"]'),
-        ("scroll = false", "scroll = 0"),
+        ("scroll = true", "scroll = 0"),
+        ('hold_keys = ["w", "a", "s", "d"]', 'hold_keys = ["f3"]'),
+        ('hold_keys = ["w", "a", "s", "d"]', 'hold_keys = "w"'),
+        ("max_hold_ms = 1800", "max_hold_ms = 100"),
+        ("max_hold_ms = 1800", "max_hold_ms = 3001"),
+        ("max_hold_ms = 1800\n", ""),
         ("60", "501"),
         ("60", "0"),
         ("3.0", "nan"),

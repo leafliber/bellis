@@ -50,6 +50,31 @@ class KeyProposal:
 
 
 @dataclass(frozen=True, slots=True)
+class ScrollProposal:
+    nx: float
+    ny: float
+    notches: int
+    target: str
+    expected_effect: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.notches) is not int or not -10 <= self.notches <= 10 or self.notches == 0:
+            raise ProposalError("notches must be a non-zero integer in [-10, 10]")
+
+
+@dataclass(frozen=True, slots=True)
+class HoldKeyProposal:
+    key: str
+    duration_ms: int
+    reason: str = ""
+    expected_effect: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.duration_ms) is not int or not 100 <= self.duration_ms <= 1500:
+            raise ProposalError("hold duration_ms must be an integer in [100, 1500]")
+
+
+@dataclass(frozen=True, slots=True)
 class WaitProposal:
     duration_ms: int
     reason: str = ""
@@ -89,8 +114,9 @@ class AskDecisionProposal:
             raise ProposalError("expected 2 to 4 distinct non-empty options")
 
 
+type InputProposal = ClickProposal | KeyProposal | ScrollProposal | HoldKeyProposal
 type ActionProposal = (
-    ClickProposal | KeyProposal | WaitProposal | DoneProposal | StopProposal | AskDecisionProposal
+    InputProposal | WaitProposal | DoneProposal | StopProposal | AskDecisionProposal
 )
 
 
@@ -111,6 +137,8 @@ DECISION_REQUIRED_KEYS = frozenset({"observation", "action"})
 _ACTION_FIELDS = {
     "click": {"nx", "ny", "target", "expected_effect"},
     "key_press": {"key", "reason", "expected_effect"},
+    "scroll": {"nx", "ny", "notches", "target", "expected_effect"},
+    "hold_key": {"key", "duration_ms", "reason", "expected_effect"},
     "wait": {"duration_ms", "reason"},
     "ask_decision": {"question", "options", "reason"},
     "done": {"evidence"},
@@ -146,6 +174,27 @@ def parse_agent_decision(raw: Mapping[str, object]) -> AgentDecision:
         case "key_press":
             proposal = KeyProposal(
                 _text(raw.get("key"), "key"), optional("reason"), optional("expected_effect")
+            )
+        case "scroll":
+            notches = raw.get("notches")
+            if type(notches) is not int:
+                raise ProposalError("notches must be an integer")
+            proposal = ScrollProposal(
+                _coordinate(raw.get("nx")),
+                _coordinate(raw.get("ny")),
+                notches,
+                _text(raw.get("target"), "target"),
+                optional("expected_effect"),
+            )
+        case "hold_key":
+            duration = raw.get("duration_ms")
+            if type(duration) is not int:
+                raise ProposalError("duration_ms must be an integer")
+            proposal = HoldKeyProposal(
+                _text(raw.get("key"), "key"),
+                duration,
+                optional("reason"),
+                optional("expected_effect"),
             )
         case "wait":
             duration = raw.get("duration_ms")
@@ -184,11 +233,40 @@ class ResolvedKeyPress:
     scan_code: int
 
 
-type ResolvedAction = ResolvedClick | ResolvedKeyPress
+@dataclass(frozen=True, slots=True)
+class ResolvedScroll:
+    x: int
+    y: int
+    notches: int
+    nx: float
+    ny: float
+    target: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedHoldKey:
+    key: str
+    scan_code: int
+    duration_ms: int
+
+
+type ResolvedAction = ResolvedClick | ResolvedKeyPress | ResolvedScroll | ResolvedHoldKey
+
+
+def _resolve_point(
+    nx: float, ny: float, *, profile: GameProfile, transform: FrameTransform
+) -> tuple[int, int]:
+    try:
+        x, y = transform.norm_to_client(nx, ny)
+    except ValueError as exc:
+        raise ActionPolicyError("invalid_coordinates") from exc
+    if not profile.point_allowed(x, y, transform.source_width, transform.source_height):
+        raise ActionPolicyError("point_not_allowed")
+    return x, y
 
 
 def resolve_input_action(
-    proposal: ClickProposal | KeyProposal, *, profile: GameProfile, transform: FrameTransform
+    proposal: InputProposal, *, profile: GameProfile, transform: FrameTransform
 ) -> ResolvedAction:
     if isinstance(proposal, KeyProposal):
         code = profile.scan_code_for(proposal.key)
@@ -197,19 +275,29 @@ def resolve_input_action(
         if code not in profile.input_policy.press_keys:
             raise ActionPolicyError("key_not_allowed")
         return ResolvedKeyPress(proposal.key, code)
+    if isinstance(proposal, HoldKeyProposal):
+        code = profile.scan_code_for(proposal.key)
+        if code is None:
+            raise ActionPolicyError("unknown_key")
+        max_hold = profile.input_policy.max_hold_ms
+        if code not in profile.input_policy.hold_keys or max_hold is None:
+            raise ActionPolicyError("hold_not_allowed")
+        if proposal.duration_ms > max_hold - 100:
+            raise ActionPolicyError("hold_too_long")
+        return ResolvedHoldKey(proposal.key, code, proposal.duration_ms)
+    if isinstance(proposal, ScrollProposal):
+        if not profile.input_policy.scroll:
+            raise ActionPolicyError("scroll_not_allowed")
+        x, y = _resolve_point(proposal.nx, proposal.ny, profile=profile, transform=transform)
+        return ResolvedScroll(x, y, proposal.notches, proposal.nx, proposal.ny, proposal.target)
     if rpc.MouseButton.LEFT not in profile.input_policy.click_buttons:
         raise ActionPolicyError("button_not_allowed")
-    try:
-        x, y = transform.norm_to_client(proposal.nx, proposal.ny)
-    except ValueError as exc:
-        raise ActionPolicyError("invalid_coordinates") from exc
-    if not profile.point_allowed(x, y, transform.source_width, transform.source_height):
-        raise ActionPolicyError("point_not_allowed")
+    x, y = _resolve_point(proposal.nx, proposal.ny, profile=profile, transform=transform)
     return ResolvedClick(x, y, rpc.MouseButton.LEFT, proposal.nx, proposal.ny, proposal.target)
 
 
 def build_action_block(
-    proposal: ClickProposal | KeyProposal,
+    proposal: InputProposal,
     profile: GameProfile,
     producer: rpc.Producer,
     seq: int,
@@ -217,20 +305,30 @@ def build_action_block(
     transform: FrameTransform,
     deadline_s: float,
 ) -> rpc.ActionBlock:
-    # Each block contains exactly one action, so its sequence also names that action.
     resolved = resolve_input_action(proposal, profile=profile, transform=transform)
+    if isinstance(resolved, (ResolvedClick, ResolvedScroll)) and (
+        transform.frame_number != frame.frame_number
+        or transform.capture_ns != frame.capture_ns
+        or transform.transform_version != frame.transform_version
+        or (transform.source_width, transform.source_height) != (frame.width, frame.height)
+    ):
+        raise ActionPolicyError("invalid_coordinates")
+    start = perf_counter_ns()
+    if isinstance(resolved, ResolvedHoldKey):
+        duration_ns = resolved.duration_ms * 1_000_000
+        deadline = start + duration_ns + int(deadline_s * 1e9)
+        steps = (
+            rpc.ControlStep(0, held=(rpc.HeldKey(resolved.scan_code),)),
+            rpc.ControlStep(duration_ns, held=()),
+        )
+        return rpc.ActionBlock(producer, seq, frame.frame_number, start, deadline, steps)
+    action: rpc.Action
     if isinstance(resolved, ResolvedClick):
-        if (
-            transform.frame_number != frame.frame_number
-            or transform.capture_ns != frame.capture_ns
-            or transform.transform_version != frame.transform_version
-            or (transform.source_width, transform.source_height) != (frame.width, frame.height)
-        ):
-            raise ActionPolicyError("invalid_coordinates")
         action = rpc.Click(seq, resolved.x, resolved.y, resolved.button)
+    elif isinstance(resolved, ResolvedScroll):
+        action = rpc.Scroll(seq, resolved.x, resolved.y, resolved.notches)
     else:
         action = rpc.KeyPress(seq, resolved.scan_code)
-    start = perf_counter_ns()
     deadline = start + int(deadline_s * 1e9)
     step = rpc.ControlStep(0, actions=(action,))
     return rpc.ActionBlock(producer, seq, frame.frame_number, start, deadline, (step,))

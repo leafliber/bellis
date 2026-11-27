@@ -195,9 +195,44 @@ class ActionExecutor:
         except FrameRingTornError:
             return None
 
+    async def _verify_after_frame(
+        self,
+        outcome: ExecutionOutcome,
+        *,
+        before_frame: RingFrame,
+        min_capture_ns: int,
+        verify_roi: rpc.NormRect | None,
+        signal: asyncio.Future[rpc.InputReleasedParams],
+    ) -> ExecutionOutcome:
+        cfg = self._cfg
+        loop = asyncio.get_running_loop()
+        base = before_frame.frame_number
+        deadline = loop.time() + cfg.verify_timeout_s
+        while not signal.done():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return replace(outcome, status=ExecutionStatus.NO_NEW_FRAME, detail="no new frame")
+            frame = self._read_frame()
+            if frame and frame.frame_number > base and frame.capture_ns >= min_capture_ns:
+                diff = perception.frame_diff(before_frame, frame, roi=verify_roi)
+                changed = (
+                    diff.changed_ratio >= cfg.min_changed_ratio
+                    or diff.mean_abs_diff >= cfg.min_mean_abs_diff
+                )
+                status = (
+                    ExecutionStatus.VERIFIED_CHANGED
+                    if changed
+                    else ExecutionStatus.NO_VISUAL_CHANGE
+                )
+                return replace(
+                    outcome, status=status, detail=status.value, after_frame=frame, diff=diff
+                )
+            await asyncio.wait((signal,), timeout=min(cfg.poll_interval_s, remaining))
+        return outcome.with_release(signal.result())
+
     async def execute_input(
         self,
-        proposal: actions.ClickProposal | actions.KeyProposal,
+        proposal: actions.InputProposal,
         *,
         before_frame: RingFrame,
         transform: perception.FrameTransform,
@@ -234,6 +269,30 @@ class ActionExecutor:
         except actions.ActionPolicyError as exc:
             return ExecutionOutcome(ExecutionStatus.POLICY_BLOCKED, exc.reason, base)
         self._seq = seq
+        if isinstance(proposal, actions.HoldKeyProposal):
+            outcome = ExecutionOutcome(ExecutionStatus.NO_NEW_FRAME, "no new frame", base, seq)
+            submission = asyncio.create_task(self._core.submit_action_block(block))
+            try:
+                await asyncio.wait((submission, signal), return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                submission.cancel()
+                await asyncio.gather(submission, return_exceptions=True)
+            if signal.done():
+                return outcome.with_release(signal.result())
+            result = submission.result()
+            if isinstance(result, rpc.Rejected):
+                return replace(outcome, status=ExecutionStatus.REJECTED, detail=result.reason)
+            wait_s = proposal.duration_ms / 1000 + cfg.post_action_delay_s
+            await asyncio.wait((signal,), timeout=wait_s)
+            if signal.done():
+                return outcome.with_release(signal.result())
+            return await self._verify_after_frame(
+                outcome,
+                before_frame=before_frame,
+                min_capture_ns=before_frame.capture_ns + 1,
+                verify_roi=verify_roi,
+                signal=signal,
+            )
         loop = asyncio.get_running_loop()
         receipt: asyncio.Future[rpc.ActionReceiptParams] = loop.create_future()
         self._receipts[seq] = receipt
@@ -273,26 +332,13 @@ class ActionExecutor:
         if isinstance(event, rpc.Uncertain):
             return replace(outcome, status=ExecutionStatus.UNCERTAIN, detail="execution uncertain")
         await asyncio.wait((signal,), timeout=cfg.post_action_delay_s)
-        deadline = loop.time() + cfg.verify_timeout_s
-        while not signal.done():
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                return replace(outcome, status=ExecutionStatus.NO_NEW_FRAME, detail="no new frame")
-            frame = self._read_frame()
-            if frame and frame.frame_number > base and frame.capture_ns >= event.at_ns:
-                diff = perception.frame_diff(before_frame, frame, roi=verify_roi)
-                changed = (
-                    diff.changed_ratio >= cfg.min_changed_ratio
-                    or diff.mean_abs_diff >= cfg.min_mean_abs_diff
-                )
-                status = ExecutionStatus.NO_VISUAL_CHANGE
-                if changed:
-                    status = ExecutionStatus.VERIFIED_CHANGED
-                return replace(
-                    outcome, status=status, detail=status.value, after_frame=frame, diff=diff
-                )
-            await asyncio.wait((signal,), timeout=min(cfg.poll_interval_s, remaining))
-        return outcome.with_release(signal.result())
+        return await self._verify_after_frame(
+            outcome,
+            before_frame=before_frame,
+            min_capture_ns=event.at_ns,
+            verify_roi=verify_roi,
+            signal=signal,
+        )
 
     async def execute_wait(
         self, proposal: actions.WaitProposal, *, before_frame: RingFrame

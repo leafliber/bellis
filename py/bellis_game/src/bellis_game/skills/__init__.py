@@ -8,11 +8,16 @@ from .actions import AgentDecision as AgentDecision
 from .actions import AskDecisionProposal as AskDecisionProposal
 from .actions import ClickProposal as ClickProposal
 from .actions import DoneProposal as DoneProposal
+from .actions import HoldKeyProposal as HoldKeyProposal
+from .actions import InputProposal as InputProposal
 from .actions import KeyProposal as KeyProposal
 from .actions import ProposalError as ProposalError
 from .actions import ResolvedAction as ResolvedAction
 from .actions import ResolvedClick as ResolvedClick
+from .actions import ResolvedHoldKey as ResolvedHoldKey
 from .actions import ResolvedKeyPress as ResolvedKeyPress
+from .actions import ResolvedScroll as ResolvedScroll
+from .actions import ScrollProposal as ScrollProposal
 from .actions import StopProposal as StopProposal
 from .actions import WaitProposal as WaitProposal
 from .actions import parse_agent_decision as parse_agent_decision
