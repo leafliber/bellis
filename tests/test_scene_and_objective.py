@@ -118,6 +118,7 @@ class _ContinuationLlm:
 
 async def test_narrative_history_objective_continuation_and_fail_closed_halt(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = HostConfig(
         db_path=tmp_path / "host.sqlite3",
@@ -209,8 +210,65 @@ async def test_narrative_history_objective_continuation_and_fail_closed_halt(
         )
         assert app.game.resume_objective_after_takeover() is False
 
-        # Console clear removes objective
+        # Console clear removes objective; let pending ControlReleased director turn drain first
         code, cleared = await browser.api("/api/game/objective", {"clear": True})
         assert code == 200 and cleared["objective"] is None
+        await asyncio.sleep(0.06)
+
+        # StepProgress updates phase/recent_steps without waking LLM or clobbering last_event
+        llm.called.clear()
+        app.game_link._goal = ev.GoalSet("g4", "打开指南", max_steps=6)  # pyright: ignore[reportPrivateUsage]
+        prev_last = app.game_link.last_event
+        app.game_link._receive_event(  # pyright: ignore[reportPrivateUsage]
+            ev.StepProgress("g4", 1, 6, "thinking").to_dict()
+        )
+        assert app.game_link.snapshot().phase == "thinking"
+        assert app.game_link.snapshot().current_step == 1
+        app.game_link._receive_event(  # pyright: ignore[reportPrivateUsage]
+            ev.StepProgress(
+                "g4", 1, 6, "step_done", "key_press", "f4", "verified_changed", "打开了指南"
+            ).to_dict()
+        )
+        snap = app.game_link.snapshot()
+        assert snap.phase == "step_done" and len(snap.recent_steps) == 1
+        assert snap.recent_steps[0]["summary"] == "f4"
+        assert app.game_link.last_event == prev_last
+        await asyncio.sleep(0.05)
+        assert not llm.called.is_set()
+
+        # Setting objective while idle and armed wakes SlowDirector immediately
+        llm.called.clear()
+        app.game_link._goal = None  # pyright: ignore[reportPrivateUsage]
+        with monkeypatch.context() as mp:
+            mp.setattr(type(app.game_permit), "armed", property(lambda _: True))
+            code, oresp = await browser.api(
+                "/api/game/objective",
+                {"description": "立刻开跑总目标", "auto_continue": True, "max_auto_steps": 4},
+            )
+            assert code == 200 and oresp["ok"] is True
+            await asyncio.wait_for(llm.called.wait(), timeout=1.0)
+
+        # Queueing a single-shot goal while arm_pending dispatches automatically when armed
+        app.game_link._goal = None  # pyright: ignore[reportPrivateUsage]
+        app.game_permit._arm_pending = True  # pyright: ignore[reportPrivateUsage]
+        code, qresp = await browser.api(
+            "/api/game/goal", {"description": "排队目标", "max_steps": 5, "wait_for_arm": True}
+        )
+        assert code == 200 and qresp["queued"] is True
+        assert (await browser.api("/api/status"))[1]["game_queued_goal"][
+            "description"
+        ] == "排队目标"
+        app._on_permit_auto_resumed()  # pyright: ignore[reportPrivateUsage]
+        await asyncio.sleep(0.05)
+        assert any(cmd.get("description") == "排队目标" for cmd in sent_commands)
+        assert (await browser.api("/api/status"))[1]["game_queued_goal"] is None
+
+        # Clear objective with cancel_active stops active goal cleanly
+        app.game_link._goal = ev.GoalSet("g5", "进行中")  # pyright: ignore[reportPrivateUsage]
+        code, resp = await browser.api(
+            "/api/game/objective", {"clear": True, "cancel_active": True}
+        )
+        assert code == 200 and resp["objective"] is None
+        assert any(cmd.get("type") == "goal_cancel" for cmd in sent_commands)
     finally:
         await app.close()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -349,13 +350,61 @@ def _run_game(
         _cleanup_cred_for_pid(args.permit_cred, permit_proc.pid)
 
 
+def _port_in_use(port: int) -> bool:
+    if port <= 0:
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _core_exe_running() -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        proc = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq realtime-core.exe", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return "realtime-core.exe" in proc.stdout.lower()
+
+
+def _preflight_all(args: argparse.Namespace) -> str | None:
+    if args.config is None:
+        stage_port = 18765 if args.stage_port is None else args.stage_port
+        console_port = 18766 if args.console_port is None else args.console_port
+        for label, port in (("Stage", stage_port), ("Console", console_port)):
+            if _port_in_use(port):
+                return (
+                    f"bellis all: 127.0.0.1:{port} ({label}) is already in use; "
+                    "stop any leftover Bellis Host process first."
+                )
+    if args.core_task and _core_exe_running():
+        return (
+            f"bellis all: realtime-core.exe is already running, so scheduled task "
+            f"'{args.core_task}' (IgnoreNew) would ignore startup. "
+            f"Stop the old process first (e.g. schtasks /End /TN {args.core_task})."
+        )
+    return None
+
+
 def _run_all(
     args: argparse.Namespace,
     *,
     popen: PopenFactory = subprocess.Popen,
     read_info: Callable[[str], cred.SessionInfo | None] = cred.read_session_info,
     emit: Callable[[str], None] = _emit_line,
+    preflight: Callable[[argparse.Namespace], str | None] | None = None,
 ) -> int:
+    checker = _preflight_all if (preflight is None and popen is subprocess.Popen) else preflight
+    if checker is not None and (conflict := checker(args)):
+        emit(conflict)
+        return 1
     host_proc = _spawn_python(
         "bellis_host.app", _host_live_args(args), stdout=subprocess.PIPE, popen=popen
     )

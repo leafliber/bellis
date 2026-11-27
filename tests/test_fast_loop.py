@@ -628,6 +628,7 @@ def test_system_prompt_scopes_actions_and_logical_keys() -> None:
         "[0.0, 1.0]" in prompt
         and "click | key_press | scroll | hold_key | wait | done | stop | ask_decision" in prompt
         and '["a", "d", "s", "w"]' in prompt
+        and "f4: open Interastral Peace Guide" in prompt
     )
     restricted = replace(
         PROFILE,

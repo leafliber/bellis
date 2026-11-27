@@ -205,6 +205,9 @@ VALID_VOICE_STATES: Final = frozenset({"busy", "idle", "unknown"})
 VALID_SCREEN_KINDS: Final = frozenset(
     {"dialogue", "choice", "menu", "overworld", "combat", "loading", "cutscene", "unknown"}
 )
+VALID_STEP_PHASES: Final = frozenset(
+    {"transition_wait", "thinking", "voice_wait", "acting", "decision_wait", "step_done"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,9 +242,40 @@ class SceneObserved(TaggedModel):
         _count(self.frame_number)
 
 
+@dataclass(frozen=True, slots=True)
+class StepProgress(TaggedModel):
+    TAG = "step_progress"
+    goal_id: str
+    step: int
+    max_steps: int
+    phase: str
+    action: str = ""
+    summary: str = ""
+    status: str = ""
+    observation: str = ""
+
+    def __post_init__(self) -> None:
+        _text(self.goal_id)
+        _count(self.step)
+        if not positive_count(self.max_steps):
+            raise ProtocolError("max_steps must be a positive integer")
+        if type(self.phase) is not str or self.phase not in VALID_STEP_PHASES:
+            raise ProtocolError("invalid step phase")
+        for value in (self.action, self.summary, self.status, self.observation):
+            if not isinstance(value, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+                raise ProtocolError("expected string step progress field")
+
+
 type SlowCommand = GoalSet | GoalCancel | PacingPause | PacingResume | DecisionResolved
 type LoopOutcome = GoalCompleted | GoalStuck | ControlReleased
-type FastEvent = LoopOutcome | DecisionNeeded | HighlightObserved | GameVoiceChanged | SceneObserved
+type FastEvent = (
+    LoopOutcome
+    | DecisionNeeded
+    | HighlightObserved
+    | GameVoiceChanged
+    | SceneObserved
+    | StepProgress
+)
 
 
 def parse_slow_command(raw: object) -> SlowCommand:
@@ -261,6 +295,7 @@ def parse_fast_event(raw: object) -> FastEvent:
             HighlightObserved,
             GameVoiceChanged,
             SceneObserved,
+            StepProgress,
         ),
         "game.event",
     )

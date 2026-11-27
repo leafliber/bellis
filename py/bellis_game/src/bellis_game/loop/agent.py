@@ -66,11 +66,12 @@ class FastLoop:
             [events.DecisionNeeded | events.HighlightObserved | events.SceneObserved], None
         ]
         | None = None,
+        on_progress: Callable[[events.StepProgress], None] | None = None,
     ) -> None:  # fmt: skip
         self._core, self._frames, self._vlm = core, frames, vlm
         self._executor, self._profile, self._producer = executor, profile, producer
         self._config, self._voice = config or LoopConfig(), voice
-        self._on_event = on_event
+        self._on_event, self._on_progress = on_event, on_progress
         self._telemetry, self._on_step = telemetry, on_step
         self._heartbeat: asyncio.Task[None] | None = None
         self._work: asyncio.Task[LoopOutcome | None] | None = None
@@ -128,6 +129,18 @@ class FastLoop:
 
     def _stuck(self, goal: GoalSet, reason: str, detail: str) -> GoalStuck:
         return GoalStuck(goal.goal_id, reason, detail, self._steps, self._last_frame)
+
+    def _progress(
+        self, goal: GoalSet, step: int, phase: str,
+        *, action: str = "", summary: str = "", status: str = "", observation: str = "",
+    ) -> None:  # fmt: skip
+        if self._on_progress is not None:
+            ev = events.StepProgress(
+                goal.goal_id, step, goal.max_steps, phase,
+                action, summary[:120], status, observation[:140],
+            )  # fmt: skip
+            with suppress(Exception):
+                self._on_progress(ev)
 
     async def run_goal(
         self,
@@ -302,6 +315,7 @@ class FastLoop:
             action, status = "none", "interrupted"
             ratio = number = None
             try:
+                self._progress(goal, step, "thinking")
                 try:
                     observed = await control.until_pause(self._observe(goal, step, history, system))
                     if observed is None or control.paused:
@@ -330,6 +344,9 @@ class FastLoop:
                         detail = "consecutive invalid decisions"
                     if self._on_step:
                         self._on_step(ActionRecord(step, number, "", "none", detail, status))
+                    self._progress(
+                        goal, step, "step_done", action="none", summary=detail, status=status
+                    )
                     if errors >= self._config.max_vlm_errors:
                         return self._stuck(goal, status, detail)
                     continue
@@ -371,6 +388,7 @@ class FastLoop:
                             proposal.reason,
                         )
                         control.begin_decision(needed)
+                        self._progress(goal, step, "decision_wait", summary=proposal.question)
                         self._on_event(needed)
                         resolved = await control.wait_decision()
                     if self._executor.control_released or control.cancelled:
@@ -392,6 +410,7 @@ class FastLoop:
                         execution = await self._executor.execute_wait(proposal, before_frame=frame)
                     else:
                         if not voice_waited and self._voice is not None and self._voice.busy:
+                            self._progress(goal, step, "voice_wait")
                             await self._wait_voice(control, budget)
                             voice_waited = True
                             if (
@@ -416,6 +435,7 @@ class FastLoop:
                             summary = f"{proposal.key} ({proposal.duration_ms} ms)"
                         else:
                             action, summary = "key_press", proposal.key
+                        self._progress(goal, step, "acting", action=action, summary=summary)
                         execution = await self._executor.execute_input(
                             proposal, before_frame=frame, transform=image.transform
                         )
@@ -443,6 +463,10 @@ class FastLoop:
                 history.append(record)
                 if self._on_step:
                     self._on_step(record)
+                self._progress(
+                    goal, step, "step_done", action=action, summary=summary,
+                    status=str(status), observation=decision.observation,
+                )  # fmt: skip
                 if terminal is not None:
                     return terminal
             finally:

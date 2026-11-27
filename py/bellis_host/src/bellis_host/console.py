@@ -205,6 +205,7 @@ class ConsoleServer:
                 "game_permit": asdict(self.game_permit.snapshot()) if self.game_permit else None,
                 "game_link": asdict(self.game.link.snapshot()) if self.game else None,
                 "game_objective": self.game.objective_snapshot() if self.game else None,
+                "game_queued_goal": self.game.queued_goal_snapshot() if self.game else None,
                 "stage_connected": bool(self.stage and self.stage.connected),
                 "pending_danmaku": self.audience.pending_count() if self.audience else 0,
                 "active_vote": vote and asdict(vote),
@@ -217,14 +218,34 @@ class ConsoleServer:
             if self.game_permit is None:
                 raise _HttpError(503)
             if path == "/api/game/arm":
+                if data.keys() - {"wait_for_focus", "settle_s"}:
+                    raise _HttpError(400)
+                wait_focus = data.get("wait_for_focus", False)
+                raw_settle = data.get("settle_s", 2.0)
+                if type(wait_focus) is not bool or not (
+                    type(raw_settle) is int or type(raw_settle) is float
+                ):
+                    raise _HttpError(400)
+                settle_s = float(raw_settle)
                 try:
-                    token = await self.game_permit.arm_input(actor="operator")
+                    status, token = await self.game_permit.request_arm(
+                        actor="operator", wait_for_focus=wait_focus, settle_s=settle_s
+                    )
                 except ChannelError:
                     raise _HttpError(503) from None
-            else:
-                token = await self.game_permit.disarm_input(
-                    reason=_string(data, "reason", "operator_disarm")
-                )
+                if status == "armed" and wait_focus and self.game is not None:
+                    if (queued := self.game.take_queued_goal()) is not None:
+                        self.game.dispatch_queued(queued)
+                    elif self.director is not None and self.game.resume_objective_after_takeover():
+                        self.director.notify_objective_resumed()
+                if wait_focus:
+                    return {"ok": True, "status": status, "token": token}
+                return {"ok": True, "token": token}
+            if self.game is not None:
+                self.game.clear_queued_goal()
+            token = await self.game_permit.disarm_input(
+                reason=_string(data, "reason", "operator_disarm")
+            )
             return {"ok": True, "token": token}
         if path == "/api/game/auto-resume":
             if self.game_permit is None:
@@ -271,27 +292,42 @@ class ConsoleServer:
         if path == "/api/game/objective":
             if self.game is None:
                 raise _HttpError(503)
-            if data.keys() - {"description", "auto_continue", "max_auto_steps", "clear"}:
+            allowed = {"description", "auto_continue", "max_auto_steps", "clear", "cancel_active"}
+            if data.keys() - allowed:
                 raise _HttpError(400)
             desc = data.get("description", "")
             if data.get("clear") is True or (isinstance(desc, str) and not desc.strip()):
                 self.game.clear_objective()
+                if data.get("cancel_active") is True:
+                    await self.game.cancel_for_stop("operator_stop")
                 return {"ok": True, "objective": None}
             auto_continue = data.get("auto_continue", True)
             max_auto = data.get("max_auto_steps", 12)
             if type(auto_continue) is not bool or type(max_auto) is not int:
                 raise _HttpError(400)
+            self.game.clear_queued_goal()
             obj = self.game.set_objective(
                 _string(data, "description"),
                 auto_continue=auto_continue,
                 max_auto_steps=max_auto,
             )
+            if (
+                obj.auto_continue
+                and self.director is not None
+                and self.game_permit is not None
+                and self.game_permit.armed
+                and self.game.link.connected
+                and self.game.link.snapshot().active_goal_id is None
+            ):
+                self.director.notify_objective_resumed()
             return {"ok": True, "objective": asdict(obj)}
         if path == "/api/control/live":
             self.safety.start_live(actor="operator")
         elif path == "/api/control/pause":
             reason = _string(data, "reason", "operator_pause")
             self.safety.pause_live(reason=reason)
+            if self.game_permit:
+                self.game_permit.cancel_pending_arm()
             if controls:
                 controls.interrupt(reason)
             if self.game:
@@ -348,9 +384,25 @@ class ConsoleServer:
         if self.game is None:
             raise _HttpError(503)
         if action == "goal":
-            if data.keys() - {"description", "max_steps", "timeout_s"}:
+            if data.keys() - {"description", "max_steps", "timeout_s", "wait_for_arm"}:
                 raise _HttpError(400)
-            command = parse_game_directive({"command": "set_goal", **data})
+            wait_for_arm = data.get("wait_for_arm", False)
+            if type(wait_for_arm) is not bool:
+                raise _HttpError(400)
+            fields = {k: v for k, v in data.items() if k != "wait_for_arm"}
+            command = parse_game_directive({"command": "set_goal", **fields})
+            if (
+                wait_for_arm
+                and isinstance(command, GoalSet)
+                and self.game_permit is not None
+                and not self.game_permit.armed
+                and self.game_permit.snapshot().arm_pending
+            ):
+                try:
+                    self.game.queue_goal(command)
+                except ChannelError:
+                    raise _HttpError(503) from None
+                return {"ok": True, "goal_id": command.goal_id, "queued": True}
         else:
             if data.keys() - {"reason"}:
                 raise _HttpError(400)

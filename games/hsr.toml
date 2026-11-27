@@ -28,6 +28,17 @@ press_duration_ms = 60
 max_rate = 3.0
 click_regions = [{ left = 0.01, top = 0.01, right = 0.99, bottom = 0.99 }]
 forbidden_zones = [{ left = 0.97, top = 0.0, right = 1.0, bottom = 0.025 }]
+controls_hint = """Game-specific PC controls:
+- In 3D overworld exploration, the mouse cursor is locked to the camera and CANNOT click HUD icons directly. ALWAYS use key_press hotkeys from overworld (once a 2D menu/panel is open, the cursor unlocks and click/scroll work):
+  - f4: open Interastral Peace Guide (星际和平指南 / 每日实训 / 生存索引) directly
+  - esc: open Phone menu (手机菜单) or close the current menu
+  - j: open Missions / Quests list (任务列表)
+  - m: open Map / Teleport (地图)
+  - v: toggle quest navigation marker (追踪导航)
+  - f: interact / talk / activate nearby prompt
+  - space: advance dialogue or confirm
+  - w/a/s/d via hold_key: move character in overworld
+  - r: toggle Auto-Battle (自动战斗) during combat; q/e/1/2/3/4: combat skills/ultimates"""
 
 [input.keys]
 esc = 1
@@ -44,6 +55,7 @@ a = 30
 s = 31
 d = 32
 f = 33
+j = 36
 v = 47
 m = 50
 space = 57

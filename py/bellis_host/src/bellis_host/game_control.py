@@ -13,7 +13,7 @@ from bellis_common.permit import FATAL_VERIFICATIONS, ReleaseReason
 from bellis_common.wire_codec import ProtocolError
 
 from .game_link import HostGameLink
-from .safety import EmergencySummary, IntentRequest, SafetyCore, SafetyError
+from .safety import EmergencySummary, HostMode, IntentRequest, SafetyCore, SafetyError
 from .store import HostStore, IntentSource, IntentState
 
 
@@ -105,6 +105,8 @@ class GameController:
         self._admission = asyncio.Lock()
         self._objective: SessionObjective | None = None
         self._paused_for_takeover = False
+        self._queued_goal: ev.GoalSet | None = None
+        self._queued_tasks: set[asyncio.Task[None]] = set()
         self._closed = False
 
     def start(self) -> None:
@@ -162,6 +164,10 @@ class GameController:
                 result=ack.to_dict(),
                 error=None if ack.accepted else ack.reason,
             )
+            if isinstance(command, ev.GoalCancel) and source == IntentSource.OPERATOR:
+                self._queued_goal = None
+                self._paused_for_takeover = False
+                self.halt_auto_continue()
             return ack
 
     async def resolve_decision(
@@ -207,6 +213,34 @@ class GameController:
     def clear_objective(self) -> None:
         self._paused_for_takeover = False
         self._objective = None
+        self._queued_goal = None
+
+    def queue_goal(self, goal: ev.GoalSet) -> ev.GoalSet:
+        if not self.link.connected:
+            raise ch.ChannelError("closed", "game-agent is not connected")
+        if self._closed or self._safety.snapshot().mode != HostMode.LIVE:
+            raise SafetyError("queueing goal requires LIVE")
+        self._queued_goal = goal
+        return goal
+
+    def clear_queued_goal(self) -> None:
+        self._queued_goal = None
+
+    def take_queued_goal(self) -> ev.GoalSet | None:
+        goal, self._queued_goal = self._queued_goal, None
+        return goal
+
+    def queued_goal_snapshot(self) -> dict[str, object] | None:
+        return None if self._queued_goal is None else asdict(self._queued_goal)
+
+    def dispatch_queued(self, goal: ev.GoalSet) -> None:
+        async def run() -> None:
+            with suppress(SafetyError, ch.ChannelError, ch.RpcError, ProtocolError):
+                await self.dispatch(goal, source=IntentSource.OPERATOR, holder="operator")
+
+        task = asyncio.create_task(run())
+        self._queued_tasks.add(task)
+        task.add_done_callback(self._queued_tasks.discard)
 
     def halt_auto_continue(self) -> None:
         if self._objective is not None and self._objective.auto_continue:
@@ -254,6 +288,7 @@ class GameController:
 
     async def cancel_for_stop(self, reason: str = "host_stopped") -> None:
         self._paused_for_takeover = False
+        self._queued_goal = None
         self.halt_auto_continue()
         if self.link.connected and self.link.snapshot().active_goal_id is not None:
             if self._cancel_task is None or self._cancel_task.done():
@@ -278,10 +313,11 @@ class GameController:
 
     async def close(self) -> None:
         self._closed = True
+        self._queued_goal = None
         if self._off:
             self._off()
             self._off = None
         await asyncio.sleep(0)  # Admit queued emergency callbacks before closing the pipe.
-        await asyncio.gather(*self._stops, return_exceptions=True)
+        await asyncio.gather(*self._stops, *self._queued_tasks, return_exceptions=True)
         if self._cancel_task:
             await asyncio.gather(self._cancel_task, return_exceptions=True)

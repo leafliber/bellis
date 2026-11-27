@@ -153,6 +153,7 @@ class GameSession:
                 config=self._config.loop_config, telemetry=self._telemetry, voice=self._voice,
                 on_step=lambda record: _observe(self._on_step, record),
                 on_event=self._emit_event,
+                on_progress=self._emit_progress,
             )  # fmt: skip
             self._control = LoopControl()
             if self._paused:
@@ -185,6 +186,11 @@ class GameSession:
         finally:
             self._control = self._executor = self._goal_id = None
         self._emit_event(outcome)
+
+    def _emit_progress(self, event: ev.StepProgress) -> None:
+        if self._peer and self._peer.connection.is_open:
+            with suppress(ch.ChannelError):
+                self._peer.notify(Methods.GAME_EVENT, event.to_dict())
 
     def _emit_event(self, event: ev.FastEvent) -> None:
         if self._peer and self._peer.connection.is_open:

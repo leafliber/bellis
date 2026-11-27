@@ -45,6 +45,10 @@ class GameLinkSnapshot:
     voice_state: str = "unknown"
     screen_kind: str = "unknown"
     recent_narrative: tuple[str, ...] = ()
+    phase: str = "idle"
+    current_step: int = 0
+    max_steps: int = 0
+    recent_steps: tuple[dict[str, object], ...] = ()
 
 
 class HostGameLink:
@@ -74,6 +78,10 @@ class HostGameLink:
         self._voice_state = "unknown"
         self._screen_kind = "unknown"
         self._narrative: deque[str] = deque(maxlen=8)
+        self._phase = "idle"
+        self._current_step = 0
+        self._max_steps = 0
+        self._recent_steps: deque[dict[str, object]] = deque(maxlen=8)
         self.last_event: ev.FastEvent | None = None
         self._paused = self._closed = False
         self._commands = asyncio.Lock()
@@ -138,6 +146,24 @@ class HostGameLink:
             event = ev.parse_fast_event(raw)
         except ProtocolError:
             return
+        if isinstance(event, ev.StepProgress):
+            active = self._goal and self._goal.goal_id == event.goal_id
+            starting = self._pending_goal and self._pending_goal.goal_id == event.goal_id
+            if active or starting:
+                self._phase = event.phase
+                self._current_step = event.step
+                self._max_steps = event.max_steps
+                if event.phase == "step_done":
+                    self._recent_steps.append(
+                        {
+                            "step": event.step,
+                            "action": event.action,
+                            "summary": event.summary[:120],
+                            "status": event.status,
+                            "observation": event.observation[:140],
+                        }
+                    )
+            return
         self.last_event = event
         if isinstance(event, ev.GameVoiceChanged):
             self._voice_state = event.state
@@ -148,6 +174,7 @@ class HostGameLink:
         starting = self._pending_goal and self._pending_goal.goal_id == event.goal_id
         if isinstance(event, ev.GoalCompleted | ev.GoalStuck | ev.ControlReleased):
             self._last_outcome = event
+            self._phase = "idle"
             if active:
                 self._goal = None
             if starting:
@@ -157,6 +184,7 @@ class HostGameLink:
         elif active or starting:
             if isinstance(event, ev.DecisionNeeded):
                 self._pending_decision = event
+                self._phase = "decision_wait"
             elif isinstance(event, ev.SceneObserved):
                 self._screen_kind = event.screen_kind
                 line = event.dialogue_line.strip()[:200]
@@ -175,6 +203,9 @@ class HostGameLink:
         self._pending_decision = self._last_highlight = None
         self._voice_state = self._screen_kind = "unknown"
         self._narrative.clear()
+        self._phase = "idle"
+        self._current_step = self._max_steps = 0
+        self._recent_steps.clear()
         self._paused = False
         if had_hello and self._on_connection:
             self._on_connection(False)
@@ -206,6 +237,10 @@ class HostGameLink:
                 if ack.accepted:
                     if self._pending_goal:
                         self._goal = self._pending_goal
+                        self._phase = "starting"
+                        self._current_step = 0
+                        self._max_steps = self._pending_goal.max_steps
+                        self._recent_steps.clear()
                     elif isinstance(command, (ev.PacingPause, ev.PacingResume)):
                         self._paused = isinstance(command, ev.PacingPause)
                 return ack
@@ -231,6 +266,7 @@ class HostGameLink:
             goal and goal.goal_id, goal and goal.description, self._paused,
             event and event.TAG, detail, self._pending_decision, self._last_highlight,
             self._voice_state, self._screen_kind, tuple(self._narrative),
+            self._phase, self._current_step, self._max_steps, tuple(self._recent_steps),
         )  # fmt: skip
 
     def _unpublish(self, target: str) -> None:

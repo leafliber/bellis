@@ -67,6 +67,8 @@ class GamePermitSnapshot:
     human_idle_ms: int | None = None
     auto_resume: bool = False
     auto_resume_idle_s: float = 5.0
+    arm_pending: bool = False
+    arm_settle_s: float = 2.0
 
 
 class HostGamePermit:
@@ -102,6 +104,8 @@ class HostGamePermit:
         self._auto_resume = False
         self._auto_resume_idle_s = 5.0
         self._auto_resume_eligible = False
+        self._arm_pending = False
+        self._arm_settle_s = 2.0
         self._issued = 0
         self._closed = False
 
@@ -169,7 +173,47 @@ class HostGamePermit:
                 await self._pause(lease.token)
                 raise
             self._revocation_latched = False
+            self._arm_pending = False
             return lease.token
+
+    async def request_arm(
+        self, *, actor: str = "operator", wait_for_focus: bool = False, settle_s: float = 2.0
+    ) -> tuple[str, int | None]:
+        if not wait_for_focus:
+            return "armed", await self.arm_input(actor=actor)
+        if not isinstance(actor, str) or not actor.strip():  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise ValueError("actor must be non-empty")
+        if type(settle_s) not in (int, float) or not (
+            math.isfinite(settle_s) and 0.5 <= settle_s <= 10
+        ):
+            raise ValueError("settle_s must be between 0.5 and 10 seconds")
+        if self._closed:
+            raise SafetyError("permit server is closed")
+        if not self.connected:
+            raise ChannelError("closed", "realtime-core is not connected")
+        if self._safety.snapshot().mode != HostMode.LIVE:
+            raise SafetyError("arming game input requires LIVE")
+        if self._stop and not self._stop.done():
+            raise SafetyError("input stop is awaiting verification")
+        if self.armed and self.active_token is not None:
+            self._arm_pending = False
+            return "armed", self.active_token
+        health = self._health
+        need_ms = int(float(settle_s) * 1000)
+        if (
+            health is not None
+            and health.capture == permit.CaptureState.CAPTURING
+            and health.target_focused
+            and health.human_idle_ms is not None
+            and health.human_idle_ms >= need_ms
+        ):
+            return "armed", await self.arm_input(actor=actor)
+        self._arm_settle_s = float(settle_s)
+        self._arm_pending = True
+        return "waiting_focus", None
+
+    def cancel_pending_arm(self) -> None:
+        self._arm_pending = False
 
     def _on_renew(self, token: int) -> float | None:
         try:
@@ -215,13 +259,13 @@ class HostGamePermit:
         return self._auto_resume, self._auto_resume_idle_s
 
     async def disarm_input(self, *, reason: str = "operator_disarm") -> int | None:
-        self._auto_resume = self._auto_resume_eligible = False
+        self._arm_pending = self._auto_resume = self._auto_resume_eligible = False
         async with self._lock:
             self._revoke(reason)
             return await self._pause(self._issued)
 
     async def emergency_stop(self, *, timeout_s: float | None = None) -> InputReleasedParams | None:
-        self._auto_resume = self._auto_resume_eligible = False
+        self._arm_pending = self._auto_resume = self._auto_resume_eligible = False
         self._server.cancel_renewal()
         if any(lease.resource == _RESOURCE for lease in self._safety.snapshot().active_leases):
             self._revoke("game_permit:emergency_stop")
@@ -250,12 +294,12 @@ class HostGamePermit:
             and not self._local.get()
             and self._safety.snapshot().mode != HostMode.EMERGENCY_STOP
         ):
-            self._auto_resume = self._auto_resume_eligible = False
+            self._arm_pending = self._auto_resume = self._auto_resume_eligible = False
             token = self._issued
             self._schedule(lambda: self._pause(token))
 
     def _emergency(self, _: EmergencySummary) -> None:
-        self._auto_resume = self._auto_resume_eligible = False
+        self._arm_pending = self._auto_resume = self._auto_resume_eligible = False
         if not self._local.get():
             self._schedule(self.emergency_stop)
 
@@ -275,7 +319,7 @@ class HostGamePermit:
             return
         reason = f"game_permit:{rel.reason.value}"
         if rel.reason in _EMERGENCIES or fatal:
-            self._auto_resume = self._auto_resume_eligible = False
+            self._arm_pending = self._auto_resume = self._auto_resume_eligible = False
             self._revocation_latched = True
             if (
                 self._emergency_release == rel.release_id
@@ -307,7 +351,7 @@ class HostGamePermit:
     def _connection(self, connected: bool) -> None:
         self._health = self._emergency_release = None
         self._revocation_latched = False
-        self._auto_resume_eligible = False
+        self._arm_pending = self._auto_resume_eligible = False
         if connected:
             self._last_release = None
         elif not self._closed:
@@ -315,18 +359,24 @@ class HostGamePermit:
 
     def _health_update(self, health: HealthParams) -> None:
         self._health = health
+        if self._safety.snapshot().mode != HostMode.LIVE:
+            self._arm_pending = False
         self._maybe_auto_resume()
 
     def _can_auto_resume(self) -> bool:
         if (
             self._closed
-            or not self._auto_resume
-            or not self._auto_resume_eligible
             or not self.connected
             or self.armed
             or self._safety.snapshot().mode != HostMode.LIVE
             or (self._stop is not None and not self._stop.done())
         ):
+            return False
+        if self._arm_pending:
+            need_ms = int(self._arm_settle_s * 1000)
+        elif self._auto_resume and self._auto_resume_eligible:
+            need_ms = int(self._auto_resume_idle_s * 1000)
+        else:
             return False
         health = self._health
         if (
@@ -334,15 +384,17 @@ class HostGamePermit:
             or health.capture != permit.CaptureState.CAPTURING
             or not health.target_focused
             or health.human_idle_ms is None
-            or health.human_idle_ms < int(self._auto_resume_idle_s * 1000)
+            or health.human_idle_ms < need_ms
         ):
             return False
         rel = self._last_release
-        return rel is None or (
-            rel.verification != permit.ReleaseVerification.UNVERIFIED
-            and rel.verification not in permit.FATAL_VERIFICATIONS
-            and rel.reason not in _EMERGENCIES
-        )
+        if rel is None:
+            return True
+        if rel.verification == permit.ReleaseVerification.UNVERIFIED:
+            return False
+        if self._arm_pending:
+            return True
+        return rel.verification not in permit.FATAL_VERIFICATIONS and rel.reason not in _EMERGENCIES
 
     def _maybe_auto_resume(self) -> None:
         if not self._can_auto_resume():
@@ -353,8 +405,9 @@ class HostGamePermit:
     async def _run_auto_resume(self) -> None:
         if not self._can_auto_resume():
             return
+        actor = "operator_focus_arm" if self._arm_pending else "operator_auto_resume"
         with suppress(SafetyError, *_RPC_ERRORS):
-            await self.arm_input(actor="operator_auto_resume")
+            await self.arm_input(actor=actor)
             if self.armed and self._on_auto_resumed is not None:
                 with suppress(Exception):
                     self._on_auto_resumed()
@@ -375,13 +428,15 @@ class HostGamePermit:
             health.human_idle_ms if health else None,
             self._auto_resume,
             self._auto_resume_idle_s,
+            self._arm_pending,
+            self._arm_settle_s,
         )
 
     async def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        self._auto_resume = self._auto_resume_eligible = False
+        self._arm_pending = self._auto_resume = self._auto_resume_eligible = False
         try:
             for unsubscribe in self._unsubscribe:
                 unsubscribe()

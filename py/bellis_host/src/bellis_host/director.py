@@ -21,6 +21,7 @@ from bellis_common.agent_events import (
     FastEvent,
     GameVoiceChanged,
     SceneObserved,
+    StepProgress,
 )
 from bellis_common.channel import ChannelError, RpcError
 from bellis_common.wire_codec import ProtocolError
@@ -155,8 +156,8 @@ def build_messages(
             "解说时可结合 game.snapshot.screen_kind 与 recent_narrative 保持与画面台词一致，"
             "绝不编造未出现的剧情。当 game.objective 非空且 auto_continue 为 true、"
             "当前无活动目标且 game.permit_armed 为 true 时，可在收到 goal_completed 或 "
-            "objective_resumed 后拆解并下发下一步有界短目标（set_goal）继续推进总目标；"
-            "遇异常或已完成则停止。"
+            "objective_resumed 后拆解并下发下一步有界短目标（set_goal，建议 max_steps 为 8–12）"
+            "继续推进总目标；遇异常或已完成则停止。"
         )
     encoded = json.dumps(context, default=asdict, ensure_ascii=False)
     body = encoded.replace("<", "\\u003c").replace(">", "\\u003e")
@@ -268,7 +269,7 @@ class SlowDirector:
             ):
                 self._wake_if_live()
             return True
-        if isinstance(event, SceneObserved):
+        if isinstance(event, SceneObserved | StepProgress):
             return True
         with self._events_lock:
             self._game_events.append(event)

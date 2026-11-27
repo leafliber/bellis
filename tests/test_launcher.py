@@ -199,6 +199,26 @@ def test_all_mode_aborts_cleanly_if_host_exits_before_ready() -> None:
     assert any("did not report readiness" in line for line in out)
 
 
+def test_all_mode_preflight_fails_fast_without_spawning() -> None:
+    spawned = 0
+    out: list[str] = []
+
+    def fake_popen(argv: list[str], **_kwargs: Any) -> subprocess.Popen[bytes]:
+        nonlocal spawned
+        spawned += 1
+        return _FakeProc(1001, argv)  # type: ignore[return-value]
+
+    args = launcher.build_parser().parse_args(["all", "--core-task", "BellisRealtimeCore"])
+    rc = launcher._run_all(  # pyright: ignore[reportPrivateUsage]
+        args,
+        popen=fake_popen,
+        emit=out.append,
+        preflight=lambda _: "bellis all: realtime-core.exe is already running",
+    )
+    assert rc == 1 and spawned == 0
+    assert any("already running" in line for line in out)
+
+
 def test_game_mode_waits_for_permit_cred_and_launches_goal() -> None:
     spawned: list[list[str]] = []
     events: list[str] = []

@@ -380,6 +380,66 @@ async def test_auto_resume_after_takeover_requires_focus_and_idle(
         assert not game.armed
 
 
+async def test_wait_for_focus_arm_activates_on_focus_and_clears_on_pause(
+    running: tuple[HostApp, Browser],
+) -> None:
+    app, browser = running
+    game = app.game_permit
+    app.safety.start_live()
+    async with pipe(game) as peer:
+        respond(peer, PermitMethods.LEASE_RENEW)
+        respond(peer, PermitMethods.LEASE_REVOKE)
+        cap, aud = permit.CaptureState.CAPTURING, permit.CaptureState.IDLE
+        lease = permit.LeaseStatus.REVOKED
+
+        code, body = await browser.api("/api/game/arm", {"wait_for_focus": True, "settle_s": 2})
+        assert code == 200 and body == {"ok": True, "status": "waiting_focus", "token": None}
+        assert game.snapshot().arm_pending is True and not game.armed
+
+        # Unfocused or insufficiently settled stays pending.
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(
+                1, cap, aud, False, None, None, None, lease, 0, False, 4000
+            ).to_dict(),
+        )
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(
+                2, cap, aud, False, None, None, None, lease, 0, True, 1200
+            ).to_dict(),
+        )
+        await asyncio.sleep(0.05)
+        assert not game.armed and game.snapshot().arm_pending is True
+
+        # Focused + idle >= settle_s activates cleanly and clears arm_pending.
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(
+                3, cap, aud, False, None, None, None, lease, 0, True, 2100
+            ).to_dict(),
+        )
+        await until(lambda: game.armed)
+        assert game.snapshot().arm_pending is False
+
+        # Dual-monitor fast path: when already focused & idle >= settle_s, arms immediately.
+        await game.disarm_input()
+        code, fast = await browser.api("/api/game/arm", {"wait_for_focus": True})
+        assert code == 200 and fast["status"] == "armed" and game.armed
+
+        # Pausing live while waiting for focus cancels pending arm (Fail-Closed).
+        await game.disarm_input()
+        peer.notify(
+            PermitMethods.HEALTH,
+            permit.HealthParams(4, cap, aud, False, None, None, None, lease, 0, False, 0).to_dict(),
+        )
+        await until(lambda: not game.snapshot().target_focused)
+        code, body = await browser.api("/api/game/arm", {"wait_for_focus": True})
+        assert code == 200 and body["status"] == "waiting_focus"
+        assert (await browser.api("/api/control/pause", {}))[0] == 200
+        assert game.snapshot().arm_pending is False
+
+
 @pytest.mark.parametrize(
     ("reason", "verification"),
     [

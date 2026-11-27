@@ -204,6 +204,9 @@ class HostApp:
         self.director.submit_game_event(event)
 
     def _on_permit_auto_resumed(self) -> None:
+        if (queued := self.game.take_queued_goal()) is not None:
+            self.game.dispatch_queued(queued)
+            return
         if self.game.resume_objective_after_takeover():
             self.director.notify_objective_resumed()
 

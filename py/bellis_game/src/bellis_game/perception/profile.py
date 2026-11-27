@@ -64,6 +64,7 @@ class GameProfile:
     input_policy: InputPolicy
     vlm: VlmProfileConfig
     hold_key_names: frozenset[str] = frozenset()
+    controls_hint: str = ""
 
     def scan_code_for(self, key_name: str) -> int | None:
         return self.key_scan_codes.get(key_name.casefold())
@@ -125,11 +126,11 @@ def _vlm(raw: object) -> VlmProfileConfig:
     )  # fmt: skip
 
 
-def _policy(raw: object) -> tuple[Mapping[str, int], frozenset[str], InputPolicy]:
+def _policy(raw: object) -> tuple[Mapping[str, int], frozenset[str], str, InputPolicy]:
     table = _table(
         raw,
         "keys click_buttons scroll press_duration_ms max_rate click_regions forbidden_zones",
-        optional="hold_keys max_hold_ms",
+        optional="hold_keys max_hold_ms controls_hint",
     )
     keys = _table(table["keys"])
     codes = {_text(name).casefold(): _int(code, 0xFFFF) for name, code in keys.items()}
@@ -153,7 +154,11 @@ def _policy(raw: object) -> tuple[Mapping[str, int], frozenset[str], InputPolicy
     max_hold_ms = _int(max_hold, 3000) if max_hold is not None else None
     if max_hold_ms is not None and max_hold_ms < 200:
         raise ProfileError("max_hold_ms must be at least 200")
-    wire = {k: v for k, v in table.items() if k not in {"keys", "hold_keys", "max_hold_ms"}}
+    controls_hint = ""
+    if "controls_hint" in table:
+        controls_hint = _text(table["controls_hint"]).strip()
+    excluded = {"keys", "hold_keys", "max_hold_ms", "controls_hint"}
+    wire = {k: v for k, v in table.items() if k not in excluded}
     policy = InputPolicy.from_dict(
         dict(
             wire,
@@ -169,7 +174,7 @@ def _policy(raw: object) -> tuple[Mapping[str, int], frozenset[str], InputPolicy
         raise ProfileError("pointer input requires click regions")
     if not all(map(valid_norm_rect, (*policy.click_regions, *policy.forbidden_zones))):
         raise ProfileError("invalid input rectangle")
-    return MappingProxyType(codes), frozenset(hold_names), policy
+    return MappingProxyType(codes), frozenset(hold_names), controls_hint, policy
 
 
 def load_game_profile(path: Path | str) -> GameProfile:
@@ -179,11 +184,11 @@ def load_game_profile(path: Path | str) -> GameProfile:
         win = _table(root["window"], "process_name", "window_class title")
         window = WindowTargetParams(**{k: _text(v) for k, v in win.items()})
         display = _table(root["display"], "expected_width expected_height")
-        codes, hold_names, policy = _policy(root["input"])
+        codes, hold_names, controls_hint, policy = _policy(root["input"])
         return GameProfile(
             _text(root["game_id"]), _text(root["display_name"]), window,
             _int(display["expected_width"]), _int(display["expected_height"]),
-            codes, policy, _vlm(root["vlm"]), hold_names,
+            codes, policy, _vlm(root["vlm"]), hold_names, controls_hint,
         )  # fmt: skip
     except ProfileError:
         raise

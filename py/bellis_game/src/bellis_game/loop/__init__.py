@@ -22,6 +22,7 @@ from .events import (
     HighlightObserved,
     LoopOutcome,
     SceneObserved,
+    StepProgress,
 )
 from .session import GameSession, GameSessionConfig
 
@@ -44,6 +45,7 @@ __all__ = [
     "LoopCore",
     "LoopOutcome",
     "SceneObserved",
+    "StepProgress",
     "VisionModel",
     "build_system_prompt",
     "build_user_prompt",

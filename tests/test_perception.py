@@ -165,11 +165,12 @@ def test_hsr_profile() -> None:
     policy = p.input_policy
     assert policy.click_buttons == (MouseButton.LEFT,)
     assert policy.press_keys == (
-        1, 2, 3, 4, 5, 16, 17, 18, 19, 28, 30, 31, 32, 33, 47, 50, 57, 62,
+        1, 2, 3, 4, 5, 16, 17, 18, 19, 28, 30, 31, 32, 33, 36, 47, 50, 57, 62,
     )  # fmt: skip
     assert 61 not in policy.press_keys  # F3 (Warp/Gacha) strictly excluded
     assert policy.hold_keys == (17, 30, 31, 32) and policy.max_hold_ms == 1800
     assert p.hold_key_names == frozenset({"w", "a", "s", "d"})
+    assert "f4" in p.controls_hint and "overworld" in p.controls_hint
     assert (policy.scroll, policy.press_duration_ms, policy.max_rate) == (True, 60, 3)
     assert p.point_allowed(10, 10, 1000, 1000)
     assert p.point_allowed(970, 25, 1000, 1000)

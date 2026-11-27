@@ -12,10 +12,18 @@ from tools.arch_guard import check_repo
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _run(cmd: list[str], cwd: Path = REPO_ROOT) -> int:
+def _run(cmd: list[str], cwd: Path = REPO_ROOT, *, timeout_s: float = 180.0) -> int:
     rel = cwd.relative_to(REPO_ROOT) if cwd != REPO_ROOT else "."
     print(f"[check] $ {' '.join(cmd)} (cwd={rel})", flush=True)
-    proc = subprocess.run(cmd, cwd=cwd, check=False)
+    try:
+        proc = subprocess.run(cmd, cwd=cwd, check=False, timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        print(
+            f"[check] TIMEOUT after {timeout_s:g}s: {' '.join(cmd)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 124
     return proc.returncode
 
 
